@@ -1,0 +1,16 @@
+{
+  "name": "bvdr-skills",
+  "owner": {
+    "name": "Bogdan Dragomirescu",
+    "url": "https://github.com/bvdr"
+  },
+  "description": "Custom Claude Code skills for macOS productivity and development workflows",
+  "plugins": [
+    {
+      "name": "macos-use-voice-alerts",
+      "source": "./skills/macos-use-voice-alerts",
+      "description": "Enable verbal notifications using macOS text-to-speech to alert when Claude needs attention or completes tasks",
+      "version": "1.0.0"
+    }
+  ]
+}

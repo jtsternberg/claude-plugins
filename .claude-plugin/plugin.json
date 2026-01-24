@@ -1,0 +1,12 @@
+{
+  "name": "bvdr-skills",
+  "description": "A collection of custom Claude Code skills for macOS productivity, development workflows, and automation",
+  "version": "1.0.0",
+  "author": {
+    "name": "Bogdan Dragomirescu",
+    "url": "https://github.com/bvdr"
+  },
+  "homepage": "https://github.com/bvdr/claude-code-skills",
+  "repository": "https://github.com/bvdr/claude-code-skills",
+  "license": "MIT"
+}
