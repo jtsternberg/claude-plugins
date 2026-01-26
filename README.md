@@ -70,6 +70,7 @@ Add to your `~/.claude/settings.json`:
 | Skill | Description | Platform |
 |-------|-------------|----------|
 | [macos-use-voice-alerts](#macos-use-voice-alerts) | Enable verbal notifications using macOS text-to-speech | macOS |
+| [setup-statusline](#setup-statusline) | Interactive wizard to configure a custom statusline | macOS, Linux |
 
 ---
 
@@ -109,6 +110,40 @@ Enable verbal notifications using macOS text-to-speech to alert when Claude need
 ```
 /bvdr-skills:macos-use-voice-alerts Whisper
 ```
+
+---
+
+### setup-statusline
+
+Interactive wizard to configure a custom Claude Code statusline with folder display, git info, context bar, and last message.
+
+**Invoke:**
+```
+/bvdr-skills:setup-statusline
+```
+
+**Configuration options:**
+- **Folder**: Last folder only / Last 2 folders / Full path / Hidden
+- **Color**: Blue / Orange / Green / Gray
+- **Git**: Full status / Branch only / No git info
+- **Last message**: Show your last prompt on second line
+
+**Example output:**
+```
+📁myproject | 🔀main (2 files uncommitted, synced) | [███░░░░░░░] 15% of 200k tokens used
+💬 Can you check if the edd license plugin is enabled...
+```
+
+**Features:**
+- Visual context bar showing token usage
+- Git branch with uncommitted count and sync status
+- Second line shows your last message for easy conversation identification
+- Color-coded with customizable accent colors
+- Automatically updates `settings.json`
+
+**Requirements:**
+- `jq` for JSON parsing
+- `git` for branch info (optional)
 
 ---
 
