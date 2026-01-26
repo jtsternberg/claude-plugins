@@ -1,20 +1,20 @@
 {
-  "name": "bvdr-skills",
+  "name": "bvdr",
   "owner": {
     "name": "Bogdan Dragomirescu",
     "url": "https://github.com/bvdr"
   },
-  "description": "Custom Claude Code skills for macOS productivity and development workflows",
+  "description": "Custom Claude Code commands for macOS productivity and development workflows",
   "plugins": [
     {
       "name": "macos-use-voice-alerts",
-      "source": "./skills/macos-use-voice-alerts",
+      "source": "./commands/bvdr/macos-use-voice-alerts.md",
       "description": "Enable verbal notifications using macOS text-to-speech to alert when Claude needs attention or completes tasks",
       "version": "1.0.0"
     },
     {
       "name": "setup-statusline",
-      "source": "./skills/setup-statusline",
+      "source": "./commands/bvdr/setup-statusline.md",
       "description": "Interactive wizard to configure a custom Claude Code statusline with folder, git, context bar, and last message display",
       "version": "1.0.0"
     }
