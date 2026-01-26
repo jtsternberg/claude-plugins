@@ -135,7 +135,7 @@ List all installed skills:
 To see all available text-to-speech voices on your system:
 
 ```bash
-say -v ?
+say -v "?"
 ```
 
 ---
