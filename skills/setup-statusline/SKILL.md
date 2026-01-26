@@ -1,6 +1,7 @@
 ---
 name: setup-statusline
 description: Interactive statusline configuration wizard for Claude Code. Asks about folder display, colors, git info, context bar, and last message display, then generates a custom statusline script.
+disable-model-invocation: true
 ---
 
 # Statusline Setup Wizard
@@ -182,7 +183,7 @@ Your statusline will show:
 
 Restart Claude Code to see your new statusline.
 
-To reconfigure later, run: /bvdr-skills:setup-statusline
+To reconfigure later, run: /bvdr:setup-statusline
 ```
 
 ---
