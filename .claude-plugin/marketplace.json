@@ -7,15 +7,9 @@
   "description": "Custom Claude Code commands for macOS productivity and development workflows",
   "plugins": [
     {
-      "name": "macos-use-voice-alerts",
-      "source": "./commands/bvdr/macos-use-voice-alerts",
-      "description": "Enable verbal notifications using macOS text-to-speech to alert when Claude needs attention or completes tasks",
-      "version": "1.0.0"
-    },
-    {
-      "name": "setup-statusline",
-      "source": "./commands/bvdr/setup-statusline",
-      "description": "Interactive wizard to configure a custom Claude Code statusline with folder, git, context bar, and last message display",
+      "name": "bvdr",
+      "source": "./plugins/bvdr",
+      "description": "bvdr's Claude Code utilities - statusline wizard and more",
       "version": "1.0.0"
     },
     {
