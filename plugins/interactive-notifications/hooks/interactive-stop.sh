@@ -44,14 +44,20 @@ else
     FOLDER_PATH="Unknown"
 fi
 
-# Try to get Claude's last message summary from transcript
+# Try to get Claude's last text message from transcript
 LAST_CLAUDE_MSG=""
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-    # Get more of the message - display alert handles longer text well
-    LAST_CLAUDE_MSG=$(tail -50 "$TRANSCRIPT_PATH" 2>/dev/null | \
+    # Look through recent assistant messages to find one with text content
+    LAST_CLAUDE_MSG=$(tail -100 "$TRANSCRIPT_PATH" 2>/dev/null | \
         grep '"type":"assistant"' | \
-        tail -1 | \
-        jq -r '.message.content // "" | if type == "array" then .[0].text // "" else . end' 2>/dev/null | \
+        tac | \
+        while read line; do
+            TEXT=$(echo "$line" | jq -r '.message.content[] | select(.type=="text") | .text' 2>/dev/null)
+            if [ -n "$TEXT" ] && [ "$TEXT" != "null" ]; then
+                echo "$TEXT"
+                break
+            fi
+        done | \
         head -c 2000 | \
         tr '\n' ' ')
 fi
