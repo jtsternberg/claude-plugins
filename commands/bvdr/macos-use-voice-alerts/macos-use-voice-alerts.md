@@ -1,6 +1,7 @@
 ---
 name: macos-use-voice-alerts
 description: Enable verbal notifications using macOS text-to-speech to alert when Claude needs human intervention or completes a task. Invoke this skill to turn on audio alerts for the session.
+disable-model-invocation: true
 ---
 
 # macOS Voice Alerts
@@ -12,7 +13,7 @@ Enable verbal notifications using the macOS `say` command to alert when Claude n
 This skill supports all macOS voices. To use a specific voice, pass it as an argument:
 
 ```
-/bvdr-skills:macos-use-voice-alerts Zarvox
+/bvdr:macos-use-voice-alerts Zarvox
 ```
 
 If no voice is specified, the system default voice is used.
@@ -34,9 +35,9 @@ If no voice is specified, the system default voice is used.
 | `Daniel` | British male | Formal contexts |
 
 **Examples:**
-- `/bvdr-skills:macos-use-voice-alerts Whisper` - Use quiet, subtle voice
-- `/bvdr-skills:macos-use-voice-alerts "Good News"` - Use upbeat voice for positive vibes
-- `/bvdr-skills:macos-use-voice-alerts Zarvox` - Use classic robotic voice
+- `/bvdr:macos-use-voice-alerts Whisper` - Use quiet, subtle voice
+- `/bvdr:macos-use-voice-alerts "Good News"` - Use upbeat voice for positive vibes
+- `/bvdr:macos-use-voice-alerts Zarvox` - Use classic robotic voice
 
 To discover all available voices on your system:
 ```bash
