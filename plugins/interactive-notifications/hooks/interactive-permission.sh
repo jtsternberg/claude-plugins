@@ -22,6 +22,111 @@ if command -v jq &> /dev/null; then
     CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
     TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
 
+    # Handle AskUserQuestion - collect answers via dialog and inject via updatedInput
+    if [ "$TOOL_NAME" = "AskUserQuestion" ]; then
+        FOLDER_PATH=$(echo "$CWD" | awk -F'/' '{
+            n = NF
+            if (n >= 3) print "../" $(n-2) "/" $(n-1) "/" $n
+            else if (n == 2) print "../" $(n-1) "/" $n
+            else print $n
+        }')
+
+        QUESTIONS=$(echo "$INPUT" | jq -r '.tool_input.questions // []')
+        NUM_QUESTIONS=$(echo "$QUESTIONS" | jq 'length')
+
+        if [ "$NUM_QUESTIONS" -eq 0 ]; then
+            echo '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+            exit 0
+        fi
+
+        # Build answers object for updatedInput
+        ANSWERS="{"
+
+        for ((i=0; i<NUM_QUESTIONS; i++)); do
+            QUESTION=$(echo "$QUESTIONS" | jq -r ".[$i]")
+            HEADER=$(echo "$QUESTION" | jq -r '.header // "Question"')
+            QUESTION_TEXT=$(echo "$QUESTION" | jq -r '.question // ""')
+            OPTIONS=$(echo "$QUESTION" | jq -r '.options // []')
+            NUM_OPTIONS=$(echo "$OPTIONS" | jq 'length')
+
+            if [ "$NUM_OPTIONS" -eq 0 ]; then
+                continue
+            fi
+
+            # Build options for dialog (max 3 buttons, use list for more)
+            if [ "$NUM_OPTIONS" -le 3 ]; then
+                BUTTON_LIST=""
+                for ((j=NUM_OPTIONS-1; j>=0; j--)); do
+                    LABEL=$(echo "$OPTIONS" | jq -r ".[$j].label // \"Option $((j+1))\"" | head -c 20)
+                    if [ -n "$BUTTON_LIST" ]; then
+                        BUTTON_LIST="$BUTTON_LIST, "
+                    fi
+                    BUTTON_LIST="$BUTTON_LIST\"$LABEL\""
+                done
+
+                DEFAULT_LABEL=$(echo "$OPTIONS" | jq -r '.[0].label // "Option 1"' | head -c 20)
+
+                RESULT=$(osascript -e "
+tell application \"System Events\"
+    activate
+    set theResult to display dialog \"$QUESTION_TEXT\" with title \"Claude [$FOLDER_PATH]: $HEADER\" buttons {$BUTTON_LIST} default button \"$DEFAULT_LABEL\" giving up after 300
+    if gave up of theResult then
+        return \"TIMEOUT\"
+    else
+        return button returned of theResult
+    end if
+end tell
+" 2>&1)
+            else
+                # Use list for 4+ options
+                LIST_ITEMS=""
+                for ((j=0; j<NUM_OPTIONS; j++)); do
+                    LABEL=$(echo "$OPTIONS" | jq -r ".[$j].label // \"Option $((j+1))\"")
+                    if [ -n "$LIST_ITEMS" ]; then
+                        LIST_ITEMS="$LIST_ITEMS, "
+                    fi
+                    LIST_ITEMS="$LIST_ITEMS\"$LABEL\""
+                done
+
+                RESULT=$(osascript -e "
+tell application \"System Events\"
+    activate
+    set chosenItem to choose from list {$LIST_ITEMS} with title \"Claude [$FOLDER_PATH]: $HEADER\" with prompt \"$QUESTION_TEXT\"
+    if chosenItem is false then
+        return \"CANCELLED\"
+    else
+        return item 1 of chosenItem
+    end if
+end tell
+" 2>&1)
+            fi
+
+            echo "$(date): AskUserQuestion Q$i [$HEADER]: $RESULT" >> "$LOG_FILE"
+
+            # Timeout/cancel - fall back to terminal
+            if [[ "$RESULT" == "TIMEOUT" ]] || [[ "$RESULT" == "CANCELLED" ]] || [[ -z "$RESULT" ]]; then
+                echo '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+                exit 0
+            fi
+
+            # Add to answers object (key is the question index as string)
+            if [ $i -gt 0 ]; then
+                ANSWERS="$ANSWERS,"
+            fi
+            RESULT_ESCAPED=$(echo "$RESULT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+            ANSWERS="$ANSWERS\"$i\":\"$RESULT_ESCAPED\""
+        done
+
+        ANSWERS="$ANSWERS}"
+        echo "$(date): AskUserQuestion answers: $ANSWERS" >> "$LOG_FILE"
+
+        # Allow the tool with pre-filled answers via updatedInput
+        cat << EOF
+{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedInput":{"answers":$ANSWERS}}}}
+EOF
+        exit 0
+    fi
+
     # Extract relevant info based on tool type
     case "$TOOL_NAME" in
         "Bash")
