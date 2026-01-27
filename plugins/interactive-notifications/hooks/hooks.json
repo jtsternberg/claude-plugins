@@ -1,5 +1,5 @@
 {
-  "description": "Interactive macOS dialogs for Claude Code permissions and questions",
+  "description": "Interactive macOS dialogs for Claude Code permissions, questions, idle alerts, and session completion",
   "hooks": {
     "PermissionRequest": [
       {
@@ -20,6 +20,29 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/interactive-questions.sh",
+            "timeout": 310
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/interactive-idle.sh",
+            "timeout": 310
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/interactive-stop.sh",
             "timeout": 310
           }
         ]
