@@ -1,0 +1,9 @@
+{
+  "name": "bvdr",
+  "version": "1.0.0",
+  "description": "bvdr's Claude Code utilities - statusline wizard and more",
+  "author": {
+    "name": "bvdr",
+    "url": "https://github.com/bvdr"
+  }
+}

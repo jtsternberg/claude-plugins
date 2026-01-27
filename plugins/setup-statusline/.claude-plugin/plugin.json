@@ -1,9 +1,0 @@
-{
-  "name": "setup-statusline",
-  "version": "1.0.0",
-  "description": "Interactive wizard to configure a custom Claude Code statusline with folder, git, context bar, and last message display",
-  "author": {
-    "name": "bvdr",
-    "url": "https://github.com/bvdr"
-  }
-}
