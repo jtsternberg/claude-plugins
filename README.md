@@ -1,14 +1,15 @@
-# Claude Code Skills by bvdr
+# Claude Plugins by bvdr
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-compatible-blueviolet)](https://claude.com/claude-code)
 
-A curated collection of custom Claude Code skills for macOS productivity, development workflows, and automation.
+A curated collection of custom Claude Code plugins and skills for macOS productivity, development workflows, and automation.
 
 ## Table of Contents
 
 - [Installation](#installation)
+- [Plugins](#plugins)
 - [Skills](#skills)
 - [Usage](#usage)
 - [Contributing](#contributing)
@@ -27,10 +28,11 @@ Add this repository as a plugin marketplace in Claude Code:
 /plugin marketplace add bvdr/claude-plugins
 ```
 
-Then install individual skills:
+Then install individual plugins:
 
 ```bash
-/plugin install macos-use-voice-alerts@bvdr-skills
+/plugin install interactive-notifications@bvdr
+/plugin install macos-use-voice-alerts@bvdr
 ```
 
 ### Option 2: Clone and Use Locally
@@ -50,7 +52,7 @@ Add to your `~/.claude/settings.json`:
 ```json
 {
   "extraKnownMarketplaces": {
-    "bvdr-skills": {
+    "bvdr": {
       "source": {
         "source": "github",
         "repo": "bvdr/claude-plugins"
@@ -58,10 +60,57 @@ Add to your `~/.claude/settings.json`:
     }
   },
   "enabledPlugins": {
-    "macos-use-voice-alerts@bvdr-skills": true
+    "interactive-notifications@bvdr": true,
+    "macos-use-voice-alerts@bvdr": true
   }
 }
 ```
+
+---
+
+## Plugins
+
+| Plugin | Description | Platform |
+|--------|-------------|----------|
+| [interactive-notifications](#interactive-notifications) | macOS dialogs for permissions, questions, idle alerts, and completion | macOS |
+
+---
+
+### interactive-notifications
+
+Respond to Claude Code from anywhere on your Mac via native macOS dialogs — no need to switch to the terminal.
+
+**Install:**
+```bash
+/plugin install interactive-notifications@bvdr
+```
+
+**Features:**
+
+| Hook | Trigger | Buttons |
+|------|---------|---------|
+| Permission Requests | Claude asks for permission | Reply / No / Yes |
+| Questions | Claude asks you a question | Clickable options |
+| Idle Alert | Claude waiting 60s+ | Reply / OK |
+| Completion | Claude finishes task | Continue / OK |
+
+**Dialog shows:**
+- Folder path (last 3 directories)
+- Tool/command details
+- Your last request for context
+
+**Buttons:**
+- **Yes** — Approve action
+- **No** — Deny action
+- **Reply** — Type a custom message
+- **Continue** — Type follow-up to keep Claude working
+- **OK** — Acknowledge and dismiss
+
+**Requirements:**
+- macOS (uses native `osascript` dialogs)
+- `jq` for JSON parsing (`brew install jq`)
+
+**Timeout:** 5 minutes (falls back to terminal if no response)
 
 ---
 
@@ -80,12 +129,12 @@ Enable verbal notifications using macOS text-to-speech to alert when Claude need
 
 **Invoke:**
 ```
-/bvdr-skills:macos-use-voice-alerts
+/macos-use-voice-alerts
 ```
 
 **With custom voice:**
 ```
-/bvdr-skills:macos-use-voice-alerts Zarvox
+/macos-use-voice-alerts Zarvox
 ```
 
 **Features:**
@@ -106,11 +155,6 @@ Enable verbal notifications using macOS text-to-speech to alert when Claude need
 | `Jester` | Comedic | Playful interactions |
 | `Samantha` | Natural | Professional settings |
 
-**Example with voice:**
-```
-/bvdr-skills:macos-use-voice-alerts Whisper
-```
-
 ---
 
 ### setup-statusline
@@ -119,7 +163,7 @@ Interactive wizard to configure a custom Claude Code statusline with folder disp
 
 **Invoke:**
 ```
-/bvdr-skills:setup-statusline
+/setup-statusline
 ```
 
 **Configuration options:**
@@ -149,19 +193,22 @@ Interactive wizard to configure a custom Claude Code statusline with folder disp
 
 ## Usage
 
+### Installing Plugins
+
+```bash
+/plugin install <plugin-name>@bvdr
+```
+
 ### Invoking Skills
 
-Skills from this marketplace are namespaced under `bvdr-skills`. Use the format:
-
 ```
-/bvdr-skills:<skill-name> [arguments]
+/<skill-name> [arguments]
 ```
 
-### Checking Available Skills
-
-List all installed skills:
+### Checking Available Plugins/Skills
 
 ```
+/plugin list
 /skill list
 ```
 
@@ -177,27 +224,14 @@ say -v "?"
 
 ## Contributing
 
-Contributions are welcome! To add a new skill:
+Contributions are welcome! To add a new plugin or skill:
 
 1. Fork this repository
-2. Create a new directory under `skills/` with your skill name
-3. Add a `SKILL.md` file following the [Claude Code skill format](https://code.claude.com/docs/en/skills)
-4. Update the `marketplace.json` with your skill entry
-5. Update this README with your skill documentation
+2. Create a new directory under `plugins/` or `skills/`
+3. Add required files (manifest.json, hooks, etc.)
+4. Update the `marketplace.json` with your entry
+5. Update this README with documentation
 6. Submit a pull request
-
-### Skill Template
-
-```markdown
----
-name: your-skill-name
-description: Brief description of what your skill does
----
-
-# Your Skill Name
-
-Full instructions for Claude to follow when this skill is invoked.
-```
 
 ---
 
@@ -205,8 +239,8 @@ Full instructions for Claude to follow when this skill is invoked.
 
 - [Claude Code Documentation](https://code.claude.com/docs)
 - [Creating Skills Guide](https://code.claude.com/docs/en/skills)
+- [Hooks Reference](https://code.claude.com/docs/en/hooks)
 - [Plugin Marketplaces](https://code.claude.com/docs/en/plugin-marketplaces)
-- [awesome-claude-skills](https://github.com/travisvn/awesome-claude-skills) - Community curated list
 
 ---
 
