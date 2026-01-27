@@ -1,0 +1,29 @@
+{
+  "description": "Interactive macOS dialogs for Claude Code permissions and questions",
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/interactive-permission.sh",
+            "timeout": 310
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/interactive-questions.sh",
+            "timeout": 310
+          }
+        ]
+      }
+    ]
+  }
+}

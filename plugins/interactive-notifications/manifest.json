@@ -1,0 +1,6 @@
+{
+  "name": "interactive-notifications",
+  "description": "macOS interactive dialogs for Claude Code permissions and questions. Respond to Claude from anywhere on your Mac without switching to the terminal.",
+  "version": "1.0.0",
+  "hooks": "./hooks/hooks.json"
+}

@@ -24,7 +24,7 @@ A curated collection of custom Claude Code skills for macOS productivity, develo
 Add this repository as a plugin marketplace in Claude Code:
 
 ```bash
-/plugin marketplace add bvdr/claude-code-skills
+/plugin marketplace add bvdr/claude-plugins
 ```
 
 Then install individual skills:
@@ -37,10 +37,10 @@ Then install individual skills:
 
 ```bash
 # Clone the repository
-git clone https://github.com/bvdr/claude-code-skills.git
+git clone https://github.com/bvdr/claude-plugins.git
 
 # Start Claude Code with the plugin directory
-claude --plugin-dir ./claude-code-skills
+claude --plugin-dir ./claude-plugins
 ```
 
 ### Option 3: Add to Settings (Auto-Install)
@@ -53,7 +53,7 @@ Add to your `~/.claude/settings.json`:
     "bvdr-skills": {
       "source": {
         "source": "github",
-        "repo": "bvdr/claude-code-skills"
+        "repo": "bvdr/claude-plugins"
       }
     }
   },

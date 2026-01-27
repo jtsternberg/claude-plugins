@@ -17,6 +17,12 @@
       "source": "./skills/setup-statusline",
       "description": "Interactive wizard to configure a custom Claude Code statusline with folder, git, context bar, and last message display",
       "version": "1.0.0"
+    },
+    {
+      "name": "interactive-notifications",
+      "source": "./plugins/interactive-notifications",
+      "description": "macOS interactive dialogs for Claude Code permissions and questions - respond from anywhere without switching to terminal",
+      "version": "1.0.0"
     }
   ]
 }
