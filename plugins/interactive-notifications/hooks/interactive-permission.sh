@@ -19,6 +19,12 @@ echo "$(date): Received permission request" >> "$LOG_FILE"
 # Parse JSON input using jq
 if command -v jq &> /dev/null; then
     TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // "Unknown"')
+
+    # Skip AskUserQuestion - it has its own dedicated handler (interactive-questions.sh)
+    if [ "$TOOL_NAME" = "AskUserQuestion" ]; then
+        exit 0
+    fi
+
     CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
     TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
 
