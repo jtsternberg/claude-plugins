@@ -47,11 +47,12 @@ fi
 # Try to get Claude's last message summary from transcript
 LAST_CLAUDE_MSG=""
 if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-    LAST_CLAUDE_MSG=$(tail -20 "$TRANSCRIPT_PATH" 2>/dev/null | \
+    # Get more of the message - display alert handles longer text well
+    LAST_CLAUDE_MSG=$(tail -50 "$TRANSCRIPT_PATH" 2>/dev/null | \
         grep '"type":"assistant"' | \
         tail -1 | \
         jq -r '.message.content // "" | if type == "array" then .[0].text // "" else . end' 2>/dev/null | \
-        head -c 150 | \
+        head -c 2000 | \
         tr '\n' ' ')
 fi
 
