@@ -70,9 +70,13 @@ Layer 1 logging (high frequency — gated behind env var):
 export SMART_PERMISSIONS_DEBUG=1
 ```
 
-Layer 2 logging (low frequency — always on):
+Layer 2 logging (low frequency — always on). Log path follows your Claude config directory:
 ```bash
+# Default profile
 tail -f ~/.claude/hooks/smart-permissions.log
+
+# Custom profile (e.g. ~/.claude-work)
+tail -f ~/.claude-work/hooks/smart-permissions.log
 ```
 
 ## Compatibility

@@ -30,9 +30,17 @@ passthrough() {
   exit 0
 }
 
+# Derive config dir from plugin install path (e.g. ~/.claude/plugins/cache/... → ~/.claude)
+# Falls back to ~/.claude if CLAUDE_PLUGIN_ROOT is not set
+if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  CLAUDE_CONFIG_DIR="${CLAUDE_PLUGIN_ROOT%%/plugins/*}"
+else
+  CLAUDE_CONFIG_DIR="$HOME/.claude"
+fi
+
 debug_log() {
   if [[ "${SMART_PERMISSIONS_DEBUG:-0}" == "1" ]]; then
-    local LOG_DIR="$HOME/.claude/hooks"
+    local LOG_DIR="$CLAUDE_CONFIG_DIR/hooks"
     mkdir -p "$LOG_DIR"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [L1] $1" >> "$LOG_DIR/smart-permissions.log"
   fi

@@ -6,7 +6,15 @@
 
 set -euo pipefail
 
-LOG_DIR="$HOME/.claude/hooks"
+# Derive config dir from plugin install path (e.g. ~/.claude/plugins/cache/... → ~/.claude)
+# Falls back to ~/.claude if CLAUDE_PLUGIN_ROOT is not set
+if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  CLAUDE_CONFIG_DIR="${CLAUDE_PLUGIN_ROOT%%/plugins/*}"
+else
+  CLAUDE_CONFIG_DIR="$HOME/.claude"
+fi
+
+LOG_DIR="$CLAUDE_CONFIG_DIR/hooks"
 LOG_FILE="$LOG_DIR/smart-permissions.log"
 
 log() {

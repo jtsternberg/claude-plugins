@@ -6,5 +6,5 @@ Two-layer permission system running on your tool calls:
 
 Customize rules: edit `permission-policy.md` in the plugin folder.
 
-Debug log: `~/.claude/hooks/smart-permissions.log`
+Debug log: `<your-claude-config>/hooks/smart-permissions.log` (e.g. `~/.claude/hooks/smart-permissions.log`)
 Verbose Layer 1 logging: `export SMART_PERMISSIONS_DEBUG=1`
