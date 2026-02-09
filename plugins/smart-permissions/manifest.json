@@ -1,0 +1,6 @@
+{
+  "name": "smart-permissions",
+  "description": "AI-powered permission hook that auto-approves safe operations and auto-denies dangerous ones, reducing manual permission prompts",
+  "version": "1.0.0",
+  "hooks": "./hooks/hooks.json"
+}

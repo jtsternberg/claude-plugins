@@ -1,0 +1,29 @@
+{
+  "description": "Two-layer smart permission system: fast deterministic rules (PreToolUse) with AI fallback (PermissionRequest)",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pretooluse-rules.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/permission-ai-fallback.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
