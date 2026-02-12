@@ -5,6 +5,10 @@ Commands for creating and reviewing Claude Code skills, slash commands, and suba
 ## Installation
 
 ```bash
+# Add the marketplace (if not already added)
+/plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
 /plugin install skill-tools@jtsternberg
 ```
 

@@ -5,6 +5,10 @@ Commands for managing pull requests: addressing comments and updating descriptio
 ## Installation
 
 ```bash
+# Add the marketplace (if not already added)
+/plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
 /plugin install pr-workflow@jtsternberg
 ```
 

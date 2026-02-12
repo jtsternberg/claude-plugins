@@ -5,6 +5,10 @@ Control Obsidian vaults from the terminal using the official Obsidian CLI (v1.12
 ## Installation
 
 ```bash
+# Add the marketplace (if not already added)
+/plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
 /plugin install obsidian-cli@jtsternberg
 ```
 

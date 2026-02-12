@@ -5,6 +5,10 @@ Transform weak headlines into compelling ones using the proven 5-Part Headline F
 ## Installation
 
 ```bash
+# Add the marketplace (if not already added)
+/plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
 /plugin install headline-refiner@jtsternberg
 ```
 

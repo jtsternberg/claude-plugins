@@ -5,6 +5,10 @@ Create git commits with AI-generated commit messages.
 ## Installation
 
 ```bash
+# Add the marketplace (if not already added)
+/plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
 /plugin install git-commits@jtsternberg
 ```
 

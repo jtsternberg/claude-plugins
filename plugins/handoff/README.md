@@ -5,6 +5,10 @@ Create handoff documents to preserve context between Claude Code sessions.
 ## Installation
 
 ```bash
+# Add the marketplace (if not already added)
+/plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
 /plugin install handoff@jtsternberg
 ```
 

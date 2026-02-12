@@ -5,6 +5,10 @@ Publish Claude Code `/insights` reports to GitHub Pages for easy sharing.
 ## Installation
 
 ```bash
+# Add the marketplace (if not already added)
+/plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
 /plugin install publish-insights@jtsternberg
 ```
 

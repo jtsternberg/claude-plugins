@@ -6,6 +6,12 @@ Status line showing model name, current directory, git branch/status, and contex
 
 **Note:** This plugin requires manual configuration as status lines use a different mechanism than other plugins.
 
+First, add the marketplace if you haven't already:
+
+```bash
+/plugin marketplace add jtsternberg/claude-plugins
+```
+
 ## Setup
 
 Add the following to your `~/.claude/settings.json`:
