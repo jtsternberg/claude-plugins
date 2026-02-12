@@ -181,3 +181,9 @@ Contributions are welcome! To add a new plugin:
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+## Acknowledgments
+
+Thanks to [bvdr/claude-plugins](https://github.com/bvdr/claude-plugins) for inspiration.
