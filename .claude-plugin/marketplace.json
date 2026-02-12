@@ -5,5 +5,50 @@
     "url": "https://github.com/jtsternberg"
   },
   "description": "Custom Claude Code plugins — skills, commands, hooks, and automation",
-  "plugins": []
+  "plugins": [
+    {
+      "name": "git-tree",
+      "path": "plugins/git-tree"
+    },
+    {
+      "name": "headline-refiner",
+      "path": "plugins/headline-refiner"
+    },
+    {
+      "name": "obsidian-cli",
+      "path": "plugins/obsidian-cli"
+    },
+    {
+      "name": "publish-insights",
+      "path": "plugins/publish-insights"
+    },
+    {
+      "name": "generating-blog-images",
+      "path": "plugins/generating-blog-images"
+    },
+    {
+      "name": "git-commits",
+      "path": "plugins/git-commits"
+    },
+    {
+      "name": "pr-workflow",
+      "path": "plugins/pr-workflow"
+    },
+    {
+      "name": "skill-tools",
+      "path": "plugins/skill-tools"
+    },
+    {
+      "name": "beads-workflow",
+      "path": "plugins/beads-workflow"
+    },
+    {
+      "name": "handoff",
+      "path": "plugins/handoff"
+    },
+    {
+      "name": "jt-status-line",
+      "path": "plugins/jt-status-line"
+    }
+  ]
 }

@@ -21,7 +21,88 @@ Add the marketplace and install any plugin:
 
 ## Plugins
 
-_No plugins yet — add your first one under `plugins/`!_
+### Skills
+
+#### 🌳 [git-tree](plugins/git-tree)
+Create git worktrees with symlinked dependencies. Perfect for parallel branch work.
+
+**Install:** `/plugin install git-tree@jtsternberg`
+
+#### 📰 [headline-refiner](plugins/headline-refiner)
+Refines headlines using the 5-Part Headline Framework (Number, What, Who, Why, Twist the Knife).
+
+**Install:** `/plugin install headline-refiner@jtsternberg`
+
+#### 📝 [obsidian-cli](plugins/obsidian-cli)
+Interacts with Obsidian vaults from the terminal using the official Obsidian CLI (v1.12+).
+
+**Install:** `/plugin install obsidian-cli@jtsternberg`
+
+#### 📊 [publish-insights](plugins/publish-insights)
+Publish Claude Code `/insights` reports to GitHub Pages for easy sharing.
+
+**Install:** `/plugin install publish-insights@jtsternberg`
+
+#### 🖼️ [generating-blog-images](plugins/generating-blog-images)
+Generate AI image prompts for blog posts by analyzing content and identifying optimal placement.
+
+**Install:** `/plugin install generating-blog-images@jtsternberg`
+
+### Commands
+
+#### 💬 [git-commits](plugins/git-commits)
+Commands for creating git commits from staged or unstaged files with AI-generated messages.
+
+**Commands:** `/commit-staged`, `/commit-unstaged`
+
+**Install:** `/plugin install git-commits@jtsternberg`
+
+#### 🔀 [pr-workflow](plugins/pr-workflow)
+Commands for managing pull requests: addressing comments and updating descriptions.
+
+**Commands:** `/address-pr-comments`, `/update-pr-description`
+
+**Install:** `/plugin install pr-workflow@jtsternberg`
+
+#### 🛠️ [skill-tools](plugins/skill-tools)
+Commands for creating and reviewing Claude Code skills, slash commands, and subagents.
+
+**Commands:** `/create-slash-command`, `/create-subagent`, `/review-skill`, `/review-slash-command`
+
+**Install:** `/plugin install skill-tools@jtsternberg`
+
+#### 📦 [beads-workflow](plugins/beads-workflow)
+Work through beads epics from start to completion with automatic PR creation.
+
+**Commands:** `/tackle-epic`
+
+**Dependencies:** Requires [beads](https://github.com/steveyegge/beads)
+
+**Install:** `/plugin install beads-workflow@jtsternberg`
+
+#### 🤝 [handoff](plugins/handoff)
+Create handoff documents to preserve context between Claude Code sessions.
+
+**Commands:** `/handoff`
+
+**Install:** `/plugin install handoff@jtsternberg`
+
+### Status Lines
+
+#### 📊 [jt-status-line](plugins/jt-status-line)
+Custom status line showing git status, beads task info, and system stats.
+
+**Manual setup:** Update `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "php /path/to/claude-plugins/plugins/jt-status-line/jt-status-line.php",
+    "padding": 0
+  }
+}
+```
 
 ---
 
