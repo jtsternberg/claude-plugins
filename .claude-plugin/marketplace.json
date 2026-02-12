@@ -1,0 +1,9 @@
+{
+  "name": "jtsternberg",
+  "owner": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  },
+  "description": "Custom Claude Code plugins — skills, commands, hooks, and automation",
+  "plugins": []
+}

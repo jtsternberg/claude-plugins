@@ -1,0 +1,12 @@
+{
+  "name": "jtsternberg",
+  "description": "A collection of custom Claude Code plugins — skills, commands, hooks, and automation",
+  "version": "1.0.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  },
+  "homepage": "https://github.com/jtsternberg/claude-plugins",
+  "repository": "https://github.com/jtsternberg/claude-plugins",
+  "license": "MIT"
+}
