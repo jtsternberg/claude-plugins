@@ -1,0 +1,6 @@
+{
+  "name": "pr-workflow",
+  "description": "Commands for managing pull requests: addressing PR comments and updating PR descriptions based on code changes.",
+  "version": "1.0.0",
+  "author": "JT Sternberg"
+}
