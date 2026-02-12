@@ -1,0 +1,6 @@
+{
+  "name": "handoff",
+  "description": "Command for creating handoff documents to preserve context between Claude Code sessions.",
+  "version": "1.0.0",
+  "author": "JT Sternberg"
+}
