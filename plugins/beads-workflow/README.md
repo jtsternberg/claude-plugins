@@ -2,6 +2,16 @@
 
 This plugin provides the `/tackle-epic` command for working through beads epics.
 
+## Installation
+
+```bash
+# Add the marketplace (if not already added)
+/plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
+/plugin install beads-workflow@jtsternberg
+```
+
 ## Dependencies
 
 This plugin requires [beads](https://github.com/steveyegge/beads) to be installed and configured:
