@@ -14,7 +14,13 @@ Add the marketplace and install any plugin:
 
 ```bash
 /plugin marketplace add jtsternberg/claude-plugins
-/plugin install <plugin-name>@jtsternberg
+/plugin install git-tree@jtsternberg  # Example: install git-tree skill
+```
+
+Verify installation:
+
+```bash
+/plugin list
 ```
 
 ---
@@ -92,7 +98,9 @@ Create handoff documents to preserve context between Claude Code sessions.
 #### 📊 [workspace-status](plugins/workspace-status)
 Status line showing model name, current directory, git branch/status, and context usage bar.
 
-**Manual setup:** Update `~/.claude/settings.json`:
+**Note:** Requires manual setup (status lines use a different configuration mechanism).
+
+**Setup:** Update `~/.claude/settings.json`:
 
 ```json
 {
@@ -106,7 +114,7 @@ Status line showing model name, current directory, git branch/status, and contex
 
 ---
 
-## Development
+## 🔧 Development
 
 ### Clone the Repository
 
