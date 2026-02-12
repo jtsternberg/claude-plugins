@@ -1,0 +1,6 @@
+{
+  "name": "git-tree",
+  "description": "Create git worktrees with symlinked dependencies. Use when user says \"git worktree\", \"work on two branches\", \"parallel branch work\", \"review PR without switching\", \"keep my changes while checking out another branch\", or wants isolated branch directories sharing vendor/node_modules.",
+  "version": "1.0.0",
+  "author": "JT Sternberg"
+}
