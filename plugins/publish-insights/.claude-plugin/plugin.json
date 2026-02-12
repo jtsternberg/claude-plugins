@@ -1,0 +1,6 @@
+{
+  "name": "publish-insights",
+  "description": "This skill should be used when the user wants to publish their Claude Code /insights report to GitHub Pages. It automates creating a git repo, setting up GitHub, enabling Pages, and monitoring the deployment. Triggers on \"publish insights\", \"share my insights report\", \"put insights on GitHub Pages\", or after generating an /insights report.",
+  "version": "1.0.0",
+  "author": "JT Sternberg"
+}
