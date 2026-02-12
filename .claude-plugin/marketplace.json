@@ -47,8 +47,8 @@
       "path": "plugins/handoff"
     },
     {
-      "name": "jt-status-line",
-      "path": "plugins/jt-status-line"
+      "name": "workspace-status",
+      "path": "plugins/workspace-status"
     }
   ]
 }

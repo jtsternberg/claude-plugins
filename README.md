@@ -1,4 +1,4 @@
-# Claude Code Plugins by JT Sternberg
+# Claude Code Plugins by JTSternberg
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
@@ -89,8 +89,8 @@ Create handoff documents to preserve context between Claude Code sessions.
 
 ### Status Lines
 
-#### 📊 [jt-status-line](plugins/jt-status-line)
-Custom status line showing git status, beads task info, and system stats.
+#### 📊 [workspace-status](plugins/workspace-status)
+Status line showing model name, current directory, git branch/status, and context usage bar.
 
 **Manual setup:** Update `~/.claude/settings.json`:
 
@@ -98,7 +98,7 @@ Custom status line showing git status, beads task info, and system stats.
 {
   "statusLine": {
     "type": "command",
-    "command": "php /path/to/claude-plugins/plugins/jt-status-line/jt-status-line.php",
+    "command": "php /path/to/claude-plugins/plugins/workspace-status/workspace-status.php",
     "padding": 0
   }
 }

@@ -1,6 +1,0 @@
-{
-  "name": "jt-status-line",
-  "description": "Custom status line showing git status, beads task info, and system stats.",
-  "version": "1.0.0",
-  "author": "JT Sternberg"
-}
