@@ -44,10 +44,14 @@ Interacts with Obsidian vaults from the terminal using the official Obsidian CLI
 
 **Install:** `/plugin install obsidian-cli@jtsternberg`
 
-#### 📊 [publish-insights](plugins/publish-insights)
+#### 📊 [publish-insights](https://github.com/jtsternberg/claude-usage-data)
 Publish Claude Code `/insights` reports to GitHub Pages for easy sharing.
 
-**Install:** `/plugin install publish-insights@jtsternberg`
+**Install:** 
+```bash
+/plugin marketplace add jtsternberg/claude-usage-data
+/plugin install publish-insights@jtsternberg/claude-usage-data
+```
 
 #### 🖼️ [generating-blog-images](plugins/generating-blog-images)
 Generate AI image prompts for blog posts by analyzing content and identifying optimal placement.

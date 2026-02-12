@@ -2,14 +2,16 @@
 
 Publish Claude Code `/insights` reports to GitHub Pages for easy sharing.
 
+> **Note:** This plugin is maintained in the [claude-usage-data](https://github.com/jtsternberg/claude-usage-data) repository.
+
 ## Installation
 
 ```bash
-# Add the marketplace (if not already added)
-/plugin marketplace add jtsternberg/claude-plugins
+# Add the marketplace
+/plugin marketplace add jtsternberg/claude-usage-data
 
 # Install the plugin
-/plugin install publish-insights@jtsternberg
+/plugin install publish-insights@jtsternberg/claude-usage-data
 ```
 
 ## Prerequisites
