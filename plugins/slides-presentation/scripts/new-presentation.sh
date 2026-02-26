@@ -19,4 +19,4 @@ cp "$TEMPLATE" "$OUT_DIR/presentation.html"
 sed -i '' "s/{{TITLE}}/$TITLE/g" "$OUT_DIR/presentation.html"
 
 echo "Created $OUT_DIR/presentation.html from template"
-echo "Next: replace {{SUBTITLE}} and {{TAGLINE}}, then add your slides."
+echo "Next: replace {{LABEL}}, {{SUBTITLE}}, and {{TAGLINE}}, then add your slides."

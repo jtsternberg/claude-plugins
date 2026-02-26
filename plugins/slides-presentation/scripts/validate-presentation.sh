@@ -69,6 +69,38 @@ if grep -q 'data-slide="0"' "$FILE"; then
   fi
 fi
 
+# Check slides have dark/light classes
+DARK_COUNT=$(grep -c 'class="slide dark' "$FILE" || true)
+LIGHT_COUNT=$(grep -c 'class="slide light' "$FILE" || true)
+CLASSIFIED=$((DARK_COUNT + LIGHT_COUNT))
+if [[ "$SLIDE_COUNT" -gt 0 ]] && [[ "$CLASSIFIED" -lt "$SLIDE_COUNT" ]]; then
+  MISSING=$((SLIDE_COUNT - CLASSIFIED))
+  echo "WARNING: $MISSING slide(s) missing dark/light class (found $DARK_COUNT dark, $LIGHT_COUNT light)"
+  WARNINGS=$((WARNINGS + 1))
+fi
+if [[ "$DARK_COUNT" -gt 0 ]] && [[ "$LIGHT_COUNT" -eq 0 ]] && [[ "$SLIDE_COUNT" -gt 2 ]]; then
+  echo "WARNING: All slides are dark — consider alternating dark/light for visual rhythm"
+  WARNINGS=$((WARNINGS + 1))
+fi
+if [[ "$LIGHT_COUNT" -gt 0 ]] && [[ "$DARK_COUNT" -eq 0 ]] && [[ "$SLIDE_COUNT" -gt 2 ]]; then
+  echo "WARNING: All slides are light — consider alternating dark/light for visual rhythm"
+  WARNINGS=$((WARNINGS + 1))
+fi
+
+# Check slides have slide-content wrapper (needed for entry animations)
+CONTENT_WRAPPERS=$(grep -c 'class="slide-content"' "$FILE" || true)
+if [[ "$SLIDE_COUNT" -gt 0 ]] && [[ "$CONTENT_WRAPPERS" -lt "$SLIDE_COUNT" ]]; then
+  MISSING=$((SLIDE_COUNT - CONTENT_WRAPPERS))
+  echo "WARNING: $MISSING slide(s) missing .slide-content wrapper (entry animations won't work)"
+  WARNINGS=$((WARNINGS + 1))
+fi
+
+# Check for banned generic fonts
+if grep -qE "font-family:.*\b(Inter|Roboto|Arial|Helvetica)\b" "$FILE" 2>/dev/null; then
+  echo "WARNING: Generic font detected (Inter/Roboto/Arial/Helvetica) — use a distinctive display + body pairing"
+  WARNINGS=$((WARNINGS + 1))
+fi
+
 # Check for broken relative image paths (skip HTML comments)
 DIR=$(dirname "$FILE")
 # Strip HTML comments before searching for image references

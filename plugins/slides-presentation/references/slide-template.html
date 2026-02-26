@@ -4,58 +4,62 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{TITLE}}</title>
+<!-- Fonts: Replace with your chosen display + body pairing from Google Fonts.
+     NEVER use Inter, Roboto, Arial. Pick from the curated list in LAYOUT-GUIDE.md.
+     Example: Fraunces (display) + DM Sans (body) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  /* Fonts: loads Inter + JetBrains Mono from Google Fonts.
-     Offline fallback: system sans-serif + monospace via font-family stacks below. */
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap');
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   :root {
-    /* -- Theme: override these for light/custom themes -- */
-    --bg: #1e1e1e;
-    --bg-lighter: #2a2a2a;
-    --grid: rgba(255,255,255,0.04);
-    --accent: #4ade80;
-    --accent-glow: rgba(74, 222, 128, 0.3);
+    /* -- Palette: derive from style reference or mood -- */
+    --dark-bg: #1a1a2e;
+    --light-bg: #f8f6f1;
+    --accent: #e94560;
+    --accent-glow: rgba(233, 69, 96, 0.3);
+
+    /* Text on dark slides (must pass WCAG AA 4.5:1) */
+    --text-dark: #f0f0f0;
+    --text-dark-body: #d4d4d8;
+    --text-dark-dim: #8888a0;
+
+    /* Text on light slides (must pass WCAG AA 4.5:1) */
+    --text-light: #1a1a2e;
+    --text-light-body: #3a3a4e;
+    --text-light-dim: #6b6b80;
+
+    /* Utility */
     --danger: #ef4444;
     --warn: #f59e0b;
     --link: #67b7f7;
-    --text: #f0f0f0;
-    --text-dim: #888;
-    --text-mid: #aaa;
-    --mono: 'JetBrains Mono', monospace;
-    --sans: 'Inter', -apple-system, sans-serif;
+    --card-border: rgba(255,255,255,0.12);
+    --card-border-light: rgba(0,0,0,0.1);
+    --card-radius: 12px;
+
+    /* Fonts: update these to match your chosen pairing */
+    --display: 'Fraunces', Georgia, serif;
+    --body: 'DM Sans', -apple-system, sans-serif;
+    --mono: 'JetBrains Mono', Menlo, monospace;
   }
 
   html, body {
     width: 100%; height: 100%;
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--sans);
+    background: var(--dark-bg);
+    color: var(--text-dark);
+    font-family: var(--body);
     overflow: hidden;
   }
 
-  /* Grid background */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background-image:
-      linear-gradient(var(--grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-    background-size: 40px 40px;
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  /* ===== Fluid layout: deck fills viewport ===== */
+  /* ===== Deck container ===== */
   .deck {
     position: relative;
     width: 100%;
     height: 100%;
   }
 
+  /* ===== Slide base ===== */
   .slide {
     position: absolute;
     inset: 0;
@@ -75,16 +79,103 @@
     z-index: 2;
   }
 
-  /* ===== Typography (rem units — scale with browser zoom) ===== */
-  h1 { font-size: 3.2rem; font-weight: 800; line-height: 1.1; margin-bottom: 0.3em; letter-spacing: -0.02em; }
-  h2 { font-size: 2.6rem; font-weight: 700; line-height: 1.15; margin-bottom: 0.5em; letter-spacing: -0.01em; }
-  .subtitle { font-size: 1.6rem; font-weight: 300; color: var(--text-mid); font-style: italic; font-family: var(--mono); }
-  .tagline { font-size: 1.1rem; color: var(--text-dim); font-family: var(--mono); margin-top: 2em; }
+  /* ===== Dark slides: atmospheric background ===== */
+  .slide.dark {
+    background:
+      radial-gradient(ellipse at 20% 50%, rgba(233, 69, 96, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(233, 69, 96, 0.04) 0%, transparent 40%),
+      radial-gradient(ellipse at 50% 100%, rgba(100, 100, 180, 0.05) 0%, transparent 50%),
+      var(--dark-bg);
+    color: var(--text-dark);
+  }
 
+  /* Subtle noise texture on dark slides */
+  .slide.dark::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .slide.dark > * { position: relative; z-index: 1; }
+  .slide.dark .slide-content { position: relative; z-index: 1; }
+
+  /* ===== Light slides ===== */
+  .slide.light {
+    background: var(--light-bg);
+    color: var(--text-light);
+  }
+
+  .slide.light .slide-label { color: var(--accent); }
+  .slide.light h2, .slide.light h3 { color: var(--text-light); }
+  .slide.light p, .slide.light li { color: var(--text-light-body); }
+  .slide.light .dim { color: var(--text-light-dim); }
+  .slide.light .terminal { background: #1a1a2e; color: var(--text-dark); }
+  .slide.light code { background: rgba(0,0,0,0.06); color: var(--text-light); }
+  .slide.light code.accent { background: rgba(233, 69, 96, 0.1); color: var(--accent); border-color: rgba(233, 69, 96, 0.2); }
+  .slide.light .card { border-color: var(--card-border-light); }
+
+  /* ===== Typography: clamp() for fluid headings ===== */
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(44px, 6.5vw, 80px);
+    font-weight: 700;
+    line-height: 1.1;
+    margin-bottom: 0.3em;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-size: clamp(32px, 4.5vw, 56px);
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 0.5em;
+    letter-spacing: -0.01em;
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-size: clamp(24px, 3vw, 36px);
+    font-weight: 600;
+    line-height: 1.2;
+    margin-bottom: 0.4em;
+  }
+
+  .subtitle {
+    font-size: clamp(18px, 2.5vw, 28px);
+    font-weight: 400;
+    color: var(--text-dark-body);
+    font-family: var(--body);
+  }
+
+  .slide.light .subtitle { color: var(--text-light-body); }
+
+  .tagline {
+    font-size: 1rem;
+    color: var(--text-dark-dim);
+    font-family: var(--mono);
+    margin-top: 2em;
+  }
+
+  /* ===== Slide labels (eyebrow text) ===== */
+  .slide-label {
+    font-family: var(--body);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    margin-bottom: 1em;
+  }
+
+  /* ===== Utility classes ===== */
   .accent { color: var(--accent); }
   .danger { color: var(--danger); }
   .warn { color: var(--warn); }
-  .dim { color: var(--text-dim); }
+  .dim { color: var(--text-dark-dim); }
 
   code {
     font-family: var(--mono);
@@ -94,15 +185,25 @@
     font-size: 0.9em;
   }
   code.accent {
-    background: rgba(74, 222, 128, 0.15);
+    background: rgba(233, 69, 96, 0.15);
     color: var(--accent);
-    border: 1px solid rgba(74, 222, 128, 0.3);
+    border: 1px solid rgba(233, 69, 96, 0.3);
+  }
+
+  /* ===== Big statement number ===== */
+  .big-number {
+    font-family: var(--display);
+    font-size: clamp(64px, 10vw, 140px);
+    font-weight: 700;
+    line-height: 1;
+    color: var(--accent);
+    margin-bottom: 0.2em;
   }
 
   /* ===== Bullet lists ===== */
   .bullets {
     list-style: none;
-    font-size: 1.35rem;
+    font-size: 1.15rem;
     line-height: 1.8;
   }
   .bullets li {
@@ -114,13 +215,13 @@
     content: '';
     position: absolute;
     left: 0;
-    top: 0.55em;
-    width: 12px;
-    height: 12px;
+    top: 0.6em;
+    width: 10px;
+    height: 10px;
     background: var(--accent);
     border-radius: 2px;
   }
-  .bullets li.red::before { background: var(--danger); }
+  .bullets li.danger::before { background: var(--danger); }
 
   /* ===== Layouts ===== */
   .two-col {
@@ -138,11 +239,104 @@
     flex: 1;
   }
 
+  /* ===== Cards ===== */
+  .card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 24px;
+  }
+  .slide.light .card {
+    background: rgba(0,0,0,0.03);
+    border-color: var(--card-border-light);
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+  }
+
+  /* ===== CSS Bar Charts ===== */
+  .chart-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .chart-label {
+    min-width: 120px;
+    font-size: 0.9rem;
+    text-align: right;
+    font-family: var(--body);
+  }
+  .chart-track {
+    flex: 1;
+    height: 28px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .slide.light .chart-track { background: rgba(0,0,0,0.06); }
+  .chart-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #fff;
+    transition: width 0.6s ease;
+  }
+
+  /* ===== Process Flow ===== */
+  .process-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .process-step {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 16px 24px;
+    font-weight: 500;
+    text-align: center;
+  }
+  .slide.light .process-step { background: rgba(0,0,0,0.04); border-color: var(--card-border-light); }
+  .process-arrow {
+    font-size: 1.4rem;
+    color: var(--accent);
+  }
+
+  /* ===== Stat cards ===== */
+  .stat-card {
+    text-align: center;
+    padding: 24px;
+  }
+  .stat-card .stat-value {
+    font-family: var(--display);
+    font-size: clamp(32px, 5vw, 56px);
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 0.3em;
+  }
+  .stat-card .stat-label {
+    font-size: 0.9rem;
+    color: var(--text-dark-dim);
+  }
+  .slide.light .stat-card .stat-label { color: var(--text-light-dim); }
+
   /* ===== Terminal mock ===== */
   .terminal {
     background: #111;
     border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 12px;
+    border-radius: var(--card-radius);
     padding: 24px 28px;
     font-family: var(--mono);
     font-size: 0.9rem;
@@ -157,12 +351,40 @@
   .terminal-dot.y { background: #febc2e; }
   .terminal-dot.g { background: #28c840; }
 
-  /* ===== Navigation (fixed to viewport) ===== */
+  /* ===== Entry animations ===== */
+  .slide-content > * {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .slide.active .slide-content > * {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Stagger children: ~100ms increments */
+  .slide.active .slide-content > *:nth-child(1) { transition-delay: 0ms; }
+  .slide.active .slide-content > *:nth-child(2) { transition-delay: 100ms; }
+  .slide.active .slide-content > *:nth-child(3) { transition-delay: 200ms; }
+  .slide.active .slide-content > *:nth-child(4) { transition-delay: 300ms; }
+  .slide.active .slide-content > *:nth-child(5) { transition-delay: 400ms; }
+  .slide.active .slide-content > *:nth-child(6) { transition-delay: 500ms; }
+  .slide.active .slide-content > *:nth-child(7) { transition-delay: 600ms; }
+  .slide.active .slide-content > *:nth-child(8) { transition-delay: 700ms; }
+
+  /* Reset delays when not active (instant hide) */
+  .slide:not(.active) .slide-content > * {
+    transition-delay: 0ms;
+  }
+
+  /* ===== Navigation ===== */
   .nav { position: fixed; bottom: 20px; right: 30px; display: flex; gap: 10px; z-index: 100; }
   .nav button {
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.15);
-    color: var(--text);
+    color: var(--text-dark);
     width: 44px; height: 44px;
     border-radius: 8px;
     font-size: 1.2rem;
@@ -170,17 +392,38 @@
     transition: background 0.2s;
   }
   .nav button:hover { background: rgba(255,255,255,0.12); }
-  .slide-counter { position: fixed; bottom: 24px; left: 30px; font-family: var(--mono); font-size: 0.85rem; color: var(--text-dim); z-index: 100; }
-  .progress { position: fixed; bottom: 0; left: 0; height: 3px; background: var(--accent); transition: width 0.4s ease; z-index: 100; }
 
-  @keyframes blink { 50% { opacity: 0; } }
+  .slide-counter {
+    position: fixed;
+    bottom: 24px;
+    left: 30px;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--text-dark-dim);
+    z-index: 100;
+  }
 
-  /* ===== Responsive: use browser zoom (Cmd +/-) to scale ===== */
+  .progress {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: var(--accent);
+    transition: width 0.4s ease;
+    z-index: 100;
+  }
+
+  /* ===== Responsive ===== */
   @media (max-width: 1200px) {
     .slide { padding: 40px 50px; }
-    h1 { font-size: 2.6rem; }
-    h2 { font-size: 2rem; }
-    .bullets { font-size: 1.15rem; }
+    .bullets { font-size: 1.05rem; }
+    .two-col { gap: 40px; }
+  }
+
+  @media (max-width: 768px) {
+    .slide { padding: 30px 30px; }
+    .two-col { grid-template-columns: 1fr; gap: 24px; }
+    .two-col-wide { grid-template-columns: 1fr; gap: 24px; }
   }
 </style>
 </head>
@@ -188,40 +431,52 @@
 
 <div class="deck" id="deck">
 
-  <!-- ===== SLIDE 1: Title ===== -->
-  <div class="slide active" data-slide="0">
-    <div style="text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%;">
-      <!-- Optional hero image: <img src="hero.png" style="max-width: 500px; height: auto;"> -->
+  <!-- ===== SLIDE 1: Title (dark) ===== -->
+  <div class="slide dark active" data-slide="0">
+    <div class="slide-content" style="text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%;">
+      <div class="slide-label">{{LABEL}}</div>
       <h1>{{TITLE}}</h1>
       <div class="subtitle">{{SUBTITLE}}</div>
       <div class="tagline">{{TAGLINE}}</div>
     </div>
   </div>
 
-  <!-- ===== SLIDE 2: Example content slide ===== -->
-  <div class="slide" data-slide="1">
-    <h2>Slide Title</h2>
-    <div class="two-col">
-      <div>
-        <ul class="bullets">
-          <li><strong>Point one:</strong> Description here.</li>
-          <li><strong>Point two:</strong> Description here.</li>
-          <li class="red"><strong>Warning:</strong> Highlighted in red.</li>
-        </ul>
-      </div>
-      <div>
-        <!-- Right column: diagram, image, terminal, etc. -->
+  <!-- ===== SLIDE 2: Example content (light) ===== -->
+  <div class="slide light" data-slide="1">
+    <div class="slide-content">
+      <div class="slide-label">The Context</div>
+      <h2>Slide Title Here</h2>
+      <div class="two-col">
+        <div>
+          <ul class="bullets">
+            <li><strong>Point one:</strong> Description here</li>
+            <li><strong>Point two:</strong> Description here</li>
+            <li class="danger"><strong>Warning:</strong> Highlighted point</li>
+          </ul>
+        </div>
+        <div>
+          <!-- Right column: diagram, image, terminal, chart, etc. -->
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Add more slides here -->
+  <!-- ===== SLIDE 3: Big statement (dark) ===== -->
+  <div class="slide dark" data-slide="2">
+    <div class="slide-content" style="text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%;">
+      <div class="slide-label">The Impact</div>
+      <div class="big-number">47%</div>
+      <p class="subtitle">of developer time is spent on boilerplate</p>
+    </div>
+  </div>
+
+  <!-- Add more slides here, alternating dark/light -->
 
 </div>
 
 <!-- Navigation -->
-<div class="slide-counter" id="counter">1 / 2</div>
-<div class="progress" id="progress" style="width: 50%"></div>
+<div class="slide-counter" id="counter">1 / 3</div>
+<div class="progress" id="progress" style="width: 33.3%"></div>
 <div class="nav">
   <button onclick="prev()" title="Previous">&larr;</button>
   <button onclick="next()" title="Next">&rarr;</button>
@@ -243,7 +498,7 @@
   function next() { go(current + 1); }
   function prev() { go(current - 1); }
 
-  // Digit buffer: type 1-2 digits to jump to a slide (e.g., "1" or "12")
+  // Digit buffer: type 1-2 digits to jump to a slide
   let digitBuffer = '';
   let digitTimer = null;
   function handleDigit(d) {
@@ -257,8 +512,8 @@
   }
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
-    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); prev(); }
     if (e.key === 'Home') { e.preventDefault(); go(0); }
     if (e.key === 'End') { e.preventDefault(); go(total - 1); }
     if (e.key === 'f' || e.key === 'F') {
