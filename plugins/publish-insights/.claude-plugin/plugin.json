@@ -1,0 +1,9 @@
+{
+  "name": "publish-insights",
+  "description": "Publish Claude Code /insights reports to GitHub Pages for easy sharing. Note: the full plugin is maintained in jtsternberg/claude-usage-data.",
+  "version": "1.0.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}
