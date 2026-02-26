@@ -62,17 +62,17 @@ Override CSS variables in `:root`:
 
 ### Step 4: Generate Illustrations (if needed)
 
-For visuals difficult to create in SVG (realistic objects, organic shapes, complex scenes), use the `compound-engineering:gemini-imagegen` skill.
+For visuals difficult to create in SVG (realistic objects, organic shapes, complex scenes), use an image generation skill. Prefer `compound-engineering:gemini-imagegen` if available, but any image generation skill in the environment will work. If none is available, use SVG/CSS diagrams or ask the user to provide images.
 
 **Practical notes:**
 
 - Use `16:9` aspect ratio and `2K` resolution for slide-sized images
 - Prompt for the slide's background color (e.g., "on a #1e1e1e charcoal background") so the image blends seamlessly
 
-**When to use SVG vs Gemini:**
+**When to use SVG vs generated images:**
 
-| SVG/CSS | Gemini |
-|---------|--------|
+| SVG/CSS | Image generation |
+|---------|-----------------|
 | Geometric diagrams, graphs, flowcharts | Realistic objects, scenes |
 | Terminal/code mockups | Artistic/illustrative graphics |
 | Simple icons, shapes, arrows | Complex visual metaphors |

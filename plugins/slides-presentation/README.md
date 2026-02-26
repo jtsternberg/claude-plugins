@@ -12,6 +12,19 @@ Create self-contained HTML slide presentations from talk prompts, outlines, or c
 /plugin install slides-presentation@jtsternberg
 ```
 
+## Requirements
+
+**Core (no external dependencies):** The skill generates pure HTML/CSS/JS presentations that work in any browser. No build tools, frameworks, or API keys needed for basic use.
+
+**Optional — AI-generated illustrations:**
+
+| Requirement | What it's for | How to get it |
+|-------------|---------------|---------------|
+| `compound-engineering:gemini-imagegen` skill | Generates realistic images for slides (people, objects, scenes) | Install the [compound-engineering](https://github.com/kiwicopple/compound-engineering) plugin |
+| `GEMINI_API_KEY` environment variable | Authenticates with Google's Gemini API | Get a key from [Google AI Studio](https://aistudio.google.com/apikey) |
+
+The skill prefers `gemini-imagegen` but will use any image generation skill available in your environment. Without any image generation skill, you can still build full presentations using SVG/CSS for diagrams and visuals.
+
 ## Description
 
 Builds browser-based slide decks as single HTML files — no dependencies, no build step. Supports dark/light themes, SVG diagrams, terminal mocks, two-column layouts, and AI-generated illustrations via Gemini.
