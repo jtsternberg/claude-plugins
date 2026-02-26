@@ -2,5 +2,8 @@
   "name": "skill-tools",
   "description": "Commands for creating and reviewing Claude Code skills, slash commands, and subagents.",
   "version": "1.0.0",
-  "author": "JT Sternberg"
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
 }

@@ -2,5 +2,8 @@
   "name": "workspace-status",
   "description": "Status line showing model name, directory, git branch/status, and context usage.",
   "version": "1.0.0",
-  "author": "JT Sternberg"
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
 }

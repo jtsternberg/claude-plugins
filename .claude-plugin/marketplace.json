@@ -6,57 +6,18 @@
   },
   "description": "Custom Claude Code plugins — skills, commands, hooks, and automation",
   "plugins": [
-    {
-      "name": "git-tree",
-      "path": "plugins/git-tree"
-    },
-    {
-      "name": "headline-refiner",
-      "path": "plugins/headline-refiner"
-    },
-    {
-      "name": "obsidian-cli",
-      "path": "plugins/obsidian-cli"
-    },
-    {
-      "name": "publish-insights",
-      "path": "plugins/publish-insights"
-    },
-    {
-      "name": "generating-blog-images",
-      "path": "plugins/generating-blog-images"
-    },
-    {
-      "name": "git-commits",
-      "path": "plugins/git-commits"
-    },
-    {
-      "name": "pr-workflow",
-      "path": "plugins/pr-workflow"
-    },
-    {
-      "name": "skill-tools",
-      "path": "plugins/skill-tools"
-    },
-    {
-      "name": "beads-workflow",
-      "path": "plugins/beads-workflow"
-    },
-    {
-      "name": "handoff",
-      "path": "plugins/handoff"
-    },
-    {
-      "name": "workspace-status",
-      "path": "plugins/workspace-status"
-    },
-    {
-      "name": "slides-presentation",
-      "path": "plugins/slides-presentation"
-    },
-    {
-      "name": "export-presentation",
-      "path": "plugins/export-presentation"
-    }
+    { "name": "git-tree", "source": "./plugins/git-tree" },
+    { "name": "headline-refiner", "source": "./plugins/headline-refiner" },
+    { "name": "obsidian-cli", "source": "./plugins/obsidian-cli" },
+    { "name": "publish-insights", "source": "./plugins/publish-insights" },
+    { "name": "generating-blog-images", "source": "./plugins/generating-blog-images" },
+    { "name": "git-commits", "source": "./plugins/git-commits" },
+    { "name": "pr-workflow", "source": "./plugins/pr-workflow" },
+    { "name": "skill-tools", "source": "./plugins/skill-tools" },
+    { "name": "beads-workflow", "source": "./plugins/beads-workflow" },
+    { "name": "handoff", "source": "./plugins/handoff" },
+    { "name": "workspace-status", "source": "./plugins/workspace-status" },
+    { "name": "slides-presentation", "source": "./plugins/slides-presentation" },
+    { "name": "export-presentation", "source": "./plugins/export-presentation" }
   ]
 }

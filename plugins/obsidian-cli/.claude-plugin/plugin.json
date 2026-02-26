@@ -2,5 +2,8 @@
   "name": "obsidian-cli",
   "description": "Interacts with Obsidian vaults from the terminal using the official Obsidian CLI (v1.12+). Manages notes, tasks, properties, daily notes, bases, tags, search, vault health, file operations, and Obsidian automation. Triggers on \"obsidian\", \"vault\", \"daily note\", \"obsidian task\", \"obsidian search\", \"obsidian property\", \"note in obsidian\", \"obsidian base\", or any request involving Obsidian vault interaction from the command line.",
   "version": "1.0.0",
-  "author": "JT Sternberg"
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
 }

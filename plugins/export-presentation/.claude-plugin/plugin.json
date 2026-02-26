@@ -2,5 +2,8 @@
   "name": "export-presentation",
   "description": "Exports HTML slide presentations to PDF or PNG screenshots using browser automation. Companion to the slides-presentation plugin.",
   "version": "1.0.0",
-  "author": "JT Sternberg"
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
 }
