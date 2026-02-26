@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<style>
+  /* Fonts: loads Inter + JetBrains Mono from Google Fonts.
+     Offline fallback: system sans-serif + monospace via font-family stacks below. */
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    /* -- Theme: override these for light/custom themes -- */
+    --bg: #1e1e1e;
+    --bg-lighter: #2a2a2a;
+    --grid: rgba(255,255,255,0.04);
+    --accent: #4ade80;
+    --accent-glow: rgba(74, 222, 128, 0.3);
+    --danger: #ef4444;
+    --warn: #f59e0b;
+    --link: #67b7f7;
+    --text: #f0f0f0;
+    --text-dim: #888;
+    --text-mid: #aaa;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', -apple-system, sans-serif;
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    overflow: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ===== Fluid layout: deck fills viewport ===== */
+  .deck {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 60px 80px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+    z-index: 1;
+  }
+
+  .slide.active {
+    opacity: 1;
+    visibility: visible;
+    z-index: 2;
+  }
+
+  /* ===== Typography (rem units — scale with browser zoom) ===== */
+  h1 { font-size: 3.2rem; font-weight: 800; line-height: 1.1; margin-bottom: 0.3em; letter-spacing: -0.02em; }
+  h2 { font-size: 2.6rem; font-weight: 700; line-height: 1.15; margin-bottom: 0.5em; letter-spacing: -0.01em; }
+  .subtitle { font-size: 1.6rem; font-weight: 300; color: var(--text-mid); font-style: italic; font-family: var(--mono); }
+  .tagline { font-size: 1.1rem; color: var(--text-dim); font-family: var(--mono); margin-top: 2em; }
+
+  .accent { color: var(--accent); }
+  .danger { color: var(--danger); }
+  .warn { color: var(--warn); }
+  .dim { color: var(--text-dim); }
+
+  code {
+    font-family: var(--mono);
+    background: rgba(255,255,255,0.08);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  code.accent {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+  }
+
+  /* ===== Bullet lists ===== */
+  .bullets {
+    list-style: none;
+    font-size: 1.35rem;
+    line-height: 1.8;
+  }
+  .bullets li {
+    padding-left: 1.8em;
+    position: relative;
+    margin-bottom: 0.4em;
+  }
+  .bullets li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 12px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+  .bullets li.red::before { background: var(--danger); }
+
+  /* ===== Layouts ===== */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 60px;
+    align-items: center;
+    flex: 1;
+  }
+  .two-col-wide {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 60px;
+    align-items: center;
+    flex: 1;
+  }
+
+  /* ===== Terminal mock ===== */
+  .terminal {
+    background: #111;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px;
+    padding: 24px 28px;
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    line-height: 1.8;
+    max-width: 800px;
+    margin: 20px auto;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .terminal-header { display: flex; gap: 8px; margin-bottom: 16px; }
+  .terminal-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .terminal-dot.r { background: #ff5f57; }
+  .terminal-dot.y { background: #febc2e; }
+  .terminal-dot.g { background: #28c840; }
+
+  /* ===== Navigation (fixed to viewport) ===== */
+  .nav { position: fixed; bottom: 20px; right: 30px; display: flex; gap: 10px; z-index: 100; }
+  .nav button {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: var(--text);
+    width: 44px; height: 44px;
+    border-radius: 8px;
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .nav button:hover { background: rgba(255,255,255,0.12); }
+  .slide-counter { position: fixed; bottom: 24px; left: 30px; font-family: var(--mono); font-size: 0.85rem; color: var(--text-dim); z-index: 100; }
+  .progress { position: fixed; bottom: 0; left: 0; height: 3px; background: var(--accent); transition: width 0.4s ease; z-index: 100; }
+
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ===== Responsive: use browser zoom (Cmd +/-) to scale ===== */
+  @media (max-width: 1200px) {
+    .slide { padding: 40px 50px; }
+    h1 { font-size: 2.6rem; }
+    h2 { font-size: 2rem; }
+    .bullets { font-size: 1.15rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="deck" id="deck">
+
+  <!-- ===== SLIDE 1: Title ===== -->
+  <div class="slide active" data-slide="0">
+    <div style="text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%;">
+      <!-- Optional hero image: <img src="hero.png" style="max-width: 500px; height: auto;"> -->
+      <h1>{{TITLE}}</h1>
+      <div class="subtitle">{{SUBTITLE}}</div>
+      <div class="tagline">{{TAGLINE}}</div>
+    </div>
+  </div>
+
+  <!-- ===== SLIDE 2: Example content slide ===== -->
+  <div class="slide" data-slide="1">
+    <h2>Slide Title</h2>
+    <div class="two-col">
+      <div>
+        <ul class="bullets">
+          <li><strong>Point one:</strong> Description here.</li>
+          <li><strong>Point two:</strong> Description here.</li>
+          <li class="red"><strong>Warning:</strong> Highlighted in red.</li>
+        </ul>
+      </div>
+      <div>
+        <!-- Right column: diagram, image, terminal, etc. -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Add more slides here -->
+
+</div>
+
+<!-- Navigation -->
+<div class="slide-counter" id="counter">1 / 2</div>
+<div class="progress" id="progress" style="width: 50%"></div>
+<div class="nav">
+  <button onclick="prev()" title="Previous">&larr;</button>
+  <button onclick="next()" title="Next">&rarr;</button>
+</div>
+
+<script>
+  let current = 0;
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+
+  function go(n) {
+    if (n < 0 || n >= total) return;
+    slides[current].classList.remove('active');
+    current = n;
+    slides[current].classList.add('active');
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
+    document.getElementById('progress').style.width = ((current + 1) / total * 100) + '%';
+  }
+  function next() { go(current + 1); }
+  function prev() { go(current - 1); }
+
+  // Digit buffer: type 1-2 digits to jump to a slide (e.g., "1" or "12")
+  let digitBuffer = '';
+  let digitTimer = null;
+  function handleDigit(d) {
+    digitBuffer += d;
+    clearTimeout(digitTimer);
+    digitTimer = setTimeout(() => {
+      const n = parseInt(digitBuffer) - 1;
+      if (n >= 0 && n < total) go(n);
+      digitBuffer = '';
+    }, 500);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prev(); }
+    if (e.key === 'Home') { e.preventDefault(); go(0); }
+    if (e.key === 'End') { e.preventDefault(); go(total - 1); }
+    if (e.key === 'f' || e.key === 'F') {
+      document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    }
+    if (e.key >= '0' && e.key <= '9') { handleDigit(e.key); return; }
+  });
+
+  // Touch/swipe
+  let touchX = 0;
+  document.addEventListener('touchstart', (e) => { touchX = e.changedTouches[0].screenX; });
+  document.addEventListener('touchend', (e) => {
+    const d = e.changedTouches[0].screenX - touchX;
+    if (Math.abs(d) > 50) d < 0 ? next() : prev();
+  });
+</script>
+</body>
+</html>

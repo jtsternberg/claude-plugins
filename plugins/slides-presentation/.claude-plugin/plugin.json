@@ -1,0 +1,6 @@
+{
+  "name": "slides-presentation",
+  "description": "Creates self-contained HTML slide presentations from talk prompts, outlines, or content descriptions. Supports dark/light themes, SVG diagrams, and AI-generated illustrations.",
+  "version": "1.0.0",
+  "author": "JT Sternberg"
+}
