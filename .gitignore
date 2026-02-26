@@ -20,3 +20,4 @@ node_modules/
 *.tmp
 *.temp
 HANDOFF*.md
+.claude/settings.local.json
