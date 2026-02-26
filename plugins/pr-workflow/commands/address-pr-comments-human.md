@@ -1,11 +1,13 @@
 ---
-description: Address all PR comments by reviewing, fixing, committing, and replying (auto push and post)
+description: Address PR comments with human review before push and reply (draft then approve)
 argument-hint: <pr-number>
 ---
 
-# Address PR Comments
+# Address PR Comments (Human-in-the-Loop)
 
 Parse `$ARGUMENTS` for the **PR number** (numeric).
+
+Do NOT push commits or post replies until the user approves. Write drafts first, then after approval: push and post.
 
 ## Step 1: Gather PR Comments
 
@@ -70,18 +72,43 @@ For each task (one at a time, in order):
 4. **If a fix was made**:
    - Stage only the affected files
    - Commit with a message referencing the PR comment (e.g., `Fix: address review feedback on <file> — <what changed>`)
-   - Push the commit: `git push`
+   - Do NOT push yet
 5. **Reply to the reviewer** — every comment MUST get a reply, regardless of outcome:
    - If fixed: draft a reply explaining what you changed
    - If low priority / deferred: draft a reply acknowledging the feedback, explaining why it's being deferred, and note any follow-up plans (e.g., "Good catch — this is lower priority so we'll track it separately")
    - If not valid: draft a respectful explanation of why no change is needed
-   - Post immediately using `gh api repos/{owner}/{repo}/pulls/$ARGUMENTS/comments/{comment_id}/replies -f body="<reply>"`
+   - Write the draft to `human-in-loop-drafts/pr-{number}/comment-{comment_id}.md`. Do NOT post via `gh api`.
+   - Draft file format:
+     ```
+     # Comment by @{author}
+     **File:** {file}:{line}
+     **Comment:** {comment text}
+     **Link:** {html_url}
+
+     ## Code Changes
+     {`git show --stat` output for the commit, or "No changes — explanation only"}
+
+     ## Commit Message
+     {full commit message}
+
+     ## Proposed Reply
+     {the reply you would post}
+     ```
 6. Mark the task complete: `bd close <task-id>`
 
-## Step 4: Final Summary
+## Step 4: Present for Approval
 
 1. Run `bd sync --flush-only`
-2. Summarize what was done:
-   - How many comments were addressed (with links to each comment)
-   - How many resulted in code changes vs. explanations
-   - List each comment and its resolution
+2. Present the user with:
+   - Path to `human-in-loop-drafts/pr-{number}/`
+   - Summary table: comment ID, author, file, resolution type (fix/explanation)
+   - Full commit log: `git log --oneline origin/HEAD..HEAD`
+3. Ask the user to review the drafts and confirm before proceeding.
+
+## Step 5: After User Approves
+
+When the user approves (or asks you to proceed):
+
+1. Run `git push`
+2. Post all replies using the drafted content: `gh api repos/{owner}/{repo}/pulls/$ARGUMENTS/comments/{comment_id}/replies -f body="<reply>"`
+3. Delete the `human-in-loop-drafts/` directory
