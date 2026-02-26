@@ -49,6 +49,14 @@
     {
       "name": "workspace-status",
       "path": "plugins/workspace-status"
+    },
+    {
+      "name": "slides-presentation",
+      "path": "plugins/slides-presentation"
+    },
+    {
+      "name": "export-presentation",
+      "path": "plugins/export-presentation"
     }
   ]
 }

@@ -68,6 +68,10 @@ Claude: Reads talk prompt, plans slide structure, builds HTML deck
         with terminal mocks and flow diagrams, validates output
 ```
 
+## Related
+
+- [export-presentation](../export-presentation/) — Export your slide decks to PDF or PNG screenshots
+
 ## Additional Documentation
 
 - [SKILL.md](SKILL.md) - Complete workflow and guidelines
