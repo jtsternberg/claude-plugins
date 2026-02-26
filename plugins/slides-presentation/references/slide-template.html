@@ -494,9 +494,21 @@
     slides[current].classList.add('active');
     document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
     document.getElementById('progress').style.width = ((current + 1) / total * 100) + '%';
+    history.replaceState(null, '', '#' + 'slide-' + slides[current].getAttribute('data-slide'));
   }
   function next() { go(current + 1); }
   function prev() { go(current - 1); }
+
+  function goFromHash() {
+    const m = location.hash.match(/^#slide-(.+)$/);
+    if (m) {
+      const id = decodeURIComponent(m[1]);
+      const idx = Array.from(slides).findIndex(s => s.getAttribute('data-slide') === id);
+      if (idx >= 0) go(idx);
+    }
+  }
+  goFromHash();
+  window.addEventListener('hashchange', goFromHash);
 
   // Digit buffer: type 1-2 digits to jump to a slide
   let digitBuffer = '';
