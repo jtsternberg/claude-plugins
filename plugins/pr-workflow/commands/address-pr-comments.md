@@ -80,7 +80,7 @@ For each task (one at a time, in order):
 
 ## Step 4: Final Summary
 
-1. Run `bd sync --flush-only`
+1. Run `bd dolt push`
 2. Summarize what was done:
    - How many comments were addressed (with links to each comment)
    - How many resulted in code changes vs. explanations

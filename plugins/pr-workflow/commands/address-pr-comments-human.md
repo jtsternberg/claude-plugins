@@ -98,7 +98,7 @@ For each task (one at a time, in order):
 
 ## Step 4: Present for Approval
 
-1. Run `bd sync --flush-only`
+1. Run `bd dolt push`
 2. Present the user with:
    - Path to `human-in-loop-drafts/pr-{number}/`
    - Summary table: comment ID, author, file, resolution type (fix/explanation)
