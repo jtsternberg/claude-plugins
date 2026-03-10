@@ -1,18 +1,22 @@
 ---
 description: Work on an epic from beads until completion, then create a PR
-argument-hint: <epic-id-or-name>
+argument-hint: <epic-id-or-name> [--here]
 ---
 
 # Tackle Epic
 
-You are given an epic identifier: `$ARGUMENTS`
+You are given an epic identifier and optional flags: `$ARGUMENTS`
+
+Parse the arguments:
+- The epic identifier is the first argument (everything before any `--` flags)
+- If `--here` is present, work on the **current branch/worktree** instead of creating a new one
 
 ## Step 1: Find the Epic
 
 First, locate the epic in beads:
 
-1. If the argument looks like an ID (e.g., `buddy-cli-98w`), run: `bd show $ARGUMENTS`
-2. If it's a name/search term, run: `bd list --type=epic --title="$ARGUMENTS"` to find matching epics
+1. If the argument looks like an ID (e.g., `buddy-cli-98w`), run: `bd show <epic-id>`
+2. If it's a name/search term, run: `bd list --type=epic --title="<search-term>"` to find matching epics
 
 If no epic is found, report the error and stop.
 
@@ -24,9 +28,11 @@ Once you have the epic:
 2. Run `bd show <epic-id> --children` to see all child tasks
 3. Understand the scope and requirements from the epic description
 
-## Step 3: Create a Worktree
+## Step 3: Set Up Working Environment
 
-Create a worktree for this epic (not just a branch):
+**If `--here` flag is set:** Skip worktree creation. Work on the current branch in the current directory. Continue to Step 4.
+
+**Otherwise (default):** Create a worktree for this epic:
 
 1. Generate a branch name from the epic title/context (lowercase, hyphenated, max 50 chars)
    - Format: `feature/<epic-id>-<short-description>`

@@ -27,7 +27,8 @@ npm install -g @beads/cli
 ## Usage
 
 ```
-/tackle-epic <epic-id>
+/tackle-epic <epic-id> [--here]
 ```
 
-The command will work through all sub-tasks of the epic, then create a PR when complete.
+- **Default:** Creates a new worktree and branch for the epic, then works through all sub-tasks and opens a PR when complete.
+- **`--here`:** Work on the current branch in the current directory instead of creating a worktree.
