@@ -21,3 +21,4 @@ node_modules/
 *.temp
 HANDOFF*.md
 .claude/settings.local.json
+.beads/backup
