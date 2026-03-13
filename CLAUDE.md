@@ -34,6 +34,10 @@ Hook scripts in `hooks/` that intercept Claude Code events (permissions, notific
 ### Skill/Command-based plugins
 Markdown files in `commands/` that define slash commands or skills Claude can invoke.
 
+## Versioning
+
+When making any changes to a plugin (skills, commands, hooks, metadata), always bump the version in its `.claude-plugin/plugin.json` before committing. Use semver: patch for fixes, minor for new features or non-breaking changes, major for breaking changes.
+
 ## Development Commands
 
 ```bash
