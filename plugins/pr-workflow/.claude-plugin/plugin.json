@@ -1,6 +1,6 @@
 {
   "name": "pr-workflow",
-  "description": "Commands for managing pull requests: addressing PR comments and updating PR descriptions based on code changes.",
+  "description": "Commands and skills for managing pull requests: addressing PR comments, updating PR descriptions, and watching PRs for events.",
   "version": "1.0.0",
   "author": {
     "name": "JT Sternberg",
