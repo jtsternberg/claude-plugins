@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+#
+# localwpshell
+#
+# Sets up the LocalWP environment for the current directory and optionally
+# runs a command. Works from anywhere inside a LocalWP site tree.
+#
+# Handles symlinked site directories (e.g. app/public -> ~/Sites/mysite)
+# by resolving real paths when the direct match fails.
+#
+# Usage:
+#   localwpshell                # Load env + show info
+#   localwpshell wp plugin list # Run a command with LocalWP's PHP/MySQL/etc.
+#   localwpshell --silent ...   # Quiet mode (or use silentlocalwpshell)
+
+set -euo pipefail
+
+# Handle --silent / -shh flag
+if [[ "${1:-}" == "--silent" || "${1:-}" == "-shh" ]]; then
+	export SILENT_LOCAL_SHELL=1
+	shift
+fi
+
+# Message function that respects SILENT_LOCAL_SHELL
+msg() {
+	[[ -z "${SILENT_LOCAL_SHELL:-}" ]] && echo "$@"
+}
+
+# Get the current project path (should be the LocalWP site root, not the WordPress public directory)
+CURRENT_PROJECT_PATH=$(pwd | sed 's|/wp-content.*||' | sed 's|/app/public$||')
+
+# Find the correct LocalWP shell script using sites.json mapping
+LOCALWP_SHELL=""
+SITES_JSON="$HOME/Library/Application Support/Local/sites.json"
+
+if [ -f "$SITES_JSON" ]; then
+	# Use jq if available, otherwise fallback to grep/sed
+	if command -v jq >/dev/null 2>&1; then
+		# Use jq for precise JSON parsing
+		SITE_ID=$(jq -r --arg path "$CURRENT_PROJECT_PATH" '. | to_entries[] | select(.value.path == $path or .value.path == ("~" + ($path | sub("^'"$HOME"'"; "")))) | .key' "$SITES_JSON" | head -1)
+	else
+		# Fallback: use grep and sed to find matching path
+		TILDE_PATH="~${CURRENT_PROJECT_PATH#$HOME}"
+		SITE_ID=$(grep -E "\"path\":\"($CURRENT_PROJECT_PATH|$TILDE_PATH)\"" "$SITES_JSON" | head -1 | sed 's/.*"\([^"]*\)":{"id".*/\1/' || true)
+	fi
+
+	if [ -n "${SITE_ID:-}" ]; then
+		LOCALWP_SHELL="$HOME/Library/Application Support/Local/ssh-entry/${SITE_ID}.sh"
+		msg "Found LocalWP site ID: $SITE_ID"
+	else
+		msg "No direct LocalWP site match for path: $CURRENT_PROJECT_PATH"
+		# Maybe pwd is inside a symlinked directory (e.g. app/public -> ~/Sites/mysite).
+		# Resolve each site's app/public to its real path and compare.
+		REAL_PROJECT_PATH=$(cd "$CURRENT_PROJECT_PATH" 2>/dev/null && pwd -P) || true
+		if [ -n "${REAL_PROJECT_PATH:-}" ] && command -v jq >/dev/null 2>&1; then
+			while IFS=$'\t' read -r sid spath; do
+				# Expand ~ to $HOME
+				spath="${spath/#\~/$HOME}"
+				# Resolve the app/public symlink if it exists
+				RESOLVED=$(cd "$spath/app/public" 2>/dev/null && pwd -P) || continue
+				if [ "$RESOLVED" = "$REAL_PROJECT_PATH" ]; then
+					SITE_ID="$sid"
+					LOCALWP_SHELL="$HOME/Library/Application Support/Local/ssh-entry/${SITE_ID}.sh"
+					msg "Found LocalWP site ID via symlink resolution: $SITE_ID"
+					break
+				fi
+			done < <(jq -r 'to_entries[] | "\(.key)\t\(.value.path)"' "$SITES_JSON")
+		fi
+	fi
+else
+	msg "LocalWP sites.json not found at: $SITES_JSON"
+fi
+
+# Fallback: if we didn't find it via JSON, try the old method
+if [ -z "$LOCALWP_SHELL" ] || [ ! -f "$LOCALWP_SHELL" ]; then
+	msg "Falling back to directory-based search..."
+	for shell_script in "$HOME/Library/Application Support/Local/ssh-entry"/*.sh; do
+		if [ -f "$shell_script" ]; then
+			msg "Checking shell_script: $shell_script"
+			# Check if this shell script contains our project path
+			if grep -q "$CURRENT_PROJECT_PATH" "$shell_script" 2>/dev/null; then
+				LOCALWP_SHELL="$shell_script"
+				break
+			fi
+		fi
+	done
+fi
+
+if [ -n "$LOCALWP_SHELL" ] && [ -f "$LOCALWP_SHELL" ]; then
+	msg "Using LocalWP shell: $LOCALWP_SHELL"
+
+	# First, handle non-PATH exports
+	while IFS= read -r export_line; do
+		if [[ $export_line =~ ^export[[:space:]]+([^=]+)=(.*)$ ]]; then
+			var_name="${BASH_REMATCH[1]}"
+			var_value="${BASH_REMATCH[2]}"
+
+			# Skip PATH exports - we'll handle those specially
+			if [[ "$var_name" != "PATH" ]]; then
+				# Remove quotes if present
+				var_value=$(echo "$var_value" | sed 's/^"//;s/"$//')
+				# Use declare to set the variable dynamically and export it
+				declare -x "$var_name=$var_value"
+			fi
+		fi
+	done < <(grep '^export ' "$LOCALWP_SHELL")
+
+	# Handle PATH exports specially to maintain order and avoid duplicates
+	PATH_ADDITIONS=()
+	while IFS= read -r path_export; do
+		if [[ $path_export =~ ^export[[:space:]]+PATH=(.*)$ ]]; then
+			path_value="${BASH_REMATCH[1]}"
+			# Remove quotes and extract the path before :$PATH
+			path_value=$(echo "$path_value" | sed 's/^"//;s/"$//' | sed 's/:\$PATH$//')
+			if [[ -n "$path_value" ]]; then
+				PATH_ADDITIONS+=("$path_value")
+			fi
+		fi
+	done < <(grep '^export PATH=' "$LOCALWP_SHELL")
+
+	# Rebuild PATH with LocalWP paths first
+	if [[ ${#PATH_ADDITIONS[@]} -gt 0 ]]; then
+		NEW_PATH=$(printf '%s:' "${PATH_ADDITIONS[@]}")
+		NEW_PATH="${NEW_PATH%:}"
+		export PATH="$NEW_PATH:$PATH"
+	fi
+
+	msg "LocalWP environment loaded:"
+	msg "----"
+	msg "PHP:      $(php -r 'echo PHP_VERSION;' 2>/dev/null || echo 'not found')  $(which php)"
+	msg "WP-CLI:   $(wp --version 2>/dev/null | cut -d' ' -f2 || echo 'not found')  $(which wp)"
+	msg "Composer: $(composer --version 2>/dev/null | cut -d' ' -f3 || echo 'not found')  $(which composer)"
+	msg "MySQL:    $(mysql --version 2>/dev/null | sed -nE 's/.*Ver[[:space:]]+([0-9.]+).*/\1/p' || echo 'not found')  $(which mysql)"
+	msg "----"
+
+	# Run the command passed as arguments
+	if [ $# -gt 0 ]; then
+		msg "Executing: $*"
+		exec "$@"
+	else
+		msg "You can now run your commands."
+	fi
+else
+	echo "ERROR: LocalWP shell not found for: $CURRENT_PROJECT_PATH" >&2
+	echo "Available LocalWP sites:" >&2
+	ls "$HOME/Library/Application Support/Local/ssh-entry"/*.sh 2>/dev/null | sed 's|.*/||;s|\.sh$||' >&2 || echo "  None found" >&2
+	exit 1
+fi

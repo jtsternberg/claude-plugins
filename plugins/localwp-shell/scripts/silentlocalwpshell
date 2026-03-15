@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#
+# silentlocalwpshell
+#
+# Wrapper for localwpshell that runs it in silent mode.
+# Useful for scripts that just need the env without the chatter.
+#
+# Usage:
+#   silentlocalwpshell wp plugin list
+
+exec localwpshell --silent "$@"

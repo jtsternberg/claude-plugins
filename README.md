@@ -58,6 +58,11 @@ Generate AI image prompts for blog posts by analyzing content and identifying op
 
 **Install:** `/plugin install generating-blog-images@jtsternberg`
 
+#### 🐘 [localwp-shell](plugins/localwp-shell)
+Wraps WP-CLI, PHP, MySQL, and Composer commands through LocalWP's sandboxed environment. Auto-detects the correct site from the current directory.
+
+**Install:** `/plugin install localwp-shell@jtsternberg`
+
 ### Commands
 
 #### 💬 [git-commits](plugins/git-commits)

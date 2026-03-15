@@ -18,6 +18,7 @@
     { "name": "handoff", "source": "./plugins/handoff" },
     { "name": "workspace-status", "source": "./plugins/workspace-status" },
     { "name": "slides-presentation", "source": "./plugins/slides-presentation" },
-    { "name": "export-presentation", "source": "./plugins/export-presentation" }
+    { "name": "export-presentation", "source": "./plugins/export-presentation" },
+    { "name": "localwp-shell", "source": "./plugins/localwp-shell" }
   ]
 }
