@@ -1,17 +1,24 @@
 ---
 description: Address all PR comments by reviewing, fixing, committing, and replying (auto push and post)
-argument-hint: <pr-number>
+argument-hint: <pr-number-or-comment-url>
 ---
 
 # Address PR Comments
 
-Parse `$ARGUMENTS` for the **PR number** (numeric).
+## Argument Parsing
+
+Parse `$ARGUMENTS` to determine the mode:
+
+- **Specific comment URL** — matches pattern `https://github.com/{owner}/{repo}/pull/{number}#discussion_r{id}` or `#pullrequestreview-{id}`
+  - Extract: `owner`, `repo`, `pr_number`, and `comment_anchor` (the fragment after `#`)
+  - This is **single-comment mode**: only address the targeted comment/review
+- **PR number** (plain numeric) — address all unresolved comments on the PR
 
 ## Step 1: Gather PR Comments
 
 Use GraphQL to get the true resolution status of every thread. Do NOT guess resolution based on replies.
 
-1. **Get the PR details**: `gh pr view $ARGUMENTS`
+1. **Get the PR details**: `gh pr view {pr_number}` (use `-R {owner}/{repo}` if the URL points to a different repo than cwd)
 2. **Fetch all review threads with resolution status** using GraphQL:
    ```
    gh api graphql -f query='
@@ -36,10 +43,19 @@ Use GraphQL to get the true resolution status of every thread. Do NOT guess reso
          }
        }
      }
-   ' -f owner='{owner}' -f repo='{repo}' -F pr=$ARGUMENTS
+   ' -f owner='{owner}' -f repo='{repo}' -F pr={pr_number}
    ```
-3. **Also fetch general issue-style comments**: `gh api repos/{owner}/{repo}/issues/$ARGUMENTS/comments`
-4. **Filter to actionable items only**:
+3. **Also fetch general issue-style comments**: `gh api repos/{owner}/{repo}/issues/{pr_number}/comments`
+4. **Filter to actionable items**:
+
+   **If single-comment mode** (URL with `#discussion_r{id}` or `#pullrequestreview-{id}`):
+   - Find the specific thread/review matching the anchor ID from the URL
+   - For `discussion_r{id}`: match against comment `databaseId` fields in `reviewThreads` — the target thread is the one containing a comment with that `databaseId`
+   - For `pullrequestreview-{id}`: match against review `databaseId` fields in `reviews`
+   - **Only address that single thread/review** — ignore everything else
+   - Still skip if `isResolved == true` (tell the user it's already resolved)
+
+   **If all-comments mode** (PR number only):
    - **SKIP** threads where `isResolved == true` — these are already resolved in GitHub
    - **SKIP** your own comments (not replies to others)
    - **INCLUDE** all unresolved review threads — from human reviewers and bots alike (Copilot, sentry[bot], etc. can surface real issues)
@@ -75,7 +91,7 @@ For each task (one at a time, in order):
    - If fixed: draft a reply explaining what you changed
    - If low priority / deferred: draft a reply acknowledging the feedback, explaining why it's being deferred, and note any follow-up plans (e.g., "Good catch — this is lower priority so we'll track it separately")
    - If not valid: draft a respectful explanation of why no change is needed
-   - Post immediately using `gh api repos/{owner}/{repo}/pulls/$ARGUMENTS/comments/{comment_id}/replies -f body="<reply>"`
+   - Post immediately using `gh api repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies -f body="<reply>"`
 6. Mark the task complete: `bd close <task-id>`
 
 ## Step 4: Final Summary
