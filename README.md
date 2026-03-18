@@ -75,7 +75,9 @@ Commands for creating git commits from staged or unstaged files with AI-generate
 #### 🔀 [pr-workflow](plugins/pr-workflow)
 Commands for managing pull requests: addressing comments and updating descriptions.
 
-**Commands:** `/address-pr-comments`, `/update-pr-description`
+**Commands:** `/address-pr-comments`, `/address-pr-comments-human`, `/update-pr-description`
+
+**Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementing fixes or writing PR descriptions.
 
 **Install:** `/plugin install pr-workflow@jtsternberg`
 
@@ -89,9 +91,11 @@ Commands for creating and reviewing Claude Code skills, slash commands, and suba
 #### 📦 [beads-workflow](plugins/beads-workflow)
 Work through beads epics from start to completion with automatic PR creation.
 
-**Commands:** `/tackle-epic`
+**Commands:** `/tackle-epic`, `/fix-findings-beads-tasks`
 
 **Dependencies:** Requires [beads](https://github.com/steveyegge/beads)
+
+**Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementation work or fixing findings.
 
 **Install:** `/plugin install beads-workflow@jtsternberg`
 
@@ -120,6 +124,26 @@ Status line showing model name, current directory, git branch/status, and contex
   }
 }
 ```
+
+---
+
+## CODE_CONVENTIONS env var
+
+Some plugins check for a `CODE_CONVENTIONS` environment variable pointing to a project-specific conventions file (e.g., patterns learned from past PR reviews). If set, the file is loaded before implementation work begins — helping avoid known anti-patterns and respect project-specific gotchas.
+
+**Setup:** Add to your project's `.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "CODE_CONVENTIONS": "docs/review-conventions.md"
+  }
+}
+```
+
+The file is plain markdown — no special format required. If the env var is unset, plugins behave as normal.
+
+**Supported by:** [pr-workflow](#-pr-workflow), [beads-workflow](#-beads-workflow)
 
 ---
 
