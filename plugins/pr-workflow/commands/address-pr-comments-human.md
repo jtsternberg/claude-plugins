@@ -74,7 +74,12 @@ Include in the description:
 - The full comment text
 - A link to the comment (use the `html_url` field)
 
-## Step 3: Address Each Comment
+## Step 3: Load Project Conventions
+
+**Load project conventions (if available):**
+If the `CODE_CONVENTIONS` environment variable is set and points to a readable file, read it now. These are project-specific patterns and gotchas to keep in mind when implementing fixes — they prevent introducing new violations while fixing old ones.
+
+## Step 4: Address Each Comment
 
 For each task (one at a time, in order):
 
@@ -112,7 +117,7 @@ For each task (one at a time, in order):
      ```
 6. Mark the task complete: `bd close <task-id>`
 
-## Step 4: Present for Approval
+## Step 5: Present for Approval
 
 1. Run `bd dolt push`
 2. Present the user with:
@@ -121,7 +126,7 @@ For each task (one at a time, in order):
    - Full commit log: `git log --oneline origin/HEAD..HEAD`
 3. Ask the user to review the drafts and confirm before proceeding.
 
-## Step 5: After User Approves
+## Step 6: After User Approves
 
 When the user approves (or asks you to proceed):
 

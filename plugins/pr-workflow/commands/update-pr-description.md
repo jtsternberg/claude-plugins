@@ -19,6 +19,9 @@ Arguments provided: $ARGUMENTS
 - **Date/Commit Hash**: Specify either a date (e.g., "2025-01-15", "2025-01-15T10:30:00") or commit hash (e.g., "abc123f") to find commits since that point
 - **--force**: Regenerate entire PR description from scratch, analyzing all commits in the branch
 
+**Project Conventions (optional):**
+If the `CODE_CONVENTIONS` environment variable is set and points to a readable file, skim it for context about project patterns that should be reflected in the PR description (e.g., architecture decisions, naming conventions).
+
 **Process:**
 
 1. **Get current PR info and save current description**:

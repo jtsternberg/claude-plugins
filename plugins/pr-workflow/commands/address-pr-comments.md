@@ -72,7 +72,12 @@ Include in the description:
 - The full comment text
 - A link to the comment (use the `html_url` field)
 
-## Step 3: Address Each Comment
+## Step 3: Load Project Conventions
+
+**Load project conventions (if available):**
+If the `CODE_CONVENTIONS` environment variable is set and points to a readable file, read it now. These are project-specific patterns and gotchas to keep in mind when implementing fixes — they prevent introducing new violations while fixing old ones.
+
+## Step 4: Address Each Comment
 
 For each task (one at a time, in order):
 
@@ -94,7 +99,7 @@ For each task (one at a time, in order):
    - Post immediately using `gh api repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies -f body="<reply>"`
 6. Mark the task complete: `bd close <task-id>`
 
-## Step 4: Final Summary
+## Step 5: Final Summary
 
 1. Run `bd dolt push`
 2. Summarize what was done:
