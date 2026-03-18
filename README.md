@@ -63,6 +63,21 @@ Wraps WP-CLI, PHP, MySQL, and Composer commands through LocalWP's sandboxed envi
 
 **Install:** `/plugin install localwp-shell@jtsternberg`
 
+#### 🎬 [slides-presentation](plugins/slides-presentation)
+Creates self-contained HTML slide presentations from talk prompts, outlines, or content descriptions. Supports dark/light themes, SVG diagrams, and AI-generated illustrations.
+
+**Install:** `/plugin install slides-presentation@jtsternberg`
+
+#### 📤 [export-presentation](plugins/export-presentation)
+Exports HTML slide presentations to PDF or PNG screenshots using browser automation. Companion to [slides-presentation](#-slides-presentation).
+
+**Install:** `/plugin install export-presentation@jtsternberg`
+
+#### 🧠 [thinking-tools](plugins/thinking-tools)
+Metacognitive reasoning frameworks for careful decision-making. Includes Chesterton's Fence (investigate before removing).
+
+**Install:** `/plugin install thinking-tools@jtsternberg`
+
 ### Commands
 
 #### 💬 [git-commits](plugins/git-commits)
