@@ -12,6 +12,9 @@ $ARGUMENTS
 
 ## Workflow
 
+0. **Load project conventions (if available):**
+   If the `CODE_CONVENTIONS` environment variable is set and points to a readable file, read it before starting fixes. Each fix should respect these conventions to avoid introducing new violations while resolving existing ones. If unset, skip this step.
+
 1. **Identify findings** from the conversation. If ambiguous, confirm with user first.
 
 2. **Create one beads task per finding** (`bd create`), ordered by severity.

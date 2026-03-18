@@ -40,6 +40,17 @@ Once you have the epic:
 2. Create the worktree: `git worktree add ../<repo-name>-<short-description> -b <branch-name>`
 3. Change into the worktree directory and continue all work there
 
+## Step 3.5: Load Project Conventions (if available)
+
+If the `CODE_CONVENTIONS` environment variable is set and points to a readable file, read it now — before starting any implementation work. These are project-specific patterns and gotchas learned from past reviews that you can avoid upfront.
+
+Apply these conventions throughout the epic during:
+- **Code implementation** — avoid known anti-patterns
+- **Commit message generation** — follow project conventions
+- **PR description generation** — reflect architectural context
+
+If `CODE_CONVENTIONS` is unset or the file doesn't exist, skip this step and proceed as normal.
+
 ## Step 4: Work on Tasks
 
 For each child task of the epic (in priority order):
