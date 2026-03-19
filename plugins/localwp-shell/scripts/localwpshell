@@ -23,7 +23,9 @@ fi
 
 # Message function that respects SILENT_LOCAL_SHELL
 msg() {
-	[[ -z "${SILENT_LOCAL_SHELL:-}" ]] && echo "$@"
+	if [[ -z "${SILENT_LOCAL_SHELL:-}" ]]; then
+		echo "$@"
+	fi
 }
 
 # Get the current project path (should be the LocalWP site root, not the WordPress public directory)
