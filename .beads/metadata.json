@@ -1,9 +1,9 @@
 {
   "database": "dolt",
-  "jsonl_export": "issues.jsonl",
   "backend": "dolt",
   "dolt_mode": "server",
   "dolt_server_host": "127.0.0.1",
   "dolt_server_port": 3308,
-  "dolt_database": "beads_claude-plugins"
+  "dolt_database": "beads_claude-plugins",
+  "project_id": "1583d738-01f9-4a12-b7cb-2b5e84075f00"
 }

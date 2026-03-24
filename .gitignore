@@ -22,3 +22,8 @@ node_modules/
 HANDOFF*.md
 .claude/settings.local.json
 .beads/backup
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
