@@ -16,6 +16,13 @@ Look for the skill at the provided path, or in `.claude/skills/$ARGUMENTS/` or `
 * https://platform.claude.com/docs/en/agents-and-tools/agent-skills/quickstart
 * https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices
 
+and recent tweet (https://x.com/lydiahallie/status/2034337963820327017?s=20) says:
+```
+if your skill depends on dynamic content, you can embed !`command` in your SKILL.md to inject shell output directly into the prompt
+
+Claude Code runs it when the skill is invoked and swaps the placeholder inline, the model only sees the result!
+```
+
 Extract key recommendations for: progressive disclosure, utility scripts, validation loops, metadata, content organization, and new patterns.
 
 ## Step 2: Read the Skill
