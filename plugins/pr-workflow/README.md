@@ -103,6 +103,32 @@ Poll a GitHub PR until a condition is met, then execute a follow-up action.
 **Prerequisites:**
 - GitHub CLI (`gh`) must be installed and authenticated
 
+### `/qa-walkthrough`
+
+Guided manual QA walkthrough for a PR — extracts a test plan, builds beads tasks, and walks you through each test one at a time.
+
+```
+/qa-walkthrough [<pr-number-or-url>]
+```
+
+**Workflow:**
+1. Gathers PR context (description, diff, HANDOFF.md if present)
+2. Extracts testing steps from the PR description (or drafts a plan from the code changes)
+3. Evaluates test coverage and suggests additional cases
+4. Builds a beads epic with dependent tasks reflecting the testing order
+5. Walks through each test interactively — one at a time, waiting for pass/fail
+6. On failure: creates a bug issue with `discovered-from` linking and prepares a handoff prompt for another agent
+7. Cleans up the QA epic and tasks after all tests pass
+
+**Bundled scripts:**
+- `extract-test-plan.sh` — deterministic test section extraction from PR description
+- `build-qa-epic.sh` — creates epic + tasks + deps from a JSON plan in one shot
+- `qa-cleanup.sh` — safe cleanup of QA artifacts with `--dry-run` support
+
+**Prerequisites:**
+- GitHub CLI (`gh`) must be installed and authenticated
+- [beads](https://github.com/jtsternberg/beads) (`bd`) must be installed
+
 ## Example Usage
 
 ```bash
@@ -117,6 +143,12 @@ Poll a GitHub PR until a condition is met, then execute a follow-up action.
 
 # Wait for a draft PR to be marked ready, then review
 /watch-pr 2165 for ready
+
+# QA walkthrough for the current branch's PR
+/qa-walkthrough
+
+# QA walkthrough for a specific PR
+/qa-walkthrough 519
 ```
 
 ## Additional Documentation
@@ -125,3 +157,4 @@ Poll a GitHub PR until a condition is met, then execute a follow-up action.
 - [commands/address-pr-comments-human.md](commands/address-pr-comments-human.md) - Human-in-the-loop PR comment resolution
 - [commands/update-pr-description.md](commands/update-pr-description.md) - Update PR description from changes
 - [skills/watch-pr/SKILL.md](skills/watch-pr/SKILL.md) - Watch PR for conditions (Copilot, ready, review)
+- [skills/qa-walkthrough/SKILL.md](skills/qa-walkthrough/SKILL.md) - Guided manual QA walkthrough
