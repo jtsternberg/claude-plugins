@@ -55,12 +55,13 @@ Not every section needs an image.
 
 ### Step 4: Generate Prompts
 
-Each prompt must include these five elements:
+Each prompt must include these six elements:
 1. **Subject** - Main focus
 2. **Style** - Illustration, photograph, diagram, etc.
 3. **Mood** - Lighting, color palette, emotional tone
 4. **Composition** - Framing, perspective, negative space
 5. **Details** - Specific elements from the blog content
+6. **Alt text** - Descriptive alt text for the generated image (for accessibility and SEO)
 
 For concrete examples, see [references/prompt-examples.md](references/prompt-examples.md).
 
@@ -72,6 +73,7 @@ Before presenting, verify each prompt:
 - [ ] Aspect ratio specified (16:9 for headers, 1:1 or 4:3 for inline)
 - [ ] Explicitly excludes common AI clichés (lightbulbs for ideas, handshakes for business, etc.)
 - [ ] No text rendering requested (AI struggles with text)
+- [ ] Alt text is descriptive and contextual (not just restating the prompt)
 
 Revise any prompt that fails these checks.
 
@@ -98,6 +100,7 @@ Example: If the blog post is `draft-the-performance-treadmill.md`, create `draft
 **Placement**: [Location in post]
 **Purpose**: [What it accomplishes]
 **Prompt**: [Full prompt text]
+**Alt text**: [Descriptive alt text for accessibility]
 **Style notes**: [Aspect ratio, what to avoid]
 
 ---
