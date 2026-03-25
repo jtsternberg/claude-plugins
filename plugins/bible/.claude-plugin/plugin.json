@@ -1,0 +1,9 @@
+{
+  "name": "bible",
+  "description": "Look up Bible verses and passages using the NLT API. Supports passage retrieval, reference parsing, and keyword search across NLT, KJV, and other translations.",
+  "version": "1.1.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}
