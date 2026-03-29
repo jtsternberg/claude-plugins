@@ -28,19 +28,19 @@ Hotline supports three ways to communicate with another workspace. Just tell you
 
 > "Ask my blog workspace what the site tagline is."
 
-A quick question that gets a quick answer. One round trip, in and out, like a phone call to your mom that somehow *doesn't* turn into an hour-long update about the neighbors.
+A quick question that gets a quick answer. One round trip, in and out.
 
 ### Work Order
 
 > "Tell the marketing workspace to draft an about page based on the company info in their repo."
 
-Delegate a task to another workspace and let it work autonomously. You'll get a report when it's done. Think less "collaboration" and more "that one coworker who actually follows through on Slack messages."
+Delegate a task to another workspace and let it work autonomously. You'll get a report when it's done.
 
 ### Conference Call
 
 > "I need you to work with the design workspace on the new landing page — coordinate the component structure and styles."
 
-Back-and-forth collaboration between workspaces. Multiple exchanges, iterative problem-solving. If headless mode starts feeling cramped after a few rounds, Hotline auto-escalates to CMUX (if available) so the conversation can breathe.
+Back-and-forth collaboration between workspaces. Multiple exchanges, iterative refinement. If the conversation runs long, Hotline auto-escalates to a CMUX window (if available) for better visibility.
 
 ---
 
@@ -50,7 +50,7 @@ When you say "call the blog workspace," Hotline needs to figure out where that w
 
 ### 1. `dirmap` (preferred)
 
-If you have the [`dirmap`](https://github.com/jtsternberg/dirmap) CLI tool in your PATH, Hotline uses it for project lookups. Dirmap maintains a registry of your project directories with IDs.
+If you have the [`dirmap`](https://github.com/jtsternberg/Dot-Files/blob/master/bin/dirmap) CLI tool in your PATH, Hotline uses it for project lookups. Dirmap maintains a registry of your project directories with IDs.
 
 ### 2. Bundled Fallback
 
@@ -109,13 +109,13 @@ Set it higher if your workspaces don't change much, lower if you're in rapid dev
 
 ## How It Works
 
-A brief peek under the hood for the curious (and the PRs-welcome crowd):
+A brief peek under the hood:
 
 ### The Three Skills
 
-- **`dial`** — The caller side. Resolves the target workspace, picks a transport, manages the session, and relays responses. The switchboard operator.
-- **`ringing`** — The receiver-side handshake. Primes the remote agent with protocol context so it knows it's on a call, not just getting a weird prompt out of nowhere.
-- **`pickup`** — Workspace identity introspection. Examines the local project (CLAUDE.md, package files, git history) and caches a concise identity JSON for resolution purposes.
+- **`hotline:dial`** — The caller side. Resolves the target workspace, picks a transport, manages the session, and relays responses.
+- **`hotline:ringing`** — The receiver-side handshake. Primes the remote agent with protocol context on first contact.
+- **`hotline:pickup`** — Workspace identity introspection. Examines the local project (CLAUDE.md, package files, git history) and caches a concise identity for resolution.
 
 ### Transport
 
@@ -130,6 +130,7 @@ Agents identify themselves using the [session fingerprint method](#session-id-di
 All hotline state lives in `~/.agents-hotline/`:
 - `identities/` — Cached workspace identity JSON files
 - `identities/*.dial_history.jsonl` — Append-only call logs per workspace
+- `sessions/` — Outgoing session maps (keyed by caller session ID)
 
 ---
 
@@ -141,7 +142,7 @@ Per-mode transport selection — using the best tool for each call type rather t
 
 ### Non-Claude Agent Support
 
-You may have noticed the state directory is `~/.agents-hotline/`, not `~/.claude-hotline/`. That naming was deliberate. The long-term vision is cross-agent communication — not just Claude-to-Claude, but any agent that speaks the protocol. The hotline is open for business; Claude just happens to be the first tenant.
+You may have noticed the state directory is `~/.agents-hotline/`, not `~/.claude-hotline/`. That naming was deliberate. The long-term vision is cross-agent communication — not just Claude-to-Claude, but any agent that speaks the protocol. Claude just happens to be the first tenant.
 
 ---
 
