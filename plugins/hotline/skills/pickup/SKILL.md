@@ -39,12 +39,13 @@ If the caller passed `--fresh`, skip this check and always proceed to Step 2.
 
 ### 2. Introspect the Workspace
 
-Gather information from these sources (skip any that don't exist):
+Run the introspection script to gather project metadata:
 
-1. **CLAUDE.md / AGENTS.md** — Project description, purpose, key directories
-2. **Package files** — `package.json`, `Gemfile`, `composer.json`, `Cargo.toml`, `go.mod`, `pyproject.toml` — for tech stack and project name
-3. **README.md** — Project overview (first ~50 lines is enough)
-4. **Recent git log** — `git log --oneline -10` — what kind of work happens here
+```bash
+bash "$HOTLINE_PICKUP_SCRIPTS/gather-workspace-info.sh"
+```
+
+This collects CLAUDE.md, package files, README excerpt, recent git log, and tech stack signals, returning structured JSON. Use this data to synthesize the identity in Step 3.
 
 ### 3. Synthesize Identity
 
