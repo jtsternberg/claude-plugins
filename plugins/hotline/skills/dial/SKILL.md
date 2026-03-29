@@ -25,17 +25,21 @@ This sets:
 Before you can call anyone else, you need to know your own session ID. Run:
 
 ```bash
-bash "$HOTLINE_SCRIPTS/session-fingerprint.sh"
+bash "$HOTLINE_SCRIPTS/session-init.sh"
 ```
 
-- **Exit 0** (stdout = session ID): Store as `MY_SESSION_ID`. You're good to go.
-- **Exit 1** (stderr = fingerprint): Your session ID isn't cached yet. Run discovery in a **separate tool call** (the transcript file must be written first):
+Parse the JSON output:
+
+- `{"status": "cached", "session_id": "..."}` — Store as `MY_SESSION_ID`. Done.
+- `{"status": "planted", "fingerprint": "..."}` — The transcript needs to be written first. In a **separate tool call**, run:
 
 ```bash
-bash "$HOTLINE_SCRIPTS/session-discover.sh" <fingerprint>
+bash "$HOTLINE_SCRIPTS/session-init.sh" discover "<fingerprint>"
 ```
 
-This returns the session ID on stdout. Store it as `MY_SESSION_ID`.
+This returns `{"status": "discovered", "session_id": "..."}`. Store as `MY_SESSION_ID`.
+
+- `{"status": "error", "message": "..."}` — Something went wrong. Report the error.
 
 ## Decision Tree
 
