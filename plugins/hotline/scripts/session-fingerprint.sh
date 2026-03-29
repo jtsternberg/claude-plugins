@@ -16,6 +16,15 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: session-fingerprint.sh"
+  echo ""
+  echo "Exit 0: cache hit — session ID written to stdout."
+  echo "Exit 1: cache miss — fingerprint string written to stderr (SESSION_FINGERPRINT_<uuid>)."
+  echo "Exit 2: error — no claude process found in process ancestry."
+  exit 0
+fi
+
 # Find the claude process in our ancestry
 CLAUDE_PID=""
 pid=$$

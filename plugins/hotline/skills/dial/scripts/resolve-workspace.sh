@@ -16,6 +16,14 @@
 # =============================================================================
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: resolve-workspace.sh <reference> [--caller-session <id>]"
+  echo ""
+  echo "Resolves a fuzzy workspace reference to a canonical path."
+  echo "Exit 0 + stdout = resolved path. Exit 1 + stderr = candidates or error."
+  exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_SCRIPTS="$(cd "$SCRIPT_DIR/../../.." && pwd)/scripts"
 

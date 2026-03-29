@@ -13,6 +13,16 @@
 # =============================================================================
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: identity-cache.sh read [--cwd /path]"
+  echo "       identity-cache.sh write [--cwd /path]"
+  echo "       identity-cache.sh is-stale [--cwd /path]"
+  echo "       identity-cache.sh path [--cwd /path]"
+  echo ""
+  echo "Read/write workspace identity JSON from ~/.agents-hotline/identities/<hash>.json"
+  exit 0
+fi
+
 IDENTITIES_DIR="$HOME/.agents-hotline/identities"
 TTL_HOURS="${HOTLINE_IDENTITY_TTL_HOURS:-24}"
 TTL_SECONDS=$((TTL_HOURS * 3600))

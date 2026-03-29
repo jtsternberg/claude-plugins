@@ -13,6 +13,16 @@
 # =============================================================================
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: session-cache.sh get <target-path> --caller-session <id>"
+  echo "       session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode>"
+  echo "       session-cache.sh update <target-path> --caller-session <id>"
+  echo "       session-cache.sh list --caller-session <id>"
+  echo ""
+  echo "Tracks Agent A's outgoing connections in ~/.agents-hotline/sessions/<caller-session>.json"
+  exit 0
+fi
+
 SESSIONS_DIR="$HOME/.agents-hotline/sessions"
 mkdir -p "$SESSIONS_DIR"
 

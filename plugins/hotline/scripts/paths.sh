@@ -12,6 +12,11 @@
 #   bash plugins/hotline/scripts/paths.sh          # prints all paths
 # =============================================================================
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: source paths.sh (sets HOTLINE_ROOT, HOTLINE_SCRIPTS, etc.)"
+  exit 0
+fi
+
 # Resolve plugin root regardless of where we're called from
 HOTLINE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

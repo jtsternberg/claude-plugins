@@ -9,6 +9,14 @@
 # =============================================================================
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: cmux-call.sh --cwd <path> [--resume <session-id>]"
+  echo ""
+  echo "Opens a workspace in CMUX and launches Claude."
+  echo "Outputs: {\"workspace_id\": \"...\", \"cwd\": \"...\", \"session_id\": \"...\"}"
+  exit 0
+fi
+
 CWD=""
 RESUME_ID=""
 

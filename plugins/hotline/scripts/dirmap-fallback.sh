@@ -11,6 +11,14 @@
 # =============================================================================
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: dirmap-fallback.sh get <id>    # Print path for project ID"
+  echo "       dirmap-fallback.sh list        # Print all entries as JSON"
+  echo ""
+  echo "Minimal dirmap fallback — reads from ~/.dirmap.json."
+  exit 0
+fi
+
 DIRMAP_FILE="$HOME/.dirmap.json"
 
 if [[ ! -f "$DIRMAP_FILE" ]]; then

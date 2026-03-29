@@ -11,6 +11,14 @@
 # =============================================================================
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: dial-history.sh append --cwd <path> --session <id> --caller <path> --mode <mode>"
+  echo "       dial-history.sh read [--cwd <path>]"
+  echo ""
+  echo "Append-only log of incoming calls per workspace (capped at 100 entries)."
+  exit 0
+fi
+
 IDENTITIES_DIR="$HOME/.agents-hotline/identities"
 MAX_ENTRIES=100
 

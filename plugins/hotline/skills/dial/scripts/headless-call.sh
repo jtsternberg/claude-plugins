@@ -13,6 +13,14 @@
 # =============================================================================
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>]"
+  echo ""
+  echo "Sends a prompt to a workspace via claude -p."
+  echo "Outputs JSON: {\"session_id\": \"...\", \"response\": \"...\"}"
+  exit 0
+fi
+
 CWD=""
 PROMPT=""
 RESUME_ID=""

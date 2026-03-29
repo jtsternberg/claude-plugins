@@ -18,6 +18,14 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: session-discover.sh <fingerprint>"
+  echo ""
+  echo "Finds the Claude Code session ID by grepping transcripts for a planted fingerprint."
+  echo "On success: writes session ID to stdout, exit 0. On failure: exit 1."
+  exit 0
+fi
+
 FINGERPRINT="${1:-}"
 
 if [[ -z "$FINGERPRINT" ]]; then
