@@ -1,0 +1,9 @@
+{
+	"name": "hotline",
+	"description": "Cross-workspace Claude Code communication. Dial another workspace to ask questions, delegate work, or collaborate in real-time.",
+	"version": "0.1.0",
+	"author": {
+		"name": "JT Sternberg",
+		"url": "https://github.com/jtsternberg"
+	}
+}
