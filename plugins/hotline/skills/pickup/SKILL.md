@@ -1,6 +1,6 @@
 ---
-name: hotline:pickup
-description: "Introspect the current workspace and cache a concise identity. Used by hotline:dial for workspace resolution. Run with --fresh to force re-introspection."
+name: hotline-pickup
+description: "Introspect the current workspace and cache a concise identity. Used by hotline-dial for workspace resolution. Run with --fresh to force re-introspection."
 ---
 
 # Hotline: Pickup — Workspace Identity
@@ -9,7 +9,7 @@ Generate a concise identity for this workspace so other agents can find and unde
 
 ## When This Runs
 
-- Automatically during `hotline:dial` workspace resolution (if identity is stale or missing)
+- Automatically during `hotline-dial` workspace resolution (if identity is stale or missing)
 - Manually when a user or agent wants to refresh the workspace identity
 
 ## Script Paths
@@ -50,14 +50,25 @@ From the gathered information, create:
 
 ### 4. Write Cache
 
-Write the identity JSON to the cache:
+Build the identity JSON with `jq` (safe for descriptions containing quotes or special characters):
 
 ```bash
-echo '{"identity":{"name":"<NAME>","description":"<DESCRIPTION>","tags":["tag1","tag2"],"generated":'$(date +%s)'}}' \
+jq -n \
+  --arg name "<NAME>" \
+  --arg desc "<DESCRIPTION>" \
+  --argjson tags '["tag1","tag2","tag3"]' \
+  --argjson gen "$(date +%s)" \
+  '{identity: {name: $name, description: $desc, tags: $tags, generated: $gen}}' \
   | bash "PICKUP_SCRIPTS/identity-cache.sh" write
 ```
 
-Replace `<NAME>`, `<DESCRIPTION>`, and tags with the synthesized values. Ensure the JSON is valid.
+Then validate the write succeeded:
+
+```bash
+bash "PICKUP_SCRIPTS/identity-cache.sh" read | jq -e '.identity.name and .identity.description' > /dev/null
+```
+
+If validation fails, rewrite with corrected values.
 
 ### 5. Return the Identity
 

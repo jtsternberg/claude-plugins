@@ -1,5 +1,5 @@
 ---
-name: hotline:dial
+name: hotline-dial
 description: "Initiate cross-workspace communication with another Claude Code instance. Supports quick calls (Q&A), work orders (delegation), and conference calls (collaboration). Auto-selects transport between headless CLI and CMUX."
 ---
 
@@ -61,7 +61,7 @@ If exit 0 (stale): run a quick headless call to populate it:
 
 ```bash
 bash "DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
-  --prompt "/hotline:pickup"
+  --prompt "/hotline-pickup"
 ```
 
 Then retry resolution from the top.
@@ -117,7 +117,7 @@ Place the call:
 
 ```bash
 bash "DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
-  --prompt "/hotline:ringing [MODE: quick_call|work_order|conference_call] $YOUR_PROMPT"
+  --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT"
 ```
 
 Parse the JSON response. Extract `session_id` and `response`.

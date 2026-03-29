@@ -16,7 +16,7 @@ Hotline lets one Claude Code workspace call another — ask a question, delegate
 /plugin install hotline@jtsternberg
 ```
 
-This registers the three Hotline skills (`hotline:dial`, `hotline:ringing`, `hotline:pickup`) as slash commands in Claude Code.
+This registers the three Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`) as slash commands in Claude Code.
 
 ---
 
@@ -40,7 +40,7 @@ Delegate a task to another workspace and let it work autonomously. You'll get a 
 
 > "I need you to work with the design workspace on the new landing page — coordinate the component structure and styles."
 
-Back-and-forth collaboration between workspaces. Multiple exchanges, iterative refinement. If the conversation runs long, Hotline auto-escalates to a CMUX window (if available) for better visibility.
+Back-and-forth collaboration between workspaces. Multiple exchanges, iterative refinement. If the conversation runs long, Hotline auto-escalates to a `cmux` window (if available) for better visibility.
 
 ---
 
@@ -50,42 +50,35 @@ When you say "call the blog workspace," Hotline needs to figure out where that w
 
 ### 1. `dirmap` (preferred)
 
-If you have the [`dirmap`](https://github.com/jtsternberg/Dot-Files/blob/master/bin/dirmap) CLI tool in your PATH, Hotline uses it for project lookups. Dirmap maintains a registry of your project directories with IDs.
+If you have the [`dirmap`](https://github.com/jtsternberg/Dot-Files/blob/master/bin/dirmap) CLI tool in your PATH, Hotline uses it directly. Your existing `~/.dirmap.json` entries just work — say "call the blog workspace" and Hotline resolves it through dirmap. (That `dirmap` is part of a larger dotfiles setup, but the concept is dead simple — point your Claude at that file and say "build me a standalone version with `add/list/remove` in TypeScript/Go/Cobol/cuneiform/etc." and you'll have one in minutes.)
 
-### 2. Bundled Fallback
+### 2. Bundled Fallback (no dirmap installed)
 
-No `dirmap` binary? No problem. Hotline includes `dirmap-fallback.sh`, a minimal reader that supports `get <id>` and `list` against the same `~/.dirmap.json` format.
-
-### 3. Setting Up `~/.dirmap.json`
-
-Create a JSON file mapping project IDs to paths:
+Hotline includes `dirmap-fallback.sh`, a minimal reader that supports `get <id>` and `list` against `~/.dirmap.json`. But you'll have to create/maintain a `~/.dirmap.json` file manually:
 
 ```json
 {
   "blog": "/Users/you/Code/my-blog",
   "marketing": "/Users/you/Code/marketing-site",
-  "api": "/Users/you/Code/backend-api",
-  "design-system": "/Users/you/Code/design-system"
+  "api": "/Users/you/Code/backend-api"
 }
 ```
 
-IDs are whatever makes sense to you — project names, abbreviations, nicknames. When you say "call the blog workspace," Hotline matches against these.
+### 3. Fuzzy Matching via Cached Identities
 
-### 4. Fuzzy Matching via Cached Identities
-
-Hotline also caches workspace identities (via the `pickup` skill) — name, description, and tags for each project. So even if you say "call the React frontend" and there's no dirmap entry called "react-frontend," resolution can match against cached identity metadata. Fuzzy, forgiving, and surprisingly good at understanding what you mean.
+Hotline also caches workspace identities (via the `hotline-pickup` skill) — name, description, and tags for each project. Even if you say "call the React frontend" and there's no dirmap entry called "react-frontend," resolution can match against cached identity metadata.
 
 ---
 
-## CMUX Integration
+## `cmux` Integration
 
-[CMUX](https://github.com/jtsternberg/cmux) is an optional enhancement for conference calls. When available, Hotline uses it for deep collaboration sessions where headless CLI would be limiting.
+[cmux](https://cmux.com/) is an optional enhancement for conference calls. When available, Hotline uses it for deep collaboration sessions where headless CLI would be limiting.
 
-- **Auto-detected**: Hotline checks for CMUX availability automatically — no config needed.
-- **Auto-escalation**: Conference calls start headless. If the back-and-forth goes past ~3 exchanges and CMUX is available, Hotline upgrades the connection to a full CMUX workspace session.
-- **Manual override**: You can always ask for a CMUX session explicitly.
+- **Auto-detected**: Hotline checks for `cmux` availability automatically — no config needed.
+- **Auto-escalation**: Conference calls start headless. If the back-and-forth goes past ~3 exchanges and `cmux` is available, Hotline upgrades the connection to a full `cmux` workspace session.
+- **Manual override**: You can always ask for a `cmux` session explicitly.
 
-CMUX gives the remote agent a proper terminal, which is handy when the conversation involves running commands, reviewing output, or doing anything more complex than a Q&A.
+`cmux` gives the remote agent a proper terminal, which is handy when the conversation involves running commands, reviewing output, or doing anything more complex than a Q&A.
 
 ---
 
@@ -113,9 +106,9 @@ A brief peek under the hood:
 
 ### The Three Skills
 
-- **`hotline:dial`** — The caller side. Resolves the target workspace, picks a transport, manages the session, and relays responses.
-- **`hotline:ringing`** — The receiver-side handshake. Primes the remote agent with protocol context on first contact.
-- **`hotline:pickup`** — Workspace identity introspection. Examines the local project (CLAUDE.md, package files, git history) and caches a concise identity for resolution.
+- **`hotline-dial`** — The caller side. Resolves the target workspace, picks a transport, manages the session, and relays responses.
+- **`hotline-ringing`** — The receiver-side handshake. Primes the remote agent with protocol context on first contact.
+- **`hotline-pickup`** — Workspace identity introspection. Examines the local project (CLAUDE.md, package files, git history) and caches a concise identity for resolution.
 
 ### Transport
 
@@ -136,9 +129,9 @@ All hotline state lives in `~/.agents-hotline/`:
 
 ## Roadmap
 
-### Hybrid Protocol (Approach 3)
+### Hybrid Protocol
 
-Per-mode transport selection — using the best tool for each call type rather than defaulting to headless-with-optional-CMUX-escalation. Think: different transport backends optimized for quick calls vs. deep collaboration.
+Per-mode transport selection — using the best tool for each call type rather than defaulting to headless-with-optional-`cmux`-escalation. Think: different transport backends optimized for quick calls vs. deep collaboration.
 
 ### Non-Claude Agent Support
 

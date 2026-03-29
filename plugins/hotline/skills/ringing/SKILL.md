@@ -1,11 +1,11 @@
 ---
-name: hotline:ringing
-description: "Receiver-side handshake for incoming hotline calls. Primes the agent with communication protocol context. Invoked as /hotline:ringing on first contact from another workspace."
+name: hotline-ringing
+description: "Receiver-side handshake for incoming hotline calls. Primes the agent with communication protocol context. Invoked as /hotline-ringing on first contact from another workspace."
 ---
 
 # Hotline: Ringing — Incoming Call Protocol
 
-You are receiving a **hotline call** from another Claude Code agent running in a different workspace. This is a cross-workspace communication initiated by the `hotline:dial` skill.
+You are receiving a **hotline call** from another Claude Code agent running in a different workspace. This is a cross-workspace communication initiated by the `hotline-dial` skill.
 
 ## What's Happening
 
@@ -15,11 +15,22 @@ Another agent (the "caller") needs your help. They've connected to your workspac
 
 - `PLUGIN_SCRIPTS` = the `scripts/` directory at the root of this plugin (sibling to `skills/`)
 
+## Incoming Prompt Format
+
+The caller's prompt follows this structure:
+
+```
+/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: <workspace-path>] [SESSION: <session-id>]
+<the actual request>
+```
+
+Parse the `MODE`, `CALLER`, and `SESSION` from the prompt metadata. Use them for logging and to determine your response style.
+
 ## Communication Protocol
 
 ### Call Modes
 
-The caller's prompt will indicate the mode. Respond accordingly:
+Respond based on the MODE from the incoming prompt:
 
 **Quick Call** — The caller needs a quick answer. Read their question, provide a concise response, and you're done. Think phone call, not meeting.
 
@@ -34,11 +45,32 @@ The caller's prompt will indicate the mode. Respond accordingly:
 - If you need clarification, ask in your response. The caller will relay to the user if needed.
 - If the task is outside your workspace's scope, say so — the caller may have dialed the wrong workspace.
 
-### Completion Signals
+### Response Format
 
-- **Quick call**: Your first response completes the call.
-- **Work order**: End your response with "WORK COMPLETE" when the delegated task is done, or "WORK IN PROGRESS" if you need another exchange.
-- **Conference call**: The caller manages the flow. Just respond to each exchange naturally.
+Structure your response based on mode:
+
+**Quick call:**
+```
+[Your answer — concise and direct]
+```
+
+**Work order:**
+```
+[What you did and the result]
+
+STATUS: WORK_COMPLETE
+```
+Or if you need another exchange:
+```
+[Progress update and what's remaining]
+
+STATUS: WORK_IN_PROGRESS
+```
+
+**Conference call:**
+```
+[Your response to this exchange — no status signal needed]
+```
 
 ## Logging
 
@@ -46,12 +78,12 @@ After handling the call, log it to the dial history:
 
 ```bash
 bash "PLUGIN_SCRIPTS/dial-history.sh" append \
-  --session "<session-id-from-caller>" \
-  --caller "<caller-workspace-path>" \
-  --mode "<quick_call|work_order|conference_call>"
+  --session "<SESSION from prompt>" \
+  --caller "<CALLER from prompt>" \
+  --mode "<MODE from prompt>"
 ```
 
-Extract the caller info from the prompt metadata. If not available, skip logging — it's not critical.
+Use the values parsed from the incoming prompt metadata. If parsing fails, skip logging — it's not critical.
 
 ## Now Handle the Call
 
