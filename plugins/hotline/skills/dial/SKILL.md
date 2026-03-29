@@ -208,3 +208,7 @@ When they return, resume the session yourself to pick up any final state:
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --prompt "Summarize what happened since the caller took over." --resume "$REMOTE_SESSION_ID"
 ```
+
+## Error Recovery
+
+If anything goes wrong at any step, consult `references/error-recovery.md` for specific failure modes and recovery steps.
