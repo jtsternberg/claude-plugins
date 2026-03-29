@@ -1,5 +1,5 @@
 ---
-name: ringing
+name: hotline:ringing
 description: "Receiver-side handshake for incoming hotline calls. Primes the agent with communication protocol context. Invoked as /hotline:ringing on first contact from another workspace."
 ---
 

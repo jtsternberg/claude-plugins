@@ -6,23 +6,17 @@ Your agents finally have a phone. And unlike your last phone upgrade, this one a
 
 Hotline lets one Claude Code workspace call another — ask a question, delegate a task, or collaborate in real-time. No copy-pasting between terminals. No "hey can you check the other project and tell me..." followed by you manually doing the checking. Just agent-to-agent communication, like nature intended.
 
----
-
-## Bonus: Session ID Discovery
-
-Hotline includes a standalone session ID discovery utility — a running Claude agent can discover its own session ID, something Claude Code doesn't expose natively. The community has been [asking for this](https://github.com/anthropics/claude-code/issues/25642) for a while.
-
-**[Full docs and usage: SESSION-ID-DISCOVERY.md](SESSION-ID-DISCOVERY.md)**
-
----
-
 ## Installation
 
 ```bash
-claude plugins add /path/to/claude-plugins/plugins/hotline
+# Add the marketplace (if not already added)
+/plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
+/plugin install hotline@jtsternberg
 ```
 
-This registers the three Hotline skills (`dial`, `ringing`, `pickup`) as slash commands in Claude Code.
+This registers the three Hotline skills (`hotline:dial`, `hotline:ringing`, `hotline:pickup`) as slash commands in Claude Code.
 
 ---
 
@@ -151,6 +145,10 @@ You may have noticed the state directory is `~/.agents-hotline/`, not `~/.claude
 
 ---
 
-## Credits
+## Bonus: Session ID Discovery
 
-Built by [JT Sternberg](https://github.com/jtsternberg) because alt-tabbing between terminals and saying "now go check the other project" was getting old. Also because the idea of agents calling each other on a literal hotline is objectively hilarious.
+Hotline includes a standalone session ID discovery utility — a running Claude agent can discover its own session ID, something Claude Code doesn't expose natively. The community has been [asking for this](https://github.com/anthropics/claude-code/issues/25642) for a while.
+
+**[Full docs and usage: SESSION-ID-DISCOVERY.md](SESSION-ID-DISCOVERY.md)**
+
+---

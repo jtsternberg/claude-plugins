@@ -1,5 +1,5 @@
 ---
-name: dial
+name: hotline:dial
 description: "Initiate cross-workspace communication with another Claude Code instance. Supports quick calls (Q&A), work orders (delegation), and conference calls (collaboration). Auto-selects transport between headless CLI and CMUX."
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: pickup
+name: hotline:pickup
 description: "Introspect the current workspace and cache a concise identity. Used by hotline:dial for workspace resolution. Run with --fresh to force re-introspection."
 ---
 
