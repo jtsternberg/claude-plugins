@@ -9,23 +9,30 @@ Place a call to another Claude Code workspace. You're the switchboard operator h
 
 ## Script Paths
 
-- `PLUGIN_SCRIPTS` = the `scripts/` directory at the root of this plugin (sibling to `skills/`)
-- `DIAL_SCRIPTS` = `skills/dial/scripts/` within this plugin
-- `PICKUP_SCRIPTS` = `skills/pickup/scripts/` within this plugin
+Before running any scripts, resolve the plugin paths. Run this once at the start:
+
+```bash
+eval "$(bash scripts/paths.sh)"
+```
+
+This sets:
+- `HOTLINE_SCRIPTS` — shared scripts (session fingerprint, dirmap fallback, dial history)
+- `HOTLINE_DIAL_SCRIPTS` — dial-specific scripts (resolve, cache, transport)
+- `HOTLINE_PICKUP_SCRIPTS` — pickup scripts (identity cache)
 
 ## Prerequisites: Know Thyself
 
 Before you can call anyone else, you need to know your own session ID. Run:
 
 ```bash
-bash "PLUGIN_SCRIPTS/session-fingerprint.sh"
+bash "$HOTLINE_SCRIPTS/session-fingerprint.sh"
 ```
 
 - **Exit 0** (stdout = session ID): Store as `MY_SESSION_ID`. You're good to go.
 - **Exit 1** (stderr = fingerprint): Your session ID isn't cached yet. Run discovery in a **separate tool call** (the transcript file must be written first):
 
 ```bash
-bash "PLUGIN_SCRIPTS/session-discover.sh" <fingerprint>
+bash "$HOTLINE_SCRIPTS/session-discover.sh" <fingerprint>
 ```
 
 This returns the session ID on stdout. Store it as `MY_SESSION_ID`.
@@ -39,7 +46,7 @@ Follow these steps in order. No freelancing — the protocol matters.
 Figure out who the user wants to call. Run:
 
 ```bash
-bash "DIAL_SCRIPTS/resolve-workspace.sh" "<reference>" --caller-session "$MY_SESSION_ID"
+bash "$HOTLINE_DIAL_SCRIPTS/resolve-workspace.sh" "<reference>" --caller-session "$MY_SESSION_ID"
 ```
 
 Where `<reference>` is whatever the user said — a project name, path, description, etc.
@@ -54,13 +61,13 @@ Where `<reference>` is whatever the user said — a project name, path, descript
 If resolution fails or returns stale results, check whether the target's identity cache needs refreshing:
 
 ```bash
-bash "PICKUP_SCRIPTS/identity-cache.sh" is-stale --cwd "$TARGET_PATH"
+bash "$HOTLINE_PICKUP_SCRIPTS/identity-cache.sh" is-stale --cwd "$TARGET_PATH"
 ```
 
 If exit 0 (stale): run a quick headless call to populate it:
 
 ```bash
-bash "DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
+bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
   --prompt "/hotline-pickup"
 ```
 
@@ -92,7 +99,7 @@ This is automatic — never ask the user about transport. They don't care how th
 For conference calls that look like they'll go deep, check CMUX availability:
 
 ```bash
-bash "DIAL_SCRIPTS/check-cmux.sh"
+bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 ```
 
 - **Exit 0**: CMUX is available. Use it.
@@ -103,7 +110,7 @@ bash "DIAL_SCRIPTS/check-cmux.sh"
 See if there's already an active session with this workspace:
 
 ```bash
-bash "DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
+bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
 ```
 
 - **Exit 0**: Active session found. Parse the JSON for `session_id` and `mode`. Reuse it.
@@ -116,7 +123,7 @@ bash "DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SE
 Place the call:
 
 ```bash
-bash "DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
+bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
   --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT"
 ```
 
@@ -125,7 +132,7 @@ Parse the JSON response. Extract `session_id` and `response`.
 Cache the session for future use:
 
 ```bash
-bash "DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
+bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
   --caller-session "$MY_SESSION_ID" --session "$REMOTE_SESSION_ID" --mode "$MODE"
 ```
 
@@ -134,13 +141,13 @@ bash "DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
 Continue the conversation:
 
 ```bash
-bash "DIAL_SCRIPTS/headless-call.sh" --prompt "$YOUR_MESSAGE" --resume "$REMOTE_SESSION_ID"
+bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --prompt "$YOUR_MESSAGE" --resume "$REMOTE_SESSION_ID"
 ```
 
 Update the cache timestamp:
 
 ```bash
-bash "DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
+bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
 ```
 
 #### CMUX (Conference Call Only)
@@ -148,7 +155,7 @@ bash "DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-session "$MY
 If CMUX was selected in Step 3:
 
 ```bash
-bash "DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" [--resume "$REMOTE_SESSION_ID"]
+bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" [--resume "$REMOTE_SESSION_ID"]
 ```
 
 Pass `--resume` only if reusing an existing session from Step 4.
@@ -175,7 +182,7 @@ Just relay the response — no need to repeat the connection boilerplate:
 For conference calls running in headless mode: if you've done ~3+ round trips and CMUX is available, it's time to upgrade. Open a CMUX workspace:
 
 ```bash
-bash "DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" --resume "$REMOTE_SESSION_ID"
+bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" --resume "$REMOTE_SESSION_ID"
 ```
 
 Announce the upgrade:
@@ -195,5 +202,5 @@ If the user asks to take over the conversation directly, give them the escape ha
 When they return, resume the session yourself to pick up any final state:
 
 ```bash
-bash "DIAL_SCRIPTS/headless-call.sh" --prompt "Summarize what happened since the caller took over." --resume "$REMOTE_SESSION_ID"
+bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --prompt "Summarize what happened since the caller took over." --resume "$REMOTE_SESSION_ID"
 ```

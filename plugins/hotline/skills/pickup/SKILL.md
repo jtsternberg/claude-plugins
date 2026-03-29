@@ -14,7 +14,13 @@ Generate a concise identity for this workspace so other agents can find and unde
 
 ## Script Paths
 
-- `PICKUP_SCRIPTS` = the `scripts/` directory within this skill (`skills/pickup/scripts/`)
+Resolve plugin paths first:
+
+```bash
+eval "$(bash scripts/paths.sh)"
+```
+
+This sets `HOTLINE_PICKUP_SCRIPTS` (and others). Use `$HOTLINE_PICKUP_SCRIPTS` in all script references below.
 
 ## Steps
 
@@ -23,7 +29,7 @@ Generate a concise identity for this workspace so other agents can find and unde
 Run:
 
 ```bash
-bash "PICKUP_SCRIPTS/identity-cache.sh" is-stale
+bash "$HOTLINE_PICKUP_SCRIPTS/identity-cache.sh" is-stale
 ```
 
 - Exit 0 (stale or missing): proceed to introspection (Step 2)
@@ -59,13 +65,13 @@ jq -n \
   --argjson tags '["tag1","tag2","tag3"]' \
   --argjson gen "$(date +%s)" \
   '{identity: {name: $name, description: $desc, tags: $tags, generated: $gen}}' \
-  | bash "PICKUP_SCRIPTS/identity-cache.sh" write
+  | bash "$HOTLINE_PICKUP_SCRIPTS/identity-cache.sh" write
 ```
 
 Then validate the write succeeded:
 
 ```bash
-bash "PICKUP_SCRIPTS/identity-cache.sh" read | jq -e '.identity.name and .identity.description' > /dev/null
+bash "$HOTLINE_PICKUP_SCRIPTS/identity-cache.sh" read | jq -e '.identity.name and .identity.description' > /dev/null
 ```
 
 If validation fails, rewrite with corrected values.

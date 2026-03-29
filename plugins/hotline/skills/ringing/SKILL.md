@@ -13,7 +13,13 @@ Another agent (the "caller") needs your help. They've connected to your workspac
 
 ## Script Paths
 
-- `PLUGIN_SCRIPTS` = the `scripts/` directory at the root of this plugin (sibling to `skills/`)
+Resolve plugin paths first:
+
+```bash
+eval "$(bash scripts/paths.sh)"
+```
+
+This sets `HOTLINE_SCRIPTS` (and others). Use `$HOTLINE_SCRIPTS` in all script references below.
 
 ## Incoming Prompt Format
 
@@ -77,7 +83,7 @@ STATUS: WORK_IN_PROGRESS
 After handling the call, log it to the dial history:
 
 ```bash
-bash "PLUGIN_SCRIPTS/dial-history.sh" append \
+bash "$HOTLINE_SCRIPTS/dial-history.sh" append \
   --session "<SESSION from prompt>" \
   --caller "<CALLER from prompt>" \
   --mode "<MODE from prompt>"
