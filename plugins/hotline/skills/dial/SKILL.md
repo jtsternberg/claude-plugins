@@ -12,7 +12,7 @@ Place a call to another Claude Code workspace. You're the switchboard operator h
 Before running any scripts, resolve the plugin paths. Run this once at the start:
 
 ```bash
-eval "$(bash scripts/paths.sh)"
+eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)"
 ```
 
 This sets:

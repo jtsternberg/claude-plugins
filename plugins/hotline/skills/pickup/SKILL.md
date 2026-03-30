@@ -17,7 +17,7 @@ Generate a concise identity for this workspace so other agents can find and unde
 Resolve plugin paths first:
 
 ```bash
-eval "$(bash scripts/paths.sh)"
+eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)"
 ```
 
 This sets `HOTLINE_PICKUP_SCRIPTS` (and others). Use `$HOTLINE_PICKUP_SCRIPTS` in all script references below.
