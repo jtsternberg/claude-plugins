@@ -4,11 +4,13 @@ If `dirmap` is not in PATH, use the bundled fallback scripts:
 
 ```bash
 # List all projects
-bash "PLUGIN_DIR/scripts/dirmap-fallback.sh" list
+bash "$HOTLINE_SCRIPTS/dirmap-fallback.sh" list
 
 # Get path for a project ID
-bash "PLUGIN_DIR/scripts/dirmap-fallback.sh" get <id>
+bash "$HOTLINE_SCRIPTS/dirmap-fallback.sh" get <id>
 ```
+
+(Requires `eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)"` to have been run first.)
 
 These read from `~/.dirmap.json`. To set up dirmap for the first time, create `~/.dirmap.json`:
 
