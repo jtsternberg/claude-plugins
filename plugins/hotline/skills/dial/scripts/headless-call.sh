@@ -43,13 +43,15 @@ STDERR_FILE=$(mktemp)
 trap "rm -f $STDERR_FILE" EXIT
 
 if [[ -n "$RESUME_ID" ]]; then
+  # Follow-up: --resume carries the session context (no cwd needed)
   RESULT=$(claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
 else
+  # First contact: cd to the target workspace before invoking claude
   if [[ -z "$CWD" ]]; then
     echo '{"error": "No --cwd provided for first contact"}'
     exit 1
   fi
-  RESULT=$(claude -p "$PROMPT" --cwd "$CWD" --output-format json 2>"$STDERR_FILE") || true
+  RESULT=$(cd "$CWD" && claude -p "$PROMPT" --output-format json 2>"$STDERR_FILE") || true
 fi
 
 if [[ -z "$RESULT" ]]; then

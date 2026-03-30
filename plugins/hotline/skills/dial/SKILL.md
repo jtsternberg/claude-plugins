@@ -47,13 +47,13 @@ Follow these steps in order. No freelancing — the protocol matters.
 
 ### Step 1: Resolve the Target Workspace
 
-Figure out who the user wants to call. Run:
+Figure out who the user wants to call. Pass the user's exact words to the resolver — do NOT interpret or remap them yourself (e.g., don't turn "writing workspace" into "dotfiles" based on your own guess). Let the resolution script + dirmap handle the matching.
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/resolve-workspace.sh" "<reference>" --caller-session "$MY_SESSION_ID"
 ```
 
-Where `<reference>` is whatever the user said — a project name, path, description, etc.
+Where `<reference>` is the user's own words — a project name, path, fuzzy description, etc. Pass it verbatim.
 
 - **Exit 0**: Target resolved. Parse the JSON output for `path` and `name`.
 - **Exit 1**: Check stderr.
