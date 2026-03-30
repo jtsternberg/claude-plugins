@@ -89,7 +89,11 @@ elif [[ -x "$PLUGIN_SCRIPTS/dirmap-fallback.sh" ]]; then
 fi
 
 if [[ -n "$DIRMAP_CMD" ]]; then
-  DIRMAP_RESULT=$($DIRMAP_CMD get "$REFERENCE" 2>/dev/null || true)
+  if [[ "$DIRMAP_CMD" == "dirmap" ]]; then
+    DIRMAP_RESULT=$(dirmap get "$REFERENCE" 2>/dev/null || true)
+  else
+    DIRMAP_RESULT=$($DIRMAP_CMD get "$REFERENCE" 2>/dev/null || true)
+  fi
   if [[ -n "$DIRMAP_RESULT" ]]; then
     if resolve_path "$DIRMAP_RESULT"; then
       exit 0
@@ -100,7 +104,11 @@ fi
 # 4. Fuzzy match — dump all candidates as JSON for the agent to pick
 if [[ -n "$DIRMAP_CMD" ]]; then
   IDENTITIES_DIR="$HOME/.agents-hotline/identities"
-  DIRMAP_JSON=$($DIRMAP_CMD list 2>/dev/null || echo "{}")
+  if [[ "$DIRMAP_CMD" == "dirmap" ]]; then
+    DIRMAP_JSON=$(dirmap list --json 2>/dev/null || echo "{}")
+  else
+    DIRMAP_JSON=$($DIRMAP_CMD list 2>/dev/null || echo "{}")
+  fi
 
   CANDIDATES="[]"
   while IFS=$'\t' read -r name path; do

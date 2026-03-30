@@ -33,7 +33,7 @@ if [[ -z "$FINGERPRINT" ]]; then
   exit 1
 fi
 
-PROJECT_DIR="$HOME/.claude/projects/$(pwd | sed 's|/|-|g')"
+PROJECT_DIR="$HOME/.claude/projects/$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')"
 
 if [[ ! -d "$PROJECT_DIR" ]]; then
   echo "Error: No transcript directory found at $PROJECT_DIR" >&2
