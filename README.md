@@ -73,6 +73,11 @@ Exports HTML slide presentations to PDF or PNG screenshots using browser automat
 
 **Install:** `/plugin install export-presentation@jtsternberg`
 
+#### 📞 [hotline](plugins/hotline)
+Cross-workspace communication for Claude Code agents. Dial another workspace to ask questions, delegate work, or collaborate in real-time. Also ships a [standalone session ID discovery utility](plugins/hotline/SESSION-ID-DISCOVERY.md).
+
+**Install:** `/plugin install hotline@jtsternberg`
+
 #### 🧠 [thinking-tools](plugins/thinking-tools)
 Metacognitive reasoning frameworks for careful decision-making. Includes Chesterton's Fence (investigate before removing).
 
