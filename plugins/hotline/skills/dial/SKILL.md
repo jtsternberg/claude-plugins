@@ -47,18 +47,32 @@ Follow these steps in order. No freelancing — the protocol matters.
 
 ### Step 1: Resolve the Target Workspace
 
-Figure out who the user wants to call. Pass the user's exact words to the resolver — do NOT interpret or remap them yourself (e.g., don't turn "writing workspace" into "dotfiles" based on your own guess). Let the resolution script + dirmap handle the matching.
+**CRITICAL: DO NOT pre-resolve the workspace.** When the user says "dial the writing workspace," you MUST pass their exact words to the resolver. Do NOT substitute your own guess (e.g., turning "writing workspace" into "dotfiles"). The resolver + dirmap handle matching — that is their job, not yours. If you pre-resolve, you bypass the entire resolution chain and will dial the wrong workspace.
 
-```bash
-bash "$HOTLINE_DIAL_SCRIPTS/resolve-workspace.sh" "<reference>" --caller-session "$MY_SESSION_ID"
+Store the user's exact reference for later comparison:
+
+```
+USER_REFERENCE="<the user's exact words for the target>"
 ```
 
-Where `<reference>` is the user's own words — a project name, path, fuzzy description, etc. Pass it verbatim.
+Then resolve:
 
-- **Exit 0**: Target resolved. Parse the JSON output for `path` and `name`.
+```bash
+bash "$HOTLINE_DIAL_SCRIPTS/resolve-workspace.sh" "$USER_REFERENCE" --caller-session "$MY_SESSION_ID"
+```
+
+- **Exit 0**: Target resolved. The resolved path is on stdout.
 - **Exit 1**: Check stderr.
   - If it contains JSON with `candidates`: present the list to the user and ask them to pick one.
   - Otherwise: it's an error. Report it and stop.
+
+#### Sanity Check: Does the Resolution Make Sense?
+
+After resolution, compare what the user asked for against what was resolved. If the resolved workspace name doesn't obviously relate to the user's reference, **confirm with the user before proceeding**:
+
+> You asked to dial "the writing workspace." The closest match I found is **dotfiles** (`/Users/you/.dotfiles`). Is that the right workspace?
+
+Only skip this confirmation when the match is clearly correct (e.g., user said "blog" and it resolved to "my-blog").
 
 #### Stale Identity Recovery
 
