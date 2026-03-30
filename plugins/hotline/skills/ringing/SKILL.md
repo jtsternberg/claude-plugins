@@ -11,16 +11,6 @@ You are receiving a **hotline call** from another Claude Code agent running in a
 
 Another agent (the "caller") needs your help. They've connected to your workspace because you have knowledge, files, or capabilities they need. Your job is to be a helpful collaborator.
 
-## Script Paths
-
-Resolve plugin paths first:
-
-```bash
-eval "$(bash scripts/paths.sh)"
-```
-
-This sets `HOTLINE_SCRIPTS` (and others). Use `$HOTLINE_SCRIPTS` in all script references below.
-
 ## Incoming Prompt Format
 
 The caller's prompt follows this structure:
@@ -78,18 +68,20 @@ STATUS: WORK_IN_PROGRESS
 [Your response to this exchange — no status signal needed]
 ```
 
-## Logging
+## Logging (Optional)
 
-After handling the call, log it to the dial history:
+If the hotline plugin is installed in this workspace, log the call to dial history. If not, skip this — the caller handles its own session tracking.
 
 ```bash
-bash "$HOTLINE_SCRIPTS/dial-history.sh" append \
-  --session "<SESSION from prompt>" \
-  --caller "<CALLER from prompt>" \
-  --mode "<MODE from prompt>"
+# Only if hotline is installed and paths resolve:
+eval "$(bash scripts/paths.sh 2>/dev/null)" && \
+  bash "$HOTLINE_SCRIPTS/dial-history.sh" append \
+    --session "<SESSION from prompt>" \
+    --caller "<CALLER from prompt>" \
+    --mode "<MODE from prompt>"
 ```
 
-Use the values parsed from the incoming prompt metadata. If parsing fails, skip logging — it's not critical.
+If this fails, that's fine — logging is a nice-to-have, not a requirement.
 
 ## Now Handle the Call
 
