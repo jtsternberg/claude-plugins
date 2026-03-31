@@ -40,32 +40,46 @@ if [[ ! -d "$PROJECTS_ROOT" ]]; then
   exit 1
 fi
 
-# Try the computed project dir first (fast path)
+# Retry up to 3 times with 1s delay — Claude Code writes transcripts
+# asynchronously, so the fingerprint may not be flushed to disk yet
+# by the time this runs in the next tool call.
+MAX_RETRIES=3
 COMPUTED_DIR="${PROJECTS_ROOT}/$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')"
 
 TRANSCRIPT=""
-
-# Fast path: check computed project dir
-if [[ -d "$COMPUTED_DIR" ]]; then
-  for f in $(ls -t "$COMPUTED_DIR"/*.jsonl 2>/dev/null | head -5); do
-    if grep -q "$FINGERPRINT" "$f"; then
-      TRANSCRIPT="$f"
-      break
-    fi
-  done
-fi
-
-# Fallback: search the 10 most recently modified project dirs
-if [[ -z "$TRANSCRIPT" ]]; then
-  for dir in $(ls -dt "$PROJECTS_ROOT"/*/ 2>/dev/null | head -10); do
-    for f in $(ls -t "$dir"*.jsonl 2>/dev/null | head -3); do
+for attempt in $(seq 1 $MAX_RETRIES); do
+  # Fast path: check computed project dir
+  if [[ -d "$COMPUTED_DIR" ]]; then
+    for f in $(ls -t "$COMPUTED_DIR"/*.jsonl 2>/dev/null | head -5); do
       if grep -q "$FINGERPRINT" "$f"; then
         TRANSCRIPT="$f"
-        break 2
+        break
       fi
     done
-  done
-fi
+  fi
+
+  # Fallback: search the 10 most recently modified project dirs
+  if [[ -z "$TRANSCRIPT" ]]; then
+    for dir in $(ls -dt "$PROJECTS_ROOT"/*/ 2>/dev/null | head -10); do
+      for f in $(ls -t "$dir"*.jsonl 2>/dev/null | head -3); do
+        if grep -q "$FINGERPRINT" "$f"; then
+          TRANSCRIPT="$f"
+          break 2
+        fi
+      done
+    done
+  fi
+
+  # Found it
+  if [[ -n "$TRANSCRIPT" ]]; then
+    break
+  fi
+
+  # Not found yet — wait for transcript flush (except on last attempt)
+  if [[ $attempt -lt $MAX_RETRIES ]]; then
+    sleep 1
+  fi
+done
 
 if [[ -z "$TRANSCRIPT" ]]; then
   echo "Error: Fingerprint not found in recent transcripts" >&2
