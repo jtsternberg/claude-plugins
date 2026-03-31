@@ -43,8 +43,13 @@ STDERR_FILE=$(mktemp)
 trap "rm -f $STDERR_FILE" EXIT
 
 if [[ -n "$RESUME_ID" ]]; then
-  # Follow-up: --resume carries the session context (no cwd needed)
-  RESULT=$(claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
+  # Follow-up: --resume still needs to run from the target workspace
+  # because Claude Code looks for sessions relative to the project directory
+  if [[ -n "$CWD" ]]; then
+    RESULT=$(cd "$CWD" && claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
+  else
+    RESULT=$(claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
+  fi
 else
   # First contact: cd to the target workspace before invoking claude
   if [[ -z "$CWD" ]]; then
