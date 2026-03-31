@@ -6,7 +6,7 @@
 # Follow-up: uses --resume with existing session ID
 #
 # Usage:
-#   headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>]
+#   headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>] [--name <name>]
 #
 # Outputs JSON: {"session_id": "...", "response": "..."}
 # On error: {"error": "..."} on stdout, exit 1
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>]"
+  echo "Usage: headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>] [--name <name>]"
   echo ""
   echo "Sends a prompt to a workspace via claude -p."
   echo "Outputs JSON: {\"session_id\": \"...\", \"response\": \"...\"}"
@@ -24,12 +24,14 @@ fi
 CWD=""
 PROMPT=""
 RESUME_ID=""
+SESSION_NAME=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cwd) CWD="$2"; shift 2 ;;
     --prompt) PROMPT="$2"; shift 2 ;;
     --resume) RESUME_ID="$2"; shift 2 ;;
+    --name) SESSION_NAME="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -46,9 +48,17 @@ if [[ -n "$RESUME_ID" ]]; then
   # Follow-up: --resume still needs to run from the target workspace
   # because Claude Code looks for sessions relative to the project directory
   if [[ -n "$CWD" ]]; then
-    RESULT=$(cd "$CWD" && claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
+    if [[ -n "$SESSION_NAME" ]]; then
+      RESULT=$(cd "$CWD" && claude -p "$PROMPT" --resume "$RESUME_ID" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
+    else
+      RESULT=$(cd "$CWD" && claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
+    fi
   else
-    RESULT=$(claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
+    if [[ -n "$SESSION_NAME" ]]; then
+      RESULT=$(claude -p "$PROMPT" --resume "$RESUME_ID" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
+    else
+      RESULT=$(claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
+    fi
   fi
 else
   # First contact: cd to the target workspace before invoking claude
@@ -56,7 +66,11 @@ else
     echo '{"error": "No --cwd provided for first contact"}'
     exit 1
   fi
-  RESULT=$(cd "$CWD" && claude -p "$PROMPT" --output-format json 2>"$STDERR_FILE") || true
+  if [[ -n "$SESSION_NAME" ]]; then
+    RESULT=$(cd "$CWD" && claude -p "$PROMPT" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
+  else
+    RESULT=$(cd "$CWD" && claude -p "$PROMPT" --output-format json 2>"$STDERR_FILE") || true
+  fi
 fi
 
 if [[ -z "$RESULT" ]]; then
