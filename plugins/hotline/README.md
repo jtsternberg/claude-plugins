@@ -102,21 +102,158 @@ Set it higher if your workspaces don't change much, lower if you're in rapid dev
 
 ## How It Works
 
-A brief peek under the hood:
+### The Complete Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  WORKSPACE A (Caller)                                               │
+│                                                                     │
+│  User: "Dial the blog workspace and ask what the tagline is"        │
+│                          │                                          │
+│                          ▼                                          │
+│                 ┌─────────────────┐                                 │
+│                 │  hotline-dial   │  (SKILL.md loaded)              │
+│                 │    skill        │                                 │
+│                 └────────┬────────┘                                 │
+│                          │                                          │
+│            ┌─────────────┼──────────────┐                           │
+│            ▼             ▼              ▼                           │
+│    ┌──────────────┐ ┌──────────┐ ┌────────────┐                    │
+│    │ session-     │ │ resolve- │ │ session-   │                    │
+│    │ init.sh      │ │workspace │ │ cache.sh   │                    │
+│    │              │ │ .sh      │ │            │                    │
+│    │ "Who am I?"  │ │ "Where?" │ │ "Talked    │                    │
+│    │              │ │          │ │  before?"  │                    │
+│    └──────┬───────┘ └────┬─────┘ └─────┬──────┘                    │
+│           │              │             │                            │
+│           │   ┌──────────┘             │                            │
+│           │   │  Uses:                 │                            │
+│           │   │  • dirmap get/list     │                            │
+│           │   │  • identity-cache.sh   │                            │
+│           │   │  • ~/.agents-hotline/  │                            │
+│           ▼   ▼                        ▼                            │
+│    MY_SESSION_ID    TARGET_PATH    EXISTING_SESSION?                │
+│                          │                                          │
+│                          ▼                                          │
+│                 ┌─────────────────┐                                 │
+│                 │ headless-call.sh│  (or cmux-call.sh for deep      │
+│                 │                 │   conference calls)              │
+│                 └────────┬────────┘                                 │
+│                          │                                          │
+└──────────────────────────┼──────────────────────────────────────────┘
+                           │
+              cd $TARGET && claude -p \
+                "/hotline-ringing [MODE: ...] \
+                 [CALLER: ...] [SESSION: ...] \
+                 <the actual prompt>" \
+                --output-format json
+                           │
+                           │  (first contact)
+                           │  or: claude -p "..." --resume $ID
+                           │  (follow-up)
+                           │
+┌──────────────────────────┼──────────────────────────────────────────┐
+│  WORKSPACE B (Receiver)  ▼                                          │
+│                                                                     │
+│                 ┌─────────────────┐                                 │
+│                 │ hotline-ringing │  (SKILL.md loaded via           │
+│                 │    skill        │   /hotline-ringing in prompt)   │
+│                 └────────┬────────┘                                 │
+│                          │                                          │
+│            Parses: MODE, CALLER, SESSION                            │
+│            from the prompt metadata                                 │
+│                          │                                          │
+│                          ▼                                          │
+│            ┌─────────────────────────┐                              │
+│            │  Agent B does the work  │                              │
+│            │  (reads files, answers  │                              │
+│            │   questions, makes      │                              │
+│            │   changes, etc.)        │                              │
+│            └─────────────┬───────────┘                              │
+│                          │                                          │
+│                          ▼                                          │
+│            ┌─────────────────────────┐                              │
+│            │  dial-history.sh append │  (logs the call)             │
+│            └─────────────┬───────────┘                              │
+│                          │                                          │
+│            Response + STATUS signal                                 │
+│            (WORK_COMPLETE / WORK_IN_PROGRESS)                       │
+│                          │                                          │
+└──────────────────────────┼──────────────────────────────────────────┘
+                           │
+                           │  JSON response with session_id
+                           │
+┌──────────────────────────┼──────────────────────────────────────────┐
+│  WORKSPACE A (back)      ▼                                          │
+│                                                                     │
+│            ┌─────────────────────────┐                              │
+│            │  session-cache.sh set   │  (caches session for reuse)  │
+│            └─────────────┬───────────┘                              │
+│                          │                                          │
+│                          ▼                                          │
+│  Agent A reports to user:                                           │
+│  "Connected to blog (session: abc123).                              │
+│   Their response: [answer]"                                         │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Session ID Discovery (the "Know Thyself" step)
+
+```
+session-init.sh
+      │
+      ▼
+session-fingerprint.sh ──► Cache hit? ──YES──► stdout: session ID (exit 0)
+      │
+      NO (exit 1)
+      │
+      ▼
+stderr: SESSION_FINGERPRINT_<uuid>
+      │
+      │  (fingerprint gets written into transcript
+      │   when this tool call completes)
+      │
+      ▼  [SEPARATE TOOL CALL]
+      │
+session-init.sh discover <fingerprint>
+      │
+      ▼
+session-discover.sh
+      │
+      ▼
+Grep recent .jsonl transcripts ──► Found? ──► Cache to /tmp, return ID
+      │                              │
+      NO                         (retries 3x
+      │                          with 1s delay
+      ▼                          for async flush)
+Fallback: search 10 most
+recent project dirs
+```
+
+### Workspace Resolution
+
+```
+resolve-workspace.sh "<user's words>"
+      │
+      ├── Starts with / or ~ ? ──► Validate path exists ──► Done
+      │
+      ├── Looks like a UUID? ──► Search session cache ──► Done
+      │
+      ├── dirmap get "<ref>" ──► Exact match? ──► Done
+      │
+      └── dirmap list --json ──► Enrich with identity caches
+              │                   from ~/.agents-hotline/identities/
+              ▼
+          Candidates JSON on stderr (exit 1)
+          Agent picks the best match or asks user
+```
 
 ### The Three Skills
 
-- **`hotline-dial`** — The caller side. Resolves the target workspace, picks a transport, manages the session, and relays responses.
-- **`hotline-ringing`** — The receiver-side handshake. Primes the remote agent with protocol context on first contact.
-- **`hotline-pickup`** — Workspace identity introspection. Examines the local project (CLAUDE.md, package files, git history) and caches a concise identity for resolution.
-
-### Transport
-
-The core transport is headless `claude -p` (for initial contact) and `claude --resume` (for follow-ups). This means cross-workspace communication works without any additional infrastructure — just Claude Code itself.
-
-### Session Fingerprinting
-
-Agents identify themselves using the [session fingerprint method](#session-id-discovery) described above. This is how the caller knows its own session ID, which gets passed to the receiver for logging and session management.
+- **`hotline-dial`** — The caller side. Orchestrates the entire flow above: resolve target, discover session, select transport, make the call, relay the response.
+- **`hotline-ringing`** — The receiver-side handshake. Loaded via the `/hotline-ringing` prefix in the prompt. Tells Agent B what's happening, how to respond, and how to signal completion.
+- **`hotline-pickup`** — Workspace identity introspection. Runs `gather-workspace-info.sh` to examine CLAUDE.md, package files, git history, then caches a concise identity to `~/.agents-hotline/identities/`. Used by workspace resolution for fuzzy matching.
 
 ### State
 
