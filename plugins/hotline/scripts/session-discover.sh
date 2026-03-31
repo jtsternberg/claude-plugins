@@ -33,20 +33,39 @@ if [[ -z "$FINGERPRINT" ]]; then
   exit 1
 fi
 
-PROJECT_DIR="$HOME/.claude/projects/$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')"
+PROJECTS_ROOT="$HOME/.claude/projects"
 
-if [[ ! -d "$PROJECT_DIR" ]]; then
-  echo "Error: No transcript directory found at $PROJECT_DIR" >&2
+if [[ ! -d "$PROJECTS_ROOT" ]]; then
+  echo "Error: No projects directory found at $PROJECTS_ROOT" >&2
   exit 1
 fi
 
+# Try the computed project dir first (fast path)
+COMPUTED_DIR="${PROJECTS_ROOT}/$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')"
+
 TRANSCRIPT=""
-for f in $(ls -t "$PROJECT_DIR"/*.jsonl 2>/dev/null | head -5); do
-  if grep -q "$FINGERPRINT" "$f"; then
-    TRANSCRIPT="$f"
-    break
-  fi
-done
+
+# Fast path: check computed project dir
+if [[ -d "$COMPUTED_DIR" ]]; then
+  for f in $(ls -t "$COMPUTED_DIR"/*.jsonl 2>/dev/null | head -5); do
+    if grep -q "$FINGERPRINT" "$f"; then
+      TRANSCRIPT="$f"
+      break
+    fi
+  done
+fi
+
+# Fallback: search the 10 most recently modified project dirs
+if [[ -z "$TRANSCRIPT" ]]; then
+  for dir in $(ls -dt "$PROJECTS_ROOT"/*/ 2>/dev/null | head -10); do
+    for f in $(ls -t "$dir"*.jsonl 2>/dev/null | head -3); do
+      if grep -q "$FINGERPRINT" "$f"; then
+        TRANSCRIPT="$f"
+        break 2
+      fi
+    done
+  done
+fi
 
 if [[ -z "$TRANSCRIPT" ]]; then
   echo "Error: Fingerprint not found in recent transcripts" >&2
