@@ -39,7 +39,11 @@ bash "$HOTLINE_SCRIPTS/session-init.sh" discover "<fingerprint>"
 
 This returns `{"status": "discovered", "session_id": "..."}`. Store as `MY_SESSION_ID`.
 
-- `{"status": "error", "message": "..."}` — Something went wrong. Report the error.
+- `{"status": "error", "message": "..."}` — Discovery failed. Offer the user two options:
+
+  1. **Continue without session ID (not recommended):** You can still dial, but session caching won't work — multiple Claude instances in the same directory could collide, and you won't be able to resume calls cleanly. If the user is OK with that, set `MY_SESSION_ID` to a generated UUID and proceed.
+
+  2. **Manual session ID:** The user can Ctrl+C, note the session ID displayed on exit, then resume with `claude --resume <id>` and pass you the session ID. This almost never happens — it's a fallback for the fallback.
 
 ## Decision Tree
 
