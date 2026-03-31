@@ -56,13 +56,21 @@ resolve_path() {
   return 1
 }
 
-# 1. Raw path?
+# 1. Absolute path?
 if [[ "$REFERENCE" == /* || "$REFERENCE" == ~* ]]; then
   if resolve_path "$REFERENCE"; then
     exit 0
   fi
   echo "Error: Path does not exist: $REFERENCE" >&2
   exit 1
+fi
+
+# 1b. Relative path? (e.g., "local-frontend/lindris-frontend" from within a monorepo)
+# Try prepending $PWD to see if it resolves to a real directory
+if [[ "$REFERENCE" == */* ]]; then
+  if resolve_path "$(pwd)/$REFERENCE"; then
+    exit 0
+  fi
 fi
 
 # 2. UUID? (session ID lookup)
