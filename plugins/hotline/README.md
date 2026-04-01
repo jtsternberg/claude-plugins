@@ -16,7 +16,7 @@ Hotline lets one Claude Code workspace call another — ask a question, delegate
 /plugin install hotline@jtsternberg
 ```
 
-This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`) as slash commands in Claude Code.
+This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`) as slash commands in Claude Code.
 
 ---
 
@@ -61,6 +61,14 @@ Or with explicit arguments:
 > "/hotline-add-contact blog /Users/me/Code/my-blog"
 
 If `dirmap` is in PATH, it uses `dirmap add`. Otherwise, it edits `~/.dirmap.json` directly.
+
+### Identifying a Workspace
+
+Use `hotline-whoami` to find out what a workspace is called in dirmap:
+
+> "/hotline-whoami"
+
+Returns the dirmap slug for the current workspace, or suggests registering it if it's not found.
 
 ---
 
@@ -166,11 +174,12 @@ Set it higher if your workspaces don't change much, lower if you're in rapid dev
                 "/hotline-ringing [MODE: ...] \
                  [CALLER: ...] [SESSION: ...] \
                  <the actual prompt>" \
+                --allowedTools Bash \
                 --output-format stream-json --verbose
                            │
                            │  (first contact)
-                           │  or: claude -p "..." --resume $ID
-                           │  (follow-up)
+                           │  or: claude -p "..." --resume $ID [--fork-session]
+                           │  (follow-up / fork when dialing by session ID)
                            │
 ┌──────────────────────────┼──────────────────────────────────────────┐
 │  WORKSPACE B (Receiver)  ▼                                          │
@@ -197,7 +206,8 @@ Set it higher if your workspaces don't change much, lower if you're in rapid dev
 │            └─────────────┬───────────┘                              │
 │                          │                                          │
 │            Response + STATUS signal                                 │
-│            (WORK_COMPLETE / WORK_IN_PROGRESS)                       │
+│            (WORK_COMPLETE / WORK_IN_PROGRESS / OUT_OF_SCOPE)        │
+│            + optional HOTLINE_NOTE for protocol issues               │
 │                          │                                          │
 └──────────────────────────┼──────────────────────────────────────────┘
                            │
@@ -258,6 +268,8 @@ resolve-workspace.sh "<user's words>"
       │
       ├── Starts with / or ~ ? ──► Validate path exists ──► Done
       │
+      ├── Contains / ? ──► Try $PWD/<ref> (relative path) ──► Done
+      │
       ├── Looks like a UUID? ──► Session cache ──► Transcript reverse lookup ──► Done
       │
       ├── dirmap get "<ref>" ──► Exact match? ──► Done
@@ -275,6 +287,7 @@ resolve-workspace.sh "<user's words>"
 - **`hotline-ringing`** — The receiver-side handshake. Loaded via the `/hotline-ringing` prefix in the prompt. Tells Agent B what's happening, how to respond, and how to signal completion. Enforces workspace isolation.
 - **`hotline-pickup`** — Workspace identity introspection. Runs `gather-workspace-info.sh` to examine CLAUDE.md, package files, git history, then caches a concise identity to `~/.agents-hotline/identities/`. Used by workspace resolution for fuzzy matching.
 - **`hotline-add-contact`** — Register a workspace in dirmap so other agents can find it. Uses `dirmap add` if available, edits `~/.dirmap.json` directly otherwise.
+- **`hotline-whoami`** — Reverse-lookup the current workspace's dirmap slug. Caller ID for the hotline.
 
 ### State
 
