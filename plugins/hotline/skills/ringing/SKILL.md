@@ -104,7 +104,7 @@ STATUS: WORK_IN_PROGRESS
 
 ## Logging
 
-After handling the call, attempt to log it to the dial history. If script execution is blocked by permissions, skip logging entirely — answer the call first, logging is secondary.
+Log the call to dial history **BEFORE your final text response**. This is important — if your last action is a tool call instead of a text response, the caller won't receive your answer.
 
 ```bash
 eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)" && \
@@ -114,7 +114,16 @@ bash "$HOTLINE_SCRIPTS/dial-history.sh" append \
   --mode "<MODE from prompt>"
 ```
 
-If this fails (permission denied, paths not found, etc.), still respond to the caller — but **include the error in your response** so the caller can relay it to the user. Never silently swallow errors.
+If this fails (permission denied, paths not found, etc.), note the error but still send your text response. Never silently swallow errors.
+
+## CRITICAL: Always End with a Text Response
+
+**Your very last message MUST be a text response, not a tool call.** The caller captures your answer from the final text output. If you end on a tool call (like the logging step above), the caller receives an empty response and has no idea what you said.
+
+Order of operations:
+1. Do the work (read files, run commands, etc.)
+2. Log the call (tool call — logging step above)
+3. **Send your text response LAST** (this is what the caller receives)
 
 ## Transparency: Report Problems, Don't Hide Them
 
