@@ -230,6 +230,20 @@ When they return, resume the session yourself to pick up any final state:
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --prompt "Summarize what happened since the caller took over." --resume "$REMOTE_SESSION_ID"
 ```
 
+## Transparency: Always Surface Problems to the User
+
+**CRITICAL:** Never silently work around, skip, or swallow errors. If something goes wrong at any step — script failures, unexpected responses, permission issues, resolution mismatches, protocol problems — **tell the user immediately.** Include the specific error, what step failed, and what you know about why.
+
+The user is your partner in debugging this system. They can help you solve problems you can't solve alone. Hiding errors wastes their time and makes the plugin harder to improve.
+
+**Bad:** "CMUX failed, falling back to headless." (What failed? Why? Can we fix it?)
+**Good:** "CMUX workspace creation failed — `cmux new-workspace` returned: `[exact error]`. Falling back to headless. This might be a bug in cmux-call.sh."
+
+**Bad:** Silently resolving "writing workspace" to "dotfiles" without checking.
+**Good:** "I resolved 'writing workspace' to 'dotfiles' — does that sound right, or did you mean a different workspace?"
+
+If the receiving agent (Agent B) includes a `HOTLINE_NOTE:` in its response, always surface that to the user — it means the protocol hit a snag.
+
 ## Error Recovery
 
 If anything goes wrong at any step, consult `references/error-recovery.md` for specific failure modes and recovery steps.

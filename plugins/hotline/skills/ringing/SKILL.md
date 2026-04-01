@@ -114,7 +114,23 @@ bash "$HOTLINE_SCRIPTS/dial-history.sh" append \
   --mode "<MODE from prompt>"
 ```
 
-If this fails (permission denied, paths not found, etc.), just skip it and respond to the caller. The call itself is what matters.
+If this fails (permission denied, paths not found, etc.), still respond to the caller — but **include the error in your response** so the caller can relay it to the user. Never silently swallow errors.
+
+## Transparency: Report Problems, Don't Hide Them
+
+**CRITICAL:** If anything goes wrong during a hotline call — permission errors, script failures, unexpected behavior, inability to parse the prompt metadata, workspace isolation concerns, or anything else unusual — you MUST include it in your response to the caller. The user needs to know when the protocol is broken so they can fix it.
+
+Bad: silently skip a failing step and pretend everything is fine.
+Good: answer the call AND note the issue:
+
+```
+[Your actual response to the request]
+
+HOTLINE_NOTE: Encountered [specific issue]. Logging failed with "permission denied"
+on dial-history.sh. The call itself succeeded but the protocol has a gap.
+```
+
+The user is actively developing this plugin. Every surfaced issue helps. Every hidden one wastes debugging time.
 
 ## Now Handle the Call
 
