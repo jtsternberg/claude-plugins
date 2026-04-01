@@ -5,7 +5,7 @@
 # Resolution chain:
 #   1. Raw path → validate exists
 #   2. UUID → session cache lookup
-#   3. Dirmap ID → dirmap get
+#   3. Dirmap ID → $DIRMAP_CMD get
 #   4. Fuzzy → dump candidates JSON on stderr for agent to pick
 #
 # Exit 0 + stdout = resolved canonical path
@@ -117,7 +117,7 @@ if [[ "$REFERENCE" =~ $UUID_REGEX ]]; then
     done
     # If simple decode didn't work, try all dirmap entries for a match
     if [[ -n "$DIRMAP_CMD" ]]; then
-      DIRMAP_JSON=$($DIRMAP_CMD list --json 2>/dev/null || $DIRMAP_CMD list 2>/dev/null || echo "{}")
+      DIRMAP_JSON=$($DIRMAP_CMD list --json 2>/dev/null || echo "{}")
       MATCH=$(echo "$DIRMAP_JSON" | jq -r --arg enc "$ENCODED_DIR" \
         'to_entries[] | select((.value | gsub("[^a-zA-Z0-9-]"; "-")) == $enc) | .value' 2>/dev/null | head -1)
       if [[ -n "$MATCH" ]]; then
@@ -134,11 +134,7 @@ fi
 
 # 3. Dirmap ID?
 if [[ -n "$DIRMAP_CMD" ]]; then
-  if [[ "$DIRMAP_CMD" == "dirmap" ]]; then
-    DIRMAP_RESULT=$(dirmap get "$REFERENCE" 2>/dev/null || true)
-  else
-    DIRMAP_RESULT=$($DIRMAP_CMD get "$REFERENCE" 2>/dev/null || true)
-  fi
+  DIRMAP_RESULT=$($DIRMAP_CMD get "$REFERENCE" 2>/dev/null || true)
   if [[ -n "$DIRMAP_RESULT" ]]; then
     if resolve_path "$DIRMAP_RESULT"; then
       exit 0
@@ -147,13 +143,10 @@ if [[ -n "$DIRMAP_CMD" ]]; then
 fi
 
 # 4. Fuzzy match — dump all candidates as JSON for the agent to pick
+# Both real dirmap and fallback accept `list --json` (fallback ignores the flag)
 if [[ -n "$DIRMAP_CMD" ]]; then
   IDENTITIES_DIR="$HOME/.agents-hotline/identities"
-  if [[ "$DIRMAP_CMD" == "dirmap" ]]; then
-    DIRMAP_JSON=$(dirmap list --json 2>/dev/null || echo "{}")
-  else
-    DIRMAP_JSON=$($DIRMAP_CMD list 2>/dev/null || echo "{}")
-  fi
+  DIRMAP_JSON=$($DIRMAP_CMD list --json 2>/dev/null || echo "{}")
 
   CANDIDATES="[]"
   while IFS=$'\t' read -r name path; do
