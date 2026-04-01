@@ -100,16 +100,17 @@ STATUS: WORK_IN_PROGRESS
 
 ## Logging
 
-After handling the call, log it to the dial history:
+After handling the call, attempt to log it to the dial history. If script execution is blocked by permissions, skip logging entirely — answer the call first, logging is secondary.
 
 ```bash
+eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)" && \
 bash "$HOTLINE_SCRIPTS/dial-history.sh" append \
   --session "<SESSION from prompt>" \
   --caller "<CALLER from prompt>" \
   --mode "<MODE from prompt>"
 ```
 
-Use the values parsed from the incoming prompt metadata. If parsing fails, skip logging — it's not critical.
+If this fails (permission denied, paths not found, etc.), just skip it and respond to the caller. The call itself is what matters.
 
 ## Now Handle the Call
 

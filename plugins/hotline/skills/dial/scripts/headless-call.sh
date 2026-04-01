@@ -49,15 +49,15 @@ if [[ -n "$RESUME_ID" ]]; then
   # because Claude Code looks for sessions relative to the project directory
   if [[ -n "$CWD" ]]; then
     if [[ -n "$SESSION_NAME" ]]; then
-      RESULT=$(cd "$CWD" && claude -p "$PROMPT" --resume "$RESUME_ID" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
+      RESULT=$(cd "$CWD" && claude -p "$PROMPT" --allowedTools Bash --resume "$RESUME_ID" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
     else
-      RESULT=$(cd "$CWD" && claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
+      RESULT=$(cd "$CWD" && claude -p "$PROMPT" --allowedTools Bash --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
     fi
   else
     if [[ -n "$SESSION_NAME" ]]; then
-      RESULT=$(claude -p "$PROMPT" --resume "$RESUME_ID" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
+      RESULT=$(claude -p "$PROMPT" --allowedTools Bash --resume "$RESUME_ID" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
     else
-      RESULT=$(claude -p "$PROMPT" --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
+      RESULT=$(claude -p "$PROMPT" --allowedTools Bash --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
     fi
   fi
 else
@@ -67,9 +67,9 @@ else
     exit 1
   fi
   if [[ -n "$SESSION_NAME" ]]; then
-    RESULT=$(cd "$CWD" && claude -p "$PROMPT" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
+    RESULT=$(cd "$CWD" && claude -p "$PROMPT" --allowedTools Bash -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
   else
-    RESULT=$(cd "$CWD" && claude -p "$PROMPT" --output-format json 2>"$STDERR_FILE") || true
+    RESULT=$(cd "$CWD" && claude -p "$PROMPT" --allowedTools Bash --output-format json 2>"$STDERR_FILE") || true
   fi
 fi
 
