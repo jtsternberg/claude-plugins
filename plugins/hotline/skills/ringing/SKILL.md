@@ -116,14 +116,9 @@ bash "$HOTLINE_SCRIPTS/dial-history.sh" append \
 
 If this fails (permission denied, paths not found, etc.), note the error but still send your text response. Never silently swallow errors.
 
-## CRITICAL: Always End with a Text Response
+## Tip: End with a Text Response When Possible
 
-**Your very last message MUST be a text response, not a tool call.** The caller captures your answer from the final text output. If you end on a tool call (like the logging step above), the caller receives an empty response and has no idea what you said.
-
-Order of operations:
-1. Do the work (read files, run commands, etc.)
-2. Log the call (tool call — logging step above)
-3. **Send your text response LAST** (this is what the caller receives)
+Ideally, your last message should be a text response rather than a tool call. The caller can extract your answer either way, but ending with text keeps things clean.
 
 ## Transparency: Report Problems, Don't Hide Them
 

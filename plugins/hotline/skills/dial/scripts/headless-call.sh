@@ -80,7 +80,7 @@ else
   "${CMD[@]}" 2>"$STDERR_FILE" > "$STREAM_FILE" || true
 fi
 
-# Parse the result event from the stream (last line with type=result)
+# Parse the result event for session_id and metadata
 RESULT_LINE=$(grep '"type":"result"' "$STREAM_FILE" | tail -1)
 
 if [[ -z "$RESULT_LINE" ]]; then
@@ -92,12 +92,19 @@ fi
 SESSION_ID=$(echo "$RESULT_LINE" | jq -r '.session_id // empty')
 RESPONSE=$(echo "$RESULT_LINE" | jq -r '.result // empty')
 
-# Check for empty response with multiple turns — something likely went wrong
+# If result field is empty, extract the last assistant text message from the stream.
+# This handles the case where the agent's final action was a tool call (e.g., logging)
+# but it DID produce a text response earlier in the conversation.
+if [[ -z "$RESPONSE" ]]; then
+  RESPONSE=$(grep '"type":"assistant"' "$STREAM_FILE" \
+    | jq -r '.message.content[]? | select(.type=="text") | .text' 2>/dev/null \
+    | tail -1)
+fi
+
+# Still empty after scanning all assistant messages — warn the user
 if [[ -z "$RESPONSE" ]]; then
   NUM_TURNS=$(echo "$RESULT_LINE" | jq -r '.num_turns // 0')
-  if [[ "$NUM_TURNS" -gt 1 ]]; then
-    RESPONSE="[HOTLINE WARNING: Agent ran $NUM_TURNS turns but returned an empty response. The session may have ended on a tool call. Session ID: $SESSION_ID — resume manually to check what happened.]"
-  fi
+  RESPONSE="[HOTLINE WARNING: Agent ran $NUM_TURNS turns but produced no text response. Session ID: $SESSION_ID — resume manually to check what happened.]"
 fi
 
 jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
