@@ -33,19 +33,21 @@ if [[ -z "$CWD" ]]; then
   exit 1
 fi
 
-WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" 2>/dev/null)
-WS_ID=$(echo "$WS_OUTPUT" | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
+WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" 2>&1)
 
-if [[ -z "$WS_ID" ]]; then
-  echo '{"error": "Failed to create CMUX workspace"}'
+# cmux returns "OK workspace:<N>" — extract the ref
+WS_REF=$(echo "$WS_OUTPUT" | grep -oE 'workspace:[0-9]+' | head -1 || true)
+
+if [[ -z "$WS_REF" ]]; then
+  jq -n --arg err "cmux new-workspace failed: $WS_OUTPUT" '{error: $err}'
   exit 1
 fi
 
 if [[ -n "$RESUME_ID" ]]; then
-  cmux send --workspace "$WS_ID" "claude --resume $RESUME_ID"
+  cmux send --workspace "$WS_REF" "claude --resume $RESUME_ID"
 else
-  cmux send --workspace "$WS_ID" "claude"
+  cmux send --workspace "$WS_REF" "claude"
 fi
 
-jq -n --arg ws "$WS_ID" --arg cwd "$CWD" --arg sid "${RESUME_ID:-new}" \
-  '{workspace_id: $ws, cwd: $cwd, session_id: $sid, message: "CMUX workspace opened with Claude session"}'
+jq -n --arg ws "$WS_REF" --arg cwd "$CWD" --arg sid "${RESUME_ID:-new}" \
+  '{workspace_ref: $ws, cwd: $cwd, session_id: $sid, message: "CMUX workspace opened with Claude session"}'
