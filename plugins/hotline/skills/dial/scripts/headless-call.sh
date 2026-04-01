@@ -2,11 +2,11 @@
 # =============================================================================
 # Headless Call: Send a prompt to a workspace via claude -p
 #
-# First contact: claude -p with --output-format json, extracts session_id
+# First contact: claude -p with stream-json output, extracts session_id + result
 # Follow-up: uses --resume with existing session ID
 #
 # Usage:
-#   headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>] [--name <name>]
+#   headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>] [--name <name>] [--fork]
 #
 # Outputs JSON: {"session_id": "...", "response": "..."}
 # On error: {"error": "..."} on stdout, exit 1
@@ -14,9 +14,9 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>] [--name <name>]"
+  echo "Usage: headless-call.sh --cwd <path> --prompt <text> [--resume <id>] [--name <name>] [--fork]"
   echo ""
-  echo "Sends a prompt to a workspace via claude -p."
+  echo "Sends a prompt to a workspace via claude -p. Uses stream-json for reliable output."
   echo "Outputs JSON: {\"session_id\": \"...\", \"response\": \"...\"}"
   exit 0
 fi
@@ -25,6 +25,7 @@ CWD=""
 PROMPT=""
 RESUME_ID=""
 SESSION_NAME=""
+FORK_SESSION=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --prompt) PROMPT="$2"; shift 2 ;;
     --resume) RESUME_ID="$2"; shift 2 ;;
     --name) SESSION_NAME="$2"; shift 2 ;;
+    --fork) FORK_SESSION=true; shift ;;
     *) shift ;;
   esac
 done
@@ -41,46 +43,62 @@ if [[ -z "$PROMPT" ]]; then
   exit 1
 fi
 
-STDERR_FILE=$(mktemp)
-trap "rm -f $STDERR_FILE" EXIT
+# Build the command as an array to avoid the if/else branch explosion
+CMD=(claude -p "$PROMPT" --allowedTools Bash --output-format stream-json --verbose)
 
 if [[ -n "$RESUME_ID" ]]; then
-  # Follow-up: --resume still needs to run from the target workspace
-  # because Claude Code looks for sessions relative to the project directory
-  if [[ -n "$CWD" ]]; then
-    if [[ -n "$SESSION_NAME" ]]; then
-      RESULT=$(cd "$CWD" && claude -p "$PROMPT" --allowedTools Bash --resume "$RESUME_ID" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
-    else
-      RESULT=$(cd "$CWD" && claude -p "$PROMPT" --allowedTools Bash --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
-    fi
-  else
-    if [[ -n "$SESSION_NAME" ]]; then
-      RESULT=$(claude -p "$PROMPT" --allowedTools Bash --resume "$RESUME_ID" -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
-    else
-      RESULT=$(claude -p "$PROMPT" --allowedTools Bash --resume "$RESUME_ID" --output-format json 2>"$STDERR_FILE") || true
-    fi
-  fi
-else
-  # First contact: cd to the target workspace before invoking claude
-  if [[ -z "$CWD" ]]; then
-    echo '{"error": "No --cwd provided for first contact"}'
-    exit 1
-  fi
-  if [[ -n "$SESSION_NAME" ]]; then
-    RESULT=$(cd "$CWD" && claude -p "$PROMPT" --allowedTools Bash -n "$SESSION_NAME" --output-format json 2>"$STDERR_FILE") || true
-  else
-    RESULT=$(cd "$CWD" && claude -p "$PROMPT" --allowedTools Bash --output-format json 2>"$STDERR_FILE") || true
-  fi
+  CMD+=(--resume "$RESUME_ID")
 fi
 
-if [[ -z "$RESULT" ]]; then
-  STDERR_MSG=$(cat "$STDERR_FILE")
-  jq -n --arg err "${STDERR_MSG:-Claude CLI returned no output}" '{error: $err}'
+if [[ -n "$SESSION_NAME" ]]; then
+  CMD+=(-n "$SESSION_NAME")
+fi
+
+if $FORK_SESSION; then
+  CMD+=(--fork-session)
+fi
+
+# Determine working directory
+if [[ -n "$CWD" ]]; then
+  EXEC_DIR="$CWD"
+elif [[ -n "$RESUME_ID" ]]; then
+  # Resume without cwd — run from current directory
+  EXEC_DIR=""
+else
+  echo '{"error": "No --cwd provided for first contact"}'
   exit 1
 fi
 
-SESSION_ID=$(echo "$RESULT" | jq -r '.session_id // empty')
-RESPONSE=$(echo "$RESULT" | jq -r '.result // empty')
+# Execute and capture the stream
+STDERR_FILE=$(mktemp)
+STREAM_FILE=$(mktemp)
+trap "rm -f $STDERR_FILE $STREAM_FILE" EXIT
+
+if [[ -n "$EXEC_DIR" ]]; then
+  (cd "$EXEC_DIR" && "${CMD[@]}" 2>"$STDERR_FILE") > "$STREAM_FILE" || true
+else
+  "${CMD[@]}" 2>"$STDERR_FILE" > "$STREAM_FILE" || true
+fi
+
+# Parse the result event from the stream (last line with type=result)
+RESULT_LINE=$(grep '"type":"result"' "$STREAM_FILE" | tail -1)
+
+if [[ -z "$RESULT_LINE" ]]; then
+  STDERR_MSG=$(cat "$STDERR_FILE")
+  jq -n --arg err "${STDERR_MSG:-Claude CLI returned no output and no result event in stream}" '{error: $err}'
+  exit 1
+fi
+
+SESSION_ID=$(echo "$RESULT_LINE" | jq -r '.session_id // empty')
+RESPONSE=$(echo "$RESULT_LINE" | jq -r '.result // empty')
+
+# Check for empty response with multiple turns — something likely went wrong
+if [[ -z "$RESPONSE" ]]; then
+  NUM_TURNS=$(echo "$RESULT_LINE" | jq -r '.num_turns // 0')
+  if [[ "$NUM_TURNS" -gt 1 ]]; then
+    RESPONSE="[HOTLINE WARNING: Agent ran $NUM_TURNS turns but returned an empty response. The session may have ended on a tool call. Session ID: $SESSION_ID — resume manually to check what happened.]"
+  fi
+fi
 
 jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
   '{session_id: $sid, response: $resp}'
