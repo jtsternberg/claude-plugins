@@ -142,6 +142,26 @@ if [[ -n "$DIRMAP_CMD" ]]; then
   fi
 fi
 
+# 3b. Strip filler words and retry dirmap lookup
+# "the dotfiles workspace" → "dotfiles", "my blog project" → "blog"
+if [[ -n "$DIRMAP_CMD" ]]; then
+  STRIPPED=$(echo "$REFERENCE" | tr '[:upper:]' '[:lower:]' \
+    | sed 's/ the / /g; s/^the //; s/ the$//; s/ my / /g; s/^my //; s/ a / /g; s/^a //; s/ an / /g; s/^an //; s/ its / /g; s/^its //' \
+    | sed 's/ workspace//g; s/ project//g; s/ repo$//; s/ repository//g; s/ site//g; s/ app$//; s/ codebase//g; s/ directory//g; s/ dir / /g; s/ folder//g' \
+    | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -s ' ')
+  if [[ -n "$STRIPPED" && "$STRIPPED" != "$REFERENCE" ]]; then
+    # Try each remaining word as a dirmap ID
+    for word in $STRIPPED; do
+      DIRMAP_RESULT=$($DIRMAP_CMD get "$word" 2>/dev/null || true)
+      if [[ -n "$DIRMAP_RESULT" ]]; then
+        if resolve_path "$DIRMAP_RESULT"; then
+          exit 0
+        fi
+      fi
+    done
+  fi
+fi
+
 # 4. Fuzzy match — dump all candidates as JSON for the agent to pick
 # Both real dirmap and fallback accept `list --json` (fallback ignores the flag)
 if [[ -n "$DIRMAP_CMD" ]]; then
