@@ -160,43 +160,39 @@ If the user gave you a specific session ID to dial (e.g., "dial session abc123")
 
 Construct a session name for the `/resume` picker. Format: `hotline: <caller-dir> → <target-dir> (<mode>)` using just the directory basenames (not full paths). Example: `hotline: marketing → blog (quick_call)`.
 
-Fire the call asynchronously. This returns immediately with a `call_dir` — the session ID and response will be written to files in that directory:
+This is a **three tool-call sequence**. Do NOT combine them — Claude Code buffers all stdout until a command exits, so combining defeats the early session ID.
+
+**Tool call 1 — Fire the async call** (returns immediately):
 
 ```bash
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" [--fork-session] \
   --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
-CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
+echo "$CALL_RESULT"
 ```
 
-Include `--fork-session` when dialing someone else's session ID. Omit it for fresh calls to a workspace (no session to fork from).
+Include `--fork-session` when dialing someone else's session ID. Parse `call_dir` from the JSON.
 
-**Immediately read the session ID** (it's written as soon as the remote session starts):
+**Tell the user:** "Dialing [workspace name]..."
+
+**Tool call 2 — Read the session ID** (appears within ~2-5s):
 
 ```bash
-# Wait briefly for session_id.txt to appear, then read it
-sleep 2 && cat "$CALL_DIR/session_id.txt"
+for i in $(seq 1 15); do [[ -f "$CALL_DIR/session_id.txt" ]] && cat "$CALL_DIR/session_id.txt" && break; sleep 1; done
 ```
 
-**Report the session ID to the user right away** — don't wait for the full response:
+**Tell the user immediately:**
+> Connected to **[workspace name]** (session: `[session-id]`). Working on it — I'll relay the response when it's ready. If you want to take over, let me know.
 
-> Connected to **[workspace name]** (session: `[session-id]`). Working on it — I'll relay the response when it's ready.
-
-**Then wait for the response** (poll for the `done` file):
+**Tool call 3 — Wait for the response:**
 
 ```bash
-# Wait for completion
-while [[ ! -f "$CALL_DIR/done" ]]; do sleep 2; done
-
-# Check for errors
-if [[ -f "$CALL_DIR/error.txt" ]]; then
-  cat "$CALL_DIR/error.txt"
-else
-  cat "$CALL_DIR/response.json"
-fi
+bash "$HOTLINE_DIAL_SCRIPTS/wait-for-response.sh" "$CALL_DIR"
 ```
 
-Parse the response JSON for `session_id` and `response`. Cache the session:
+This outputs `{"phase":"complete","session_id":"...","response":"..."}` when done, or `{"phase":"error",...}` if something went wrong.
+
+Parse `session_id` and `response`. Cache the session:
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
