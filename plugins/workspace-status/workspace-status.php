@@ -235,12 +235,23 @@ function generate_status_line($input_data) {
         $parts[] = getMsg($git_info, 'green');
     }
 
-    // Context bar
+    // Context bar — prefer native used_percentage, fall back to transcript calculation
     $transcript_path = $input_data['transcript_path'] ?? '';
     $max_context = $input_data['context_window']['context_window_size'] ?? 200000;
     $max_k = (int)($max_context / 1000);
-    list($context_length, $pct, $is_estimate) = get_context_usage($transcript_path, $max_context);
+    if (isset($input_data['context_window']['used_percentage'])) {
+        $pct = (int)$input_data['context_window']['used_percentage'];
+        $is_estimate = false;
+    } else {
+        list(, $pct, $is_estimate) = get_context_usage($transcript_path, $max_context);
+    }
     $parts[] = get_context_bar($pct, $is_estimate, $max_k);
+
+    // Cost display
+    if (isset($input_data['cost']['total_cost_usd'])) {
+        $cost = number_format((float)$input_data['cost']['total_cost_usd'], 2);
+        $parts[] = getMsg('$' . $cost, 'green');
+    }
 
     // Recent prompts
     list($prompts, $error) = get_prompts($transcript_path, 3);
@@ -295,7 +306,22 @@ function generate_status_line($input_data) {
         }
     }
 
-    return implode(' | ', $parts);
+    $line1 = implode(' | ', $parts);
+
+    // Line 2: rate limits (only if present)
+    $rate_parts = [];
+    if (isset($input_data['rate_limits']['five_hour']['used_percentage'])) {
+        $rate_parts[] = '5h: ' . (int)$input_data['rate_limits']['five_hour']['used_percentage'] . '%';
+    }
+    if (isset($input_data['rate_limits']['seven_day']['used_percentage'])) {
+        $rate_parts[] = '7d: ' . (int)$input_data['rate_limits']['seven_day']['used_percentage'] . '%';
+    }
+
+    if (!empty($rate_parts)) {
+        $line1 .= "\n" . getMsg(implode(' ', $rate_parts), 'dark_gray');
+    }
+
+    return $line1;
 }
 
 /**
