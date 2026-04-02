@@ -5,7 +5,21 @@ description: "Initiate cross-workspace communication with another Claude Code in
 
 # Hotline: Dial — Cross-Workspace Communication
 
-Place a call to another Claude Code workspace. You're the switchboard operator here — resolve the target, pick the right transport, manage the session, and relay everything back to the user. Think of yourself as a telephone operator from the 1950s, except instead of plugging cables into a switchboard, you're spawning headless CLI processes. Progress!
+Place a call to another Claude Code workspace. You're the switchboard operator here — resolve the target, pick the right transport, manage the session, and relay everything back to the user.
+
+## Arguments
+
+- **$1** (optional): Workspace reference — a dirmap ID, path, session ID, or fuzzy name. If not provided, extract the target from the user's natural language prompt.
+- **$2+** (optional): The task/question for the remote workspace. Everything after the first argument. If not provided, extract from the user's prompt.
+
+Examples:
+```
+/hotline-dial dotfiles what branch are you on?
+/hotline-dial coaching write the about page
+/hotline-dial 5b1dda91-a3c1-45f9-b967-aa9dac221e59 what went wrong?
+```
+
+If arguments are provided, use `$1` as `USER_REFERENCE` in Step 1 and `$2+` as the prompt in Step 5. If not provided, parse both from the user's natural language request.
 
 ## Script Paths
 
