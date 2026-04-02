@@ -168,11 +168,21 @@ paperclipai activity list -C <company-id> --json
 paperclipai dashboard get -C <company-id> --json
 ```
 
+### Heartbeats
+
+```bash
+# Manually trigger a heartbeat run for an agent
+paperclipai heartbeat run --agent-id <agent-id>
+```
+
 ### System / Ops
 
 ```bash
 # Run diagnostic checks
 paperclipai doctor
+
+# Auto-repair common config problems
+paperclipai doctor --repair
 
 # Start the server (bootstraps if needed)
 paperclipai run
@@ -235,6 +245,7 @@ cat "$AGENT_DIR/SOUL.md"
 
 ```bash
 paperclipai doctor
+paperclipai doctor --repair   # auto-fix common config problems
 paperclipai auth whoami
 ```
 
@@ -270,6 +281,104 @@ paperclipai agent list -C <company-id> --json
 
 # Step 4: explore agent files
 ls ~/.paperclip/instances/default/companies/<company-id>/agents/<agent-id>/instructions/
+```
+
+
+## Agent Adapter Configuration
+
+When registering an agent in the Paperclip UI, use this template for `adapterType: claude_local`:
+
+```json
+{
+  "adapterType": "claude_local",
+  "adapterConfig": {
+    "model": "claude-haiku-4-5-20251001",
+    "cwd": "/your/agent/workspace",
+    "instructionsFilePath": "/your/agents/agent-name/AGENTS.md",
+    "args": ["--add-dir", "/your/shared/skills"],
+    "timeoutSec": 900,
+    "graceSec": 15,
+    "maxTurnsPerRun": 20,
+    "dangerouslySkipPermissions": true
+  }
+}
+```
+
+**Model selection by role:**
+
+| Role | Recommended model | Reason |
+|------|------------------|--------|
+| CEO / orchestration | claude-sonnet-4-6 | Strategic reasoning |
+| Manager (delegation/routing) | claude-haiku-4-5 | Read + route, Sonnet not needed |
+| IC creative (content, code) | claude-sonnet-4-6 | Output quality matters |
+| IC formulaic (ops, outreach) | claude-haiku-4-5 | ~3x cheaper, sufficient |
+
+**Note:** Never set `timeoutSec` to `0` — that means no timeout, which can cause runaway agents. Use `900` (15 min) as a safe default.
+
+## Heartbeat Configuration
+
+Heartbeat config lives in the agent's `runtimeConfig` in the Paperclip UI:
+
+```json
+{
+  "runtimeConfig": {
+    "heartbeat": {
+      "enabled": true,
+      "intervalSec": 600,
+      "wakeOnDemand": true,
+      "cooldownSec": 10,
+      "maxConcurrentRuns": 1
+    }
+  }
+}
+```
+
+**Interval guidance:**
+- Creative / coding agents: `600` (10 min)
+- On-demand agents: `86400` (1/day) + `wakeOnDemand: true`
+- Never below `30` — risks spam and runaway cost
+
+## Budget Management
+
+Paperclip enforces per-agent and per-company spend limits (in cents):
+
+| Threshold | Behavior |
+|-----------|----------|
+| 80% of budget | Agent automatically focuses on critical tasks only |
+| 100% of budget | Agent auto-paused until budget is reset |
+
+**Suggested starting values (monthly):**
+
+| Role | Budget (cents) |
+|------|---------------|
+| CEO | 5,000 ($50) |
+| Manager | 3,000 ($30) |
+| IC | 2,000 ($20) |
+| Company total | 15,000–20,000 |
+
+**Never leave budget at `0`** — that means unlimited spend, which is a runaway risk.
+
+## Debugging
+
+Common errors and fixes:
+
+| Symptom | Fix |
+|---------|-----|
+| "Nested sessions" / Claude Code conflict | Launch Paperclip with `unset CLAUDECODE` before `pnpm dev` (or use a wrapper script) |
+| Agent does nothing on heartbeat | Check `instructionsFilePath` exists + heartbeat `enabled: true` |
+| Immediate timeout on agent run | `timeoutSec` is `0` — set it to `900` |
+| Port 3100 already in use | `lsof -ti:3100 \| xargs kill -9` |
+| Config invalid / corrupted | `paperclipai doctor --repair` |
+| Workspace fallback errors | Set `cwd` explicitly in `adapterConfig` |
+| CLI auth errors | `paperclipai auth login` — session may have expired |
+
+**CLAUDECODE conflict wrapper** — if running Paperclip from a terminal inside Claude Code, the `CLAUDECODE` env var causes nested session errors. Use a wrapper:
+
+```bash
+#!/bin/zsh
+unset CLAUDECODE
+cd ~/paperclip
+pnpm dev
 ```
 
 ## Notes
