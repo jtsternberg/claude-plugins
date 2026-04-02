@@ -160,6 +160,59 @@ function get_context_bar($percentage, $is_estimate, $max_k) {
 }
 
 /**
+ * Generate a visual rate limit bar with optional timeline marker.
+ *
+ * @param string $label Display label (e.g. '5h', '7d')
+ * @param int $percentage Usage percentage (0-100)
+ * @param int|null $resets_at Unix timestamp when this window resets
+ * @param int $window_seconds Duration of the rate limit window in seconds
+ * @return string Formatted rate limit bar with colors
+ */
+function get_rate_limit_bar($label, $percentage, $resets_at = null, $window_seconds = 0) {
+    $bar_width = 10;
+
+    $c_accent = "\033[38;5;74m";   // blue
+    $c_empty = "\033[38;5;238m";   // dark gray
+    $c_marker = "\033[38;5;220m";  // yellow
+    $c_reset = "\033[0m";
+
+    // Calculate timeline position (which bar cell the "now" marker falls in)
+    $marker_cell = -1;
+    if ($resets_at && $window_seconds > 0) {
+        $remaining = $resets_at - time();
+        $elapsed = $window_seconds - $remaining;
+        if ($elapsed >= 0 && $elapsed <= $window_seconds) {
+            $time_pct = ($elapsed / $window_seconds) * 100;
+            $marker_cell = (int)($time_pct / 10);
+            if ($marker_cell >= $bar_width) {
+                $marker_cell = $bar_width - 1;
+            }
+        }
+    }
+
+    $bar = '';
+    for ($i = 0; $i < $bar_width; $i++) {
+        if ($i === $marker_cell) {
+            $bar .= $c_marker . '│' . $c_reset;
+            continue;
+        }
+
+        $bar_start = $i * 10;
+        $progress = $percentage - $bar_start;
+
+        if ($progress >= 8) {
+            $bar .= $c_accent . '█' . $c_reset;
+        } elseif ($progress >= 3) {
+            $bar .= $c_accent . '▄' . $c_reset;
+        } else {
+            $bar .= $c_empty . '░' . $c_reset;
+        }
+    }
+
+    return getMsg($label . ': ', 'dark_gray') . $bar . ' ' . getMsg("{$percentage}%", 'dark_gray');
+}
+
+/**
  * Get recent prompts from transcript file.
  *
  * @param string $transcript_path Path to the session transcript JSONL file
@@ -308,17 +361,29 @@ function generate_status_line($input_data) {
 
     $line1 = implode(' | ', $parts);
 
-    // Line 2: rate limits (only if present)
+    // Line 2: rate limits with visual bars (only if present)
     $rate_parts = [];
     if (isset($input_data['rate_limits']['five_hour']['used_percentage'])) {
-        $rate_parts[] = '5h: ' . (int)$input_data['rate_limits']['five_hour']['used_percentage'] . '%';
+        $resets_at = $input_data['rate_limits']['five_hour']['resets_at'] ?? null;
+        $rate_parts[] = get_rate_limit_bar(
+            '5h',
+            (int)$input_data['rate_limits']['five_hour']['used_percentage'],
+            $resets_at,
+            5 * 3600
+        );
     }
     if (isset($input_data['rate_limits']['seven_day']['used_percentage'])) {
-        $rate_parts[] = '7d: ' . (int)$input_data['rate_limits']['seven_day']['used_percentage'] . '%';
+        $resets_at = $input_data['rate_limits']['seven_day']['resets_at'] ?? null;
+        $rate_parts[] = get_rate_limit_bar(
+            '7d',
+            (int)$input_data['rate_limits']['seven_day']['used_percentage'],
+            $resets_at,
+            7 * 86400
+        );
     }
 
     if (!empty($rate_parts)) {
-        $line1 .= "\n" . getMsg(implode(' ', $rate_parts), 'dark_gray');
+        $line1 .= "\n" . implode('  ', $rate_parts);
     }
 
     return $line1;
