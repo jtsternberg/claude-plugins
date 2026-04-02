@@ -144,6 +144,8 @@ If the user gave you a specific session ID to dial (e.g., "dial session abc123")
 
 **Override:** If the user's intent is clearly to contribute to or help that session (e.g., "help that session fix its bug," "continue that conversation"), don't fork — they want to add to the existing session. When in doubt, fork.
 
+**CRITICAL: When dialing by session ID, the `--cwd` MUST come from Step 1's resolve output** (which reverse-looks up the session ID to find its workspace via transcript files). Do NOT use your own workspace as `--cwd` — the target session lives in a different directory, and using the wrong `--cwd` causes `--fork` to silently fail with empty output.
+
 ### Step 5: Execute the Call
 
 #### First Contact (No Existing Session)

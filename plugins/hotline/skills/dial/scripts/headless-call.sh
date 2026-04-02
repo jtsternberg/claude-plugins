@@ -80,12 +80,19 @@ else
   "${CMD[@]}" 2>"$STDERR_FILE" > "$STREAM_FILE" || true
 fi
 
+# Check for completely empty stream (silent failure — e.g., --fork with wrong --cwd)
+if [[ ! -s "$STREAM_FILE" ]]; then
+  STDERR_MSG=$(cat "$STDERR_FILE")
+  jq -n --arg err "${STDERR_MSG:-Claude CLI produced no output at all. If using --fork, verify --cwd points to the TARGET session's workspace (use resolve-workspace.sh with the session ID), not the caller's workspace.}" '{error: $err}'
+  exit 1
+fi
+
 # Parse the result event for session_id and metadata
 RESULT_LINE=$(grep '"type":"result"' "$STREAM_FILE" | tail -1)
 
 if [[ -z "$RESULT_LINE" ]]; then
   STDERR_MSG=$(cat "$STDERR_FILE")
-  jq -n --arg err "${STDERR_MSG:-Claude CLI returned no output and no result event in stream}" '{error: $err}'
+  jq -n --arg err "${STDERR_MSG:-Stream had data but no result event. The session may have been interrupted or timed out.}" '{error: $err}'
   exit 1
 fi
 
