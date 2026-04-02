@@ -6,7 +6,7 @@
 # Follow-up: uses --resume with existing session ID
 #
 # Usage:
-#   headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>] [--name <name>] [--fork]
+#   headless-call.sh --cwd <path> --prompt <text> [--resume <session-id>] [--name <name>] [--fork-session]
 #
 # Outputs JSON: {"session_id": "...", "response": "..."}
 # On error: {"error": "..."} on stdout, exit 1
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: headless-call.sh --cwd <path> --prompt <text> [--resume <id>] [--name <name>] [--fork]"
+  echo "Usage: headless-call.sh --cwd <path> --prompt <text> [--resume <id>] [--name <name>] [--fork-session]"
   echo ""
   echo "Sends a prompt to a workspace via claude -p. Uses stream-json for reliable output."
   echo "Outputs JSON: {\"session_id\": \"...\", \"response\": \"...\"}"
@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
     --prompt) PROMPT="$2"; shift 2 ;;
     --resume) RESUME_ID="$2"; shift 2 ;;
     --name) SESSION_NAME="$2"; shift 2 ;;
-    --fork) FORK_SESSION=true; shift ;;
+    --fork-session) FORK_SESSION=true; shift ;;
     *) shift ;;
   esac
 done
@@ -83,7 +83,7 @@ fi
 # Check for completely empty stream (silent failure — e.g., --fork with wrong --cwd)
 if [[ ! -s "$STREAM_FILE" ]]; then
   STDERR_MSG=$(cat "$STDERR_FILE")
-  jq -n --arg err "${STDERR_MSG:-Claude CLI produced no output at all. If using --fork, verify --cwd points to the TARGET session's workspace (use resolve-workspace.sh with the session ID), not the caller's workspace.}" '{error: $err}'
+  jq -n --arg err "${STDERR_MSG:-Claude CLI produced no output at all. If using --fork-session, verify --cwd points to the TARGET session's workspace (use resolve-workspace.sh with the session ID), not the caller's workspace.}" '{error: $err}'
   exit 1
 fi
 

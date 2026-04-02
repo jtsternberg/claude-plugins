@@ -140,11 +140,11 @@ bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-sessio
 
 **Fork behavior when the user provided a session ID directly** (not from our cache):
 
-If the user gave you a specific session ID to dial (e.g., "dial session abc123"), that's someone else's session. **Fork by default** (`--fork` flag) to avoid cluttering their conversation with hotline protocol noise.
+If the user gave you a specific session ID to dial (e.g., "dial session abc123"), that's someone else's session. **Fork by default** (`--fork-session` flag) to avoid cluttering their conversation with hotline protocol noise.
 
 **Override:** If the user's intent is clearly to contribute to or help that session (e.g., "help that session fix its bug," "continue that conversation"), don't fork — they want to add to the existing session. When in doubt, fork.
 
-**CRITICAL: When dialing by session ID, the `--cwd` MUST come from Step 1's resolve output** (which reverse-looks up the session ID to find its workspace via transcript files). Do NOT use your own workspace as `--cwd` — the target session lives in a different directory, and using the wrong `--cwd` causes `--fork` to silently fail with empty output.
+**CRITICAL: When dialing by session ID, the `--cwd` MUST come from Step 1's resolve output** (which reverse-looks up the session ID to find its workspace via transcript files). Do NOT use your own workspace as `--cwd` — the target session lives in a different directory, and using the wrong `--cwd` causes `--fork-session` to silently fail with empty output.
 
 ### Step 5: Execute the Call
 
@@ -152,15 +152,15 @@ If the user gave you a specific session ID to dial (e.g., "dial session abc123")
 
 Construct a session name for the `/resume` picker. Format: `hotline: <caller-dir> → <target-dir> (<mode>)` using just the directory basenames (not full paths). Example: `hotline: marketing → blog (quick_call)`.
 
-Place the call. If the user provided a session ID directly (and you determined in Step 4 that forking is appropriate), add `--fork`:
+Place the call. If the user provided a session ID directly (and you determined in Step 4 that forking is appropriate), add `--fork-session`:
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
-  --name "$SESSION_NAME" [--fork] \
+  --name "$SESSION_NAME" [--fork-session] \
   --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT"
 ```
 
-Include `--fork` when dialing someone else's session ID. Omit it for fresh calls to a workspace (no session to fork from).
+Include `--fork-session` when dialing someone else's session ID. Omit it for fresh calls to a workspace (no session to fork from).
 
 Parse the JSON response. Extract `session_id` and `response`.
 
