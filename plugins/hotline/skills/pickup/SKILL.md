@@ -1,6 +1,8 @@
 ---
 name: hotline-pickup
-description: "Introspect the current workspace and cache a concise identity. Used by hotline-dial for workspace resolution. Run with --fresh to force re-introspection."
+description: "Generates and caches a concise identity for the current workspace. Used by hotline-dial for workspace resolution and fuzzy matching. Trigger when a workspace identity is stale, missing, or needs refreshing."
+argument-hint: "[--fresh]"
+allowed-tools: Bash
 ---
 
 # Hotline: Pickup — Workspace Identity
@@ -14,13 +16,9 @@ Generate a concise identity for this workspace so other agents can find and unde
 
 ## Script Paths
 
-Resolve plugin paths first:
+!`bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh`
 
-```bash
-eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)"
-```
-
-This sets `HOTLINE_PICKUP_SCRIPTS` (and others). Use `$HOTLINE_PICKUP_SCRIPTS` in all script references below.
+The above sets `HOTLINE_PICKUP_SCRIPTS` (and others).
 
 ## Steps
 

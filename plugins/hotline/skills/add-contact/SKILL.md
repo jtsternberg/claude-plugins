@@ -1,6 +1,8 @@
 ---
 name: hotline-add-contact
-description: "Register a workspace in dirmap so other agents can find it via hotline-dial. Use when a workspace needs to be added to the directory map for cross-workspace communication."
+description: "Registers a workspace in dirmap so other agents can find it via hotline-dial. Use when adding a workspace to the directory map for cross-workspace communication."
+argument-hint: "[slug] [path]"
+allowed-tools: Bash
 ---
 
 # Hotline: Add Contact

@@ -1,38 +1,32 @@
 ---
 name: hotline-dial
-description: "Initiate cross-workspace communication with another Claude Code instance. Supports quick calls (Q&A), work orders (delegation), and conference calls (collaboration). Auto-selects transport between headless CLI and CMUX."
+description: "Initiates cross-workspace communication with another Claude Code instance. Supports quick calls, work orders, and conference calls. Use when the user wants to call, dial, message, delegate to, or collaborate with another workspace or project."
+argument-hint: "[workspace] [task/question...]"
+allowed-tools: Bash
 ---
 
-# Hotline: Dial — Cross-Workspace Communication
+# Hotline: Dial
 
-Place a call to another Claude Code workspace. You're the switchboard operator here — resolve the target, pick the right transport, manage the session, and relay everything back to the user.
+Dial another workspace to ask questions, delegate work, or collaborate.
 
 ## Arguments
 
-- **$1** (optional): Workspace reference — a dirmap ID, path, session ID, or fuzzy name. If not provided, extract the target from the user's natural language prompt.
-- **$2+** (optional): The task/question for the remote workspace. Everything after the first argument. If not provided, extract from the user's prompt.
+- **`$0`** (optional): Workspace reference — a dirmap ID, path, session ID, or fuzzy name.
+- **`$1+`** (optional): The task/question for the remote workspace.
 
-Examples:
 ```
 /hotline-dial dotfiles what branch are you on?
 /hotline-dial coaching write the about page
-/hotline-dial 5b1dda91-a3c1-45f9-b967-aa9dac221e59 what went wrong?
+/hotline-dial 5b1dda91-... what went wrong?
 ```
 
-If arguments are provided, use `$1` as `USER_REFERENCE` in Step 1 and `$2+` as the prompt in Step 5. If not provided, parse both from the user's natural language request.
+If `$0` is provided, use it as `USER_REFERENCE` in Step 1. If `$1+` is provided, use it as the prompt in Step 5. If neither, parse both from the user's natural language.
 
 ## Script Paths
 
-Before running any scripts, resolve the plugin paths. Run this once at the start:
+!`bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh`
 
-```bash
-eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)"
-```
-
-This sets:
-- `HOTLINE_SCRIPTS` — shared scripts (session fingerprint, dirmap fallback, dial history)
-- `HOTLINE_DIAL_SCRIPTS` — dial-specific scripts (resolve, cache, transport)
-- `HOTLINE_PICKUP_SCRIPTS` — pickup scripts (identity cache)
+The above sets `HOTLINE_SCRIPTS`, `HOTLINE_DIAL_SCRIPTS`, and `HOTLINE_PICKUP_SCRIPTS`.
 
 ## Prerequisites: Know Thyself
 

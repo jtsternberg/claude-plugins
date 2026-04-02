@@ -1,6 +1,8 @@
 ---
 name: hotline-whoami
-description: "Identify the current workspace's dirmap slug. Use when the agent needs to know what this workspace is called in the directory, for caller ID in hotline calls, or to check if a workspace is registered."
+description: "Identifies the current workspace's dirmap slug. Use when the agent needs caller ID for hotline calls, or to check if a workspace is registered in the directory map."
+argument-hint: "[path]"
+allowed-tools: Bash
 ---
 
 # Hotline: Who Am I?

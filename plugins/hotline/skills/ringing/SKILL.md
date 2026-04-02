@@ -1,6 +1,9 @@
 ---
 name: hotline-ringing
-description: "Receiver-side handshake for incoming hotline calls. Primes the agent with communication protocol context. Invoked as /hotline-ringing on first contact from another workspace."
+description: "Handles incoming cross-workspace calls from hotline-dial. Primes the agent with communication protocol, workspace isolation rules, and response format. Activated when another Claude Code agent connects to this workspace."
+argument-hint: "[MODE: mode] [CALLER: path] [SESSION: id] task..."
+allowed-tools: Bash
+disable-model-invocation: true
 ---
 
 # Hotline: Ringing — Incoming Call Protocol
@@ -37,13 +40,9 @@ STATUS: OUT_OF_SCOPE
 
 ## Script Paths
 
-Resolve plugin paths first:
+!`bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh`
 
-```bash
-eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)"
-```
-
-This sets `HOTLINE_SCRIPTS` (and others). Use `$HOTLINE_SCRIPTS` in all script references below.
+The above sets `HOTLINE_SCRIPTS`, `HOTLINE_DIAL_SCRIPTS`, and `HOTLINE_PICKUP_SCRIPTS`.
 
 ## Incoming Prompt Format
 
