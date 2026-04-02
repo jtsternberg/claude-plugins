@@ -152,28 +152,50 @@ If the user gave you a specific session ID to dial (e.g., "dial session abc123")
 
 Construct a session name for the `/resume` picker. Format: `hotline: <caller-dir> → <target-dir> (<mode>)` using just the directory basenames (not full paths). Example: `hotline: marketing → blog (quick_call)`.
 
-Place the call. If the user provided a session ID directly (and you determined in Step 4 that forking is appropriate), add `--fork-session`:
+Fire the call asynchronously. This returns immediately with a `call_dir` — the session ID and response will be written to files in that directory:
 
 ```bash
-bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
+CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" [--fork-session] \
-  --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT"
+  --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 ```
 
 Include `--fork-session` when dialing someone else's session ID. Omit it for fresh calls to a workspace (no session to fork from).
 
-The script outputs **two JSON lines**:
-- **Line 1 (immediate):** `{"session_id": "..."}` — available as soon as the remote session starts. Surface this to the user right away so they have the session ID.
-- **Line 2 (on completion):** `{"session_id": "...", "response": "..."}` — the full response.
+**Immediately read the session ID** (it's written as soon as the remote session starts):
 
-This means you can report "Connected to X (session: abc123)" before the remote agent finishes its work.
+```bash
+# Wait briefly for session_id.txt to appear, then read it
+sleep 2 && cat "$CALL_DIR/session_id.txt"
+```
 
-Cache the session for future use:
+**Report the session ID to the user right away** — don't wait for the full response:
+
+> Connected to **[workspace name]** (session: `[session-id]`). Working on it — I'll relay the response when it's ready.
+
+**Then wait for the response** (poll for the `done` file):
+
+```bash
+# Wait for completion
+while [[ ! -f "$CALL_DIR/done" ]]; do sleep 2; done
+
+# Check for errors
+if [[ -f "$CALL_DIR/error.txt" ]]; then
+  cat "$CALL_DIR/error.txt"
+else
+  cat "$CALL_DIR/response.json"
+fi
+```
+
+Parse the response JSON for `session_id` and `response`. Cache the session:
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
   --caller-session "$MY_SESSION_ID" --session "$REMOTE_SESSION_ID" --mode "$MODE"
 ```
+
+Clean up: `rm -rf "$CALL_DIR"`
 
 #### Follow-Up (Existing Session from Our Cache)
 
