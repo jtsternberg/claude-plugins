@@ -162,7 +162,11 @@ bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
 
 Include `--fork-session` when dialing someone else's session ID. Omit it for fresh calls to a workspace (no session to fork from).
 
-Parse the JSON response. Extract `session_id` and `response`.
+The script outputs **two JSON lines**:
+- **Line 1 (immediate):** `{"session_id": "..."}` — available as soon as the remote session starts. Surface this to the user right away so they have the session ID.
+- **Line 2 (on completion):** `{"session_id": "...", "response": "..."}` — the full response.
+
+This means you can report "Connected to X (session: abc123)" before the remote agent finishes its work.
 
 Cache the session for future use:
 
