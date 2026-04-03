@@ -10,8 +10,8 @@
 # can be found in it. This script does NOT combine them into one step.
 #
 # Usage:
-#   session-init.sh [--json] discover <fingerprint>   # Step 2: find session from fingerprint
-#   session-init.sh [--json]                           # Step 1: check cache or plant fingerprint
+#   session-init.sh [--expanded]                           # Step 1: check cache or plant fingerprint
+#   session-init.sh discover <fingerprint> [--expanded]    # Step 2: find session from fingerprint
 #   session-init.sh --help
 #
 # Step 1 output (JSON on stdout):
@@ -23,7 +23,7 @@
 #   {"status": "discovered", "session_id": "..."}     — done, use this ID
 #   {"status": "error", "message": "..."}             — discovery failed
 #
-# With --json, "cached" and "discovered" responses also include:
+# With --expanded, "cached" and "discovered" responses also include:
 #   "transcript_path", "claude_pid", "project_dir"
 # =============================================================================
 set -euo pipefail
@@ -31,34 +31,38 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: session-init.sh [--json]                    # Check cache or plant fingerprint"
-  echo "       session-init.sh [--json] discover <fp>      # Discover session from fingerprint"
+  echo "Usage: session-init.sh [--expanded]                    # Check cache or plant fingerprint"
+  echo "       session-init.sh discover <fp> [--expanded]      # Discover session from fingerprint"
   echo ""
   echo "Two-step session ID discovery orchestrator."
   echo "Step 1 and Step 2 MUST be separate tool calls."
   echo ""
   echo "Options:"
-  echo "  --json  Include transcript_path, claude_pid, project_dir in JSON output"
+  echo "  --expanded  Include transcript_path, claude_pid, project_dir in JSON output"
   exit 0
 fi
 
-# Parse --json flag
-JSON_OUTPUT=false
-if [[ "${1:-}" == "--json" ]]; then
-  JSON_OUTPUT=true
-  shift
-fi
+# Parse all args — flags can appear anywhere
+EXPANDED=false
+SUBCOMMAND=""
+FINGERPRINT=""
+for arg in "$@"; do
+  case "$arg" in
+    --expanded) EXPANDED=true ;;
+    discover) SUBCOMMAND="discover" ;;
+    *) FINGERPRINT="$arg" ;;
+  esac
+done
 
 # Step 2: discover from fingerprint
-if [[ "${1:-}" == "discover" ]]; then
-  FINGERPRINT="${2:-}"
+if [[ "$SUBCOMMAND" == "discover" ]]; then
   if [[ -z "$FINGERPRINT" ]]; then
     echo '{"status":"error","message":"No fingerprint provided. Usage: session-init.sh discover <fingerprint>"}'
     exit 1
   fi
 
-  if [[ "$JSON_OUTPUT" == true ]]; then
-    RESULT=$("$SCRIPT_DIR/session-discover.sh" --json "$FINGERPRINT" 2>&1) && EXIT_CODE=0 || EXIT_CODE=$?
+  if [[ "$EXPANDED" == true ]]; then
+    RESULT=$("$SCRIPT_DIR/session-discover.sh" "$FINGERPRINT" --json 2>&1) && EXIT_CODE=0 || EXIT_CODE=$?
     if [[ $EXIT_CODE -eq 0 ]]; then
       echo "$RESULT" | jq '{status: "discovered"} + .'
     else
@@ -86,7 +90,7 @@ RESULT=$("$SCRIPT_DIR/session-fingerprint.sh" 2>"$STDERR_FILE") && EXIT_CODE=0 |
 case $EXIT_CODE in
   0)
     # Cache hit
-    if [[ "$JSON_OUTPUT" == true ]]; then
+    if [[ "$EXPANDED" == true ]]; then
       # Look up cached transcript path, or reconstruct it
       CLAUDE_PID=""
       cpid=$$
