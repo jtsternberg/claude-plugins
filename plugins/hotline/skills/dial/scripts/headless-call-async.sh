@@ -146,7 +146,7 @@ fi
     '{session_id: $sid, response: $resp}' > "$CALL_DIR/response.json"
 
   touch "$CALL_DIR/done"
-) &
+) &>/dev/null &
 
 # Return immediately with the call directory
 jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'
