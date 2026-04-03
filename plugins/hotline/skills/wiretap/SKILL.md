@@ -4,9 +4,9 @@ description: "Finds and returns the path to the current session's conversation t
 allowed-tools: Bash
 ---
 
-# Hotline: Session Transcript
+# Hotline: Wiretap
 
-Locate the JSONL transcript file for the current Claude Code session. Requires session ID discovery first, then constructs the path from the project directory hash.
+Locate the JSONL transcript file for the current Claude Code session.
 
 ## Script Paths
 
@@ -26,12 +26,12 @@ This is a **two-step process** that requires **two separate Bash tool calls**. T
 
 ```bash
 eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)" && \
-bash "$HOTLINE_SCRIPTS/session-init.sh"
+bash "$HOTLINE_SCRIPTS/session-init.sh" --include-path
 ```
 
 Parse the JSON output:
 
-- `{"status": "cached", "session_id": "..."}` — You already know the ID. Skip to **Build Path**.
+- `{"status": "cached", "session_id": "...", "transcript_path": "...", ...}` — Done. Skip to **Report**.
 - `{"status": "planted", "fingerprint": "..."}` — Save the fingerprint value. Proceed to **Step 2** in a **separate tool call**.
 - `{"status": "error", "message": "..."}` — Report the error to the user. Discovery failed.
 
@@ -41,42 +41,26 @@ Parse the JSON output:
 
 ```bash
 eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)" && \
-bash "$HOTLINE_SCRIPTS/session-init.sh" discover "<fingerprint>"
+bash "$HOTLINE_SCRIPTS/session-init.sh" --include-path discover "<fingerprint>"
 ```
 
 Replace `<fingerprint>` with the value from Step 1.
 
 Parse the JSON output:
 
-- `{"status": "discovered", "session_id": "..."}` — Got it. Proceed to **Build Path**.
+- `{"status": "discovered", "session_id": "...", "transcript_path": "...", ...}` — Got it. Proceed to **Report**.
 - `{"status": "error", "message": "..."}` — Report the error. Discovery failed.
-
-## Build Path
-
-Construct the transcript path and verify it exists:
-
-```bash
-PROJECT_HASH=$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')
-TRANSCRIPT_PATH="$HOME/.claude/projects/${PROJECT_HASH}/<session_id>.jsonl"
-if [[ -f "$TRANSCRIPT_PATH" ]]; then
-  echo "FOUND: $TRANSCRIPT_PATH"
-else
-  echo "NOT FOUND: $TRANSCRIPT_PATH"
-fi
-```
-
-Replace `<session_id>` with the discovered session ID.
 
 ## Report
 
-Tell the user their transcript path:
+The `transcript_path` field from the JSON response is the full path to the JSONL file. Tell the user:
 
 > Your session transcript is at:
 > ```
 > <transcript_path>
 > ```
 
-If the file was not found, let the user know and suggest the path may differ.
+If the file doesn't exist at that path, let the user know.
 
 ## --open Flag
 

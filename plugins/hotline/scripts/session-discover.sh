@@ -3,9 +3,10 @@
 #
 # Finds the Claude Code session ID by grepping transcript files for a planted fingerprint.
 #
-# Usage: session-discover.sh <fingerprint>
+# Usage: session-discover.sh [--json] <fingerprint>
 #
-#   <fingerprint> - The SESSION_FINGERPRINT_<uuid> string output by session-fingerprint.sh
+#   --json          Output full JSON payload instead of bare session ID
+#   <fingerprint>   The SESSION_FINGERPRINT_<uuid> string output by session-fingerprint.sh
 #
 # The fingerprint must have been emitted into the conversation transcript before calling
 # this script. The transcript filename (minus .jsonl) IS the session ID.
@@ -19,17 +20,26 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: session-discover.sh <fingerprint>"
+  echo "Usage: session-discover.sh [--json] <fingerprint>"
   echo ""
   echo "Finds the Claude Code session ID by grepping transcripts for a planted fingerprint."
   echo "On success: writes session ID to stdout, exit 0. On failure: exit 1."
+  echo ""
+  echo "Options:"
+  echo "  --json  Output full JSON payload: session_id, transcript_path, claude_pid, project_dir"
   exit 0
+fi
+
+JSON_OUTPUT=false
+if [[ "${1:-}" == "--json" ]]; then
+  JSON_OUTPUT=true
+  shift
 fi
 
 FINGERPRINT="${1:-}"
 
 if [[ -z "$FINGERPRINT" ]]; then
-  echo "Usage: session-discover.sh <fingerprint>" >&2
+  echo "Usage: session-discover.sh [--json] <fingerprint>" >&2
   exit 1
 fi
 
@@ -87,8 +97,9 @@ if [[ -z "$TRANSCRIPT" ]]; then
 fi
 
 SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
+PROJECT_DIR=$(dirname "$TRANSCRIPT")
 
-# Cache for future session-fingerprint.sh calls
+# Find the claude process in our ancestry (for caching)
 CLAUDE_PID=""
 pid=$$
 while [[ "$pid" != "1" && -n "$pid" ]]; do
@@ -100,8 +111,20 @@ while [[ "$pid" != "1" && -n "$pid" ]]; do
   pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
 done
 
+# Cache session ID and transcript path for future lookups
 if [[ -n "$CLAUDE_PID" ]]; then
-  echo "$SESSION_ID" > "/tmp/claude-session-${CLAUDE_PID}"
+  CACHE_FILE="/tmp/claude-session-${CLAUDE_PID}"
+  echo "$SESSION_ID" > "$CACHE_FILE"
+  echo "$TRANSCRIPT" > "${CACHE_FILE}.transcript"
 fi
 
-echo "$SESSION_ID"
+if [[ "$JSON_OUTPUT" == true ]]; then
+  jq -n \
+    --arg sid "$SESSION_ID" \
+    --arg path "$TRANSCRIPT" \
+    --arg pid "${CLAUDE_PID:-}" \
+    --arg dir "$PROJECT_DIR" \
+    '{session_id: $sid, transcript_path: $path, claude_pid: $pid, project_dir: $dir}'
+else
+  echo "$SESSION_ID"
+fi
