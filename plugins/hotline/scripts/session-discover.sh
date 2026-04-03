@@ -3,10 +3,10 @@
 #
 # Finds the Claude Code session ID by grepping transcript files for a planted fingerprint.
 #
-# Usage: session-discover.sh [--json] <fingerprint>
+# Usage: session-discover.sh <fingerprint> [--json]
 #
-#   --json          Output full JSON payload instead of bare session ID
 #   <fingerprint>   The SESSION_FINGERPRINT_<uuid> string output by session-fingerprint.sh
+#   --json          Output full JSON payload instead of bare session ID
 #
 # The fingerprint must have been emitted into the conversation transcript before calling
 # this script. The transcript filename (minus .jsonl) IS the session ID.
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: session-discover.sh [--json] <fingerprint>"
+  echo "Usage: session-discover.sh <fingerprint> [--json]"
   echo ""
   echo "Finds the Claude Code session ID by grepping transcripts for a planted fingerprint."
   echo "On success: writes session ID to stdout, exit 0. On failure: exit 1."
@@ -30,16 +30,17 @@ if [[ "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
+FINGERPRINT=""
 JSON_OUTPUT=false
-if [[ "${1:-}" == "--json" ]]; then
-  JSON_OUTPUT=true
-  shift
-fi
-
-FINGERPRINT="${1:-}"
+for arg in "$@"; do
+  case "$arg" in
+    --json) JSON_OUTPUT=true ;;
+    *) FINGERPRINT="$arg" ;;
+  esac
+done
 
 if [[ -z "$FINGERPRINT" ]]; then
-  echo "Usage: session-discover.sh [--json] <fingerprint>" >&2
+  echo "Usage: session-discover.sh <fingerprint> [--json]" >&2
   exit 1
 fi
 

@@ -26,7 +26,7 @@ This is a **two-step process** that requires **two separate Bash tool calls**. T
 
 ```bash
 eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)" && \
-bash "$HOTLINE_SCRIPTS/session-init.sh" --include-path
+bash "$HOTLINE_SCRIPTS/session-init.sh" --json
 ```
 
 Parse the JSON output:
@@ -41,7 +41,7 @@ Parse the JSON output:
 
 ```bash
 eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)" && \
-bash "$HOTLINE_SCRIPTS/session-init.sh" --include-path discover "<fingerprint>"
+bash "$HOTLINE_SCRIPTS/session-init.sh" --json discover "<fingerprint>"
 ```
 
 Replace `<fingerprint>` with the value from Step 1.

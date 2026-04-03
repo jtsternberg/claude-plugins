@@ -10,8 +10,8 @@
 # can be found in it. This script does NOT combine them into one step.
 #
 # Usage:
-#   session-init.sh [--include-path] discover <fingerprint>   # Step 2: find session from fingerprint
-#   session-init.sh [--include-path]                           # Step 1: check cache or plant fingerprint
+#   session-init.sh [--json] discover <fingerprint>   # Step 2: find session from fingerprint
+#   session-init.sh [--json]                           # Step 1: check cache or plant fingerprint
 #   session-init.sh --help
 #
 # Step 1 output (JSON on stdout):
@@ -23,7 +23,7 @@
 #   {"status": "discovered", "session_id": "..."}     — done, use this ID
 #   {"status": "error", "message": "..."}             — discovery failed
 #
-# With --include-path, "cached" and "discovered" responses also include:
+# With --json, "cached" and "discovered" responses also include:
 #   "transcript_path", "claude_pid", "project_dir"
 # =============================================================================
 set -euo pipefail
@@ -31,21 +31,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: session-init.sh [--include-path]                    # Check cache or plant fingerprint"
-  echo "       session-init.sh [--include-path] discover <fp>      # Discover session from fingerprint"
+  echo "Usage: session-init.sh [--json]                    # Check cache or plant fingerprint"
+  echo "       session-init.sh [--json] discover <fp>      # Discover session from fingerprint"
   echo ""
   echo "Two-step session ID discovery orchestrator."
   echo "Step 1 and Step 2 MUST be separate tool calls."
   echo ""
   echo "Options:"
-  echo "  --include-path  Include transcript_path, claude_pid, project_dir in JSON output"
+  echo "  --json  Include transcript_path, claude_pid, project_dir in JSON output"
   exit 0
 fi
 
-# Parse --include-path flag
-INCLUDE_PATH=false
-if [[ "${1:-}" == "--include-path" ]]; then
-  INCLUDE_PATH=true
+# Parse --json flag
+JSON_OUTPUT=false
+if [[ "${1:-}" == "--json" ]]; then
+  JSON_OUTPUT=true
   shift
 fi
 
@@ -57,7 +57,7 @@ if [[ "${1:-}" == "discover" ]]; then
     exit 1
   fi
 
-  if [[ "$INCLUDE_PATH" == true ]]; then
+  if [[ "$JSON_OUTPUT" == true ]]; then
     RESULT=$("$SCRIPT_DIR/session-discover.sh" --json "$FINGERPRINT" 2>&1) && EXIT_CODE=0 || EXIT_CODE=$?
     if [[ $EXIT_CODE -eq 0 ]]; then
       echo "$RESULT" | jq '{status: "discovered"} + .'
@@ -86,7 +86,7 @@ RESULT=$("$SCRIPT_DIR/session-fingerprint.sh" 2>"$STDERR_FILE") && EXIT_CODE=0 |
 case $EXIT_CODE in
   0)
     # Cache hit
-    if [[ "$INCLUDE_PATH" == true ]]; then
+    if [[ "$JSON_OUTPUT" == true ]]; then
       # Look up cached transcript path, or reconstruct it
       CLAUDE_PID=""
       cpid=$$
