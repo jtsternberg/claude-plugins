@@ -2,7 +2,6 @@
 name: hotline-ringing
 description: "Handles incoming cross-workspace calls from hotline-dial. Primes the agent with communication protocol, workspace isolation rules, and response format. Activated when another Claude Code agent connects to this workspace."
 argument-hint: "[MODE: mode] [CALLER: path] [SESSION: id] task..."
-allowed-tools: Bash
 disable-model-invocation: true
 ---
 

@@ -20,11 +20,13 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: headless-call.sh --cwd <path> --prompt <text> [--resume <id>] [--name <name>] [--fork-session]"
+  echo "Usage: headless-call.sh --cwd <path> --prompt <text> [--resume <id>] [--name <name>] [--fork-session] [--tools <tools>]"
   echo ""
   echo "Sends a prompt to a workspace via claude -p. Outputs two JSON lines:"
   echo "  Line 1 (immediate): {\"session_id\": \"...\"}"
   echo "  Line 2 (on complete): {\"session_id\": \"...\", \"response\": \"...\"}"
+  echo ""
+  echo "  --tools <tools>  Override allowed tools (default: \"Bash Read Edit Write Grep Glob\")"
   exit 0
 fi
 
@@ -33,6 +35,7 @@ PROMPT=""
 RESUME_ID=""
 SESSION_NAME=""
 FORK_SESSION=false
+ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --resume) RESUME_ID="$2"; shift 2 ;;
     --name) SESSION_NAME="$2"; shift 2 ;;
     --fork-session) FORK_SESSION=true; shift ;;
+    --tools) ALLOWED_TOOLS="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -51,7 +55,7 @@ if [[ -z "$PROMPT" ]]; then
 fi
 
 # Build the command as an array
-CMD=(claude -p "$PROMPT" --allowedTools Bash --output-format stream-json --verbose)
+CMD=(claude -p "$PROMPT" --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
 
 if [[ -n "$RESUME_ID" ]]; then
   CMD+=(--resume "$RESUME_ID")

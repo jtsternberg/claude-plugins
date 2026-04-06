@@ -20,11 +20,13 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: headless-call-async.sh --cwd <path> --prompt <text> [--resume <id>] [--name <name>] [--fork-session]"
+  echo "Usage: headless-call-async.sh --cwd <path> --prompt <text> [--resume <id>] [--name <name>] [--fork-session] [--tools <tools>]"
   echo ""
   echo "Fires a headless call in the background. Returns immediately with the call_dir."
   echo "Session ID written to call_dir/session_id.txt as soon as available."
   echo "Full response written to call_dir/response.json when complete."
+  echo ""
+  echo "  --tools <tools>  Override allowed tools (default: \"Bash Read Edit Write Grep Glob\")"
   exit 0
 fi
 
@@ -33,6 +35,7 @@ PROMPT=""
 RESUME_ID=""
 SESSION_NAME=""
 FORK_SESSION=false
+ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --resume) RESUME_ID="$2"; shift 2 ;;
     --name) SESSION_NAME="$2"; shift 2 ;;
     --fork-session) FORK_SESSION=true; shift ;;
+    --tools) ALLOWED_TOOLS="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -54,7 +58,7 @@ fi
 CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
 
 # Build the command
-CMD=(claude -p "$PROMPT" --allowedTools Bash --output-format stream-json --verbose)
+CMD=(claude -p "$PROMPT" --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
 
 if [[ -n "$RESUME_ID" ]]; then
   CMD+=(--resume "$RESUME_ID")
