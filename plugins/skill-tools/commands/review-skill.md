@@ -37,5 +37,6 @@ Compare against fetched documentation. Focus solely on actionable improvements â
 2. **Issues**: Problems with specific line references
 3. **Recommendations**: Prioritized improvements with code/text examples
 4. **Script opportunities**: Bash/python scripts that could improve reliability
+5. **Inline shell execution**: Does this skill hardcode context that could be dynamic? Check for opportunities to use `!`command`` syntax (single-line) or ` ```! ` fenced blocks (multi-line) to inject runtime context â€” current date, git branch, environment info, project metadata, etc. These run at skill load time and inline the output before Claude sees the prompt. Flag any static values that would be more accurate or useful if computed on the fly.
 
 Output the review as a markdown file.
