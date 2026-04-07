@@ -1,6 +1,6 @@
 # Headline Refiner Plugin
 
-Transform weak headlines into compelling ones using the proven 5-Part Headline Framework.
+Transform weak headlines into compelling ones using the proven 5-Part Headline Framework. See https://www.youtube.com/watch?v=JQsErUBMlXQ
 
 ## Installation
 
