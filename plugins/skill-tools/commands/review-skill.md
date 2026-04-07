@@ -11,10 +11,10 @@ Look for the skill at the provided path, or in `.claude/skills/$ARGUMENTS/` or `
 
 **REQUIRED**: Fetch these URLs for current best practices before reviewing:
 
-* https://claude.com/blog/skills
 * https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview
 * https://platform.claude.com/docs/en/agents-and-tools/agent-skills/quickstart
 * https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices
+* https://code.claude.com/docs/en/skills.md
 
 and recent tweet (https://x.com/lydiahallie/status/2034337963820327017?s=20) says:
 ```
