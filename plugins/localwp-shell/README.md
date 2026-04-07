@@ -52,3 +52,7 @@ amskills install localwp-shell
 ```
 
 The skill triggers automatically when Claude detects you're working inside a LocalWP site directory.
+
+## Troubleshooting
+
+If commands still hit the system PHP after installing, make sure your working directory is inside the LocalWP site (or a symlink that resolves to one). Run `bash scripts/localwpshell php -v` to verify the correct binary is being picked up.
