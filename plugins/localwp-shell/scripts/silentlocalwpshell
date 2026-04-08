@@ -8,4 +8,5 @@
 # Usage:
 #   silentlocalwpshell wp plugin list
 
-exec localwpshell --silent "$@"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$SCRIPT_DIR/localwpshell" --silent "$@"

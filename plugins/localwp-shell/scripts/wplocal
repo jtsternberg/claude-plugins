@@ -8,4 +8,5 @@
 #   wplocal plugin list
 #   wplocal search-replace 'old.test' 'new.test'
 
-exec silentlocalwpshell wp "$@"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$SCRIPT_DIR/silentlocalwpshell" wp "$@"
