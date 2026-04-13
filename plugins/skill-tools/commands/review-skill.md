@@ -9,7 +9,9 @@ Look for the skill at the provided path, or in `.claude/skills/$ARGUMENTS/` or `
 
 ## Step 1: Fetch Current Documentation
 
-**REQUIRED**: Fetch these URLs for current best practices before reviewing:
+**REQUIRED**: Fetch these URLs for current best practices before reviewing.
+
+Do NOT use webfetch tool, as it will be summarized. Use `curl` instead in order to get the full content.
 
 * https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview
 * https://platform.claude.com/docs/en/agents-and-tools/agent-skills/quickstart
@@ -37,6 +39,6 @@ Compare against fetched documentation. Focus solely on actionable improvements �
 2. **Issues**: Problems with specific line references
 3. **Recommendations**: Prioritized improvements with code/text examples
 4. **Script opportunities**: Bash/python scripts that could improve reliability
-5. **Inline shell execution**: Does this skill hardcode context that could be dynamic? Check for opportunities to use `!`command`` syntax (single-line) or ` ```! ` fenced blocks (multi-line) to inject runtime context — current date, git branch, environment info, project metadata, etc. These run at skill load time and inline the output before Claude sees the prompt. Flag any static values that would be more accurate or useful if computed on the fly.
+5. **Inject dynamic context**: Does this skill hardcode context that could be dynamic? Check for opportunities to use `!`command`` syntax (single-line) or ` ```! ` fenced blocks (multi-line) to inject runtime context — current date, git branch, environment info, project metadata, etc. These run at skill load time and inline the output before Claude sees the prompt. Flag any static values that would be more accurate or useful if computed on the fly. This is a great way to reduce the size of the skill and make it more maintainable.
 
 Output the review as a markdown file.
