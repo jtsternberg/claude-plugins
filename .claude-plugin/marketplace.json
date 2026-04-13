@@ -23,6 +23,7 @@
     { "name": "thinking-tools", "source": "./plugins/thinking-tools" },
     { "name": "bible", "source": "./plugins/bible" },
     { "name": "hotline", "source": "./plugins/hotline" },
-    { "name": "paperclip", "source": "./plugins/paperclip" }
+    { "name": "paperclip", "source": "./plugins/paperclip" },
+    { "name": "gws", "source": "./plugins/gws" }
   ]
 }
