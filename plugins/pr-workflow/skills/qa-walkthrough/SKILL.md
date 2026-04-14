@@ -1,9 +1,17 @@
 ---
 name: qa-walkthrough
-description: Guided manual QA walkthrough for PRs, branch changes, or ad-hoc testing. Generates a test plan, builds a beads epic, and walks the user through each test interactively. Use when the user says "QA this PR", "qa walkthrough", "manual testing", "walk me through testing", "QA my changes", or wants to manually verify work.
+description: Guided manual QA walkthrough for PRs, branch changes, or ad-hoc testing. Generates a test plan, builds a beads epic, and walks the user through each test interactively.
+when_to_use: Use when the user says "QA this PR", "qa walkthrough", "manual testing", "walk me through testing", "QA my changes", "test my changes", or wants to manually verify work before merging or pushing.
+argument-hint: "[<pr-number> | --branch | --describe \"...\"]"
+allowed-tools: Bash(gh *) Bash(git *) Bash(bd *) Bash(bash "${CLAUDE_SKILL_DIR}/scripts/*")
+effort: high
 ---
 
 # QA Walkthrough
+
+<!-- Note: disable-model-invocation is intentionally NOT set. While this skill creates beads
+     epics (a side effect), users expect "QA my changes" to trigger it automatically.
+     Reviewed 2026-04-14 against official skills docs. -->
 
 Guided manual QA walkthrough that generates a test plan from a PR, branch diff, or description, builds a structured beads task list (`bd create`) and epic, and walks the user through each test interactively.
 
@@ -19,6 +27,14 @@ Guided manual QA walkthrough that generates a test plan from a PR, branch diff, 
 - **`--branch`** — QA uncommitted or branch changes via git diff instead of a PR.
 - **`--base=<ref>`** — Base ref for branch mode (default: `main`).
 - **`--describe "<text>"`** — QA from a description (e.g., testing a new skill, config change, or plugin).
+
+**Input:** $ARGUMENTS
+
+## Auto-detected context
+
+- Current branch: !`git branch --show-current 2>/dev/null || echo "detached"`
+- Has PR: !`gh pr view --json number -q .number 2>/dev/null || echo "none"`
+- Uncommitted changes: !`git status --porcelain 2>/dev/null | head -5`
 
 ## Step 0: Determine Mode
 
@@ -51,7 +67,7 @@ Set `QA_LABEL="PR #<number>"`.
 
 ```bash
 # Get the diff summary and changes
-bash scripts/extract-test-plan.sh --from-diff[=<base-ref>]
+bash "${CLAUDE_SKILL_DIR}/scripts/extract-test-plan.sh" --from-diff[=<base-ref>]
 ```
 
 Set `QA_LABEL` to the branch name (`git branch --show-current`).
@@ -73,7 +89,7 @@ In all modes: if a HANDOFF.md exists in the working directory, read it and extra
 Try the bundled extraction script first:
 
 ```bash
-bash scripts/extract-test-plan.sh <number>
+bash "${CLAUDE_SKILL_DIR}/scripts/extract-test-plan.sh" <number>
 ```
 
 This parses the PR description for common test plan headings (`## Testing`, `## Test Plan`, `## How to Test`, etc.). If the script finds a section, use it as the starting point.
@@ -119,7 +135,7 @@ echo '[
   {"name": "Pre-setup: ...", "description": "...", "depends_on_index": null},
   {"name": "Admin UI: ...", "description": "...", "depends_on_index": 0},
   {"name": "Checkout flow: ...", "description": "...", "depends_on_index": 1}
-]' | bash scripts/build-qa-epic.sh "$QA_LABEL" "<short description>"
+]' | bash "${CLAUDE_SKILL_DIR}/scripts/build-qa-epic.sh" "$QA_LABEL" "<short description>"
 ```
 
 The script creates the epic, all tasks, and wires up dependencies in one shot. It returns JSON with the epic and task IDs.
@@ -194,7 +210,7 @@ Once all tasks pass:
 2. Ask the user: "All tests passed. Want me to delete the testing epic and tasks? They don't add historical value since there are no code changes."
 3. If confirmed:
    ```bash
-   bash scripts/qa-cleanup.sh <epic-id>
+   bash "${CLAUDE_SKILL_DIR}/scripts/qa-cleanup.sh" <epic-id>
    ```
 
 ## Guidelines
@@ -205,3 +221,4 @@ Once all tasks pass:
 - **Don't over-test.** If a test is essentially the same code path as another with different input, suggest combining or skipping with user approval.
 - **Pre-setup is a real task.** Environment requirements (webhook forwarding, test data creation, etc.) should be their own task — don't assume the user has everything running.
 - **Handle surprises gracefully.** If the user reports behavior that is correct but differs from the test plan's assumptions (e.g., a field being hidden in a certain state), acknowledge it and adjust the test accordingly rather than treating it as a failure.
+- **Compaction resilience.** If context compresses mid-walkthrough, run `bd ready` to recover state. The beads epic and task structure persist independently of the conversation. Re-invoke `/qa-walkthrough` if the skill instructions feel absent after compaction.
