@@ -51,8 +51,7 @@ RESPONSE=$(gws drive files update \
 RETURNED_ID=$(printf '%s' "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null || true)
 
 if [[ -z "$RETURNED_ID" ]]; then
-  echo "ERROR: Update failed. Response:" >&2
-  echo "$RESPONSE" >&2
+  bash "$SCRIPT_DIR/../../../scripts/diagnose-access.sh" "$DOC_ID" >&2
   exit 1
 fi
 

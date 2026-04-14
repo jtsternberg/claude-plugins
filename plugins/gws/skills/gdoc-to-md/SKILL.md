@@ -91,5 +91,8 @@ If the bundled scripts are unavailable, see
 
 **Auth expired:** Run `gws auth login` to re-authenticate.
 **Wrong account:** Run `gws auth status` to check which account is active.
+**Account mismatch:** If the doc belongs to a different Google account,
+the script will tell you which account you're authenticated as and suggest
+sharing or switching accounts. Run `gws auth status` to check.
 **Empty output:** The doc may be empty or the export may have failed — check
 stderr for error messages.

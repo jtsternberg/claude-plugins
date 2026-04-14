@@ -45,7 +45,7 @@ DOC_TITLE=$(gws drive files get --params "{\"fileId\": \"$DOC_ID\", \"fields\": 
   | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])" 2>/dev/null || true)
 
 if [[ -z "$DOC_TITLE" ]]; then
-  echo "ERROR: Could not fetch document metadata. Check the doc ID and permissions." >&2
+  bash "$(dirname "$0")/../../../scripts/diagnose-access.sh" "$DOC_ID" >&2
   exit 1
 fi
 

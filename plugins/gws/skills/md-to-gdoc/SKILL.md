@@ -95,5 +95,8 @@ If the bundled scripts are unavailable, see
 
 **Auth expired:** Run `gws auth login` to re-authenticate.
 **Wrong account:** Run `gws auth status` to check which account is active.
+**Account mismatch:** If the doc/folder belongs to a different Google account,
+the script will tell you which account you're authenticated as and suggest
+sharing or switching accounts. Run `gws auth status` to check.
 **Upload path error:** The `gws` CLI rejects absolute paths outside cwd. Copy
 the file into cwd first, or `cd` to the file's directory before uploading.
