@@ -5,7 +5,8 @@
 set -euo pipefail
 
 ACCOUNTS_BASE="${GWS_ACCOUNTS_DIR:-$HOME/.config/gws-accounts}"
-ACTIVE_CONFIG="${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-$HOME/.config/gws}"
+DEFAULT_CONFIG="$HOME/.config/gws"
+ACTIVE_CONFIG="${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-$DEFAULT_CONFIG}"
 JSON_OUTPUT=false
 
 while [[ $# -gt 0 ]]; do
@@ -15,19 +16,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -d "$ACCOUNTS_BASE" ]]; then
-  if [[ "$JSON_OUTPUT" == true ]]; then
-    echo "[]"
-  else
-    echo "No accounts configured. Run account-add.sh <label> to add one." >&2
-  fi
-  exit 0
-fi
-
 # Collect accounts
 ACCOUNTS=()
+
+# Include the default account (~/.config/gws)
+if [[ -d "$DEFAULT_CONFIG" && -f "$DEFAULT_CONFIG/credentials.enc" ]]; then
+  default_email=$(GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$DEFAULT_CONFIG" gws auth status 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('user','unknown'))" 2>/dev/null || echo "unknown")
+  default_active=false
+  real_default=$(cd "$DEFAULT_CONFIG" && pwd)
+  real_active=$(cd "$ACTIVE_CONFIG" 2>/dev/null && pwd || echo "")
+  if [[ "$real_default" == "$real_active" ]]; then
+    default_active=true
+  fi
+  ACCOUNTS+=("default|$default_email|$default_active")
+fi
+
 for dir in "$ACCOUNTS_BASE"/*/; do
-  [[ -d "$dir" ]] || continue
+  [[ -d "$ACCOUNTS_BASE" && -d "$dir" ]] || continue
   label=$(basename "$dir")
   metadata="$dir/account.json"
 
