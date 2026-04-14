@@ -1,23 +1,40 @@
 ---
 name: qa-walkthrough
-description: Guided manual QA walkthrough for pull requests. Extracts or generates a test plan from PR changes, then walks the user through each test interactively. Use when the user says "QA this PR", "qa walkthrough", "manual testing", "walk me through testing", or wants to manually verify a PR before merge.
+description: Guided manual QA walkthrough for PRs, branch changes, or ad-hoc testing. Generates a test plan, builds a beads epic, and walks the user through each test interactively. Use when the user says "QA this PR", "qa walkthrough", "manual testing", "walk me through testing", "QA my changes", or wants to manually verify work.
 ---
 
 # QA Walkthrough
 
-Guided manual QA walkthrough that extracts testing steps from a PR, builds a structured beads task list (`bd create`) and epic, and walks the user through each test interactively.
+Guided manual QA walkthrough that generates a test plan from a PR, branch diff, or description, builds a structured beads task list (`bd create`) and epic, and walks the user through each test interactively.
 
 ## Arguments
 
 ```
 /qa-walkthrough [<pr-number-or-url>]
+/qa-walkthrough --branch [--base=<ref>]
+/qa-walkthrough --describe "<what to test>"
 ```
 
-- **`<pr-number-or-url>`** (optional) — A PR number or full URL. If omitted, use the current branch's PR.
+- **`<pr-number-or-url>`** (optional) — A PR number or full URL. If omitted with no flags, use the current branch's PR.
+- **`--branch`** — QA uncommitted or branch changes via git diff instead of a PR.
+- **`--base=<ref>`** — Base ref for branch mode (default: `main`).
+- **`--describe "<text>"`** — QA from a description (e.g., testing a new skill, config change, or plugin).
 
-## Step 1: Gather PR Context
+## Step 0: Determine Mode
 
-Fetch the PR details and branch changes:
+Detect the mode from arguments:
+
+| Arguments | Mode | Source |
+|-----------|------|--------|
+| `<pr-number-or-url>` or no args (and current branch has a PR) | **PR** | `gh pr view` / `gh pr diff` |
+| `--branch` or no args (and current branch has NO PR) | **Branch** | `git diff` (staged + branch vs base) |
+| `--describe "..."` | **Ad-hoc** | User-provided description |
+
+If no arguments are given, auto-detect: check `gh pr view --json number -q .number 2>/dev/null`. If that returns a number, use PR mode. Otherwise, fall back to branch mode.
+
+## Step 1: Gather Context
+
+### PR Mode
 
 ```bash
 # Get the PR description and metadata
@@ -28,9 +45,30 @@ gh pr diff [<number>] --stat
 gh pr diff [<number>]
 ```
 
-If a HANDOFF.md exists in the working directory, read it and extract any testing notes, known issues, or environmental requirements. Incorporate these into the test plan in Step 2.
+Set `QA_LABEL="PR #<number>"`.
+
+### Branch Mode
+
+```bash
+# Get the diff summary and changes
+bash scripts/extract-test-plan.sh --from-diff[=<base-ref>]
+```
+
+Set `QA_LABEL` to the branch name (`git branch --show-current`).
+
+### Ad-hoc Mode
+
+The user's description is the context. No code diff needed — you'll generate the test plan from the description alone.
+
+Set `QA_LABEL` to a short slug from the description (e.g., "new-skill-qa-walkthrough").
+
+---
+
+In all modes: if a HANDOFF.md exists in the working directory, read it and extract any testing notes, known issues, or environmental requirements. Incorporate these into the test plan in Step 2.
 
 ## Step 2: Extract Testing Steps
+
+### PR Mode
 
 Try the bundled extraction script first:
 
@@ -40,11 +78,26 @@ bash scripts/extract-test-plan.sh <number>
 
 This parses the PR description for common test plan headings (`## Testing`, `## Test Plan`, `## How to Test`, etc.). If the script finds a section, use it as the starting point.
 
-If no testing section exists (exit code 1), analyze the code changes and draft a testing plan. Present it to the user for approval before proceeding.
+If no testing section exists (exit code 1), analyze the code changes and draft a testing plan.
+
+### Branch Mode
+
+The diff output from Step 1 is your source. Analyze the changed files and draft a testing plan based on what was modified.
+
+### Ad-hoc Mode
+
+Use the user's description to generate a testing plan. Focus on:
+- The described feature's expected behavior
+- Edge cases and error states
+- Integration points with existing functionality
+
+---
+
+In all modes: present the test plan to the user for approval before proceeding.
 
 ## Step 3: Evaluate Test Coverage
 
-Review the extracted testing steps against the actual code changes. Consider whether additional tests should be added:
+Review the extracted testing steps against the actual changes (if any). Consider whether additional tests should be added:
 
 - **Regression tests** — Do the changes touch shared functionality that could break existing behavior?
 - **Edge cases** — Are there boundary conditions, empty inputs, or error states not covered?
@@ -66,7 +119,7 @@ echo '[
   {"name": "Pre-setup: ...", "description": "...", "depends_on_index": null},
   {"name": "Admin UI: ...", "description": "...", "depends_on_index": 0},
   {"name": "Checkout flow: ...", "description": "...", "depends_on_index": 1}
-]' | bash scripts/build-qa-epic.sh <number> "<short description>"
+]' | bash scripts/build-qa-epic.sh "$QA_LABEL" "<short description>"
 ```
 
 The script creates the epic, all tasks, and wires up dependencies in one shot. It returns JSON with the epic and task IDs.
@@ -74,7 +127,7 @@ The script creates the epic, all tasks, and wires up dependencies in one shot. I
 **Option B — Manual creation** (for 1-2 tasks):
 
 ```bash
-bd create --title="Test PR #<number>: <short description>" --description="Manual testing for PR #<number>" --type=epic --priority=1
+bd create --title="QA: $QA_LABEL — <short description>" --description="Manual QA walkthrough for $QA_LABEL" --type=epic --priority=1
 ```
 
 Group related sub-steps into single tasks (e.g., "Admin UI: field rendering & persistence" rather than separate tasks for each click). Run `bd create` commands in parallel for efficiency.
@@ -95,15 +148,15 @@ Use `bd dep add <task> <depends-on>` for task-to-task dependencies. Do NOT use `
 Display a visual ASCII tree of the tasks and their dependencies to the user before starting. Example:
 
 ```
-Epic: Test PR #519 (wp-content-d9o)
-│
-├─ 1. Pre-setup: Stripe webhook & test discount (wp-content-vep)  ← READY
-│   │
-│   ├─ 2. Admin UI: field rendering & persistence (wp-content-9ux)
-│   │   │
-│   │   ├─ 3a. Checkout (no SSO): matching email succeeds (wp-content-58v)
-│   │   │   ├─ 4a. SSO: allowlisted email succeeds (wp-content-mi1)
-│   │   │   └─ 4b. SSO: bypass prevention (wp-content-hm9)
+Epic: QA: feature-branch — new checkout flow (wp-content-d9o)
+|
+|- 1. Pre-setup: Stripe webhook & test discount (wp-content-vep)  <- READY
+|   |
+|   |- 2. Admin UI: field rendering & persistence (wp-content-9ux)
+|   |   |
+|   |   |- 3a. Checkout (no SSO): matching email succeeds (wp-content-58v)
+|   |   |   |- 4a. SSO: allowlisted email succeeds (wp-content-mi1)
+|   |   |   +- 4b. SSO: bypass prevention (wp-content-hm9)
 ```
 
 ## Step 5: Walk Through Tests

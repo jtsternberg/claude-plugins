@@ -9,14 +9,14 @@
 # i.e. the task is ready immediately after the epic's pre-setup).
 #
 # Usage:
-#   echo '[...]' | build-qa-epic.sh <pr-number> "<short-description>"
+#   echo '[...]' | build-qa-epic.sh <label> ["<short-description>"]
 #
 # Output:
 #   JSON object with epic_id, task list with IDs, and dependency map.
 # =============================================================================
 
-PR="${1:?Usage: build-qa-epic.sh <pr-number> <short-description>}"
-DESC="${2:-PR #${PR}}"
+LABEL="${1:?Usage: build-qa-epic.sh <label> [<short-description>]}"
+DESC="${2:-$LABEL}"
 
 # Read JSON plan from stdin
 PLAN=$(cat)
@@ -32,8 +32,8 @@ if [[ "$TASK_COUNT" -lt 1 ]]; then
 fi
 
 # Create the epic
-EPIC_OUTPUT=$(bd create --title="QA: PR #${PR} — ${DESC}" \
-  --description="Manual QA walkthrough for PR #${PR}" \
+EPIC_OUTPUT=$(bd create --title="QA: ${DESC}" \
+  --description="Manual QA walkthrough for ${LABEL}" \
   --type=epic --priority=1 --json 2>/dev/null)
 
 EPIC_ID=$(echo "$EPIC_OUTPUT" | jq -r '.id // empty')
