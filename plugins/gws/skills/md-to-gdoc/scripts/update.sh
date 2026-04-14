@@ -6,6 +6,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Resolve active account config directory
+if [[ -z "${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-}" ]]; then
+  _COMMON="$SCRIPT_DIR/../../../scripts/account-common.sh"
+  if [[ -f "$_COMMON" ]]; then
+    source "$_COMMON"
+    export GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$(resolve_active_config)"
+  fi
+fi
+
 usage() {
   echo "Usage: $(basename "$0") <markdown-file> <doc-id-or-url>" >&2
   exit 1

@@ -5,6 +5,15 @@
 # Output: Path to the created markdown file on stdout. Errors on stderr.
 set -euo pipefail
 
+# Resolve active account config directory
+if [[ -z "${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-}" ]]; then
+  _COMMON="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../scripts/account-common.sh"
+  if [[ -f "$_COMMON" ]]; then
+    source "$_COMMON"
+    export GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$(resolve_active_config)"
+  fi
+fi
+
 usage() {
   echo "Usage: $(basename "$0") <doc-id-or-url> [output.md] [--title]" >&2
   exit 1
