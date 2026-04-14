@@ -4,9 +4,9 @@
 # Output: Table of label, email, active status. With --json, outputs JSON array.
 set -euo pipefail
 
-ACCOUNTS_BASE="${GWS_ACCOUNTS_DIR:-$HOME/.config/gws-accounts}"
-DEFAULT_CONFIG="$HOME/.config/gws"
-ACTIVE_CONFIG="${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-$DEFAULT_CONFIG}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/account-common.sh"
+
 JSON_OUTPUT=false
 
 while [[ $# -gt 0 ]]; do
@@ -16,6 +16,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+ACTIVE_LABEL=$(resolve_active_label)
+
 # Collect accounts
 ACCOUNTS=()
 
@@ -24,11 +26,7 @@ if [[ -d "$DEFAULT_CONFIG" && -f "$DEFAULT_CONFIG/credentials.enc" ]]; then
   default_email=$(GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$DEFAULT_CONFIG" gws auth status 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('user','unknown'))" 2>/dev/null || echo "unknown")
   default_active=false
-  real_default=$(cd "$DEFAULT_CONFIG" && pwd)
-  real_active=$(cd "$ACTIVE_CONFIG" 2>/dev/null && pwd || echo "")
-  if [[ "$real_default" == "$real_active" ]]; then
-    default_active=true
-  fi
+  [[ "$ACTIVE_LABEL" == "default" ]] && default_active=true
   ACCOUNTS+=("default|$default_email|$default_active")
 fi
 
@@ -43,13 +41,8 @@ for dir in "$ACCOUNTS_BASE"/*/; do
     email="unknown"
   fi
 
-  # Check if this is the active account
   active=false
-  real_dir=$(cd "$dir" && pwd)
-  real_active=$(cd "$ACTIVE_CONFIG" 2>/dev/null && pwd || echo "")
-  if [[ "$real_dir" == "$real_active" ]]; then
-    active=true
-  fi
+  [[ "$label" == "$ACTIVE_LABEL" ]] && active=true
 
   ACCOUNTS+=("$label|$email|$active")
 done

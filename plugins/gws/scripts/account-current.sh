@@ -4,8 +4,8 @@
 # Output: Account info on stdout.
 set -euo pipefail
 
-ACCOUNTS_BASE="${GWS_ACCOUNTS_DIR:-$HOME/.config/gws-accounts}"
-ACTIVE_CONFIG="${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-$HOME/.config/gws}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/account-common.sh"
 
 JSON_OUTPUT=false
 EMAIL_ONLY=false
@@ -20,38 +20,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Resolve the active config dir to an absolute path
-REAL_ACTIVE=$(cd "$ACTIVE_CONFIG" 2>/dev/null && pwd || echo "$ACTIVE_CONFIG")
+LABEL=$(resolve_active_label)
+ACTIVE_CONFIG_DIR=$(resolve_active_config)
 
-# Check if the active config matches a labeled account
-LABEL=""
-EMAIL=""
+# Get email from the active account
+EMAIL=$(GOOGLE_WORKSPACE_CLI_CONFIG_DIR="$ACTIVE_CONFIG_DIR" gws auth status 2>/dev/null \
+  | python3 -c "import sys,json; print(json.load(sys.stdin).get('user','unknown'))" 2>/dev/null || echo "unknown")
 
-if [[ -d "$ACCOUNTS_BASE" ]]; then
-  for dir in "$ACCOUNTS_BASE"/*/; do
-    [[ -d "$dir" ]] || continue
-    real_dir=$(cd "$dir" && pwd)
-    if [[ "$real_dir" == "$REAL_ACTIVE" ]]; then
-      LABEL=$(basename "$dir")
-      metadata="$dir/account.json"
-      if [[ -f "$metadata" ]]; then
-        EMAIL=$(python3 -c "import json; print(json.load(open('$metadata')).get('email',''))" 2>/dev/null || true)
-      fi
-      break
-    fi
-  done
-fi
-
-# If no label matched, get email from gws auth status
-if [[ -z "$EMAIL" ]]; then
-  EMAIL=$(gws auth status 2>/dev/null \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('user','unknown'))" 2>/dev/null || echo "unknown")
-fi
-
-# Default label for the default config dir
-if [[ -z "$LABEL" ]]; then
-  LABEL="default"
-fi
+REAL_ACTIVE=$(cd "$ACTIVE_CONFIG_DIR" 2>/dev/null && pwd || echo "$ACTIVE_CONFIG_DIR")
 
 if [[ "$EMAIL_ONLY" == true ]]; then
   echo "$EMAIL"

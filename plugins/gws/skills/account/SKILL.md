@@ -54,20 +54,16 @@ bash ${CLAUDE_SKILL_DIR}/../../scripts/account-list.sh --json
 
 ### Switch active account
 
-To switch for subsequent gws commands in this session:
-
 ```bash
-eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/account-switch.sh <label>)"
+bash ${CLAUDE_SKILL_DIR}/../../scripts/account-switch.sh <label>
 ```
 
-This sets `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` to the labeled account's
-config directory. All subsequent `gws` commands in this shell session
-will use that account.
-
-For programmatic use (just get the config dir path):
+This persists the choice to `~/.config/gws-accounts/.active`. All
+subsequent account-aware scripts will use that account. To switch
+back to the default account:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/account-switch.sh <label> --env
+bash ${CLAUDE_SKILL_DIR}/../../scripts/account-switch.sh default
 ```
 
 ### Check current account
@@ -91,9 +87,13 @@ bash ${CLAUDE_SKILL_DIR}/../../scripts/account-current.sh --email
 ## How It Works
 
 The `gws` CLI stores all auth state in a config directory (default:
-`~/.config/gws`). The `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` environment variable
-overrides this. By maintaining separate config directories per account label,
-we can switch between accounts by changing this env var.
+`~/.config/gws`). By maintaining separate config directories per account
+label under `~/.config/gws-accounts/<label>/`, we can switch between accounts.
+
+The active account is tracked in `~/.config/gws-accounts/.active` (a
+single-line file containing the label). When this file is absent, the
+default account (`~/.config/gws`) is used. This persists across shell
+sessions and agent `Bash()` calls.
 
 Each account directory contains:
 - `client_secret.json` — OAuth app config (copied from default, shared across accounts)
@@ -104,17 +104,10 @@ Each account directory contains:
 ## Integration with Other Skills
 
 When using `gdoc-to-md` or `md-to-gdoc` with a doc/folder that belongs to
-a different account, the error message will tell you which account you're
-authenticated as and suggest switching. To use a specific account:
+a different account, switch first then run the command:
 
-1. Switch first: `eval "$(account-switch.sh work)"`
+1. Switch: `account-switch.sh work`
 2. Then run the download/upload command
-
-Or inline for a single command:
-
-```bash
-GOOGLE_WORKSPACE_CLI_CONFIG_DIR=$(bash ${CLAUDE_SKILL_DIR}/../../scripts/account-switch.sh work --env) gws drive files list
-```
 
 ## Troubleshooting
 
