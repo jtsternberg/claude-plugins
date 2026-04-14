@@ -1,6 +1,13 @@
 ---
 name: gws-account
-description: Manage multiple Google accounts for gws CLI. Add, list, switch between, and check active Google Workspace accounts. Triggers on "switch google account", "add google account", "which google account", "gws account", "list accounts".
+description: Check, add, list, or switch the active Google account. This skill is the ONLY way to manage Google accounts — there is no standalone CLI command for account management.
+when_to_use: |
+  Use when the user asks anything about Google accounts: "which google account am I using?",
+  "switch google account", "add google account", "what account is active?",
+  "list google accounts", "gws account", "change to my work account",
+  "am I logged in to Google?", "check my Google auth".
+  IMPORTANT: The gws CLI does NOT have an "account" subcommand — this skill provides
+  all account management. Do not attempt to run gws account commands directly.
 argument-hint: <add|list|switch|current> [label] [--json]
 allowed-tools: Bash(bash *) Bash(gws *) Bash(python3 *)
 ---
@@ -113,7 +120,8 @@ GOOGLE_WORKSPACE_CLI_CONFIG_DIR=$(bash ${CLAUDE_SKILL_DIR}/../../scripts/account
 
 **"No accounts configured":** Run the add subcommand with a label to set up
 your first account.
-**Browser doesn't open:** The `gws auth login` command opens a browser for
-OAuth. If it doesn't open automatically, look for a URL printed to stderr.
+**Browser doesn't open:** The script captures the OAuth URL and opens it
+automatically with `open` (macOS) or `xdg-open` (Linux). If neither works,
+the URL is printed to stderr for manual opening.
 **Account exists error:** To re-authenticate an existing account, remove its
 directory at `~/.config/gws-accounts/<label>/` and add it again.
