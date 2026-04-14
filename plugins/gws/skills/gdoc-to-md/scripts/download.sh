@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Download a Google Doc as a local markdown file.
+# Uses native text/markdown export from the Google Drive API.
 # Usage: download.sh <doc-id-or-url> [output.md] [--title]
 # Output: Path to the created markdown file on stdout. Errors on stderr.
 set -euo pipefail
@@ -39,12 +40,6 @@ if ! gws auth status >/dev/null 2>&1; then
   exit 1
 fi
 
-# Check html-to-markdown
-if ! command -v html-to-markdown >/dev/null 2>&1; then
-  echo "ERROR: html-to-markdown not found in PATH" >&2
-  exit 1
-fi
-
 # Fetch doc title from Drive metadata
 DOC_TITLE=$(gws drive files get --params "{\"fileId\": \"$DOC_ID\", \"fields\": \"name\"}" 2>/dev/null \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])" 2>/dev/null || true)
@@ -67,24 +62,13 @@ if [[ -z "$OUTPUT" ]]; then
   fi
 fi
 
-# Export as HTML to a temp file
-TMPHTML=$(mktemp "./__tmp-export-XXXXX.html")
-trap 'rm -f "$TMPHTML"' EXIT
-
+# Export directly as markdown via the Drive API's native text/markdown support
 gws drive files export \
-  --params "{\"fileId\": \"$DOC_ID\", \"mimeType\": \"text/html\"}" \
-  --output "$TMPHTML" 2>&1
+  --params "{\"fileId\": \"$DOC_ID\", \"mimeType\": \"text/markdown\"}" \
+  --output "$OUTPUT" 2>&1
 
-if [[ ! -s "$TMPHTML" ]]; then
+if [[ ! -s "$OUTPUT" ]]; then
   echo "ERROR: Export produced empty file. The document may be empty or export failed." >&2
-  exit 1
-fi
-
-# Convert HTML to Markdown
-html-to-markdown "$TMPHTML" "$OUTPUT"
-
-if [[ ! -f "$OUTPUT" ]]; then
-  echo "ERROR: Markdown conversion failed." >&2
   exit 1
 fi
 

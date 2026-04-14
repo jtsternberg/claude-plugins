@@ -14,24 +14,15 @@ gws drive files get --params '{"fileId": "DOC_ID", "fields": "name"}'
 Parse the `name` field from the JSON response using:
 `python3 -c "import sys,json; print(json.load(sys.stdin)['name'])"`
 
-## Step 3: Export as HTML
+## Step 3: Export as Markdown
+
+The Drive API natively supports `text/markdown` as an export format for
+Google Docs.
 
 ```bash
 gws drive files export \
-  --params '{"fileId": "DOC_ID", "mimeType": "text/html"}' \
-  --output ./exported.html
+  --params '{"fileId": "DOC_ID", "mimeType": "text/markdown"}' \
+  --output ./output.md
 ```
 
-## Step 4: Convert to Markdown
-
-```bash
-html-to-markdown ./exported.html ./output.md
-```
-
-## Step 5: Cleanup
-
-Delete the temp HTML file created in step 3.
-
-```bash
-rm -f ./exported.html
-```
+Note: Exported content is limited to 10 MB.

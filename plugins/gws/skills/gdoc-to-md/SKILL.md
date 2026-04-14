@@ -1,20 +1,20 @@
 ---
 name: gdoc-to-md
-description: Download a Google Doc as a local markdown file via gws CLI. Exports as HTML then converts with html-to-markdown. Triggers on "download google doc", "pull from drive", "gdoc to markdown", "export google doc", "gws download".
+description: Download a Google Doc as a local markdown file via gws CLI. Uses native text/markdown export from the Drive API. Triggers on "download google doc", "pull from drive", "gdoc to markdown", "export google doc", "gws download".
 argument-hint: <doc-id-or-url> [output.md] [--title]
-allowed-tools: Bash(gws *) Bash(bash *) Bash(html-to-markdown *) Bash(python3 *)
+allowed-tools: Bash(gws *) Bash(bash *) Bash(python3 *)
 ---
 
 # Google Doc to Markdown
 
-Download Google Docs as local markdown files using the `gws` CLI and
-`html-to-markdown` converter.
+Download Google Docs as local markdown files using the `gws` CLI.
+The Google Drive API natively supports `text/markdown` as an export format,
+so no external conversion tools are needed.
 
 ## Prerequisites
 
 ```!
 gws auth status 2>&1 || echo "NOT AUTHENTICATED — run: gws auth login"
-which html-to-markdown >/dev/null 2>&1 || echo "MISSING — html-to-markdown not found in PATH"
 ```
 
 ## Task
@@ -52,10 +52,9 @@ bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_ID_OR_URL --title
 
 1. Extracts the doc ID from a URL if a full URL is provided
 2. Fetches the document title from Google Drive metadata
-3. Exports the doc as HTML via `gws drive files export`
-4. Converts the HTML to markdown via `html-to-markdown`
-5. Writes the result to the output file
-6. Cleans up temp files
+3. Exports the doc as markdown via `gws drive files export` with
+   `mimeType: text/markdown` (native Drive API support)
+4. Writes the result to the output file
 
 ### Extracting a Doc ID
 
@@ -68,6 +67,10 @@ When no output path is given:
 1. If `--title` is set, derives the filename from the Google Doc title
    (lowercased, spaces to hyphens, `.md` extension)
 2. Otherwise defaults to `<doc-id>.md` in the current directory
+
+### Export Size Limit
+
+Google limits exported content from `files.export` to **10 MB**.
 
 ## Batch Downloads
 
@@ -90,4 +93,3 @@ If the bundled scripts are unavailable, see
 **Wrong account:** Run `gws auth status` to check which account is active.
 **Empty output:** The doc may be empty or the export may have failed — check
 stderr for error messages.
-**html-to-markdown not found:** Install it or ensure it's in your PATH.
