@@ -188,23 +188,47 @@ Process tasks one at a time following the dependency order:
    - What the expected result is
 4. **Wait for the user** to confirm (pass/fail/unexpected behavior)
 5. On pass: `bd close <id> --reason="<brief result summary>"`
-6. On fail: Stop and investigate. Read the relevant code, diagnose, and either:
-   - Fix the code and ask the user to retry
-   - Create a new beads bug issue: `bd create --title="..." --description="..." --type=bug --deps discovered-from:<failed-task-id>`
-   - Prepare a handoff prompt for another agent to fix the bug. Include:
-     - The beads issue ID
-     - What the test expected vs. what happened
-     - The relevant file(s) and line numbers
-     - Steps to reproduce
-   Present the prompt to the user so they can paste it into a new Claude Code session.
-   After addressing the failure, run `bd ready` again — unblocked tasks that don't depend on the failed test can still proceed.
+6. On fail: **Create a fix task and let the user decide priority:**
+   a. Create a beads bug linked to the failed test:
+      ```bash
+      bd create --title="Fix: <what failed>" \
+        --description="<what was expected vs. what happened, steps to reproduce, relevant files/lines>" \
+        --type=bug --priority=1 \
+        --deps discovered-from:<failed-task-id>
+      ```
+   b. Mark the QA task as failed (do NOT close it):
+      ```bash
+      bd update <qa-task-id> --notes="FAILED: <brief description of failure>"
+      ```
+   c. **Ask the user one question:**
+      > This test failed. I've created `<bug-id>` to track the fix. Should I work on this fix now before continuing QA, or continue testing and address all failures after the walkthrough?
+   d. **If "fix now":** Work on the fix. Once resolved, close the bug (`bd close <bug-id>`), then ask the user to re-test the original QA step. On re-test pass, close the QA task. On re-test fail, repeat from (a).
+   e. **If "continue QA":** Leave the bug open and move on. After addressing the failure, run `bd ready` again — unblocked tasks that don't depend on the failed test can still proceed. Tasks that depend on the failed test remain blocked.
 7. Move to the next ready task
 
-Continue until all tasks are complete.
+Continue until all passable tasks are complete. If any failures were punted, proceed to Step 5b.
+
+### Step 5b: Resolve Punted Failures
+
+If any failures were deferred during the walkthrough:
+
+1. List all open bugs discovered during QA:
+   ```bash
+   bd list --status=open --type=bug
+   ```
+   Filter to bugs with `discovered-from` links to this QA epic's tasks.
+2. Present the list to the user with a summary of each failure.
+3. Work through each bug one at a time:
+   a. Claim it: `bd update <bug-id> --claim`
+   b. Fix the code
+   c. Ask the user to re-verify the original QA step
+   d. On pass: close both the bug and the original QA task
+   e. On fail: update the bug with new findings and ask the user how to proceed
+4. Once all bugs are resolved (or the user decides to stop), continue to Step 6.
 
 ## Step 6: Cleanup
 
-Once all tasks pass:
+Once all QA tasks and any punted bugs are resolved:
 
 1. Close the epic: `bd close <epic-id> --reason="All tests passed"`
 2. Ask the user: "All tests passed. Want me to delete the testing epic and tasks? They don't add historical value since there are no code changes."
@@ -212,6 +236,12 @@ Once all tasks pass:
    ```bash
    bash "${CLAUDE_SKILL_DIR}/scripts/qa-cleanup.sh" <epic-id>
    ```
+
+If the user decides to stop before all bugs are resolved, do NOT close the epic. Leave it open with a note summarizing the remaining failures so the next session can pick up where this one left off:
+
+```bash
+bd update <epic-id> --notes="QA incomplete — <N> bugs remain open: <bug-id-1>, <bug-id-2>, ..."
+```
 
 ## Guidelines
 
