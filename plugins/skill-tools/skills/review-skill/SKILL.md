@@ -48,7 +48,7 @@ Extract key recommendations for: progressive disclosure, utility scripts, valida
 2. **Issues**: Problems with specific line references
 3. **Recommendations**: Prioritized improvements with code/text examples
 
-Output the review as a markdown file.
+Output the review as a markdown file in the system temp directory.
 
 ## Step 3: Challenge Your Review
 
