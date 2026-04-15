@@ -4,7 +4,7 @@ description: "Review a skill for improvement opportunities against best practice
 argument-hint: "<skill-name-or-path>"
 disable-model-invocation: true
 effort: max
-allowed-tools: Read Glob Grep Bash Write
+allowed-tools: Read Glob Grep Bash Write Edit
 ---
 
 Your job will be to review the skill at `$ARGUMENTS` for improvement opportunities.
@@ -13,11 +13,9 @@ Look for the skill at the provided path, or in `.claude/skills/$ARGUMENTS/` or `
 
 ## Current Skills Documentation
 
-```!
-curl -sL https://code.claude.com/docs/en/skills.md
-```
+Skills docs cached at: !`bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh`
 
-If the above is empty or shows an error, tell the user the docs URL is unreachable and stop.
+Read the docs from that path. If the path doesn't exist or the file is empty, tell the user the docs URL is unreachable and stop.
 
 ## Step 1: Read the Skill
 
@@ -27,6 +25,10 @@ Key areas to emphasize:
 1. **Inject dynamic context**: Does this skill hardcode context that could be dynamic? Check for opportunities to use `!`command`` syntax (single-line) or ` ```! ` fenced blocks (multi-line) to inject runtime context — current date, git branch, environment info, project metadata, etc. These run at skill load time and inline the output before Claude sees the prompt. Flag any static values that would be more accurate or useful if computed on the fly. This is a great way to reduce the size of the skill and make it more maintainable.
 2. **Script opportunities**: Bash/sh scripts that could improve reliability and save on tokens.
 3. **`when_to_use` frontmatter**: Is the `description` doing double duty as both a summary and a list of trigger phrases? If so, the trigger phrases should move to `when_to_use` to keep the description focused. Both fields are concatenated for matching (capped at 1,536 chars combined).
+4. **Skill size & compaction**: Is SKILL.md over 500 lines? Could reference material move to supporting files? If the skill is large and expected to stay active, are critical instructions front-loaded (only first 5,000 tokens survive compaction)?
+5. **Invocation control**: Does `disable-model-invocation` / `user-invocable` match the skill's purpose? Side-effect workflows should be user-only. Background knowledge should be model-only.
+6. **Tool permissions**: Are `allowed-tools` entries scoped with patterns (e.g., `Bash(git *)`) or overly broad (bare `Bash`)?
+7. **String substitutions**: Is the skill using `$ARGUMENTS`, `${CLAUDE_SKILL_DIR}`, `${CLAUDE_SESSION_ID}` where they'd add value?
 
 ## Step 2: Understand Intent, Then Evaluate
 
@@ -65,7 +67,7 @@ Re-read your review against the docs and the skill. For each recommendation, ask
 
 Update the review file — remove recommendations that don't hold up, add any you missed.
 
-Now present the findings to the user: `eval $EDITOR {FILE_PATH}`
+Now present the findings to the user and open the review file in their editor.
 
 ## Step 4: Apply the Recommendations
 
