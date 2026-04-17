@@ -11,10 +11,16 @@ Usage:
 import json
 import os
 import re
+import signal
 import argparse
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
+
+# Exit cleanly when piped into `head`, `less`, etc. Without this, Python raises
+# BrokenPipeError and prints a traceback to stderr/stdout.
+if hasattr(signal, "SIGPIPE"):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
 def week_monday(date_str: str) -> str:
