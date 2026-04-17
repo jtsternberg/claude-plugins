@@ -24,6 +24,7 @@
     { "name": "bible", "source": "./plugins/bible" },
     { "name": "hotline", "source": "./plugins/hotline" },
     { "name": "paperclip", "source": "./plugins/paperclip" },
-    { "name": "gws", "source": "./plugins/gws" }
+    { "name": "gws", "source": "./plugins/gws" },
+    { "name": "session-tools", "source": "./plugins/session-tools" }
   ]
 }
