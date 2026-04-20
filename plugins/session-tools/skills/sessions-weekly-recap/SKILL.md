@@ -30,6 +30,7 @@ Parse the `$ARGUMENTS` string for these flags.
 - `--since YYYY-MM-DD` — start of date range
 - `--until YYYY-MM-DD` — end of date range
 - `--output-dir PATH` — override output directory (path may contain spaces; strip surrounding quotes; resolve `~` and relative paths to absolute before forwarding to the extractor or cron installer)
+- `--all` — include sessions of any age (overrides the default 7-day lookback; takes precedence over `--since`). Use when the user asks for a recap spanning months or their entire history.
 
 When `--weekly` is set without dates, the extraction script defaults to the previous full week (last Monday through last Sunday). That's the expected behavior for the weekly cron that runs Monday morning.
 
@@ -42,10 +43,10 @@ If any cron flag is present, **load `references/CRON.md` and follow its instruct
 
 ### Step 1: Extract Session Data
 
-Run the extraction script, passing through `--weekly`, `--since`, `--until`:
+Run the extraction script, passing through `--weekly`, `--since`, `--until`, `--all`:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/extract_sessions.py [--weekly] [--since ...] [--until ...]
+python3 ${CLAUDE_SKILL_DIR}/scripts/extract_sessions.py [--weekly] [--since ...] [--until ...] [--all]
 ```
 
 **Do not pass `--output-dir` to the script** — that flag is handled by this SKILL.md, not the extractor.
