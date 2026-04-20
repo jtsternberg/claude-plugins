@@ -3,7 +3,7 @@ name: sessions-weekly-recap
 description: "Generate daily or weekly recap notes from Claude Code session transcripts. Extracts session data, synthesizes human-readable summaries grouped by theme, and writes them as markdown files. Supports incremental merge into existing notes. JT's fork — adds --weekly mode, --output-dir override, and launchd cron management."
 disable-model-invocation: true
 allowed-tools: "Bash(python3 *), Bash(bash *), Read, Write, Edit"
-argument-hint: "[--weekly] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--output-dir PATH]"
+argument-hint: "[--weekly] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--output-dir PATH] | [--install-cron [--day mon] [--time HH:MM]] | [--uninstall-cron | --cron-status | --cron-logs | --cron-run-now]"
 ---
 
 # Sessions Recap
@@ -23,14 +23,20 @@ Override with `--output-dir "/some/path"`. If the directory doesn't exist, creat
 
 ## Arguments
 
-Parse the `$ARGUMENTS` string for these flags:
+Parse the `$ARGUMENTS` string for these flags.
 
+**Recap generation flags:**
 - `--weekly` — enable weekly mode
 - `--since YYYY-MM-DD` — start of date range
 - `--until YYYY-MM-DD` — end of date range
-- `--output-dir PATH` — override output directory (path may contain spaces; strip surrounding quotes)
+- `--output-dir PATH` — override output directory (path may contain spaces; strip surrounding quotes; resolve `~` and relative paths to absolute before forwarding to the extractor or cron installer)
 
 When `--weekly` is set without dates, the extraction script defaults to the previous full week (last Monday through last Sunday). That's the expected behavior for the weekly cron that runs Monday morning.
+
+**Cron management flags (mutually exclusive with recap generation):**
+- `--install-cron`, `--uninstall-cron`, `--cron-status`, `--cron-logs`, `--cron-run-now`
+
+If any cron flag is present, **load `references/CRON.md` and follow its instructions**. Skip the recap workflow below — the cron flags are handled entirely in that reference.
 
 ## Workflow
 
@@ -107,27 +113,6 @@ Show:
 - Output directory path
 - Path to each file written
 
-## Scheduling a Weekly Recap (launchd)
+## Scheduling a Weekly Recap
 
-The skill includes a helper to install/manage a local macOS launchd job that runs `claude -p` headlessly on a schedule.
-
-```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh <action> [options]
-```
-
-Actions:
-- `install --output-dir "<path>" [--day mon] [--time 09:00]` — install weekly job
-- `uninstall` — remove the job
-- `status` — check whether it's loaded and next run time
-- `logs` — tail stdout + stderr logs
-- `run-now` — trigger the job immediately (for testing)
-
-The installer writes `~/Library/LaunchAgents/com.jtsternberg.sessions-recap-weekly.plist` and loads it via `launchctl`. The plist invokes:
-
-```
-claude -p "/sessions-weekly-recap --weekly --output-dir \"<path>\"" --dangerously-skip-permissions
-```
-
-`--dangerously-skip-permissions` is required because there's no TTY to approve tool calls. The job runs as your user with your existing Claude Code auth.
-
-Logs: `~/.claude/logs/sessions-recap-weekly.{out,err}.log`
+The skill can install a macOS launchd job that runs `claude -p` headlessly on a schedule. See `references/CRON.md` for full details, flag mapping, and the bypass-the-skill direct-invocation syntax.

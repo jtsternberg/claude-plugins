@@ -59,6 +59,11 @@ cmd_install() {
   [ -n "$output_dir" ] || die "--output-dir is required"
   [[ "$time" =~ ^[0-9]{1,2}:[0-9]{2}$ ]] || die "--time must be HH:MM (got: $time)"
 
+  # Expand leading ~ to $HOME so mkdir and the launchd plist get a real absolute
+  # path. Without this, quoted paths like "~/notes" stay literal and the
+  # scheduled job writes to a bogus directory.
+  output_dir="${output_dir/#\~/$HOME}"
+
   local weekday hour minute claude_bin
   weekday="$(day_to_int "$day")"
   hour="${time%:*}"; hour="${hour#0}"; [ -z "$hour" ] && hour=0
