@@ -1,6 +1,6 @@
 ---
 name: sessions-weekly-recap
-description: "Generate daily or weekly recap notes from Claude Code session transcripts. Extracts session data, synthesizes human-readable summaries grouped by theme, and writes them as markdown files. Supports incremental merge into existing notes. JT's fork — adds --weekly mode, --output-dir override, and launchd cron management."
+description: "Generate daily or weekly recap notes from Claude Code session transcripts. Extracts session data, synthesizes human-readable summaries grouped by theme, and writes them as markdown files. Supports incremental merge into existing notes. JT's fork — adds --weekly mode, --output-dir override, and launchd cron management (macOS only)."
 disable-model-invocation: true
 allowed-tools: "Bash(python3 *), Bash(bash *), Read, Write, Edit"
 argument-hint: "[--weekly] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--output-dir PATH] | [--install-cron [--day mon] [--time HH:MM]] | [--uninstall-cron | --cron-status | --cron-logs | --cron-run-now]"
@@ -9,6 +9,8 @@ argument-hint: "[--weekly] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--output-d
 # Sessions Weekly Recap
 
 Generate daily or weekly recap markdown notes from Claude Code session transcripts. Extract what was worked on, synthesize it into themed sections, and write one `.md` file per period.
+
+> **Platform:** recap generation works on any OS. The cron management flags (`--install-cron` etc.) are **macOS-only** — they wrap `launchctl`. On Linux, point the user at `cron` or `systemd --user` as manual alternatives.
 
 ## Modes
 
