@@ -38,6 +38,8 @@ Forked from Fernando Duro's upstream `sessions-recap`. Adds weekly mode, `--outp
 
 #### Usage
 
+**Generate recaps:**
+
 ```
 /sessions-weekly-recap                                    # Daily, last 7 days
 /sessions-weekly-recap --since 2026-04-01                 # Daily, from a date
@@ -45,33 +47,33 @@ Forked from Fernando Duro's upstream `sessions-recap`. Adds weekly mode, `--outp
 /sessions-weekly-recap --weekly --output-dir "~/notes"    # Weekly, custom output
 ```
 
+**Manage the weekly cron (macOS launchd):**
+
+```
+/sessions-weekly-recap --install-cron --output-dir "/absolute/path" [--day mon] [--time 09:00]
+/sessions-weekly-recap --cron-status
+/sessions-weekly-recap --cron-run-now
+/sessions-weekly-recap --cron-logs
+/sessions-weekly-recap --uninstall-cron
+```
+
 Default output:
 - Daily → `~/.claude/daily-notes/`
 - Weekly → `~/.claude/weekly-notes/`
 
-#### Scheduling a weekly recap (macOS launchd)
+#### Scheduling details
 
-The skill ships with a helper that installs a `launchctl`-managed plist.
+Cron flags route through `scripts/install_cron.sh`. The installer writes a plist to `~/Library/LaunchAgents/` and loads it via `launchctl`.
 
-```bash
-# From inside a Claude Code session with this plugin enabled:
-bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh install \
-  --output-dir "/absolute/path/to/output" \
-  --day mon \
-  --time 09:00
-
-# Other actions:
-bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh status
-bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh logs
-bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh run-now
-bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh uninstall
-```
-
-Outside of a skill context (e.g. from a plain shell), call the script directly:
+If you prefer to bypass the skill and call the script directly (e.g. from a plain shell):
 
 ```bash
-bash /path/to/claude-plugins/plugins/session-tools/skills/sessions-weekly-recap/scripts/install_cron.sh install \
-  --output-dir "/absolute/path/to/output"
+SCRIPTS=/path/to/claude-plugins/plugins/session-tools/skills/sessions-weekly-recap/scripts
+bash $SCRIPTS/install_cron.sh install --output-dir "/absolute/path" --day mon --time 09:00
+bash $SCRIPTS/install_cron.sh status
+bash $SCRIPTS/install_cron.sh logs
+bash $SCRIPTS/install_cron.sh run-now
+bash $SCRIPTS/install_cron.sh uninstall
 ```
 
 The installed plist:
