@@ -66,16 +66,24 @@ trap 'rm -f "$CLEAN"' EXIT
 
 "$SCRIPT_DIR/clean.sh" "$FILE" "$CLEAN"
 
-# Upload — gws requires relative paths within cwd
+# Upload — gws requires relative paths within cwd.
+# Do NOT merge stderr into stdout: gws prints a "Using keyring backend: keyring"
+# banner to stderr, which would break JSON parsing of stdout.
 RESPONSE=$(gws drive files create \
   --json "{\"name\": $(printf '%s' "$TITLE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'), \"mimeType\": \"application/vnd.google-apps.document\", \"parents\": [\"$FOLDER_ID\"]}" \
   --upload "$CLEAN" \
-  --upload-content-type text/markdown 2>&1)
+  --upload-content-type text/markdown)
 
 DOC_ID=$(printf '%s' "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null || true)
 
 if [[ -z "$DOC_ID" ]]; then
-  bash "$SCRIPT_DIR/../../../scripts/diagnose-access.sh" "$FOLDER_ID" >&2
+  echo "ERROR: Could not parse document ID from gws response." >&2
+  echo "API response: $RESPONSE" >&2
+  # Only diagnose folder access if the response actually signals an API error;
+  # otherwise the diagnostic is misleading (access may be fine).
+  if printf '%s' "$RESPONSE" | python3 -c "import sys,json; sys.exit(0 if 'error' in json.load(sys.stdin) else 1)" 2>/dev/null; then
+    bash "$SCRIPT_DIR/../../../scripts/diagnose-access.sh" "$FOLDER_ID" >&2
+  fi
   exit 1
 fi
 
