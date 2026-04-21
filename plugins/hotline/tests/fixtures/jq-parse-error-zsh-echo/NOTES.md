@@ -49,5 +49,9 @@ corruption happens entirely inside zsh's `echo` between the two jq invocations.
 
 ## Reproduction script
 
-See `plugins/hotline/tests/reproduce-jq-parse-error.sh`. It fails (parse error)
-on a pre-fix checkout and passes (clean roundtrip) after the fix lands.
+See `plugins/hotline/tests/reproduce-jq-parse-error.sh`. It deliberately keeps
+the unsafe zsh `echo` pattern as a reproduction case, so it is expected to
+continue exiting 1 with the parse error on every checkout — the fix landed in
+PR #1 swaps the *documented* caller pattern (SKILL.md), not the unsafe pattern
+itself. The repro only stops failing if the emitter output ever changes in a
+way that removes backslash escapes; at that point SKILL.md needs a re-audit.
