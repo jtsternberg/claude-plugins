@@ -61,6 +61,17 @@ Default output:
 - Daily → `~/.claude/daily-notes/`
 - Weekly → `~/.claude/weekly-notes/`
 
+#### Optional style anchor
+
+Set `$SESSIONS_RECAP_EXAMPLE` to a path to a past recap you like. When the skill is invoked, that file is injected into the prompt as a **style reference** — Claude matches its specificity, bullet density, theme layout, and tone without copying content.
+
+```bash
+# In ~/.claude/settings.json (or exported in your shell):
+export SESSIONS_RECAP_EXAMPLE="/absolute/path/to/my-favorite-Week-X.Y.Z.md"
+```
+
+Unset or unreadable → the skill uses its built-in generic writing guidelines. This is opt-in; no example ships with the plugin because style preferences are personal and example files tend to contain work details users wouldn't want in a shared plugin repo.
+
 #### Scheduling details
 
 Cron flags route through `scripts/install_cron.sh`. The installer writes a plist to `~/Library/LaunchAgents/` and loads it via `launchctl`.

@@ -74,6 +74,21 @@ For each period (date or week) in the extracted data, check if a note already ex
 
 For each period, read the session data and write the note. This is the creative step.
 
+#### Optional Style Anchor
+
+If the user has set `$SESSIONS_RECAP_EXAMPLE` to a readable markdown file, its contents are injected below. Use it as a **style reference** — match the level of specificity, bullet density, theme organization, and tone. **Do not copy content or events from the anchor into new recaps.** If the block below says "(no style anchor configured)", fall back to the generic guidelines.
+
+```!
+if [ -n "${SESSIONS_RECAP_EXAMPLE:-}" ] && [ -r "${SESSIONS_RECAP_EXAMPLE:-}" ]; then
+  echo "<!-- BEGIN style anchor from \$SESSIONS_RECAP_EXAMPLE=$SESSIONS_RECAP_EXAMPLE -->"
+  cat "$SESSIONS_RECAP_EXAMPLE"
+  echo
+  echo "<!-- END style anchor -->"
+else
+  echo "(no style anchor configured — \$SESSIONS_RECAP_EXAMPLE unset or file unreadable)"
+fi
+```
+
 #### Daily Writing Guidelines
 
 - **Heading:** `# YYYY-MM-DD — Day of Week`
