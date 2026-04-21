@@ -184,10 +184,25 @@ REMOTE_SESSION_ID=$(bash "$HOTLINE_DIAL_SCRIPTS/wait-for-session.sh" "$CALL_DIR"
 **Then wait for the response:**
 
 ```bash
-RESPONSE_JSON=$(bash "$HOTLINE_DIAL_SCRIPTS/wait-for-response.sh" "$CALL_DIR")
+bash "$HOTLINE_DIAL_SCRIPTS/wait-for-response.sh" "$CALL_DIR" >/dev/null
+REMOTE_SESSION_ID=$(jq -r '.session_id' "$CALL_DIR/response.json")
+RESPONSE=$(jq -r '.response' "$CALL_DIR/response.json")
 ```
 
-Parse `session_id` and `response` from the JSON. Cache the session:
+`wait-for-response.sh` stdout is guaranteed to be valid, compact JSON on exit 0 — or a non-zero exit with a clear error on stderr. Callers do not need to re-validate.
+
+**⚠️ Do not do this** — under zsh (the default shell on macOS, and the shell Claude Code's Bash tool runs in) the `echo`-pipe pattern corrupts any JSON with backslash escapes (`\n`, `\f`, `\u001b`, ...):
+
+```bash
+# WRONG — zsh's echo interprets \f and \u001b in the captured JSON,
+#         producing malformed bytes jq then rejects with a parse error.
+RESPONSE_JSON=$(bash "$HOTLINE_DIAL_SCRIPTS/wait-for-response.sh" "$CALL_DIR")
+echo "$RESPONSE_JSON" | jq -r '.response'
+```
+
+Read from the file (preferred, shown above) or use a here-string: `jq -r '.response' <<<"$RESPONSE_JSON"`. If a caller ever sees a `parse error: Invalid string: control characters from U+0000 through U+001F` on `wait-for-response.sh` output, that's a hotline bug — file it via `bd` under the hotline plugin with the stream.jsonl and response.json captured from the call_dir.
+
+Cache the session:
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \

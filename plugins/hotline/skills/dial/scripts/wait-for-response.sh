@@ -8,9 +8,19 @@
 # Output (stdout):
 #   {"session_id":"...","response":"..."}
 #
+# The emitted JSON is compact (single line) and re-validated via jq before
+# being written to stdout — so stdout is guaranteed to be parseable JSON on
+# exit 0, or the script exits non-zero with an error on stderr.
+#
+# Caller note: agents running under zsh MUST NOT pipe the captured output
+# through `echo` (zsh's echo interprets backslash escapes and will corrupt
+# any JSON with escape sequences). Use `<<<"$VAR"` or read from the
+# call_dir/response.json file directly. See SKILL.md.
+#
 # Exit codes:
-#   0 — response received (JSON on stdout)
-#   1 — error (timeout or remote failure; message on stderr)
+#   0 — response received (valid JSON on stdout)
+#   1 — error (timeout, remote failure, or unparseable response.json;
+#       message on stderr)
 #
 # Usage:
 #   wait-for-response.sh <call_dir> [--timeout <seconds>]
@@ -49,9 +59,21 @@ if [[ -f "$CALL_DIR/error.txt" ]]; then
   exit 1
 fi
 
-if [[ -f "$CALL_DIR/response.json" ]]; then
-  cat "$CALL_DIR/response.json"
-else
+if [[ ! -f "$CALL_DIR/response.json" ]]; then
   echo "Done but no response.json found" >&2
+  exit 1
+fi
+
+# Re-emit as compact, validated JSON. If the file is somehow unparseable,
+# jq exits non-zero with an error on stderr — we surface that loudly rather
+# than hand a caller visibly-valid-but-broken bytes.
+#
+# Use `-c` (compact) only, not `-ce`: `-e` sets exit status from the
+# truthiness of the last output, which would make `jq -ce . <file>` emit
+# `null` to stdout AND exit 1 if response.json ever held a literal null —
+# a confusing mixed signal. `-c` catches parse errors on its own, which is
+# the only invariant this script promises.
+if ! jq -c . "$CALL_DIR/response.json"; then
+  echo "response.json is not parseable JSON — hotline emission bug" >&2
   exit 1
 fi
