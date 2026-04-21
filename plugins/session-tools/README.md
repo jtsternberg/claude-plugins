@@ -61,16 +61,22 @@ Default output:
 - Daily → `~/.claude/daily-notes/`
 - Weekly → `~/.claude/weekly-notes/`
 
-#### Optional style anchor
+#### Style anchor
 
-Set `$SESSIONS_RECAP_EXAMPLE` to a path to a past recap you like. When the skill is invoked, that file is injected into the prompt as a **style reference** — Claude matches its specificity, bullet density, theme layout, and tone without copying content.
+Every invocation, Claude is shown a sample weekly recap as a style reference — headings, Summary section, theme organization, bullet density. By default the skill uses a bundled generic example (`skills/sessions-weekly-recap/references/EXAMPLE-WEEKLY.md`).
+
+To override with a past recap you like, set `$SESSIONS_RECAP_EXAMPLE` to its absolute path:
 
 ```bash
-# In ~/.claude/settings.json (or exported in your shell):
+# In ~/.claude/settings.json "env", or exported in your shell:
 export SESSIONS_RECAP_EXAMPLE="/absolute/path/to/my-favorite-Week-X.Y.Z.md"
 ```
 
-Unset or unreadable → the skill uses its built-in generic writing guidelines. This is opt-in; no example ships with the plugin because style preferences are personal and example files tend to contain work details users wouldn't want in a shared plugin repo.
+Override resolution:
+- `$SESSIONS_RECAP_EXAMPLE` set + readable → use the user file
+- else → use the bundled default
+
+The bundled default contains placeholder content (no real work references); the override lets you anchor Claude's voice to your actual past recaps without committing your work details to this public plugin repo.
 
 #### Scheduling details
 

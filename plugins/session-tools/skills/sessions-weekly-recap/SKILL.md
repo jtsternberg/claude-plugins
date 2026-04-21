@@ -74,18 +74,21 @@ For each period (date or week) in the extracted data, check if a note already ex
 
 For each period, read the session data and write the note. This is the creative step.
 
-#### Optional Style Anchor
+#### Style Anchor
 
-If the user has set `$SESSIONS_RECAP_EXAMPLE` to a readable markdown file, its contents are injected below. Use it as a **style reference** — match the level of specificity, bullet density, theme organization, and tone. **Do not copy content or events from the anchor into new recaps.** If the block below says "(no style anchor configured)", fall back to the generic guidelines.
+A sample weekly recap is always injected below as a **style reference** — use it to match the level of specificity, bullet density, theme organization, and tone. **Do not copy content or events from the anchor into new recaps** — it may be a generic template or a past recap of entirely different work.
+
+Resolution order:
+1. If `$SESSIONS_RECAP_EXAMPLE` is set and readable, inject that file (user override).
+2. Otherwise, inject the bundled generic default (`references/EXAMPLE-WEEKLY.md`).
 
 ```!
 if [ -n "${SESSIONS_RECAP_EXAMPLE:-}" ] && [ -r "${SESSIONS_RECAP_EXAMPLE:-}" ]; then
-  echo "<!-- BEGIN style anchor from \$SESSIONS_RECAP_EXAMPLE=$SESSIONS_RECAP_EXAMPLE -->"
+  echo "<!-- style anchor: user override (\$SESSIONS_RECAP_EXAMPLE=$SESSIONS_RECAP_EXAMPLE) -->"
   cat "$SESSIONS_RECAP_EXAMPLE"
-  echo
-  echo "<!-- END style anchor -->"
 else
-  echo "(no style anchor configured — \$SESSIONS_RECAP_EXAMPLE unset or file unreadable)"
+  echo "<!-- style anchor: bundled default -->"
+  cat "${CLAUDE_SKILL_DIR}/references/EXAMPLE-WEEKLY.md"
 fi
 ```
 
