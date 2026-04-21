@@ -246,16 +246,18 @@ if [[ $have_zsh -eq 1 ]]; then
   # Unsafe pattern: echo pipe — must NOT be documented as the caller pattern.
   # We expect this to fail; if it stops failing (e.g., because emitter swaps
   # to a form without backslash escapes), update SKILL.md accordingly.
-  out=$(zsh -c "
-    CALL_DIR=$(printf %q "$FIXTURE_DIR")
-    DIAL_SCRIPTS=$(printf %q "$DIAL_SCRIPTS")
-    FIX_DIR=\$(mktemp -d /tmp/hotline-unsafe-XXXXX)
-    cp \"\$CALL_DIR/response.json\" \"\$FIX_DIR/response.json\"
-    touch \"\$FIX_DIR/done\"
-    RESPONSE_JSON=\$(bash \"\$DIAL_SCRIPTS/wait-for-response.sh\" \"\$FIX_DIR\")
-    echo \"\$RESPONSE_JSON\" | jq -r .response 2>&1
-    rm -rf \"\$FIX_DIR\"
-  ")
+  #
+  # Pass paths via env so the zsh script body can stay single-quoted (no
+  # shell-meta interpolation at bash-parse time) and survives paths with
+  # spaces, quotes, or other shell-special characters.
+  out=$(FIXTURE_DIR="$FIXTURE_DIR" DIAL_SCRIPTS="$DIAL_SCRIPTS" zsh -c '
+    FIX_DIR=$(mktemp -d /tmp/hotline-unsafe-XXXXX)
+    cp "$FIXTURE_DIR/response.json" "$FIX_DIR/response.json"
+    touch "$FIX_DIR/done"
+    RESPONSE_JSON=$(bash "$DIAL_SCRIPTS/wait-for-response.sh" "$FIX_DIR")
+    echo "$RESPONSE_JSON" | jq -r .response 2>&1
+    rm -rf "$FIX_DIR"
+  ')
   if echo "$out" | grep -q "parse error"; then
     pass "zsh: \`echo \$VAR | jq\` correctly fails (documented as unsafe)"
   else
