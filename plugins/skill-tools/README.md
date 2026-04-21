@@ -18,6 +18,18 @@ Provides scaffolding and review tools for developing Claude Code extensions. Hel
 
 ## Commands
 
+### `/create-skill`
+
+End-to-end skill builder. Chains the official `skill-creator` → `review-skill` → auto-applies the review → opens the finished SKILL.md in your editor.
+
+```
+/create-skill <skill-name-or-description>
+```
+
+One up-front confirmation covers classification (project / personal / public) and save path; everything after runs straight through. Public skills get parameterized automatically using the same env-var pattern as `plugins/session-tools` (`$SESSIONS_RECAP_EXAMPLE`-style overrides with safe defaults).
+
+Set `$CLAUDE_PUBLIC_SKILLS_DIR` to have the wrapper propose a default location for new public skills.
+
 ### `/create-slash-command`
 
 Create a new slash command with proper structure.
@@ -99,7 +111,8 @@ Evaluates command files for:
 
 ## Additional Documentation
 
+- [skills/create-skill/SKILL.md](skills/create-skill/SKILL.md)
+- [skills/review-skill/SKILL.md](skills/review-skill/SKILL.md)
 - [commands/create-slash-command.md](commands/create-slash-command.md)
 - [commands/create-subagent.md](commands/create-subagent.md)
-- [commands/review-skill.md](commands/review-skill.md)
 - [commands/review-slash-command.md](commands/review-slash-command.md)
