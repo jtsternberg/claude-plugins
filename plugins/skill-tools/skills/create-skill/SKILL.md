@@ -23,10 +23,16 @@ Creating a skill and then reviewing it are two separate workflows. Running them 
 
 While this wrapper is running:
 
-- **Do not** open the review file in the user's editor.
-- **Do not** ask "would you like to apply the recommendations?" — the wrapper already answered yes on the user's behalf.
-- **One up-front confirmation is allowed** — Step 1 (location + audience) genuinely can't be inferred safely, so confirm it before any drafting starts.
-- After Step 1, batch any remaining clarifications into the final presentation as "open questions" — do not stop mid-flow to ask.
+- The review file stays internal — Step 5 presents the conclusions directly. The finished SKILL.md gets opened in the editor at the end.
+- Apply qualifying review recommendations automatically; the wrapper has authority to answer "yes, apply" on the user's behalf.
+- One up-front confirmation happens in Step 1 (location + audience). Everything after runs straight through.
+- Collect any other clarifications as "open questions" in the Step 5 summary.
+
+### Tips
+
+* If the user interrupts mid-step to correct something (save path, name, trigger phrases, any piece of Step 1's confirmed plan), **re-enter the affected step cleanly**.
+
+* Always call `Skill(skill-creator:skill-creator)` before drafting anything yourself.
 
 ## Step 1: Decide where the skill lives (and who it's for)
 
@@ -61,16 +67,16 @@ Wait for a yes / redirect. Then proceed to Step 2. If the user just says "yes" o
 
 ## Step 2: Create the skill via skill-creator
 
-Invoke the official skill-creator. **Specifically** use `skill-creator:skill-creator` from the claude-plugins-official marketplace — not `compound-engineering:skill-creator` or any other plugin's look-alike. Those have different workflows (heavier eval loops, different file layouts) and are not what this wrapper is designed to chain with.
+Invoke the official skill-creator: `skill-creator:skill-creator` from the claude-plugins-official marketplace. If a look-alike exists in another plugin (e.g., `compound-engineering:skill-creator`), prefer the official one — it has the workflow this wrapper is built to chain with.
 
-**Preferred invocation:** `Skill` tool with `skill-creator:skill-creator`, passing the user's intent as the argument/context.
+**Invocation:** call the `Skill` tool with `skill-creator:skill-creator`, passing the user's intent as the argument/context. Skill invocability is per-skill; attempt the call and observe the result rather than inferring from another skill's frontmatter.
 
-**If the `Skill` tool refuses** (e.g., because the target skill has `disable-model-invocation: true`, which blocks programmatic invocation), fall back to inline execution:
+**Fallback:** if the `Skill` tool returns a concrete refusal error, switch to inline execution:
 
 1. Read `~/.claude/plugins/cache/claude-plugins-official/skill-creator/*/skills/skill-creator/SKILL.md` (glob the version segment).
 2. Follow its instructions directly in this conversation.
 
-Run skill-creator in **lightweight mode**: draft the skill, then stop. Skip the test-case / benchmark / description-optimization loops unless the user explicitly asked for them. Those add long interactive cycles that defeat the "don't bother the user" contract. Review-skill (Step 2) handles the quality pass instead.
+Run skill-creator in **lightweight mode**: draft the skill and stop. The test-case / benchmark / description-optimization loops can be invoked separately when the user asks for them — review-skill (Step 3) handles the quality pass in this flow.
 
 Let skill-creator:
 
@@ -102,11 +108,11 @@ ultrathink
 
 Read the refined review from `/tmp/skill-review-{skill-name}.md`. For each recommendation, decide:
 
-- **Apply automatically** when the recommendation (a) solves a concrete problem the reviewer identified, (b) does not require clarification from the user, and (c) does not contradict the user's stated intent for the skill.
-- **Defer** when the recommendation demands a design decision the user should own (e.g., "rename the skill to X", "narrow the trigger scope to Y", "split the skill into two"). Collect deferred items; they become Step 4's "open questions".
-- **Drop** when the recommendation is speculative, based on a fabricated metric, or fights a deliberate design choice the user made.
+- **Apply automatically** when the recommendation solves a concrete problem the reviewer identified, needs no clarification from the user, and aligns with the user's stated intent for the skill.
+- **Defer** when the recommendation involves a design decision the user should own (e.g., renaming the skill, narrowing the trigger scope, splitting the skill in two). Deferred items become Step 5's "open questions".
+- **Drop** when the recommendation is speculative, relies on unverifiable claims, or conflicts with a deliberate design choice the user made.
 
-After applying fixes, re-read the skill end-to-end. If the review surfaced a genuine need for bundled resources (`scripts/`, `references/`, `assets/`), create them now. If the skill still fails review criteria, loop back to the review pass once more — do not loop indefinitely; two review passes is the cap before presenting.
+After applying fixes, re-read the skill end-to-end. If the review surfaced a genuine need for bundled resources (`scripts/`, `references/`, `assets/`), create them now. Cap the review loop at two passes; if open issues remain after the second pass, carry them into Step 5 as open questions.
 
 ## Step 5: Present
 
@@ -120,10 +126,12 @@ Include:
 4. **Open questions** — deferred recommendations needing a user decision, if any.
 5. **Try it** — the slash command or trigger phrase for the new skill.
 
+After the summary, open the finished `SKILL.md` in the user's editor so they can inspect and iterate — macOS: `open <path-to-SKILL.md>`; other platforms: the `$EDITOR` equivalent.
+
 If the skill is part of a plugin, remind the user that plugin version bumps and `marketplace.json` registration are separate steps this wrapper does not perform.
 
 ## Non-goals
 
 - Running skill-creator's full eval/benchmark loop. Users who want that should invoke `skill-creator:skill-creator` directly.
 - Updating `marketplace.json`, bumping plugin versions, writing README entries, or committing the new skill. Those are separate workflows.
-- Looping on review more than twice. If the skill still fails review after two passes, present what's there and flag the outstanding issues as open questions.
+- Looping on review more than twice. Two passes is the cap; any remaining items land in Step 5 as open questions.
