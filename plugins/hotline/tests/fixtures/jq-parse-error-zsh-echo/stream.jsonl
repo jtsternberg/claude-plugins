@@ -1,0 +1,3 @@
+{"type":"system","session_id":"sess-repro-2026-04-21"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Working on it..."}]}}
+{"type":"result","session_id":"sess-repro-2026-04-21","result":"Here is a multi-paragraph response.\n\nIt contains a form-feed control byte (\u000c) mid-string.\n\nIt also contains an ANSI escape sequence (\u001b[31mred\u001b[0m).\n\nThe response.json on disk is valid JSON — jq escapes these as \\f and \\u001b inside the string.\n\nBut when the caller runs `echo \"$RESPONSE_JSON\" | jq -r '.response'` under zsh, zsh's echo interprets those backslash escapes as actual bytes — producing malformed JSON before jq parses it.","num_turns":3}
