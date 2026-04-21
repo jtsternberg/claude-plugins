@@ -67,7 +67,13 @@ fi
 # Re-emit as compact, validated JSON. If the file is somehow unparseable,
 # jq exits non-zero with an error on stderr — we surface that loudly rather
 # than hand a caller visibly-valid-but-broken bytes.
-if ! jq -ce . "$CALL_DIR/response.json"; then
+#
+# Use `-c` (compact) only, not `-ce`: `-e` sets exit status from the
+# truthiness of the last output, which would make `jq -ce . <file>` emit
+# `null` to stdout AND exit 1 if response.json ever held a literal null —
+# a confusing mixed signal. `-c` catches parse errors on its own, which is
+# the only invariant this script promises.
+if ! jq -c . "$CALL_DIR/response.json"; then
   echo "response.json is not parseable JSON — hotline emission bug" >&2
   exit 1
 fi
