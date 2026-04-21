@@ -115,6 +115,13 @@ fi
   fi
 
   # Parse final response
+  #
+  # NOTE: plugins/hotline/tests/wait-for-response_test.sh mirrors this
+  # extraction block in `synthesize_response()` so the regression suite can
+  # exercise the emission path without invoking `claude -p`. If you change
+  # the logic below (result-line selection, fallback order, warning text),
+  # update the test helper too or the tests will silently pass against a
+  # stale mirror.
   if [[ ! -s "$STREAM_FILE" ]]; then
     STDERR_MSG=$(cat "$STDERR_FILE" 2>/dev/null || true)
     echo "${STDERR_MSG:-Claude CLI produced no output}" > "$CALL_DIR/error.txt"
