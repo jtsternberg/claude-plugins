@@ -55,13 +55,31 @@ When the source is HTML and you want markdown:
 file=$(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --md)
 ```
 
-Pipeline: `readability-cli` extracts the article body (strips `<script>`, `<style>`, navbar, footer, sidebar), then `turndown-cli` converts the cleaned HTML to markdown. The script prefers PATH-installed binaries and falls back to `npx -y` — so there's nothing required to `npm install`, but `npx` adds ~4s of overhead per call (even with a warm cache). Heavy users should speed things up with:
+Pipeline: `readability-cli` extracts the article body (strips `<script>`, `<style>`, navbar, footer, sidebar), then `turndown-cli` converts the cleaned HTML to markdown. The script prefers PATH-installed binaries and falls back to `npx -y` — so there's nothing required to `npm install`, but `npx` adds ~3s of overhead per call (even with a warm cache).
 
-```bash
-npm i -g readability-cli turndown-cli
+### When you see the npx-fallback tip, offer to install
+
+When the script uses the npx fallback for `--md`, it emits this line to stderr (visible in your Bash tool result):
+
+```
+fetch-docs: tip — npx fallback in use; 'npm i -g readability-cli turndown-cli' makes --md ~6× faster
 ```
 
-After that, `--md` calls drop from ~5–6s to under 1s.
+Rule: **on the second time you see this tip in a session**, surface it to the user and offer to install. The first `--md` call is a one-off; the second proves the user is doing enough of this that the speedup is worth the install. On the first tip, stay silent.
+
+When you do surface it, say something like:
+
+> FYI — these `--md` calls are each taking ~4s because the binaries aren't installed globally. Installing them drops the time to ~0.7s (about 6× faster):
+>
+> ```bash
+> npm i -g readability-cli turndown-cli
+> ```
+>
+> Want me to run that?
+
+**Never run `npm i -g` without explicit user consent.** Global npm state is shared machine-wide; it's not reversible for the user without them noticing. If they say yes, run it and continue. If they decline or ignore the offer, do not bring it up again in this session — even on subsequent tips.
+
+### Reader-mode caveat
 
 The reader-mode extraction is opinionated — it removes page chrome by design. If the user needs truly unfiltered HTML, drop `--md` and read the raw file.
 

@@ -204,6 +204,12 @@ if [ "$WANT_MD" = 1 ]; then
 		echo "fetch-docs: turndown-cli produced empty markdown" >&2
 		exit 1
 	fi
+	# If we went through npx for either tool, emit a speed-up tip to stderr.
+	# The skill's SKILL.md tells Claude to surface this to the user once per
+	# session and offer to run the install — don't repeat the offer.
+	if [ "${READABILITY_CMD[0]}" = "npx" ] || [ "${TURNDOWN_CMD[0]}" = "npx" ]; then
+		echo "fetch-docs: tip — npx fallback in use; 'npm i -g readability-cli turndown-cli' makes --md ~6× faster" >&2
+	fi
 	echo "$OUT_MD"
 	exit 0
 fi
