@@ -61,7 +61,11 @@ if [[ -z "$TITLE" ]]; then
 fi
 
 # Clean: strip YAML frontmatter and Obsidian callout headers
-CLEAN=$(mktemp "./__tmp-upload-XXXXX.md")
+# Note: macOS BSD mktemp does NOT randomize X's when a suffix follows (it creates
+# the file with literal "XXXXX" in the name), which breaks parallel invocations.
+# So we generate a unique name manually using $RANDOM + $$.
+CLEAN="./__tmp-upload-$$-$RANDOM.md"
+: > "$CLEAN"
 trap 'rm -f "$CLEAN"' EXIT
 
 "$SCRIPT_DIR/clean.sh" "$FILE" "$CLEAN"
