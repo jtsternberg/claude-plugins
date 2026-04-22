@@ -26,6 +26,7 @@
     { "name": "paperclip", "source": "./plugins/paperclip" },
     { "name": "gws", "source": "./plugins/gws" },
     { "name": "session-tools", "source": "./plugins/session-tools" },
-    { "name": "work-with-media", "source": "./plugins/work-with-media" }
+    { "name": "work-with-media", "source": "./plugins/work-with-media" },
+    { "name": "research-tools", "source": "./plugins/research-tools" }
   ]
 }

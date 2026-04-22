@@ -93,6 +93,11 @@ Turn audio and video into text on macOS. Bundles a [MacWhisper](https://goodsnoo
 
 **Install:** `claude plugin install work-with-media@jtsternberg`
 
+#### 📚 [research-tools](plugins/research-tools)
+Research infrastructure for Claude Code. Ships `fetch-docs` — pulls a URL's raw content into a local file so Claude reads the authoritative source instead of WebFetch's filtered summary. Works on any http/https URL; optional HTML→markdown conversion via `npx`.
+
+**Install:** `claude plugin install research-tools@jtsternberg`
+
 ### Commands
 
 #### 💬 [git-commits](plugins/git-commits)

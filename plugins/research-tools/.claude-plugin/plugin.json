@@ -1,0 +1,9 @@
+{
+  "name": "research-tools",
+  "description": "Tools for researching external sources from within Claude Code. Ships fetch-docs, a skill that pulls raw URL content into a local file so agents read the authoritative source instead of WebFetch's filtered summary.",
+  "version": "1.0.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}
