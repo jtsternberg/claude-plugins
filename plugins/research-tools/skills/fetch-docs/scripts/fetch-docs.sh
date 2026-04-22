@@ -18,9 +18,12 @@ Positional:
 Flags:
   --slug=NAME     Output filename slug. Defaults to a short hash of the URL.
   --ttl=SECONDS   Cache TTL. Default 86400 (24h). 0 forces a refetch.
-  --md            Convert HTML to markdown via readability-cli + turndown-cli
-                  (both run through npx; no install needed). No-op when the
-                  source is already markdown.
+  --md            Convert HTML to markdown via readability-cli + turndown-cli.
+                  Uses PATH-installed binaries when present (fastest); falls
+                  back to `npx -y` otherwise (no install needed, but adds
+                  ~4s overhead per call). For speed, run:
+                    npm i -g readability-cli turndown-cli
+                  No-op when the source is already markdown.
 
 Outputs:
   The cached file path on stdout. Paths use /tmp/fetch-docs-<slug>.<ext>
@@ -79,6 +82,20 @@ if [ "$WANT_MD" = 1 ]; then
 	if ! command -v node >/dev/null 2>&1 || ! command -v npx >/dev/null 2>&1; then
 		echo "fetch-docs: --md requires node and npx on PATH" >&2
 		exit 1
+	fi
+	# Prefer PATH-installed CLIs (global npm install) over npx. npx adds ~2s
+	# overhead per call even with a warm cache; global installs run in ~0.3s.
+	if command -v readability-cli >/dev/null 2>&1; then
+		READABILITY_CMD=(readability-cli)
+	else
+		READABILITY_CMD=(npx -y readability-cli)
+	fi
+	if command -v turndown >/dev/null 2>&1; then
+		TURNDOWN_CMD=(turndown)
+	elif command -v turndown-cli >/dev/null 2>&1; then
+		TURNDOWN_CMD=(turndown-cli)
+	else
+		TURNDOWN_CMD=(npx -y turndown-cli)
 	fi
 fi
 
@@ -170,12 +187,12 @@ mv "$BODY" "$OUT_HTML"
 if [ "$WANT_MD" = 1 ]; then
 	CLEAN=$(mktemp -t fetch-docs-clean.XXXXXX).html
 	# -l exit → fail fast on non-article pages instead of emitting CSS-leaked garbage.
-	if ! npx -y readability-cli -l exit -q "$OUT_HTML" -o "$CLEAN" >/dev/null 2>&1 || [ ! -s "$CLEAN" ]; then
+	if ! "${READABILITY_CMD[@]}" -l exit -q "$OUT_HTML" -o "$CLEAN" >/dev/null 2>&1 || [ ! -s "$CLEAN" ]; then
 		echo "fetch-docs: readability-cli could not extract an article from $OUT_HTML (page is likely not article-shaped — drop --md and read the raw HTML)" >&2
 		exit 1
 	fi
 	# --head=atx + --code=fenced: nicer for agents than setext underlines + indented code.
-	if ! npx -y turndown-cli --head=2 --code=2 "$CLEAN" "$OUT_MD" >/dev/null 2>&1; then
+	if ! "${TURNDOWN_CMD[@]}" --head=2 --code=2 "$CLEAN" "$OUT_MD" >/dev/null 2>&1; then
 		echo "fetch-docs: turndown-cli failed converting $CLEAN" >&2
 		exit 1
 	fi
