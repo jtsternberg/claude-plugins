@@ -8,10 +8,10 @@ Publish Claude Code `/insights` reports to GitHub Pages for easy sharing.
 
 ```bash
 # Add the marketplace
-/plugin marketplace add jtsternberg/claude-usage-data
+claude plugin marketplace add jtsternberg/claude-usage-data
 
 # Install the plugin
-/plugin install publish-insights@jtsternberg/claude-usage-data
+claude plugin install publish-insights@jtsternberg/claude-usage-data
 ```
 
 ## Prerequisites

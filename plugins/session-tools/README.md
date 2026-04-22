@@ -5,7 +5,7 @@ A bucket of skills for working with Claude Code session transcripts stored under
 ## Install
 
 ```bash
-/plugin install session-tools@jtsternberg
+claude plugin install session-tools@jtsternberg
 ```
 
 Or locally:

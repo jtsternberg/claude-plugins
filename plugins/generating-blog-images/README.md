@@ -6,10 +6,10 @@ Generate AI image prompts for blog posts by analyzing content and identifying op
 
 ```bash
 # Add the marketplace (if not already added)
-/plugin marketplace add jtsternberg/claude-plugins
+claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
-/plugin install generating-blog-images@jtsternberg
+claude plugin install generating-blog-images@jtsternberg
 ```
 
 ## Description

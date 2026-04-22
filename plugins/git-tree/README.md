@@ -6,10 +6,10 @@ Create git worktrees with symlinked dependencies for parallel branch work.
 
 ```bash
 # Add the marketplace (if not already added)
-/plugin marketplace add jtsternberg/claude-plugins
+claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
-/plugin install git-tree@jtsternberg
+claude plugin install git-tree@jtsternberg
 ```
 
 ## Description

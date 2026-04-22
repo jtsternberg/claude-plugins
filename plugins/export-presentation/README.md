@@ -6,10 +6,10 @@ Export HTML slide presentations to PDF or PNG screenshots using browser automati
 
 ```bash
 # Add the marketplace (if not already added)
-/plugin marketplace add jtsternberg/claude-plugins
+claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
-/plugin install export-presentation@jtsternberg
+claude plugin install export-presentation@jtsternberg
 ```
 
 ## Requirements

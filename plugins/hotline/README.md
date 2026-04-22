@@ -10,10 +10,10 @@ Hotline lets one Claude Code workspace call another — ask a question, delegate
 
 ```bash
 # Add the marketplace (if not already added)
-/plugin marketplace add jtsternberg/claude-plugins
+claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
-/plugin install hotline@jtsternberg
+claude plugin install hotline@jtsternberg
 ```
 
 This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`) as slash commands in Claude Code.

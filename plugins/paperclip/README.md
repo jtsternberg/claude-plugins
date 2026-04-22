@@ -8,10 +8,10 @@ Equips Claude with everything it needs to manage companies, agents, issues, and 
 
 ```bash
 # Add the marketplace (if not already added)
-/plugin marketplace add jtsternberg/claude-plugins
+claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
-/plugin install paperclip@jtsternberg
+claude plugin install paperclip@jtsternberg
 ```
 
 This registers the `paperclip` skill as a slash command in Claude Code.

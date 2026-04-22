@@ -6,10 +6,10 @@ Commands and skills for managing pull requests: addressing comments, updating de
 
 ```bash
 # Add the marketplace (if not already added)
-/plugin marketplace add jtsternberg/claude-plugins
+claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
-/plugin install pr-workflow@jtsternberg
+claude plugin install pr-workflow@jtsternberg
 ```
 
 ## Description

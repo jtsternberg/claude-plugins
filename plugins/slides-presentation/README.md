@@ -6,10 +6,10 @@ Create self-contained HTML slide presentations from talk prompts, outlines, or c
 
 ```bash
 # Add the marketplace (if not already added)
-/plugin marketplace add jtsternberg/claude-plugins
+claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
-/plugin install slides-presentation@jtsternberg
+claude plugin install slides-presentation@jtsternberg
 ```
 
 ## Requirements

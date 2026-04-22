@@ -9,7 +9,7 @@ Status line showing model name, current directory, git branch/status, and contex
 First, add the marketplace if you haven't already:
 
 ```bash
-/plugin marketplace add jtsternberg/claude-plugins
+claude plugin marketplace add jtsternberg/claude-plugins
 ```
 
 ## Setup

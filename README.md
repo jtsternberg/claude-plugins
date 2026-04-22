@@ -13,14 +13,14 @@ A curated collection of Claude Code plugins — skills, commands, hooks, and aut
 Add the marketplace and install any plugin:
 
 ```bash
-/plugin marketplace add jtsternberg/claude-plugins
-/plugin install git-tree@jtsternberg  # Example: install git-tree skill
+claude plugin marketplace add jtsternberg/claude-plugins
+claude plugin install git-tree@jtsternberg  # Example: install git-tree skill
 ```
 
 Verify installation:
 
 ```bash
-/plugin list
+claude plugin list
 ```
 
 ---
@@ -32,61 +32,61 @@ Verify installation:
 #### 🌳 [git-tree](plugins/git-tree)
 Create git worktrees with symlinked dependencies. Perfect for parallel branch work.
 
-**Install:** `/plugin install git-tree@jtsternberg`
+**Install:** `claude plugin install git-tree@jtsternberg`
 
 #### 📰 [headline-refiner](plugins/headline-refiner)
 Refines headlines using the 5-Part Headline Framework (Number, What, Who, Why, Twist the Knife).
 
-**Install:** `/plugin install headline-refiner@jtsternberg`
+**Install:** `claude plugin install headline-refiner@jtsternberg`
 
 #### 📝 [obsidian-cli](plugins/obsidian-cli)
 Interacts with Obsidian vaults from the terminal using the official Obsidian CLI (v1.12+).
 
-**Install:** `/plugin install obsidian-cli@jtsternberg`
+**Install:** `claude plugin install obsidian-cli@jtsternberg`
 
 #### 📊 [publish-insights](https://github.com/jtsternberg/claude-usage-data)
 Publish Claude Code `/insights` reports to GitHub Pages for easy sharing.
 
 **Install:** 
 ```bash
-/plugin marketplace add jtsternberg/claude-usage-data
-/plugin install publish-insights@jtsternberg/claude-usage-data
+claude plugin marketplace add jtsternberg/claude-usage-data
+claude plugin install publish-insights@jtsternberg/claude-usage-data
 ```
 
 #### 🖼️ [generating-blog-images](plugins/generating-blog-images)
 Generate AI image prompts for blog posts by analyzing content and identifying optimal placement.
 
-**Install:** `/plugin install generating-blog-images@jtsternberg`
+**Install:** `claude plugin install generating-blog-images@jtsternberg`
 
 #### 🐘 [localwp-shell](plugins/localwp-shell)
 Wraps WP-CLI, PHP, MySQL, and Composer commands through LocalWP's sandboxed environment. Auto-detects the correct site from the current directory.
 
-**Install:** `/plugin install localwp-shell@jtsternberg`
+**Install:** `claude plugin install localwp-shell@jtsternberg`
 
 #### 🎬 [slides-presentation](plugins/slides-presentation)
 Creates self-contained HTML slide presentations from talk prompts, outlines, or content descriptions. Supports dark/light themes, SVG diagrams, and AI-generated illustrations.
 
-**Install:** `/plugin install slides-presentation@jtsternberg`
+**Install:** `claude plugin install slides-presentation@jtsternberg`
 
 #### 📤 [export-presentation](plugins/export-presentation)
 Exports HTML slide presentations to PDF or PNG screenshots using browser automation. Companion to [slides-presentation](#-slides-presentation).
 
-**Install:** `/plugin install export-presentation@jtsternberg`
+**Install:** `claude plugin install export-presentation@jtsternberg`
 
 #### 📞 [hotline](plugins/hotline)
 Cross-workspace communication for Claude Code agents. Dial another workspace to ask questions, delegate work, or collaborate in real-time. Also ships a [standalone session ID discovery utility](plugins/hotline/SESSION-ID-DISCOVERY.md).
 
-**Install:** `/plugin install hotline@jtsternberg`
+**Install:** `claude plugin install hotline@jtsternberg`
 
 #### 🧠 [thinking-tools](plugins/thinking-tools)
 Metacognitive reasoning frameworks for careful decision-making. Includes Chesterton's Fence (investigate before removing).
 
-**Install:** `/plugin install thinking-tools@jtsternberg`
+**Install:** `claude plugin install thinking-tools@jtsternberg`
 
 #### 📅 [session-tools](plugins/session-tools)
 Tools for managing Claude Code session transcripts — recaps, cleanup, retitling, etc. Currently ships `sessions-weekly-recap` (daily/weekly recap notes + macOS launchd installer).
 
-**Install:** `/plugin install session-tools@jtsternberg`
+**Install:** `claude plugin install session-tools@jtsternberg`
 
 #### 🎙️ [work-with-media](plugins/work-with-media)
 Turn audio and video into text on macOS. Bundles a [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper) CLI wrapper (local file transcription) and a yt-dlp skill (YouTube/Vimeo/URL — captions, description, chapters, or audio download as a transcription fallback). Subs-first for URLs, so a TLDR doesn't require downloading 20 MB of audio.
@@ -100,7 +100,7 @@ Commands for creating git commits from staged or unstaged files with AI-generate
 
 **Commands:** `/commit-staged`, `/commit-unstaged`
 
-**Install:** `/plugin install git-commits@jtsternberg`
+**Install:** `claude plugin install git-commits@jtsternberg`
 
 #### 🔀 [pr-workflow](plugins/pr-workflow)
 Commands for managing pull requests: addressing comments and updating descriptions.
@@ -109,14 +109,14 @@ Commands for managing pull requests: addressing comments and updating descriptio
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementing fixes or writing PR descriptions.
 
-**Install:** `/plugin install pr-workflow@jtsternberg`
+**Install:** `claude plugin install pr-workflow@jtsternberg`
 
 #### 🛠️ [skill-tools](plugins/skill-tools)
 Commands for creating and reviewing Claude Code skills, slash commands, and subagents.
 
 **Commands:** `/create-slash-command`, `/create-subagent`, `/review-skill`, `/review-slash-command`
 
-**Install:** `/plugin install skill-tools@jtsternberg`
+**Install:** `claude plugin install skill-tools@jtsternberg`
 
 #### 📦 [beads-workflow](plugins/beads-workflow)
 Work through beads epics from start to completion with automatic PR creation.
@@ -127,14 +127,14 @@ Work through beads epics from start to completion with automatic PR creation.
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementation work or fixing findings.
 
-**Install:** `/plugin install beads-workflow@jtsternberg`
+**Install:** `claude plugin install beads-workflow@jtsternberg`
 
 #### 🤝 [handoff](plugins/handoff)
 Create handoff documents to preserve context between Claude Code sessions.
 
 **Commands:** `/handoff`
 
-**Install:** `/plugin install handoff@jtsternberg`
+**Install:** `claude plugin install handoff@jtsternberg`
 
 ### Status Lines
 

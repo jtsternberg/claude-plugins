@@ -6,10 +6,10 @@ This plugin provides the `/tackle-epic` command for working through beads epics.
 
 ```bash
 # Add the marketplace (if not already added)
-/plugin marketplace add jtsternberg/claude-plugins
+claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
-/plugin install beads-workflow@jtsternberg
+claude plugin install beads-workflow@jtsternberg
 ```
 
 ## Dependencies
