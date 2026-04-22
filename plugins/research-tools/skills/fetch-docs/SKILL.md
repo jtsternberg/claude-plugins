@@ -17,7 +17,9 @@ allowed-tools: Bash(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh *) Bash(curl 
 
 WebFetch summarizes. This skill gets you the raw page.
 
-When Claude Code calls WebFetch, a small-model pass filters the page through the user's prompt and drops specifics — exact flag names, enum values, edge-case prose. `fetch-docs` skips that step entirely: it `curl`s the URL into `/tmp/`, returns the file path, and you `Read` it like any other file.
+When Claude Code calls WebFetch, a small-model pass filters the page through the user's prompt and drops specifics — exact flag names, enum values, edge-case prose. `fetch-docs` skips that step entirely: it `curl`s the URL into `/tmp/` and returns the file path.
+
+**Do not Read the file by default.** The point of landing it on disk is to keep it out of context until the user actually asks about the content. Return the path and stop. If a follow-up turn asks what the docs say, Read it then.
 
 ## Prerequisites
 
