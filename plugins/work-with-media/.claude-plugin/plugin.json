@@ -1,0 +1,9 @@
+{
+  "name": "work-with-media",
+  "description": "Turns audio and video into text on macOS. Bundles a MacWhisper `mw` CLI wrapper for local-file transcription with a yt-dlp skill that pulls captions, descriptions, chapters, and audio from YouTube/Vimeo/any URL. The two skills compose — yt-dlp usually finishes URL requests from captions alone, and falls back to downloading audio for macwhisper-cli only when transcription is actually needed.",
+  "version": "1.0.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}

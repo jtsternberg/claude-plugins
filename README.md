@@ -88,6 +88,11 @@ Tools for managing Claude Code session transcripts — recaps, cleanup, retitlin
 
 **Install:** `/plugin install session-tools@jtsternberg`
 
+#### 🎙️ [work-with-media](plugins/work-with-media)
+Turn audio and video into text on macOS. Bundles a [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper) CLI wrapper (local file transcription) and a yt-dlp skill (YouTube/Vimeo/URL — captions, description, chapters, or audio download as a transcription fallback). Subs-first for URLs, so a TLDR doesn't require downloading 20 MB of audio.
+
+**Install:** `claude plugin install work-with-media@jtsternberg`
+
 ### Commands
 
 #### 💬 [git-commits](plugins/git-commits)
