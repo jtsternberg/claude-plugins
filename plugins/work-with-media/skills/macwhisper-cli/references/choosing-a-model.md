@@ -20,19 +20,23 @@ mw models select whisperkit:openai_whisper-small
 
 ## Engines at a glance
 
-- **`whisper-cpp`** — ggml-based Whisper, broad language support, runs on Intel + Apple Silicon. The safe default when you don't know the user's hardware.
-- **`whisperkit`** — Whisper ported to Core ML, fast on Apple Silicon (uses the Apple Neural Engine).
-- **`parakeet-pro`** — NVIDIA Parakeet runtime packaged for Mac, English-only, very fast.
-- **`apple`** — macOS on-device Speech framework, macOS 26+ only.
+Engine IDs seen in `mw models list`:
+
+- **`whisper-cpp`** — local Whisper implementation using ggml model files (e.g. `ggml-tiny.en`, `ggml-base.en`).
+- **`whisperkit`** — local engine. Per the CLI docs, one of the engines that supports `--stream`.
+- **`parakeet-pro`** — local engine. IDs in this namespace map to what the CLI docs call "ParakeetKit"; one of the engines that supports `--stream`.
+- **`apple`** — macOS on-device Speech framework. Per the docs, macOS 26+ only; shown with `-` size in `mw models list` because the OS manages storage. Supports `--stream`.
+
+MacWhisper can also use cloud engines (OpenAI, Groq, Deepgram, ElevenLabs, MacWhisper AI) if configured. Those return one final result and don't stream.
 
 ## Picking a model
 
 Rough heuristics — these are starting points, not rules:
 
-- **Short clips, English-only, speed first** → a small `whisper-cpp` (`ggml-*-tiny.en`, `ggml-*-base.en`) or `parakeet-pro`.
+- **Short clips, English-only, speed first** → a small `whisper-cpp` model like `ggml-tiny.en` or `ggml-base.en`, or `parakeet-pro`.
 - **Multilingual or higher accuracy needed** → a WhisperKit small/medium, or a `whisper-cpp` non-`.en` model.
 - **Long recordings (hour+)** → stick with the active model (`▸` in `mw models list`) if it fits the language/accuracy requirements — switching to a cold model on a long clip means eating the first-load cost before real transcription starts.
-- **Streaming output required** (`--stream`) → `mw help transcribe` documents streaming as local-engine-only but doesn't enumerate which of the installed engines qualify. Try the current model; if it outputs one big blob instead of incremental segments, switch to a different engine via `mw models select` and retry.
+- **Streaming output required** (`--stream`) → use a local engine. Per the CLI docs, these stream: WhisperKit, ParakeetKit, Apple speech. Cloud engines (OpenAI, Groq, Deepgram, ElevenLabs, MacWhisper AI) return one final result regardless of `--stream`.
 
 ## Changing the default vs. one-off override
 
@@ -50,4 +54,4 @@ mw models select whisperkit:openai_whisper-small
 
 ## When a model isn't installed
 
-If `mw models list` doesn't include the model the user asks for, don't try to fetch weights manually — MacWhisper manages the catalog and hand-placed weights outside it won't appear in the CLI. Point the user to MacWhisper → Models to install from the in-app picker.
+If `mw models list` doesn't include the model the user asks for, don't try to fetch weights manually — MacWhisper manages the catalog. Point the user to MacWhisper's UI to download the model there first, then re-run `mw models list`.

@@ -21,7 +21,7 @@ claude plugin install work-with-media@jtsternberg
 ### macwhisper-cli skill
 
 - **[MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper)** (macOS only) — installed with the CLI enabled (Settings → Advanced → **Install** under Command-Line Tool). This drops `/usr/local/bin/mw`.
-- At least one transcription model downloaded from MacWhisper's Models tab.
+- At least one transcription model downloaded from MacWhisper's UI.
 
 ### yt-dlp skill
 

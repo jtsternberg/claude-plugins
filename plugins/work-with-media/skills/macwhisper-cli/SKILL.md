@@ -12,7 +12,7 @@ allowed-tools: Bash(mw *) Bash(tee *) Bash(pbcopy)
 
 # MacWhisper CLI
 
-Control MacWhisper from the terminal. The `mw` binary connects to the running MacWhisper.app over a local socket and transcribes audio or video files using whichever model is active. It auto-launches MacWhisper if it's not already running (~5s typical first-run handshake).
+Control MacWhisper from the terminal. The `mw` binary connects to the running MacWhisper.app over a local socket and transcribes audio or video files using whichever model is active. It auto-launches MacWhisper if it's not already running (5-second timeout).
 
 > **Platform:** macOS only. Apple speech models additionally require macOS 26+.
 
@@ -88,7 +88,7 @@ Use `--stream` when:
 - You want to see progress in real time (long recordings, exploratory runs).
 - You're piping into something that benefits from incremental input (live display, line-oriented processing).
 
-Skip `--stream` when the active engine doesn't support it. `mw help transcribe` documents `--stream` as local-engine-only; if you see one big blob instead of incremental segments, the active engine doesn't support streaming — switch to another model via `mw models select` and retry.
+Per MacWhisper's CLI docs, `--stream` works on local engines (WhisperKit, ParakeetKit, Apple speech) and has no effect on cloud engines (OpenAI, Groq, Deepgram, ElevenLabs, MacWhisper AI — they return one final result regardless). If streaming matters, make sure the active model uses a local engine.
 
 ### One-off model override
 
@@ -104,7 +104,7 @@ Use this when the default model is wrong for this specific file (e.g., default i
 mw transcribe --persist ~/Recordings/meeting.m4a > /tmp/mw-meeting.txt
 ```
 
-`--persist` puts the transcript in the MacWhisper app (searchable history, annotation, re-export) *and* the redirect keeps a copy at `/tmp/mw-meeting.txt` so the agent can Read it for follow-up questions. Without `--persist`, MacWhisper drops the transcript from its history after the run — the /tmp file is all you have.
+`--persist` saves the transcription into MacWhisper's history (same as a regular in-app transcription) *and* the redirect keeps a copy at `/tmp/mw-meeting.txt` so the agent can Read it for follow-up questions. Without `--persist`, the run is transient — the text prints and is gone.
 
 Rule of thumb: **one-shot scripts default to transient; "record this meeting" workflows default to `--persist`.**
 
@@ -133,9 +133,9 @@ Keep the yt-dlp skill's metadata files (`/tmp/ytmeta-<id>.*`) in place — they 
 ## Troubleshooting
 
 - **"NOT INSTALLED" from the prerequisites block** — Open MacWhisper → Settings → Advanced → **Install** under Command-Line Tool. Binary lands at `/usr/local/bin/mw`.
-- **Long pause on first command, then it works** — `mw` auto-launched MacWhisper.app and waited for the socket. Subsequent commands should be fast. If the first-run handshake hasn't completed within ~10s, open MacWhisper manually and retry.
+- **Long pause on first command, then it works** — `mw` auto-launched MacWhisper.app and waited for the socket. Subsequent commands should be fast. If the CLI hangs or can't reach the app, quit and relaunch MacWhisper, then try `mw version`.
 - **"Unknown model" or the wrong language in output** — Run `mw models list` to see installed models and which one is active (`▸`). Change with `mw models select <engine>:<model-id>` or override per call with `--model`.
 - **Transcript missing from MacWhisper app history** — The run didn't include `--persist`. Transcripts are transient by default.
-- **`--stream` produced one big blob instead of segments** — The active (or `--model`-overridden) engine doesn't support streaming. `mw help transcribe` documents `--stream` as local-engine-only but doesn't enumerate which engines qualify. Switch to a different model via `mw models select` (or `--model` per call) and retry.
+- **`--stream` produced one big blob instead of segments** — The active engine is a cloud engine (OpenAI, Groq, Deepgram, ElevenLabs, or MacWhisper AI) — those return one final result regardless of `--stream`. Per the CLI docs, engines that actually stream are the local ones: WhisperKit, ParakeetKit, Apple speech. Switch to one of those via `mw models select` (or `--model` per call) and retry.
 - **File-not-found errors on relative paths** — `mw` runs under MacWhisper.app, but paths resolve relative to the shell's cwd. Pass absolute paths if you're unsure, or `cd` to the file's directory first.
 - **Apple speech models not listed** — They require macOS 26+. On older macOS, they won't appear in `mw models list`.
