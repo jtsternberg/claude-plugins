@@ -85,7 +85,11 @@ if [ "$WANT_MD" = 1 ]; then
 	fi
 	# Prefer PATH-installed CLIs (global npm install) over npx. npx adds ~2s
 	# overhead per call even with a warm cache; global installs run in ~0.3s.
-	if command -v readability-cli >/dev/null 2>&1; then
+	# readability-cli installs its binary as `readable` (not `readability-cli`),
+	# so that's the PATH name to probe first.
+	if command -v readable >/dev/null 2>&1; then
+		READABILITY_CMD=(readable)
+	elif command -v readability-cli >/dev/null 2>&1; then
 		READABILITY_CMD=(readability-cli)
 	else
 		READABILITY_CMD=(npx -y readability-cli)
