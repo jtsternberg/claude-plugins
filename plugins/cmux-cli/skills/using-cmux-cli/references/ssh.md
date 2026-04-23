@@ -4,10 +4,21 @@
 
 This reference is loaded on demand. Main SKILL.md keeps only the natural-language trigger for SSH work — read this file when the user's task involves a remote host.
 
-## When to use `cmux ssh` vs plain `ssh`
+## When to use `cmux ssh` vs plain `ssh` in a split
 
-- **`cmux ssh <host>`** — remote work as a first-class cmux workspace: browser panes route through the remote network, drag-and-drop files, remote coding agents notify your local sidebar, session survives reconnects.
-- **Plain `ssh host`** (from inside any cmux terminal) — just a shell on the remote box. No relay daemon, no browser routing, no drag-and-drop, no session persistence. Right choice when you don't need any of the above.
+**Default**: for most "ssh to host X" requests, prefer a **side-by-side split with plain `ssh`** — it's visible to the user immediately. Only reach for `cmux ssh <host>` when you actually need the remote integration (browser routing, drag-drop, remote agent notifications, reconnect-across-drops). See the [visibility-default principle in SKILL.md](../SKILL.md#default-principle-make-new-work-visible-to-the-user) for the one-call recipe.
+
+Concrete picker:
+
+| User's intent | Pick | Why |
+|---------------|------|-----|
+| "ssh to X to check a log" / "run a quick command on X" / "poke around on X" | Side-by-side split + plain `ssh user@host` | Visible in the current window immediately. No relay daemon needed. |
+| "ssh to X and run a coding agent" / "start `claude-teams` on the remote" | `cmux ssh user@host` | Needs the reverse-tunnel relay so remote `cmux notify` / `cmux set-status` reach the local sidebar. |
+| "I want to drag files into that remote terminal" | `cmux ssh user@host` | Drag-drop → `scp` through `ControlMaster` multiplexing only works with the workspace path. |
+| "I want to hit the remote's `localhost:3000` from a cmux browser pane" | `cmux ssh user@host` | Browser traffic routing through the remote's network requires the daemon. |
+| "I want this session to survive connection drops and a screen resize" | `cmux ssh user@host` | Session persistence + PTY resize coordination are daemon features. |
+
+**Important**: `cmux ssh` always creates a **new workspace** (hidden behind a tab switch). When you pick it, tell the user: "I'm opening this as a new workspace — you'll need to switch tabs to see it." That warning turns the tab-switch into an informed choice rather than a surprise.
 
 ## Quick reference
 

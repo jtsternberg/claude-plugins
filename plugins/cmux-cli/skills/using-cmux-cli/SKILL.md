@@ -90,6 +90,51 @@ Two subsystems live in separate files to keep this skill lean. Read them only wh
 
 ---
 
+## Default principle: make new work visible to the user
+
+**When the user asks you to open anything — an ssh session, a new terminal, a dev server, a browser — they almost always want to _see_ it alongside what they're already looking at.** They're sitting in their cmux window watching you work. If you open the new thing in a separate workspace tab or a new OS window, they have to stop watching to go find it — and at that point, they might as well have done the work themselves.
+
+### The default routing
+
+For any "open X" / "start X" / "ssh to X" / "run Y in a new terminal" request that *doesn't* specify a destination, route through the side-by-side workflow below. Don't reach for `cmux new-workspace`, `cmux new-window`, or bare `cmux ssh <host>` — those spawn in places the user can't see without switching context.
+
+The one-call recipe:
+
+```bash
+# 1. Open a sibling surface next to the user's current view.
+REF=$(${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh --json | jq -r '.surface_ref')
+
+# 2. Send the work into it. Append \n so the command actually runs.
+cmux send --surface "$REF" "ssh user@host\n"
+# or: cmux send --surface "$REF" "npm run dev\n"
+# or: cmux send --surface "$REF" "cargo watch -x test\n"
+```
+
+Use `--focused` on `open-side-surface.sh` when the user says "next to the tab I'm looking at" instead of "next to yours" — the defaults diverge when the user is viewing a different tab than the one the agent lives in.
+
+### When to break the default (escape hatches)
+
+Flip to a separate-workspace path **only** when the user explicitly asks for it. Trigger phrases:
+
+- "in a new workspace" / "as its own tab" → `cmux new-workspace --name "..." [--cwd <path>] [--command "..."]`
+- "in a separate window" / "open a new cmux window" → `cmux new-window`
+- "open a full cmux ssh workspace to X" / "I need drag-drop / remote browser / relay for agent X" → `cmux ssh <host>` (see [references/ssh.md](references/ssh.md))
+
+When you pick a hidden path deliberately, **tell the user the new surface isn't visible yet** and how to reach it (tab switch, window focus). Surprise hiding is the failure mode this section exists to prevent.
+
+### The `cmux ssh` decision
+
+`cmux ssh <host>` does a lot — relay daemon, browser routing through the remote's network, drag-drop uploads via `scp`, remote `cmux` calls relayed to your local sidebar — but it **always creates a new workspace**, so the session is behind a tab the user has to switch to. Two paths:
+
+| User's intent | Right tool | Why |
+|---------------|-----------|-----|
+| "ssh to host X to check a log / run a command / poke around" | side-by-side + plain `ssh` (default recipe above) | Visible immediately; plain SSH is enough for read/send/observe. |
+| "ssh to host X and run a coding agent" / "I need to drag files to the remote" / "I want the browser to hit the remote's localhost" | `cmux ssh <host>` (+ warn user it opens in a new workspace) | Needs the relay daemon and workspace integration. Worth the tab-switch cost. |
+
+If the user's request is ambiguous ("ssh into host X"), default to the visible side-by-side path. Plain `ssh` in a split gives you everything you need to read output and send commands, and the user can actually see it happen.
+
+---
+
 ## High-frequency subcommands (inlined `--help`)
 
 These are the commands you'll reach for constantly. Live help is pinned below so you can construct correct calls without a second round-trip.
@@ -181,7 +226,7 @@ Reach for these when work takes more than a few seconds and the user might look 
 
 ## Workflow: open a side-by-side surface in the current window
 
-When the user says *"open a new tab next to mine"* / *"open a terminal side-by-side so I can see both"*, use the bundled helper rather than hand-rolling the decision tree:
+This is the mechanics behind the [default visibility principle](#default-principle-make-new-work-visible-to-the-user) above. Use it for any "open / start / ssh / run" request that doesn't explicitly ask for a separate workspace. The bundled helper handles the decision tree (split vs. add-to-adjacent-pane) so you don't have to hand-roll it:
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh [OPTIONS]
@@ -375,10 +420,12 @@ When the user describes an action informally, map it to cmux vocabulary:
 
 | User says | cmux command | Notes |
 |-----------|--------------|-------|
-| "split this right" / "split pane right" | `cmux new-split right` | literal split — creates a new pane column |
-| "open a new tab next to mine" / "new terminal side-by-side" | see [Workflow: open a side-by-side surface](#workflow-open-a-side-by-side-surface-in-the-current-window) | routes between `new-surface --pane <adjacent>` and `new-split right` based on current layout |
-| "open a new workspace in /foo" | `cmux new-workspace --cwd /foo` | add `--command` to auto-run something |
-| "ssh into box.example.com as a workspace" | `cmux ssh box.example.com` | see `cmux ssh --help` for identity / port flags |
+| "open a new tab next to mine" / "new terminal side-by-side" / **any bare "open a terminal" / "start a dev server" / "run Y in a new terminal"** | [Default recipe](#default-principle-make-new-work-visible-to-the-user) — `open-side-surface.sh --json` + `cmux send --surface <ref> "...\n"` | Default: the user wants to watch. Never silently spawn a new workspace. |
+| "ssh to X" / "ssh into box.example.com" (ambiguous) | [Default recipe](#default-principle-make-new-work-visible-to-the-user) with `cmux send --surface <ref> "ssh user@host\n"` | Plain SSH in a visible split. Agent can `read-screen` while user watches. |
+| "ssh into X **as a workspace**" / "I need drag-drop / remote browser / relay" | `cmux ssh box.example.com` | Escape hatch — opens a **new workspace** (hidden tab). Warn the user. See [references/ssh.md](references/ssh.md). |
+| "split this right" / "split pane right" | `cmux new-split right` | Literal split — creates a new pane column (terminal only). |
+| "open a new workspace in /foo" / "as its own tab" | `cmux new-workspace --cwd /foo` | Explicit escape hatch — hidden tab. `--command` auto-runs something on launch. |
+| "open a new cmux window" / "in a separate window" | `cmux new-window` | Escape hatch — separate OS window. |
 | "what's in the other pane?" / "read the terminal" | `cmux read-screen` | add `--scrollback --lines 200` for history |
 | "run `npm test` in the other pane" | `cmux send --surface <ref> "npm test\n"` | **append `\n`** or the command never runs |
 | "send ctrl-c to that pane" | `cmux send-key --surface <ref> C-c` | use `send-key` for modifiers, not `send` |
