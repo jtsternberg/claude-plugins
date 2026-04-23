@@ -1,0 +1,9 @@
+{
+  "name": "cmux-cli",
+  "description": "Control cmux (terminal multiplexer / workspace manager) from the command line. Manage windows, workspaces, panes, surfaces, and tabs; send keystrokes; read screen output; split panes; drive the embedded browser; send notifications. Triggers on mentions of cmux, workspaces, panes, surfaces, tabs, splits, or requests to send input to / read output from a cmux session.",
+  "version": "0.1.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}
