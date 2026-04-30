@@ -1,7 +1,7 @@
 {
   "name": "thinking-tools",
-  "description": "Metacognitive reasoning frameworks for careful decision-making. Includes Chesterton's Fence (investigate before removing) and room for more thinking tools like pre-mortems, steelmanning, and first principles.",
-  "version": "1.0.0",
+  "description": "Metacognitive reasoning frameworks for careful decision-making. Includes Chesterton's Fence (investigate before removing), Pink Elephant (rewriting counterproductive negative instructions), and room for more thinking tools like pre-mortems, steelmanning, and first principles.",
+  "version": "1.1.0",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"
