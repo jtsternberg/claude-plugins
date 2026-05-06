@@ -213,46 +213,192 @@ function get_rate_limit_bar($label, $percentage, $resets_at = null, $window_seco
 }
 
 /**
- * Get recent prompts from transcript file.
+ * Get the last N messages (user + assistant) from transcript file.
  *
  * @param string $transcript_path Path to the session transcript JSONL file
- * @param int $count Maximum number of prompts to return (default 3)
- * @return array [prompts_array, error_message] where prompts are in reverse chronological order
+ * @param int $count Maximum number of messages to return
+ * @return array Array of ['role' => 'user'|'assistant', 'text' => string]
  */
-function get_prompts($transcript_path, $count = 3) {
+function get_recent_messages($transcript_path, $count = 5) {
     if (!file_exists($transcript_path)) {
-        return [[], "Transcript file does not exist"];
+        return [];
     }
 
-    $prompts = [];
     $handle = fopen($transcript_path, 'r');
     if (!$handle) {
-        return [[], "Could not open transcript file"];
+        return [];
     }
 
+    $messages = [];
     while (($line = fgets($handle)) !== false) {
         $entry = json_decode($line, true);
         if ($entry === null) continue;
+        if (!empty($entry['isSidechain']) || !empty($entry['isApiErrorMessage'])) continue;
 
-        // Look for user messages with text content
-        if (($entry['type'] ?? '') === 'user') {
+        $type = $entry['type'] ?? '';
+        if ($type === 'user') {
             $content = $entry['message']['content'] ?? [];
-            if (is_array($content) && !empty($content)) {
-                $first = $content[0];
-                if (is_array($first) && ($first['type'] ?? '') === 'text' && isset($first['text'])) {
-                    $prompts[] = $first['text'];
+            $text = '';
+            if (is_array($content)) {
+                foreach ($content as $block) {
+                    if (is_array($block) && ($block['type'] ?? '') === 'text') {
+                        $text = $block['text'];
+                        break;
+                    }
+                }
+            } elseif (is_string($content)) {
+                $text = $content;
+            }
+            if ($text && strpos($text, '<') !== 0) {
+                $messages[] = ['role' => 'user', 'text' => $text];
+            }
+        } elseif ($type === 'assistant') {
+            $content = $entry['message']['content'] ?? [];
+            if (is_array($content)) {
+                foreach ($content as $block) {
+                    if (is_array($block) && ($block['type'] ?? '') === 'text' && !empty($block['text'])) {
+                        $messages[] = ['role' => 'assistant', 'text' => $block['text']];
+                        break;
+                    }
                 }
             }
         }
     }
     fclose($handle);
 
-    if (!empty($prompts)) {
-        $recent_prompts = array_slice($prompts, -$count);
-        return [array_reverse($recent_prompts), null];
+    return array_slice($messages, -$count);
+}
+
+/**
+ * Compute a stable cache key from a set of messages.
+ *
+ * @param array $messages Array of ['role', 'text'] pairs
+ * @return string MD5 hash of concatenated role:text pairs
+ */
+function messages_hash($messages) {
+    $parts = array_map(fn($m) => $m['role'] . ':' . $m['text'], $messages);
+    return md5(implode('|', $parts));
+}
+
+/**
+ * Read a cached summary for the given hash.
+ *
+ * @param string $hash Cache key
+ * @return string|null Cached summary or null on miss
+ */
+function get_cached_summary($hash) {
+    $file = $_SERVER['HOME'] . '/.claude/logs/ws-summary-' . $hash . '.txt';
+    if (file_exists($file)) {
+        return trim(file_get_contents($file)) ?: null;
+    }
+    return null;
+}
+
+/**
+ * Write a summary to cache and prune old cache files (keep 20 most recent).
+ *
+ * @param string $hash Cache key
+ * @param string $summary Summary text
+ */
+function save_summary_cache($hash, $summary) {
+    $log_dir = $_SERVER['HOME'] . '/.claude/logs';
+    if (!is_dir($log_dir)) {
+        mkdir($log_dir, 0755, true);
     }
 
-    return [[], "No prompts in transcript"];
+    $file = $log_dir . '/ws-summary-' . $hash . '.txt';
+    file_put_contents($file, $summary, LOCK_EX);
+
+    // Prune: keep only the 20 most recently modified cache files
+    $pattern = $log_dir . '/ws-summary-*.txt';
+    $files = glob($pattern);
+    if ($files && count($files) > 20) {
+        usort($files, fn($a, $b) => filemtime($a) - filemtime($b));
+        $to_delete = array_slice($files, 0, count($files) - 20);
+        foreach ($to_delete as $old) {
+            @unlink($old);
+        }
+    }
+}
+
+/**
+ * Generate a one-line summary of recent messages via Ollama.
+ *
+ * @param array $messages Array of ['role', 'text'] pairs
+ * @param string $model Ollama model name
+ * @return string|null Generated summary or null on failure
+ */
+function generate_summary_via_ollama($messages, $model) {
+    $excerpt = '';
+    foreach ($messages as $msg) {
+        $role = $msg['role'] === 'user' ? 'User' : 'Claude';
+        $text = preg_replace('/\s+/', ' ', trim($msg['text']));
+        $text = substr($text, 0, 200);
+        $excerpt .= "{$role}: {$text}\n";
+    }
+
+    $system = 'You summarize coding conversations in 8 words or fewer. Output ONLY the summary — no punctuation at the end, no quotes, no explanation.';
+    $user   = "Summarize what's happening:\n\n" . trim($excerpt);
+
+    $payload = json_encode([
+        'model'    => $model,
+        'stream'   => false,
+        'messages' => [
+            ['role' => 'system', 'content' => $system],
+            ['role' => 'user',   'content' => $user],
+        ],
+    ]);
+
+    $ch = curl_init('http://localhost:11434/api/chat');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $payload,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_TIMEOUT        => 5,
+        CURLOPT_CONNECTTIMEOUT => 2,
+    ]);
+
+    $response = curl_exec($ch);
+    unset($ch);
+
+    if (!$response) {
+        return null;
+    }
+
+    $data = json_decode($response, true);
+    $text = trim($data['message']['content'] ?? '');
+    return $text ?: null;
+}
+
+/**
+ * Get an AI-generated summary of recent conversation activity.
+ * Returns cached result instantly if messages haven't changed; generates otherwise.
+ *
+ * @param string $transcript_path Path to the session transcript JSONL file
+ * @param string $model Ollama model to use
+ * @return string Summary text or fallback placeholder
+ */
+function get_conversation_summary($transcript_path, $model) {
+    $messages = get_recent_messages($transcript_path, 5);
+    if (empty($messages)) {
+        return '💭 ' . getMsg('No conversation yet', 'dark_gray');
+    }
+
+    $hash = messages_hash($messages);
+    $cached = get_cached_summary($hash);
+    if ($cached !== null) {
+        return '💭 ' . getMsg($cached, 'white');
+    }
+
+    // Generate — blocks briefly on first render after each new message
+    $summary = generate_summary_via_ollama($messages, $model);
+    if ($summary) {
+        save_summary_cache($hash, $summary);
+        return '💭 ' . getMsg($summary, 'white');
+    }
+
+    return '💭 ' . getMsg('summarizing...', 'dark_gray');
 }
 
 /**
@@ -305,58 +451,18 @@ function generate_status_line($input_data) {
         $parts[] = getMsg('$' . $cost, 'green');
     }
 
-    // Recent prompts
-    list($prompts, $error) = get_prompts($transcript_path, 3);
-
-    if ($error || empty($prompts)) {
-        // Show fallback message
-        $parts[] = getMsg('💭 No recent prompts', 'dark_gray');
-    } else {
-        // Process each prompt with different opacity/colors
-        foreach ($prompts as $index => $prompt) {
-            // Format the prompt for status line
-            $prompt = preg_replace('/\s+/', ' ', trim($prompt));
-
-            // Different truncation lengths for different positions
-            $max_lengths = [60, 35, 25]; // Current, previous, older
-            $max_length = $max_lengths[$index] ?? 30;
-
-            if (strlen($prompt) > $max_length) {
-                $prompt = substr($prompt, 0, $max_length - 3) . '...';
-            }
-
-            if ($index === 0) {
-                // Current prompt - full brightness with icon
-                $prompt_lower = strtolower($prompt);
-                if (strpos($prompt, '/') === 0) {
-                    $prompt_color = 'yellow';
-                    $icon = "⚡";
-                } elseif (strpos($prompt, '?') !== false) {
-                    $prompt_color = 'blue';
-                    $icon = "❓";
-                } elseif (preg_match('/\b(create|write|add|implement|build)\b/', $prompt_lower)) {
-                    $prompt_color = 'light_green';
-                    $icon = "💡";
-                } elseif (preg_match('/\b(fix|debug|error|issue)\b/', $prompt_lower)) {
-                    $prompt_color = 'red';
-                    $icon = "🐛";
-                } elseif (preg_match('/\b(refactor|improve|optimize)\b/', $prompt_lower)) {
-                    $prompt_color = 'magenta';
-                    $icon = "♻️";
-                } else {
-                    $prompt_color = 'white';
-                    $icon = "💬";
-                }
-                $parts[] = $icon . ' ' . getMsg($prompt, $prompt_color);
-            } elseif ($index === 1) {
-                // Previous prompt - light gray
-                $parts[] = getMsg($prompt, 'light_gray');
-            } else {
-                // Older prompt - dark gray
-                $parts[] = getMsg($prompt, 'dark_gray');
-            }
+    // Ollama model: prefer config file, fall back to a small default
+    $ollama_model = 'qwen2.5-coder:1.5b';
+    $config_file = ($_SERVER['HOME'] ?? '') . '/.config/workspace-status/config';
+    if (file_exists($config_file)) {
+        $cfg = parse_ini_file($config_file) ?: [];
+        if (!empty($cfg['OLLAMA_MODEL'])) {
+            $ollama_model = $cfg['OLLAMA_MODEL'];
         }
     }
+
+    // AI-generated conversation summary
+    $parts[] = get_conversation_summary($transcript_path, $ollama_model);
 
     $line1 = implode(' | ', $parts);
 
