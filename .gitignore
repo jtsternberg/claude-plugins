@@ -27,3 +27,5 @@ HANDOFF*.md
 .dolt/
 *.db
 .beads-credential-key
+
+.claude/CLAUDE.md
