@@ -1,8 +1,8 @@
 ---
 name: gdoc-to-md
 description: Download a Google Doc as a local markdown file via gws CLI. Uses native text/markdown export from the Drive API. Triggers on "download google doc", "pull from drive", "gdoc to markdown", "export google doc", "gws download".
-argument-hint: <doc-id-or-url> [output.md] [--title]
-allowed-tools: Bash(gws *) Bash(bash *) Bash(python3 *)
+argument-hint: '<doc-id-or-url> [output.md] [--title]'
+allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *)'
 ---
 
 # Google Doc to Markdown
