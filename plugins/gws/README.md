@@ -1,6 +1,6 @@
 # GWS (Google Workspace CLI)
 
-A Claude Code plugin for interacting with Google Workspace via the [`gws`](https://github.com/nicholasgasior/gws) CLI — starting with uploading markdown files to Google Drive as formatted Google Docs.
+A Claude Code plugin for interacting with Google Workspace via the official [`gws`](https://github.com/googleworkspace/cli) CLI — starting with uploading markdown files to Google Drive as formatted Google Docs.
 
 ## Skills
 
