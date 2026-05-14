@@ -80,6 +80,8 @@ Structure your response based on mode:
 **Quick call:**
 ```
 [Your answer — concise and direct]
+
+STATUS: DONE
 ```
 
 **Work order:**

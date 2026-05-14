@@ -119,21 +119,22 @@ If the user's intent is ambiguous, ask. One question: "Is this a quick question,
 
 This is automatic — never ask the user about transport. They don't care how the sausage gets made.
 
-| Mode | Transport |
-|------|-----------|
-| Quick call | Headless CLI |
-| Work order | Headless CLI |
-| Conference call (short, ~2-3 exchanges) | Headless CLI |
-| Conference call (deep collaboration) | CMUX if available, else headless |
-
-For conference calls that look like they'll go deep, check CMUX availability:
+Check CMUX availability for **all** modes:
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 ```
 
-- **Exit 0**: CMUX is available. Use it.
-- **Exit 1**: CMUX not available. Fall back to headless.
+- **Exit 0**: CMUX is available. Use it for every mode.
+- **Exit 1**: CMUX not available. Fall back to headless for every mode.
+
+| Mode | CMUX available | No CMUX |
+|------|----------------|---------|
+| Quick call | `cmux-call-async.sh` | Headless CLI |
+| Work order | `cmux-call-async.sh` | Headless CLI |
+| Conference call | `cmux-call.sh` | Headless CLI |
+
+**Why prefer CMUX?** Interactive `claude` sessions (no `-p` flag) do not consume programmatic usage credits. The hotline protocol — STATUS signals, response format — is defined by the ringing skill, not the transport, so the receiver's output is identical either way. Headless is the fallback for machines where cmux isn't running.
 
 ### Step 4: Check for Existing Session and Determine Fork Behavior
 
@@ -160,12 +161,25 @@ If the user gave you a specific session ID to dial (e.g., "dial session abc123")
 
 Construct a session name for the `/resume` picker. Format: `hotline: <caller-dir> → <target-dir> (<mode>)` using just the directory basenames (not full paths). Example: `hotline: marketing → blog (quick_call)`.
 
+**Choose the launch script based on the transport selected in Step 3:**
+
+- CMUX available + quick call or work order → `cmux-call-async.sh`
+- CMUX available + conference call → skip to [CMUX (Conference Call)](#cmux-conference-call) below
+- No CMUX → `headless-call-async.sh`
+
 Fire the call asynchronously. This returns immediately with a `call_dir` — the session ID and response will be written to files in that directory:
 
 ```bash
+# CMUX transport (quick call / work order):
+CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
+  --name "$SESSION_NAME" [--fork-session] \
+  --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
+
+# Headless fallback (quick call / work order):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" [--fork-session] \
-  --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 ```
 
@@ -225,15 +239,15 @@ Update the cache timestamp:
 bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
 ```
 
-#### CMUX (Conference Call Only)
+#### CMUX (Conference Call)
 
-If CMUX was selected in Step 3:
+If the mode is **conference call** and CMUX is available:
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" [--resume "$REMOTE_SESSION_ID"]
 ```
 
-Pass `--resume` only if reusing an existing session from Step 4.
+Pass `--resume` only if reusing an existing session from Step 4. This opens a visible interactive workspace — the user can observe or take over the conversation directly.
 
 ## Reporting to the User
 
@@ -251,18 +265,6 @@ Always surface the connection details on the first exchange:
 Just relay the response — no need to repeat the connection boilerplate:
 
 > **[workspace name]:** [response text]
-
-## Adaptive Escalation
-
-For conference calls running in headless mode: if you've done ~3+ round trips and CMUX is available, it's time to upgrade. Open a CMUX workspace:
-
-```bash
-bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" --resume "$REMOTE_SESSION_ID"
-```
-
-Announce the upgrade:
-
-> This conversation is getting lengthy. I've opened a CMUX window so you can continue it with a proper terminal session.
 
 ## Takeover
 
