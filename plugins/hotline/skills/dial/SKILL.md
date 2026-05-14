@@ -164,10 +164,10 @@ Construct a session name for the `/resume` picker. Format: `hotline: <caller-dir
 **Choose the launch script based on the transport selected in Step 3:**
 
 - CMUX available + quick call or work order → `cmux-call-async.sh`
-- CMUX available + conference call → skip to [CMUX (Conference Call)](#cmux-conference-call) below
+- CMUX available + conference call → `cmux-call.sh`
 - No CMUX → `headless-call-async.sh`
 
-Fire the call asynchronously. This returns immediately with a `call_dir` — the session ID and response will be written to files in that directory:
+For quick calls and work orders, fire the call asynchronously. This returns immediately with a `call_dir` — the session ID and response will be written to files in that directory. For conference calls with CMUX, open the visible workspace and deliver the prompt there.
 
 ```bash
 # CMUX transport (quick call / work order):
@@ -176,14 +176,30 @@ CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PAT
   --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 
-# Headless fallback (quick call / work order):
+# CMUX transport (conference call):
+CMUX_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
+  --name "$SESSION_NAME" [--fork-session] \
+  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+
+# Headless fallback (any mode):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" [--fork-session] \
-  --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 ```
 
 Include `--fork-session` when dialing someone else's session ID. Omit it for fresh calls to a workspace (no session to fork from).
+
+If you used `cmux-call.sh` for a conference call, report the visible workspace result to the user and skip the async wait steps below:
+
+```bash
+WORKSPACE_REF=$(echo "$CMUX_RESULT" | jq -r '.workspace_ref')
+REMOTE_SESSION_ID=$(echo "$CMUX_RESULT" | jq -r '.session_id')
+```
+
+> Connected to **[workspace name]** in CMUX (`[workspace-ref]`). The conference prompt has been delivered in the visible workspace.
+
+Then cache the session with mode `conference_call`, and stop here unless the user asks you to continue the conference from the caller side.
 
 **Wait for the session ID** (returns quickly once the remote agent starts):
 
@@ -240,12 +256,14 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 ```bash
 # CMUX transport (quick call / work order):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
-  --resume "$REMOTE_SESSION_ID" --prompt "$YOUR_MESSAGE")
+  --resume "$REMOTE_SESSION_ID" \
+  --prompt "/hotline-ringing [MODE: $mode] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_MESSAGE")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 # Then wait-for-session / wait-for-response as normal.
 
 # CMUX (conference call):
-bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" --resume "$REMOTE_SESSION_ID"
+bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
+  --resume "$REMOTE_SESSION_ID" --prompt "$YOUR_MESSAGE"
 
 # Headless fallback (any mode):
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
@@ -263,10 +281,12 @@ bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-ses
 If the mode is **conference call** and CMUX is available:
 
 ```bash
-bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" [--resume "$REMOTE_SESSION_ID"]
+bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
+  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT" \
+  [--resume "$REMOTE_SESSION_ID"]
 ```
 
-Pass `--resume` only if reusing an existing session from Step 4. This opens a visible interactive workspace — the user can observe or take over the conversation directly.
+Pass `--resume` only if reusing an existing session from Step 4. This opens a visible interactive workspace and delivers the conference prompt into it — the user can observe or take over the conversation directly.
 
 ## Reporting to the User
 
