@@ -89,7 +89,10 @@ chmod 700 "$LAUNCH_SCRIPT"
   [[ -n "$SESSION_NAME" ]] && printf ' -n %q' "$SESSION_NAME"
   $FORK_SESSION && printf ' --fork-session'
   printf ' --allowedTools %q' "$ALLOWED_TOOLS"
-  [[ -n "$PROMPT" ]] && printf ' %q' "$PROMPT"
+  # `--` is REQUIRED before the positional prompt because --allowedTools is
+  # variadic (`<tools...>`) and would otherwise swallow the prompt as an
+  # extra "tool" name. See cmux-call-async.sh for the live-reproduced bug.
+  [[ -n "$PROMPT" ]] && printf ' -- %q' "$PROMPT"
   printf '\n'
 } > "$LAUNCH_SCRIPT"
 

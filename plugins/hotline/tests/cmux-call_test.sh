@@ -77,6 +77,15 @@ assert_contains "first-contact pre-sets session id" "$launch_body" "--session-id
 assert_contains "first-contact launch script contains conference prompt" "$launch_body" "/hotline-ringing"
 assert_contains "first-contact preserves conference mode" "$launch_body" "conference_call"
 
+# Regression: --allowedTools is variadic — must be terminated with `--` before
+# the positional prompt or claude swallows the prompt as a tool name.
+if printf '%s' "$launch_body" | grep -qE -- "--allowedTools .+ -- "; then
+  pass "first-contact launch script puts -- before the positional prompt"
+else
+  fail "first-contact launch script puts -- before the positional prompt" \
+       "got: $launch_body"
+fi
+
 session_id=$(jq -r '.session_id' "$tmp/out.json" 2>/dev/null || true)
 if [[ "$session_id" =~ ^[0-9a-f-]{36}$ ]]; then
   pass "first-contact returns generated session id"

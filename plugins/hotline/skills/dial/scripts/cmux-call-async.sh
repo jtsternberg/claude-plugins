@@ -131,7 +131,12 @@ chmod 700 "$LAUNCH_SCRIPT"
   $FORK_SESSION                && printf ' --fork-session'
   [[ -n "$SESSION_NAME"      ]] && printf ' -n %q'           "$SESSION_NAME"
   printf ' --allowedTools %q' "$ALLOWED_TOOLS"
-  printf ' %q\n' "$PROMPT"
+  # `--` is REQUIRED before the positional prompt because --allowedTools is
+  # variadic (`<tools...>`) and would otherwise swallow the prompt as an
+  # extra "tool" name. Reproduced live: omitting `--` causes claude to start
+  # with an empty REPL ("No conversation yet"), losing the prompt entirely.
+  # This was the root cause of the original hotline-call hang.
+  printf ' -- %q\n' "$PROMPT"
 } > "$LAUNCH_SCRIPT"
 
 # Open cmux workspace. --focus true is REQUIRED: without it cmux does not spawn

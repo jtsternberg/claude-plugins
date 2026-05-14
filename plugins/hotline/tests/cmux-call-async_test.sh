@@ -39,7 +39,7 @@ build_launch_script() {
     $fork_session && printf ' --fork-session'
     [[ -n "$session_name" ]] && printf ' -n %q' "$session_name"
     printf ' --allowedTools %q' "$allowed_tools"
-    printf ' %q\n' "$prompt"
+    printf ' -- %q\n' "$prompt"
   }
 }
 
@@ -97,6 +97,20 @@ else
   fail "launch script quotes complex --tools specs" "$(cat /tmp/hotline-cmux-test.err)"
 fi
 rm -f /tmp/hotline-cmux-test.err
+
+# Regression: --allowedTools is variadic (<tools...>). Without `--` separating
+# the tools list from the positional prompt, claude swallows the prompt as
+# another "tool" name and starts with an empty REPL ("No conversation yet").
+# This was the actual root cause of the original lindris-frontend ↔
+# lindris-backend hotline-call failure on 2026-05-14. Verified by reproducing
+# the broken arg order live in a cmux workspace.
+script=$(build_launch_script "" "22222222-2222-4222-8222-222222222222" false "name" "Bash Read" "submit me")
+if printf '%s' "$script" | grep -qE -- "--allowedTools .+ -- "; then
+  pass "launch script puts -- between --allowedTools and the positional prompt"
+else
+  fail "launch script puts -- between --allowedTools and the positional prompt" \
+       "got: $script"
+fi
 
 screen=$'partial progress\nSTATUS: WORK_IN_PROGRESS\nfinal answer\nSTATUS: WORK_COMPLETE\n'
 status=$(printf '%s' "$screen" | latest_status)
