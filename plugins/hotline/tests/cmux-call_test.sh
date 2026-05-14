@@ -51,7 +51,10 @@ esac
 EOF
 chmod +x "$tmp/bin/cmux"
 
-PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" bash "$SCRIPT_UNDER_TEST" \
+# Default invocation: explicitly unset HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS so
+# the test doesn't pick up a value from the developer's own shell/settings.json.
+env -u HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS \
+  PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" bash "$SCRIPT_UNDER_TEST" \
   --cwd "$tmp/cwd" \
   --name "hotline test" \
   --tools "Bash(git *) Edit" \
@@ -84,6 +87,15 @@ if printf '%s' "$launch_body" | grep -qE -- "--allowedTools .+ -- "; then
 else
   fail "first-contact launch script puts -- before the positional prompt" \
        "got: $launch_body"
+fi
+
+# HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS is opt-in. Default (unset) must NOT
+# add the flag; the above invocation didn't set it, so verify absence.
+if printf '%s' "$launch_body" | grep -q -- "--dangerously-skip-permissions"; then
+  fail "default launch does NOT include --dangerously-skip-permissions" \
+       "got: $launch_body"
+else
+  pass "default launch does NOT include --dangerously-skip-permissions"
 fi
 
 session_id=$(jq -r '.session_id' "$tmp/out.json" 2>/dev/null || true)
@@ -120,6 +132,26 @@ if [[ "$session_id" == "resume id with spaces" ]]; then
   pass "resume call returns resume id"
 else
   fail "resume call returns resume id" "got: $session_id"
+fi
+
+# HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 opt-in: third invocation with the
+# env var set must include --dangerously-skip-permissions.
+HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  bash "$SCRIPT_UNDER_TEST" \
+  --cwd "$tmp/cwd" \
+  --prompt "test perms" \
+  > "$tmp/out3.json" 2> "$tmp/stderr3.txt"
+
+send_args=$(cat "$tmp/send_args" 2>/dev/null || true)
+launch_script=$(printf '%s' "$send_args" | sed -E 's/.*bash (\/tmp\/hotline-cmux-launch-[^\\[:space:]]+).*/\1/')
+LAUNCH_SCRIPTS+=("$launch_script")
+launch_body=$(cat "$launch_script" 2>/dev/null || true)
+
+if printf '%s' "$launch_body" | grep -q -- "--dangerously-skip-permissions"; then
+  pass "HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 adds --dangerously-skip-permissions"
+else
+  fail "HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 adds --dangerously-skip-permissions" \
+       "got: $launch_body"
 fi
 
 rm -f "${LAUNCH_SCRIPTS[@]}"

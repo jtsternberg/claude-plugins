@@ -127,6 +127,24 @@ By default, workspace identities (cached by the `pickup` skill) are considered f
 
 Set it higher if your workspaces don't change much, lower if you're in rapid development across multiple projects.
 
+### Skip permission prompts in cmux receivers (opt-in)
+
+When Hotline routes a call through `cmux` (interactive `claude`), the receiver runs in an unattended pane. Any permission gate the receiver hits — skill invocation, a Bash command not on `--allowedTools`, etc. — stalls the call until a human clicks "Yes." There's no human watching.
+
+If you want autonomous calls to skip that gate, set:
+
+```json
+{
+  "env": {
+    "HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS": "1"
+  }
+}
+```
+
+…or export it in your shell rc. Accepts `1` / `true` / `yes` (case-insensitive). Adds `--dangerously-skip-permissions` to the cmux-side `claude` invocation.
+
+**Default is off.** This is a real trust decision — bypassing permissions means the receiver can run any tool, including ones you wouldn't approve interactively. Only enable it if you trust the workspaces you're dialing into. Headless (`claude -p`) calls do not need this — non-interactive mode handles permissions without prompting.
+
 ---
 
 ## How It Works
