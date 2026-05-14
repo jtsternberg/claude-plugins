@@ -115,7 +115,7 @@ fi
 # Write a launch script so the full prompt reaches claude without escaping
 # issues. printf %q produces bash-safe quoting for newlines, brackets, etc.
 # chmod 700 prevents other local users from reading prompt contents.
-LAUNCH_SCRIPT=$(mktemp /tmp/hotline-launch-XXXXX.sh)
+LAUNCH_SCRIPT=$(mktemp /tmp/hotline-launch-XXXXX)
 chmod 700 "$LAUNCH_SCRIPT"
 {
   printf '#!/usr/bin/env bash\n'
@@ -131,7 +131,14 @@ chmod 700 "$LAUNCH_SCRIPT"
 
 # Open cmux workspace.
 WS_NAME="${SESSION_NAME:-hotline}"
-WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --name "$WS_NAME" 2>&1)
+if ! WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --name "$WS_NAME" 2>&1); then
+  jq -n --arg err "cmux new-workspace failed: $WS_OUTPUT" '{error: $err}' \
+    > "$CALL_DIR/error.txt"
+  touch "$CALL_DIR/done"
+  rm -f "$LAUNCH_SCRIPT"
+  jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'
+  exit 0
+fi
 WS_REF=$(echo "$WS_OUTPUT" | grep -oE 'workspace:[0-9]+' | head -1 || true)
 
 if [[ -z "$WS_REF" ]]; then
@@ -161,7 +168,16 @@ done
 echo "$PRE_LINES" > "$CALL_DIR/pre_lines.txt"
 
 # Fire the claude session.
-cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"
+if ! SEND_OUTPUT=$(cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n" 2>&1); then
+  jq -n --arg err "cmux send failed: $SEND_OUTPUT" '{error: $err}' \
+    > "$CALL_DIR/error.txt"
+  [[ "$KEEP_WORKSPACE" != "true" ]] && \
+    cmux close-workspace --workspace "$WS_REF" 2>/dev/null || true
+  rm -f "$LAUNCH_SCRIPT"
+  touch "$CALL_DIR/done"
+  jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'
+  exit 0
+fi
 
 # Background poller: reads screen until a terminal STATUS signal appears.
 (

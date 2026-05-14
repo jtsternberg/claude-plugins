@@ -8,6 +8,7 @@ set -u
 PASS=0
 FAIL=0
 FAILED_CASES=()
+SCRIPT_UNDER_TEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/dial/scripts/cmux-call-async.sh"
 
 pass() {
   PASS=$((PASS + 1))
@@ -57,6 +58,29 @@ extract_cmux_response() {
       '
 }
 
+assert_async_error_contract() {
+  local label="$1"
+  local tmp="$2"
+  local output_file="$tmp/out.json"
+  local stderr_file="$tmp/stderr.txt"
+
+  local call_dir
+  call_dir=$(jq -r '.call_dir // empty' "$output_file" 2>/dev/null || true)
+
+  if [[ -z "$call_dir" || ! -d "$call_dir" ]]; then
+    fail "$label returns a usable call_dir" "stdout=$(cat "$output_file" 2>/dev/null) stderr=$(cat "$stderr_file" 2>/dev/null)"
+    return
+  fi
+
+  if [[ -f "$call_dir/done" && -f "$call_dir/error.txt" ]]; then
+    pass "$label writes done and error.txt"
+  else
+    fail "$label writes done and error.txt" "call_dir=$call_dir"
+  fi
+
+  rm -rf "$call_dir"
+}
+
 echo "cmux-call-async regression:"
 
 script=$(build_launch_script "" "11111111-1111-4111-8111-111111111111" false "hotline test" "Bash(git *) Edit" "hello")
@@ -82,6 +106,54 @@ if [[ "$response" == "final answer" ]]; then
 else
   fail "response is taken after the last progress marker" "got: $(printf '%q' "$response")"
 fi
+
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/bin" "$tmp/cwd"
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "new-workspace" ]]; then
+  echo "boom from new-workspace" >&2
+  exit 42
+fi
+exit 0
+EOF
+chmod +x "$tmp/bin/cmux"
+PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" \
+  > "$tmp/out.json" 2> "$tmp/stderr.txt"
+rc=$?
+if [[ $rc -eq 0 ]]; then
+  pass "new-workspace failure exits after returning call_dir"
+else
+  fail "new-workspace failure exits after returning call_dir" "exit code: $rc"
+fi
+assert_async_error_contract "new-workspace failure" "$tmp"
+rm -rf "$tmp"
+
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/bin" "$tmp/cwd"
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  new-workspace) echo "OK workspace:123" ;;
+  read-screen) echo "$ " ;;
+  send)
+    echo "boom from send" >&2
+    exit 43
+    ;;
+  close-workspace) exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/bin/cmux"
+PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" \
+  > "$tmp/out.json" 2> "$tmp/stderr.txt"
+rc=$?
+if [[ $rc -eq 0 ]]; then
+  pass "send failure exits after returning call_dir"
+else
+  fail "send failure exits after returning call_dir" "exit code: $rc"
+fi
+assert_async_error_contract "send failure" "$tmp"
+rm -rf "$tmp"
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
