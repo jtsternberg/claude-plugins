@@ -43,16 +43,11 @@ build_launch_script() {
   }
 }
 
-# Last meaningful line — mirrors the production poller. Blank lines and the
-# bare REPL idle prompt `> ` are ignored; STATUS strings quoted inside the
-# response body can't accidentally terminate the call.
+# Latest STATUS line anywhere — mirrors the production poller. Robust against
+# trailing terminal chrome (shell prompts, `│ > │` REPL prompt box bottoms)
+# that would otherwise appear AFTER the real STATUS line.
 latest_status() {
-  awk '
-    /^[[:space:]]*$/         {next}
-    /^[[:space:]]*>[[:space:]]*$/ {next}
-    {last=$0}
-    END {print last}
-  '
+  awk '/^STATUS: /{s=$0} END{print s}'
 }
 
 # Response extraction — mirrors the production poller. Resets on every
@@ -60,8 +55,7 @@ latest_status() {
 # buffer so multi-terminal-status screens use the most recent body.
 extract_cmux_response() {
   grep -v "^bash /tmp/hotline-launch" \
-    | grep -vE "^[[:space:]]*[╭│╰─└┌┘┐]+[[:space:]]*$" \
-    | grep -vE "^ℹ " \
+    | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
     | grep -vE "^>[[:space:]]*$" \
     | awk '
         /^STATUS: WORK_IN_PROGRESS$/ {buf=""; next}
@@ -141,15 +135,26 @@ else
        "got: $(printf '%q' "$response")"
 fi
 
-# Quoted-STATUS case: the response body itself contains a STATUS string
-# (e.g., the receiver is explaining the hotline protocol). The terminal
-# STATUS line must be the last meaningful line for the call to terminate.
+# Trailing-chrome case: the LAST line in the screen is shell/REPL chrome,
+# not the STATUS. Confirms "latest STATUS anywhere wins" so the real STATUS
+# above the trailing chrome still terminates the call.
+screen=$'response body\nSTATUS: DONE\n /tmp  \n'
+status=$(printf '%s' "$screen" | latest_status)
+if [[ "$status" == "STATUS: DONE" ]]; then
+  pass "STATUS still detected when trailing chrome follows it"
+else
+  fail "STATUS still detected when trailing chrome follows it" "got: $status"
+fi
+
+# Quoted-STATUS case: a single quoted line containing STATUS inside the
+# response body (e.g., a protocol explanation) followed by the real
+# terminal STATUS. The real STATUS comes last, so it wins.
 screen=$'Here is how the protocol works:\nSTATUS: WORK_COMPLETE means done.\nSTATUS: DONE\n'
 status=$(printf '%s' "$screen" | latest_status)
 if [[ "$status" == "STATUS: DONE" ]]; then
-  pass "quoted STATUS inside body does not pre-empt the real terminal status"
+  pass "real STATUS wins when quoted STATUS appears earlier in body"
 else
-  fail "quoted STATUS inside body does not pre-empt the real terminal status" \
+  fail "real STATUS wins when quoted STATUS appears earlier in body" \
        "got: $status"
 fi
 

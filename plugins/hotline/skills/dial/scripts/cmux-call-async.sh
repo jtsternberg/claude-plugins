@@ -235,40 +235,47 @@ export WS_REF LAUNCH_SCRIPT KEEP_WORKSPACE PRE_LINES MAX_WAIT \
     CLEAN=$(echo "$NEW_CONTENT" \
       | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
 
-    # Look at the LAST meaningful line (skipping blank lines and the bare
-    # claude REPL idle prompt `> `). This is the only place a real STATUS
-    # signal can appear — STATUS strings quoted earlier in the response
-    # (e.g., docs about the protocol) won't terminate us prematurely.
-    LAST_MEANINGFUL=$(echo "$CLEAN" | awk '
-      /^[[:space:]]*$/         {next}
-      /^[[:space:]]*>[[:space:]]*$/ {next}
-      {last=$0}
-      END {print last}
-    ')
+    # Find the LATEST STATUS line in the screen. Live testing showed that the
+    # "last meaningful line" heuristic is fragile against trailing terminal
+    # chrome (shell prompts, the claude REPL's `│ > │` box bottom, etc.) — any
+    # of those would appear after the real STATUS and defeat the check.
+    #
+    # "Latest STATUS line anywhere wins" matches what real receivers do: emit
+    # the terminal STATUS at the very tail of their message. A receiver that
+    # *quotes* a STATUS string mid-response would still put its real STATUS
+    # after it, so the latest occurrence is correct. The only failure mode is
+    # a receiver that quotes the protocol AFTER its own final STATUS line —
+    # an acceptable corner case.
+    LATEST_STATUS=$(echo "$CLEAN" | awk '/^STATUS: /{s=$0} END{print s}')
 
-    if [[ "$LAST_MEANINGFUL" == "STATUS: WORK_IN_PROGRESS" ]]; then
+    if [[ "$LATEST_STATUS" == "STATUS: WORK_IN_PROGRESS" ]]; then
       continue
     fi
 
     # Terminal statuses — extract response and wrap up.
-    if [[ "$LAST_MEANINGFUL" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$ ]]; then
-      # Strip terminal chrome before extracting the response:
+    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$ ]]; then
+      # Strip terminal chrome before extracting the response. The aggressive
+      # prefix match (any line starting with `╭│╰─└┌┘┐ℹ`) is needed because
+      # the claude REPL renders its idle prompt as a multi-line box where the
+      # middle line `│ > │` carries text — a stricter "pure chrome only"
+      # regex leaves that line in the response. The tradeoff is that response
+      # bodies rendering ASCII art with these specific Unicode box chars get
+      # stripped. Real responses almost never include them.
+      #
+      # Lines we strip:
       #   - the `bash /tmp/hotline-launch-*` command echoed at the prompt
-      #   - claude's banner: lines composed entirely of box-drawing chars
-      #     (anchored at line start and end so legitimate ASCII art with
-      #      mixed text survives)
+      #   - lines starting with claude's banner / box-drawing characters
       #   - claude's "ℹ ..." info lines (update available / tip banners)
-      #   - the bare REPL prompt `> ` on its own line
-      #     (multi-line markdown blockquotes start with `> text` and survive)
+      #   - the bare REPL prompt `> ` on its own line (multi-line markdown
+      #     blockquotes start with `> text` and survive)
       #
       # Response extraction: walk the lines, resetting the buffer on every
       # WORK_IN_PROGRESS signal and saving the buffer on every terminal
       # STATUS line. At END, emit the LAST saved buffer — that matches the
-      # LAST_MEANINGFUL terminal status we already chose.
+      # LATEST_STATUS we just chose for detection.
       RESPONSE=$(echo "$CLEAN" \
         | grep -v "^bash /tmp/hotline-launch" \
-        | grep -vE "^[[:space:]]*[╭│╰─└┌┘┐]+[[:space:]]*$" \
-        | grep -vE "^ℹ " \
+        | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
         | grep -vE "^>[[:space:]]*$" \
         | awk '
             /^STATUS: WORK_IN_PROGRESS$/ {buf=""; next}
