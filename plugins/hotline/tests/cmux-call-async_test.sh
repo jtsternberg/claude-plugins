@@ -47,19 +47,28 @@ build_launch_script() {
 # trailing terminal chrome (shell prompts, `│ > │` REPL prompt box bottoms)
 # that would otherwise appear AFTER the real STATUS line.
 latest_status() {
-  awk '/^STATUS: /{s=$0} END{print s}'
+  awk '
+    /^[[:space:]]*STATUS: / {
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      s=line
+    }
+    END {print s}
+  '
 }
 
 # Response extraction — mirrors the production poller. Resets on every
 # WORK_IN_PROGRESS, saves on every terminal STATUS, emits the LAST saved
 # buffer so multi-terminal-status screens use the most recent body.
+# Allows leading whitespace on STATUS lines because claude's REPL indents
+# response content by 2 spaces inside its assistant bubble.
 extract_cmux_response() {
   grep -v "^bash /tmp/hotline-launch" \
     | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
     | grep -vE "^>[[:space:]]*$" \
     | awk '
-        /^STATUS: WORK_IN_PROGRESS$/ {buf=""; next}
-        /^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$/ {result=buf; buf=""; next}
+        /^[[:space:]]*STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
+        /^[[:space:]]*STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
         {buf = buf $0 ORS}
         END {printf "%s", result}
       '
@@ -157,6 +166,18 @@ if [[ "$response" == *"second attempt body"* && "$response" != *"first attempt b
 else
   fail "response uses body before LAST terminal status, not the first" \
        "got: $(printf '%q' "$response")"
+fi
+
+# Indented-STATUS case: claude's REPL renders response content with 2 spaces
+# of indent inside the assistant bubble — the actual line on screen is
+# "  STATUS: DONE", not "STATUS: DONE". A column-0 anchor regex would miss
+# it. Verified live against a real receiver session.
+screen=$'  ⏺ PR status report\n  body line one\n  body line two\n  STATUS: DONE\n'
+status=$(printf '%s' "$screen" | latest_status)
+if [[ "$status" == "STATUS: DONE" ]]; then
+  pass "indented STATUS line is detected (claude REPL indents by 2 spaces)"
+else
+  fail "indented STATUS line is detected (claude REPL indents by 2 spaces)" "got: $status"
 fi
 
 # Trailing-chrome case: the LAST line in the screen is shell/REPL chrome,
