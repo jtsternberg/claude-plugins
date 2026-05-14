@@ -164,23 +164,28 @@ Set it higher if your workspaces don't change much, lower if you're in rapid dev
 │    MY_SESSION_ID    TARGET_PATH    EXISTING_SESSION?                │
 │                          │                                          │
 │                          ▼                                          │
-│                 ┌─────────────────┐                                 │
-│                 │ cmux/headless    │  (cmux preferred when           │
-│                 │ transport        │   available)                    │
-│                 └────────┬────────┘                                 │
-│                          │                                          │
-└──────────────────────────┼──────────────────────────────────────────┘
-                           │
-             cmux-call-async.sh \
-               --cwd "$TARGET" \
-               --prompt "/hotline-ringing [MODE: ...] \
-                         [CALLER: ...] [SESSION: ...] \
-                         <the actual prompt>"
-                           │
-                           │  (first contact)
-                           │  or: headless-call-async.sh fallback
-                           │  or: cmux/headless --resume $ID
-                           │
+│                 ┌─────────────────────────────┐                     │
+│                 │ Transport select (per mode) │                     │
+│                 │                             │                     │
+│                 │ cmux available?             │                     │
+│                 │  ├─ quick / work order ──►  │  cmux-call-async.sh │
+│                 │  └─ conference call    ──►  │  cmux-call.sh       │
+│                 │ cmux unavailable        ─►  │  headless-call*.sh  │
+│                 └─────────────┬───────────────┘                     │
+│                               │                                     │
+└───────────────────────────────┼─────────────────────────────────────┘
+                                │
+              First contact (no --resume):
+                <launch script> --prompt \
+                  "/hotline-ringing [MODE: ...] \
+                   [CALLER: ...] [SESSION: ...] \
+                   <the actual prompt>"
+
+              Follow-up (--resume <session-id>):
+                <launch script> --prompt "$YOUR_MESSAGE"
+                  (raw message — ringing skill is already
+                   loaded in the remote session's context)
+                                │
 ┌──────────────────────────┼──────────────────────────────────────────┐
 │  WORKSPACE B (Receiver)  ▼                                          │
 │                                                                     │

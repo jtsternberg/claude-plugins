@@ -43,18 +43,31 @@ build_launch_script() {
   }
 }
 
+# Last meaningful line — mirrors the production poller. Blank lines and the
+# bare REPL idle prompt `> ` are ignored; STATUS strings quoted inside the
+# response body can't accidentally terminate the call.
 latest_status() {
-  awk '/^STATUS: /{status=$0} END{print status}'
+  awk '
+    /^[[:space:]]*$/         {next}
+    /^[[:space:]]*>[[:space:]]*$/ {next}
+    {last=$0}
+    END {print last}
+  '
 }
 
+# Response extraction — mirrors the production poller. Resets on every
+# WORK_IN_PROGRESS, saves on every terminal STATUS, emits the LAST saved
+# buffer so multi-terminal-status screens use the most recent body.
 extract_cmux_response() {
   grep -v "^bash /tmp/hotline-launch" \
-    | grep -vE "^[╭│╰ℹ─]" \
-    | grep -vE "^> $" \
+    | grep -vE "^[[:space:]]*[╭│╰─└┌┘┐]+[[:space:]]*$" \
+    | grep -vE "^ℹ " \
+    | grep -vE "^>[[:space:]]*$" \
     | awk '
         /^STATUS: WORK_IN_PROGRESS$/ {buf=""; next}
-        /^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$/ {printf "%s", buf; exit}
+        /^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$/ {result=buf; buf=""; next}
         {buf = buf $0 ORS}
+        END {printf "%s", result}
       '
 }
 
@@ -105,6 +118,39 @@ if [[ "$response" == "final answer" ]]; then
   pass "response is taken after the last progress marker"
 else
   fail "response is taken after the last progress marker" "got: $(printf '%q' "$response")"
+fi
+
+# Multi-terminal-status case: two terminal STATUS lines on the same screen.
+# Can happen if the receiver retried a turn or the screen captured an earlier
+# completion plus a later one. Both detection and extraction must use the LAST
+# terminal status, not the first.
+screen=$'first attempt body\nSTATUS: WORK_COMPLETE\n--- new turn ---\nsecond attempt body\nSTATUS: DONE\n'
+status=$(printf '%s' "$screen" | latest_status)
+response=$(printf '%s' "$screen" | extract_cmux_response)
+
+if [[ "$status" == "STATUS: DONE" ]]; then
+  pass "latest terminal status wins over an earlier terminal status"
+else
+  fail "latest terminal status wins over an earlier terminal status" "got: $status"
+fi
+
+if [[ "$response" == *"second attempt body"* && "$response" != *"first attempt body"* ]]; then
+  pass "response uses body before LAST terminal status, not the first"
+else
+  fail "response uses body before LAST terminal status, not the first" \
+       "got: $(printf '%q' "$response")"
+fi
+
+# Quoted-STATUS case: the response body itself contains a STATUS string
+# (e.g., the receiver is explaining the hotline protocol). The terminal
+# STATUS line must be the last meaningful line for the call to terminate.
+screen=$'Here is how the protocol works:\nSTATUS: WORK_COMPLETE means done.\nSTATUS: DONE\n'
+status=$(printf '%s' "$screen" | latest_status)
+if [[ "$status" == "STATUS: DONE" ]]; then
+  pass "quoted STATUS inside body does not pre-empt the real terminal status"
+else
+  fail "quoted STATUS inside body does not pre-empt the real terminal status" \
+       "got: $status"
 fi
 
 tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)

@@ -20,7 +20,7 @@
 # Usage:
 #   cmux-call-async.sh --cwd <path> --prompt <text> [--resume <id>]
 #                      [--name <name>] [--fork-session] [--tools <list>]
-#                      [--keep-workspace]
+#                      [--keep-workspace] [--max-wait <seconds>]
 #   # Returns immediately with: {"call_dir": "/tmp/hotline-call-xxxxx"}
 # =============================================================================
 set -euo pipefail
@@ -30,6 +30,7 @@ if [[ "${1:-}" == "--help" ]]; then
 Usage: cmux-call-async.sh --cwd <path> --prompt <text> [--resume <id>]
                           [--name <name>] [--fork-session]
                           [--tools <list>] [--keep-workspace]
+                          [--max-wait <seconds>]
 
 Opens an interactive claude session in a cmux workspace, delivers the hotline
 prompt via a temp launch script, and polls cmux read-screen for STATUS signals.
@@ -41,6 +42,8 @@ Options:
   --tools <list>     Allowed tools (default: "Bash Read Edit Write Grep Glob")
   --keep-workspace   Do not close the cmux workspace after the call completes.
                      workspace_ref.txt in the call_dir always has the ref.
+  --max-wait <secs>  How long the poller waits for a terminal STATUS line.
+                     Default: 1800 (30 minutes).
 
 STATUS signals polled for:
   STATUS: DONE           — quick call complete
@@ -58,6 +61,7 @@ SESSION_NAME=""
 FORK_SESSION=false
 ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
 KEEP_WORKSPACE=false
+MAX_WAIT=1800
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -68,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --fork-session)   FORK_SESSION=true;   shift   ;;
     --tools)          ALLOWED_TOOLS="$2";  shift 2 ;;
     --keep-workspace) KEEP_WORKSPACE=true; shift   ;;
+    --max-wait)       MAX_WAIT="$2";       shift 2 ;;
     *)                shift ;;
   esac
 done
@@ -129,9 +134,12 @@ chmod 700 "$LAUNCH_SCRIPT"
   printf ' %q\n' "$PROMPT"
 } > "$LAUNCH_SCRIPT"
 
-# Open cmux workspace.
+# Open cmux workspace. --focus true is REQUIRED: without it cmux does not spawn
+# a real tty for the workspace's terminal surface, and subsequent `cmux send`
+# and `cmux read-screen` calls fail with "Terminal surface not found" /
+# "Surface is not a terminal". Discovered via live testing.
 WS_NAME="${SESSION_NAME:-hotline}"
-if ! WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --name "$WS_NAME" 2>&1); then
+if ! WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --name "$WS_NAME" --focus true 2>&1); then
   jq -n --arg err "cmux new-workspace failed: $WS_OUTPUT" '{error: $err}' \
     > "$CALL_DIR/error.txt"
   touch "$CALL_DIR/done"
@@ -151,7 +159,6 @@ if [[ -z "$WS_REF" ]]; then
 fi
 
 echo "$WS_REF" > "$CALL_DIR/workspace_ref.txt"
-echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 
 # Wait for the workspace shell to be ready before snapshotting the baseline.
 # Poll until the screen is non-empty (up to 5s) rather than a fixed sleep.
@@ -165,7 +172,6 @@ for _ in $(seq 1 10); do
   fi
   sleep 0.5
 done
-echo "$PRE_LINES" > "$CALL_DIR/pre_lines.txt"
 
 # Fire the claude session.
 if ! SEND_OUTPUT=$(cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n" 2>&1); then
@@ -180,12 +186,12 @@ if ! SEND_OUTPUT=$(cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n" 2>&1)
 fi
 
 # Background poller: reads screen until a terminal STATUS signal appears.
+# Exported vars are inherited; no temp files needed for hand-off.
+export WS_REF LAUNCH_SCRIPT KEEP_WORKSPACE PRE_LINES MAX_WAIT \
+       SESSION_ID_PRESET CALL_DIR
 (
-  MAX_WAIT=300
   ELAPSED=0
   POLL_INTERVAL=1
-  PRE=$(cat "$CALL_DIR/pre_lines.txt" 2>/dev/null || echo 0)
-  KEEP=$(cat "$CALL_DIR/keep_workspace.txt" 2>/dev/null || echo false)
   ESC=$(printf '\x1b')
 
   finish() {
@@ -196,11 +202,19 @@ fi
       jq -n --arg sid "$session_id" --arg resp "$response" \
         '{session_id: $sid, response: $resp}' > "$CALL_DIR/response.json"
     fi
-    [[ "$KEEP" != "true" ]] && \
+    [[ "$KEEP_WORKSPACE" != "true" ]] && \
       cmux close-workspace --workspace "$WS_REF" 2>/dev/null || true
     rm -f "$LAUNCH_SCRIPT"
     touch "$CALL_DIR/done"
   }
+
+  # If the poller is killed (parent dies, system shutdown, etc.), still clean
+  # up the launch script and close the workspace so we don't leak resources.
+  trap '
+    rm -f "$LAUNCH_SCRIPT"
+    [[ "$KEEP_WORKSPACE" != "true" ]] && \
+      cmux close-workspace --workspace "$WS_REF" 2>/dev/null || true
+  ' EXIT
 
   while [[ $ELAPSED -lt $MAX_WAIT ]]; do
     sleep $POLL_INTERVAL
@@ -212,7 +226,7 @@ fi
 
     # Isolate lines added since the baseline snapshot.
     TOTAL=$(echo "$SCREEN" | wc -l | awk '{print $1}')
-    NEW_COUNT=$((TOTAL - PRE))
+    NEW_COUNT=$((TOTAL - PRE_LINES))
     [[ $NEW_COUNT -le 0 ]] && NEW_COUNT="$TOTAL"
     NEW_CONTENT=$(echo "$SCREEN" | tail -n "$NEW_COUNT")
     # Strip ANSI escape sequences and carriage returns before any line-oriented
@@ -221,29 +235,46 @@ fi
     CLEAN=$(echo "$NEW_CONTENT" \
       | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
 
-    # Use the latest protocol status visible in the screen. Earlier
-    # WORK_IN_PROGRESS lines stay in scrollback, so checking for them first
-    # would mask a later terminal status forever.
-    LATEST_STATUS=$(echo "$CLEAN" | awk '/^STATUS: /{status=$0} END{print status}')
+    # Look at the LAST meaningful line (skipping blank lines and the bare
+    # claude REPL idle prompt `> `). This is the only place a real STATUS
+    # signal can appear — STATUS strings quoted earlier in the response
+    # (e.g., docs about the protocol) won't terminate us prematurely.
+    LAST_MEANINGFUL=$(echo "$CLEAN" | awk '
+      /^[[:space:]]*$/         {next}
+      /^[[:space:]]*>[[:space:]]*$/ {next}
+      {last=$0}
+      END {print last}
+    ')
 
-    if [[ "$LATEST_STATUS" == "STATUS: WORK_IN_PROGRESS" ]]; then
+    if [[ "$LAST_MEANINGFUL" == "STATUS: WORK_IN_PROGRESS" ]]; then
       continue
     fi
 
     # Terminal statuses — extract response and wrap up.
-    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$ ]]; then
-      # Remove terminal chrome: the bash launch command line, claude's
-      # banner box-drawing characters, and the bare REPL idle prompt.
-      # NOTE: we do NOT filter lines starting with ">" because those are
-      # valid markdown blockquotes in responses.
+    if [[ "$LAST_MEANINGFUL" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$ ]]; then
+      # Strip terminal chrome before extracting the response:
+      #   - the `bash /tmp/hotline-launch-*` command echoed at the prompt
+      #   - claude's banner: lines composed entirely of box-drawing chars
+      #     (anchored at line start and end so legitimate ASCII art with
+      #      mixed text survives)
+      #   - claude's "ℹ ..." info lines (update available / tip banners)
+      #   - the bare REPL prompt `> ` on its own line
+      #     (multi-line markdown blockquotes start with `> text` and survive)
+      #
+      # Response extraction: walk the lines, resetting the buffer on every
+      # WORK_IN_PROGRESS signal and saving the buffer on every terminal
+      # STATUS line. At END, emit the LAST saved buffer — that matches the
+      # LAST_MEANINGFUL terminal status we already chose.
       RESPONSE=$(echo "$CLEAN" \
         | grep -v "^bash /tmp/hotline-launch" \
-        | grep -vE "^[╭│╰ℹ─]" \
-        | grep -vE "^> $" \
+        | grep -vE "^[[:space:]]*[╭│╰─└┌┘┐]+[[:space:]]*$" \
+        | grep -vE "^ℹ " \
+        | grep -vE "^>[[:space:]]*$" \
         | awk '
             /^STATUS: WORK_IN_PROGRESS$/ {buf=""; next}
-            /^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$/ {printf "%s", buf; exit}
+            /^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$/ {result=buf; buf=""; next}
             {buf = buf $0 ORS}
+            END {printf "%s", result}
           ')
 
       finish "$SESSION_ID_PRESET" "$RESPONSE"

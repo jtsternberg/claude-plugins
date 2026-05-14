@@ -44,7 +44,10 @@ if [[ -z "$CWD" ]]; then
   exit 1
 fi
 
-WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" 2>&1)
+# --focus true is REQUIRED: without it cmux does not spawn a real tty for the
+# workspace's terminal surface, and subsequent `cmux send` calls fail with
+# "Terminal surface not found". Discovered via live testing.
+WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --focus true 2>&1)
 
 # cmux returns "OK workspace:<N>" — extract the ref
 WS_REF=$(echo "$WS_OUTPUT" | grep -oE 'workspace:[0-9]+' | head -1 || true)

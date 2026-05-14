@@ -128,6 +128,8 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 - **Exit 0**: CMUX is available. Use it for every mode.
 - **Exit 1**: CMUX not available. Fall back to headless for every mode.
 
+> **Tip:** If the `/cmux-cli:using-cmux-cli` skill is available in this session, invoke it before firing a CMUX-routed call. It documents the workspace/surface/tty semantics, the `cmux send` escape rules (`\n` = Enter), and the focus-required-to-spawn-tty quirk that this transport depends on — using it helps you reason about connection failures rather than guessing.
+
 | Mode | CMUX available | No CMUX |
 |------|----------------|---------|
 | Quick call | `cmux-call-async.sh` | Headless CLI |
@@ -258,11 +260,13 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 - **Exit 0 + `mode` is `conference_call`**: use `cmux-call.sh` with `--resume`
 - **Exit 1**: fall back to `headless-call.sh`
 
+**Important: follow-ups never re-wrap with `/hotline-ringing`.** The remote session already invoked that slash command on first contact — the ringing skill is in its context, including the STATUS protocol. Sending raw `$YOUR_MESSAGE` keeps the conversation going naturally; re-invoking `/hotline-ringing` would re-trigger the skill's first-contact setup and confuse the receiver. All three transports below pass `$YOUR_MESSAGE` raw, matching what `headless-call.sh` already does.
+
 ```bash
 # CMUX transport (quick call / work order):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
   --resume "$REMOTE_SESSION_ID" \
-  --prompt "/hotline-ringing [MODE: $mode] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_MESSAGE")
+  --prompt "$YOUR_MESSAGE")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 # Then wait-for-session / wait-for-response as normal.
 
@@ -286,12 +290,18 @@ bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-ses
 If the mode is **conference call** and CMUX is available:
 
 ```bash
+# First contact (no --resume): include /hotline-ringing so the receiver loads
+# the protocol skill on its first turn.
 bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
-  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT" \
-  [--resume "$REMOTE_SESSION_ID"]
+  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT"
+
+# Resume (--resume): the ringing skill is already loaded — send raw $YOUR_MESSAGE.
+bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
+  --prompt "$YOUR_MESSAGE" \
+  --resume "$REMOTE_SESSION_ID"
 ```
 
-Pass `--resume` only if reusing an existing session from Step 4. This opens a visible interactive workspace and delivers the conference prompt into it — the user can observe or take over the conversation directly.
+This opens a visible interactive workspace and delivers the conference prompt into it — the user can observe or take over the conversation directly.
 
 ## Reporting to the User
 
