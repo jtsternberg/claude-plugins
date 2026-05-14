@@ -1,7 +1,7 @@
 ---
 name: hotline-dial
 description: "Initiates cross-workspace communication with another Claude Code instance. Supports quick calls, work orders, and conference calls. Use when the user wants to call, dial, message, delegate to, or collaborate with another workspace or project."
-argument-hint: "[workspace] [task/question...]"
+argument-hint: "[--headless] [workspace] [task/question...]"
 allowed-tools: Bash
 ---
 
@@ -11,6 +11,7 @@ Dial another workspace to ask questions, delegate work, or collaborate.
 
 ## Arguments
 
+- **`--headless`** (optional flag, anywhere in args): Force this single dial to use the headless transport (`claude -p`) even if cmux is available. Useful for debugging the headless path, A/B comparing modes, or when the caller wants `claude -p`'s structured stream-json output instead of cmux read-screen scraping. Set `FORCE_HEADLESS=true` for this dial only and skip Step 3's cmux check. Costs programmatic-usage credit; default behavior (cmux when available) doesn't.
 - **`$0`** (optional): Workspace reference — a dirmap ID, path, session ID, or fuzzy name.
 - **`$1+`** (optional): The task/question for the remote workspace.
 
@@ -18,9 +19,12 @@ Dial another workspace to ask questions, delegate work, or collaborate.
 /hotline-dial dotfiles what branch are you on?
 /hotline-dial coaching write the about page
 /hotline-dial 5b1dda91-... what went wrong?
+/hotline-dial --headless dotfiles what branch are you on?
 ```
 
-If `$0` is provided, use it as `USER_REFERENCE` in Step 1. If `$1+` is provided, use it as the prompt in Step 5. If neither, parse both from the user's natural language.
+**Parse `--headless` first**: scan the raw args for the literal token `--headless` and remove it from the arg list before resolving `$0` and `$1+`. Set `FORCE_HEADLESS=true` if found, `false` otherwise. (For the "always avoid cmux" use case, users can also set `HOTLINE_FORCE_HEADLESS=1` in their env — see Step 3.)
+
+If `$0` is provided (after stripping `--headless`), use it as `USER_REFERENCE` in Step 1. If `$1+` is provided, use it as the prompt in Step 5. If neither, parse both from the user's natural language.
 
 ## Script Paths
 
@@ -119,14 +123,16 @@ If the user's intent is ambiguous, ask. One question: "Is this a quick question,
 
 This is automatic — never ask the user about transport. They don't care how the sausage gets made.
 
-Check CMUX availability for **all** modes:
+**If `FORCE_HEADLESS=true` (from the `--headless` flag in Arguments):** skip the cmux check entirely — go straight to the headless path for this dial.
+
+Otherwise, check CMUX availability:
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 ```
 
 - **Exit 0**: CMUX is available. Use it for every mode.
-- **Exit 1**: CMUX not available. Fall back to headless for every mode.
+- **Exit 1**: CMUX not available (or `HOTLINE_FORCE_HEADLESS=1` is set in the env). Fall back to headless for every mode.
 
 > **Tip:** If the `/cmux-cli:using-cmux-cli` skill is available in this session, invoke it before firing a CMUX-routed call. It documents the workspace/surface/tty semantics, the `cmux send` escape rules (`\n` = Enter), and the focus-required-to-spawn-tty quirk that this transport depends on — using it helps you reason about connection failures rather than guessing.
 
@@ -134,7 +140,12 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 
 > **Heads-up:** CMUX calls land in an unattended pane. The receiver will stall on the first permission gate (skill invocation, an unauthorized Bash command, etc.) because there's no human there to click "Yes." Users who want autonomous hotline calls can set `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` in `~/.claude/settings.json`'s `"env"` block (or their shell) to add `--dangerously-skip-permissions` to the receiver's `claude` invocation. **Default is off** — this is a real trust decision. If a call hangs at "Combobulating…" with no progress, suspect a permission prompt in the receiver pane.
 
-> **Force headless mode:** Set `HOTLINE_FORCE_HEADLESS=1` (or `true`/`yes`) in the env to skip cmux entirely — `check-cmux.sh` returns exit 1 and the dial falls through to `headless-call.sh` / `headless-call-async.sh`. Useful for debugging the headless transport, comparing behavior across modes, or when you want `claude -p`'s structured stream-json output instead of the cmux read-screen scraping path. Headless calls draw from the programmatic-usage credit, so this is opt-in.
+> **Force headless mode — two ways:**
+>
+> 1. **Per-call flag**: pass `--headless` in the slash-command args (see Arguments above). Forces just this dial through the headless transport.
+> 2. **Always-on env var**: set `HOTLINE_FORCE_HEADLESS=1` (or `true`/`yes`) in `~/.claude/settings.json`'s `"env"` block or the shell. Makes `check-cmux.sh` always exit 1, so every dial takes the headless path regardless of cmux availability.
+>
+> Both reach the same `headless-call.sh` / `headless-call-async.sh` path. Useful for debugging the headless transport, A/B comparing modes, or wanting `claude -p`'s structured stream-json output instead of cmux read-screen scraping. Headless draws from the programmatic-usage credit; cmux interactive does not — the opt-in default reflects that.
 
 | Mode | CMUX available | No CMUX |
 |------|----------------|---------|

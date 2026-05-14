@@ -147,7 +147,17 @@ If you want autonomous calls to skip that gate, set:
 
 ### Force headless transport (opt-in)
 
-By default, dial picks `cmux` when it's available (free interactive usage) and falls back to `headless-call.sh` only when cmux isn't running. To force headless on every dial — useful for debugging the headless transport, A/B comparing modes, or when you want `claude -p`'s structured stream-json output instead of cmux read-screen scraping:
+By default, dial picks `cmux` when it's available (free interactive usage) and falls back to `headless-call.sh` only when cmux isn't running. Two ways to override:
+
+**Per call** — pass `--headless` as a flag in the dial slash command:
+
+```
+/hotline-dial --headless dotfiles what branch are you on?
+```
+
+The flag is parsed by the dial skill and stripped from the args before workspace resolution. Forces just that one dial through the headless transport.
+
+**Always-on** — set the env var in `~/.claude/settings.json` (or your shell):
 
 ```json
 {
@@ -157,7 +167,9 @@ By default, dial picks `cmux` when it's available (free interactive usage) and f
 }
 ```
 
-…or export it for a single shell. Accepts `1` / `true` / `yes` (case-insensitive). When set, `check-cmux.sh` exits 1 and the dial skill takes the headless path. Headless calls draw from the programmatic-usage credit; cmux interactive calls don't. The opt-in nature reflects that cost difference.
+Accepts `1` / `true` / `yes` (case-insensitive). When set, `check-cmux.sh` always exits 1 and every dial takes the headless path regardless of cmux availability.
+
+Use cases for either path: debugging the headless transport, A/B comparing receiver behavior across modes, or wanting `claude -p`'s structured stream-json output instead of cmux read-screen scraping. Headless calls draw from the programmatic-usage credit; cmux interactive calls don't — the opt-in default reflects that cost difference.
 
 ---
 
