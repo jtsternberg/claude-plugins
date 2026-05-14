@@ -120,12 +120,12 @@ chmod 700 "$LAUNCH_SCRIPT"
 {
   printf '#!/usr/bin/env bash\n'
   printf 'claude'
-  [[ -n "$RESUME_ID"         ]] && printf ' --resume %s'     "$RESUME_ID"
+  [[ -n "$RESUME_ID"         ]] && printf ' --resume %q'     "$RESUME_ID"
   [[ -z "$RESUME_ID" && -n "$SESSION_ID_PRESET" ]] && \
-                                    printf ' --session-id %s' "$SESSION_ID_PRESET"
+                                    printf ' --session-id %q' "$SESSION_ID_PRESET"
   $FORK_SESSION                && printf ' --fork-session'
   [[ -n "$SESSION_NAME"      ]] && printf ' -n %q'           "$SESSION_NAME"
-  printf ' --allowedTools %s' "$ALLOWED_TOOLS"
+  printf ' --allowedTools %q' "$ALLOWED_TOOLS"
   printf ' %q\n' "$PROMPT"
 } > "$LAUNCH_SCRIPT"
 
@@ -205,13 +205,17 @@ cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"
     CLEAN=$(echo "$NEW_CONTENT" \
       | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
 
-    # WORK_IN_PROGRESS: keep polling — the remote agent isn't done yet.
-    if echo "$CLEAN" | grep -qE "^STATUS: WORK_IN_PROGRESS$"; then
+    # Use the latest protocol status visible in the screen. Earlier
+    # WORK_IN_PROGRESS lines stay in scrollback, so checking for them first
+    # would mask a later terminal status forever.
+    LATEST_STATUS=$(echo "$CLEAN" | awk '/^STATUS: /{status=$0} END{print status}')
+
+    if [[ "$LATEST_STATUS" == "STATUS: WORK_IN_PROGRESS" ]]; then
       continue
     fi
 
     # Terminal statuses — extract response and wrap up.
-    if echo "$CLEAN" | grep -qE "^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$"; then
+    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$ ]]; then
       # Remove terminal chrome: the bash launch command line, claude's
       # banner box-drawing characters, and the bare REPL idle prompt.
       # NOTE: we do NOT filter lines starting with ">" because those are
@@ -220,7 +224,11 @@ cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"
         | grep -v "^bash /tmp/hotline-launch" \
         | grep -vE "^[╭│╰ℹ─]" \
         | grep -vE "^> $" \
-        | awk '/^STATUS: /{exit} {print}')
+        | awk '
+            /^STATUS: WORK_IN_PROGRESS$/ {buf=""; next}
+            /^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$/ {printf "%s", buf; exit}
+            {buf = buf $0 ORS}
+          ')
 
       finish "$SESSION_ID_PRESET" "$RESPONSE"
       exit 0

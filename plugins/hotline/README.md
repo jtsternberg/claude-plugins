@@ -40,7 +40,7 @@ Delegate a task to another workspace and let it work autonomously. You'll get a 
 
 > "I need you to work with the design workspace on the new landing page — coordinate the component structure and styles."
 
-Back-and-forth collaboration between workspaces. Multiple exchanges, iterative refinement. If the conversation runs long, Hotline auto-escalates to a `cmux` window (if available) for better visibility.
+Back-and-forth collaboration between workspaces. Multiple exchanges, iterative refinement. If `cmux` is available, Hotline opens a visible `cmux` workspace immediately; otherwise it falls back to headless Claude.
 
 ### Dialing by Session ID
 
@@ -165,22 +165,21 @@ Set it higher if your workspaces don't change much, lower if you're in rapid dev
 │                          │                                          │
 │                          ▼                                          │
 │                 ┌─────────────────┐                                 │
-│                 │ headless-call.sh│  (or cmux-call.sh for deep      │
-│                 │                 │   conference calls)              │
+│                 │ cmux/headless    │  (cmux preferred when           │
+│                 │ transport        │   available)                    │
 │                 └────────┬────────┘                                 │
 │                          │                                          │
 └──────────────────────────┼──────────────────────────────────────────┘
                            │
-              cd $TARGET && claude -p \
-                "/hotline-ringing [MODE: ...] \
-                 [CALLER: ...] [SESSION: ...] \
-                 <the actual prompt>" \
-                --allowedTools Bash \
-                --output-format stream-json --verbose
+             cmux-call-async.sh \
+               --cwd "$TARGET" \
+               --prompt "/hotline-ringing [MODE: ...] \
+                         [CALLER: ...] [SESSION: ...] \
+                         <the actual prompt>"
                            │
                            │  (first contact)
-                           │  or: claude -p "..." --resume $ID [--fork-session]
-                           │  (follow-up / fork when dialing by session ID)
+                           │  or: headless-call-async.sh fallback
+                           │  or: cmux/headless --resume $ID
                            │
 ┌──────────────────────────┼──────────────────────────────────────────┐
 │  WORKSPACE B (Receiver)  ▼                                          │
@@ -207,7 +206,7 @@ Set it higher if your workspaces don't change much, lower if you're in rapid dev
 │            └─────────────┬───────────┘                              │
 │                          │                                          │
 │            Response + STATUS signal                                 │
-│            (WORK_COMPLETE / WORK_IN_PROGRESS / OUT_OF_SCOPE)        │
+│            (DONE / WORK_COMPLETE / WORK_IN_PROGRESS / OUT_OF_SCOPE) │
 │            + optional HOTLINE_NOTE for protocol issues               │
 │                          │                                          │
 └──────────────────────────┼──────────────────────────────────────────┘
