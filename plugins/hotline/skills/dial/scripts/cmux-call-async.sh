@@ -84,33 +84,46 @@ fi
 
 CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
 
-# Generate a session ID up front and pass it via --session-id so the caller
-# can surface it to the user immediately (same as the headless stream path)
-# without waiting for the call to complete or grepping transcripts after the
-# fact. uuidgen is available on macOS and most Linux distros; python3 is the
-# fallback.
-SESSION_ID_PRESET=$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' \
-  || python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null \
-  || true)
-
-# Write it immediately so wait-for-session.sh returns right away.
+# Determine the session ID upfront so wait-for-session.sh returns immediately.
+#
+# First contact (no --resume): generate a fresh UUID and pass it to claude via
+# --session-id so the transcript is written under our chosen ID.
+#
+# Follow-up (--resume): the session already exists — use RESUME_ID directly.
+# Do NOT generate a new UUID; that would write a wrong ID to session_id.txt.
+#
+# uuidgen (macOS/Linux), python3 uuid, and /proc/sys/kernel/random/uuid are
+# tried in order so the script degrades gracefully on minimal systems.
+SESSION_ID_PRESET=""
+if [[ -n "$RESUME_ID" ]]; then
+  SESSION_ID_PRESET="$RESUME_ID"
+else
+  SESSION_ID_PRESET=$(
+    uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' \
+    || python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null \
+    || cat /proc/sys/kernel/random/uuid 2>/dev/null \
+    || true
+  )
+fi
 [[ -n "$SESSION_ID_PRESET" ]] && echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id.txt"
 
 # Write a launch script so the full prompt reaches claude without escaping
 # issues. printf %q produces bash-safe quoting for newlines, brackets, etc.
+# chmod 700 prevents other local users from reading prompt contents.
 LAUNCH_SCRIPT=$(mktemp /tmp/hotline-launch-XXXXX.sh)
+chmod 700 "$LAUNCH_SCRIPT"
+trap 'rm -f "$LAUNCH_SCRIPT"' EXIT
 {
   printf '#!/usr/bin/env bash\n'
   printf 'claude'
-  [[ -n "$RESUME_ID"       ]] && printf ' --resume %s'     "$RESUME_ID"
-  [[ -n "$SESSION_ID_PRESET" && -z "$RESUME_ID" ]] && \
-                                  printf ' --session-id %s' "$SESSION_ID_PRESET"
-  $FORK_SESSION              && printf ' --fork-session'
-  [[ -n "$SESSION_NAME"    ]] && printf ' -n %q'           "$SESSION_NAME"
+  [[ -n "$RESUME_ID"         ]] && printf ' --resume %s'     "$RESUME_ID"
+  [[ -z "$RESUME_ID" && -n "$SESSION_ID_PRESET" ]] && \
+                                    printf ' --session-id %s' "$SESSION_ID_PRESET"
+  $FORK_SESSION                && printf ' --fork-session'
+  [[ -n "$SESSION_NAME"      ]] && printf ' -n %q'           "$SESSION_NAME"
   printf ' --allowedTools %s' "$ALLOWED_TOOLS"
   printf ' %q\n' "$PROMPT"
 } > "$LAUNCH_SCRIPT"
-chmod +x "$LAUNCH_SCRIPT"
 
 # Open cmux workspace.
 WS_NAME="${SESSION_NAME:-hotline}"

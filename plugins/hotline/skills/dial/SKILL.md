@@ -227,7 +227,15 @@ Clean up: `rm -rf "$CALL_DIR"`
 
 #### Follow-Up (Existing Session from Our Cache)
 
-Continue the conversation using the same transport used for first contact:
+Use the same transport logic as Step 3 — check cmux first:
+
+```bash
+bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
+```
+
+- **Exit 0 + quick call or work order**: use `cmux-call-async.sh` with `--resume`
+- **Exit 0 + conference call**: use `cmux-call.sh` with `--resume`  
+- **Exit 1**: fall back to `headless-call.sh`
 
 ```bash
 # CMUX transport (quick call / work order):
@@ -236,7 +244,10 @@ CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PAT
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 # Then wait-for-session / wait-for-response as normal.
 
-# Headless fallback:
+# CMUX (conference call):
+bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" --resume "$REMOTE_SESSION_ID"
+
+# Headless fallback (any mode):
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
   --prompt "$YOUR_MESSAGE" --resume "$REMOTE_SESSION_ID"
 ```
