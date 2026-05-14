@@ -1,6 +1,6 @@
 ---
 name: generating-blog-images
-description: Generates AI image prompts for blog posts by analyzing content, identifying optimal placement points, and crafting detailed prompts. Use when the user asks for image prompts, illustrations, or visual suggestions for blog content, or mentions AI image generators like Midjourney, DALL-E, Imagen, or Nano Banana.
+description: "Generates AI image prompts for blog posts by analyzing content, identifying optimal placement points, and crafting detailed prompts. Use when the user asks for image prompts, illustrations, or visual suggestions for blog content, or mentions AI image generators like Midjourney, DALL-E, Imagen, or Nano Banana."
 ---
 
 # Blog Post Image Prompt Generator

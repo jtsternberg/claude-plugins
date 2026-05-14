@@ -1,8 +1,8 @@
 ---
 name: using-cmux-cli
-description: Controls cmux (macOS terminal multiplexer / workspace manager) via the `cmux` CLI. Use when the user mentions cmux, workspaces, panes, surfaces, tabs, or splits; asks to send keystrokes to / read output from a terminal; wants to drive cmux's embedded browser; or wants to post a notification into a workspace. Also triggers on tmux-style commands (capture-pane, wait-for, swap-pane) when cmux is in play.
+description: "Controls cmux (macOS terminal multiplexer / workspace manager) via the `cmux` CLI. Use when the user mentions cmux, workspaces, panes, surfaces, tabs, or splits; asks to send keystrokes to / read output from a terminal; wants to drive cmux's embedded browser; or wants to post a notification into a workspace. Also triggers on tmux-style commands (capture-pane, wait-for, swap-pane) when cmux is in play."
 argument-hint: "[list|send|read|split|focus|notify|browser] [natural language description]"
-allowed-tools: Bash(cmux *), Bash(which cmux), Bash(${CLAUDE_SKILL_DIR}/scripts/*)
+allowed-tools: "Bash(cmux *), Bash(which cmux), Bash(${CLAUDE_SKILL_DIR}/scripts/*)"
 ---
 
 # cmux CLI

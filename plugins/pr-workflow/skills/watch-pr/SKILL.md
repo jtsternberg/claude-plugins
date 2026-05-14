@@ -1,6 +1,6 @@
 ---
 name: watch-pr
-description: Polls a GitHub PR for a specific condition, then executes a follow-up action. Conditions include waiting for Copilot to finish work, waiting for a draft PR to be marked ready for review, or waiting for someone to submit a review. Use when the user says things like "watch copilot", "wait for copilot", "watch this PR", "let me know when the PR is ready", or "notify me when it's reviewed".
+description: "Polls a GitHub PR for a specific condition, then executes a follow-up action. Conditions include waiting for Copilot to finish work, waiting for a draft PR to be marked ready for review, or waiting for someone to submit a review. Use when the user says things like \"watch copilot\", \"wait for copilot\", \"watch this PR\", \"let me know when the PR is ready\", or \"notify me when it's reviewed\"."
 ---
 
 # Watch PR

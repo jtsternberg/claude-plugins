@@ -1,6 +1,6 @@
 ---
 name: create-skill
-description: End-to-end skill builder that creates a new Claude Code skill, automatically reviews it against current best practices, and self-heals it before presenting the finished skill. Use when the user asks to create, make, scaffold, or build a skill and wants a polished result delivered in one pass without being interrupted mid-process. Make sure to use this skill whenever the user says "create a skill", "make a skill", "new skill", "scaffold a skill", "build me a skill", or otherwise asks for a skill to be produced end-to-end rather than drafted and reviewed separately.
+description: "End-to-end skill builder that creates a new Claude Code skill, automatically reviews it against current best practices, and self-heals it before presenting the finished skill. Use when the user asks to create, make, scaffold, or build a skill and wants a polished result delivered in one pass without being interrupted mid-process. Make sure to use this skill whenever the user says \"create a skill\", \"make a skill\", \"new skill\", \"scaffold a skill\", \"build me a skill\", or otherwise asks for a skill to be produced end-to-end rather than drafted and reviewed separately."
 argument-hint: "<skill-name-or-description>"
 disable-model-invocation: true
 effort: high

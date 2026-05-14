@@ -1,6 +1,6 @@
 ---
 name: nlt
-description: This skill should be used when looking up Bible verses, passages, or references using the NLT API. Triggers on requests to read, quote, or look up Scripture, Bible verses, Bible passages, or biblical references. Also triggers on mentions of NLT, KJV, NTV translations, or requests like "what does the Bible say about", "read me", or "look up [book] [chapter]:[verse]".
+description: "This skill should be used when looking up Bible verses, passages, or references using the NLT API. Triggers on requests to read, quote, or look up Scripture, Bible verses, Bible passages, or biblical references. Also triggers on mentions of NLT, KJV, NTV translations, or requests like \"what does the Bible say about\", \"read me\", or \"look up [book] [chapter]:[verse]\"."
 ---
 
 # NLT Bible Lookup

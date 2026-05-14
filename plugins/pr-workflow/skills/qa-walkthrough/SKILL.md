@@ -1,9 +1,9 @@
 ---
 name: qa-walkthrough
-description: Guided manual QA walkthrough for PRs, branch changes, or ad-hoc testing. Generates a test plan, builds a beads epic, and walks the user through each test interactively.
-when_to_use: Use when the user says "QA this PR", "qa walkthrough", "manual testing", "walk me through testing", "QA my changes", "test my changes", or wants to manually verify work before merging or pushing.
+description: "Guided manual QA walkthrough for PRs, branch changes, or ad-hoc testing. Generates a test plan, builds a beads epic, and walks the user through each test interactively."
+when_to_use: "Use when the user says \"QA this PR\", \"qa walkthrough\", \"manual testing\", \"walk me through testing\", \"QA my changes\", \"test my changes\", or wants to manually verify work before merging or pushing."
 argument-hint: "[<pr-number> | --branch | --describe \"...\"]"
-allowed-tools: Bash(gh *) Bash(git *) Bash(bd *) Bash(bash "${CLAUDE_SKILL_DIR}/scripts/*")
+allowed-tools: "Bash(gh *) Bash(git *) Bash(bd *) Bash(bash \"${CLAUDE_SKILL_DIR}/scripts/*\")"
 effort: high
 ---
 

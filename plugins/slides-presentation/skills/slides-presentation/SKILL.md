@@ -1,6 +1,6 @@
 ---
 name: slides-presentation
-description: Creates self-contained HTML slide presentations from talk prompts, outlines, or content descriptions. Use when user asks to "create a presentation", "make slides", "build a slide deck", "present this", or mentions giving a talk. Generates a polished single .html file with opinionated design, entry animations, and alternating dark/light slides. No PowerPoint, no external tools needed.
+description: "Creates self-contained HTML slide presentations from talk prompts, outlines, or content descriptions. Use when user asks to \"create a presentation\", \"make slides\", \"build a slide deck\", \"present this\", or mentions giving a talk. Generates a polished single .html file with opinionated design, entry animations, and alternating dark/light slides. No PowerPoint, no external tools needed."
 ---
 
 # Slides Presentation Builder

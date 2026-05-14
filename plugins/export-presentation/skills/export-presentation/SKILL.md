@@ -1,6 +1,6 @@
 ---
 name: export-presentation
-description: Exports HTML slide presentations to PDF or PNG screenshots. Use when the user asks to export slides, convert a presentation to PDF, take slide screenshots, print a deck, or share a presentation as images. Companion to the slides-presentation plugin.
+description: "Exports HTML slide presentations to PDF or PNG screenshots. Use when the user asks to export slides, convert a presentation to PDF, take slide screenshots, print a deck, or share a presentation as images. Companion to the slides-presentation plugin."
 ---
 
 # Export Presentation

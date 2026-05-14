@@ -1,6 +1,6 @@
 ---
 name: yt-dlp
-description: Extracts text, captions, descriptions, chapters, and audio from YouTube, Vimeo, and any yt-dlp-supported URL on macOS or Linux. Leads with a subs-first strategy (description + chapters + auto-captions in one yt-dlp call, no audio download), and falls back to audio download + the macwhisper-cli skill only when captions are missing or insufficient.
+description: "Extracts text, captions, descriptions, chapters, and audio from YouTube, Vimeo, and any yt-dlp-supported URL on macOS or Linux. Leads with a subs-first strategy (description + chapters + auto-captions in one yt-dlp call, no audio download), and falls back to audio download + the macwhisper-cli skill only when captions are missing or insufficient."
 when_to_use: |
   Use for any URL-based text/transcript request — "transcribe this video",
   "transcribe this YouTube link", "TLDR of this video",
@@ -8,7 +8,7 @@ when_to_use: |
   "what did [speaker] say in this video", "YouTube transcript",
   "captions of this video", "get the transcript of this link", or any
   request to extract text/info from a video URL.
-allowed-tools: Bash(yt-dlp *) Bash(ffmpeg *) Bash(curl *) Bash(mw *) Bash(cat *) Bash(rm /tmp/*)
+allowed-tools: "Bash(yt-dlp *) Bash(ffmpeg *) Bash(curl *) Bash(mw *) Bash(cat *) Bash(rm /tmp/*)"
 ---
 
 # yt-dlp

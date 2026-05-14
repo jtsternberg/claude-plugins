@@ -1,13 +1,13 @@
 ---
 name: gws-youtube
-description: This skill should be used when the user asks to "clean up my youtube playlists", "list my youtube playlists", "dedupe my playlists", "remove video from playlist", "add video to playlist", "youtube cleanup", "youtube channel playlists", "merge playlists", "find duplicate playlists", or mentions YouTube playlist management. Manages YouTube playlists (list, dedupe analysis, add/remove items) via the gws plugin's bash primitives, reusing the active gws account's OAuth client. Reach for this instead of constructing raw YouTube Data API calls or writing one-off Python scripts.
+description: "This skill should be used when the user asks to \"clean up my youtube playlists\", \"list my youtube playlists\", \"dedupe my playlists\", \"remove video from playlist\", \"add video to playlist\", \"youtube cleanup\", \"youtube channel playlists\", \"merge playlists\", \"find duplicate playlists\", or mentions YouTube playlist management. Manages YouTube playlists (list, dedupe analysis, add/remove items) via the gws plugin's bash primitives, reusing the active gws account's OAuth client. Reach for this instead of constructing raw YouTube Data API calls or writing one-off Python scripts."
 when_to_use: |
   Use whenever the user wants to inspect or modify YouTube playlists they
   own — listing playlists, listing items, adding a video, removing an item,
   or building a higher-level cleanup workflow (dedupe by name, find
   cross-playlist overlap, consolidate singletons, delete empties). Respects
   the active gws account set by the gws-account skill.
-argument-hint: <login|logout|playlists|items|add|remove> [flags]
+argument-hint: "<login|logout|playlists|items|add|remove> [flags]"
 allowed-tools: 'Bash(bash *) Bash(jq *) Bash(curl *) Bash(python3 *)'
 ---
 

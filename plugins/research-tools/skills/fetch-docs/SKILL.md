@@ -1,6 +1,6 @@
 ---
 name: fetch-docs
-description: Pulls a URL's raw content into a local file so Claude reads the authoritative source instead of WebFetch's summary. Use when the user wants docs, a page, or an API reference grounded in what the source actually says — not what a small-model pass thinks the page says. Works on any http/https URL; optional HTML→markdown conversion.
+description: "Pulls a URL's raw content into a local file so Claude reads the authoritative source instead of WebFetch's summary. Use when the user wants docs, a page, or an API reference grounded in what the source actually says — not what a small-model pass thinks the page says. Works on any http/https URL; optional HTML→markdown conversion."
 when_to_use: |
   Use when the user says any of:
   "fetch the docs", "fetch this URL raw", "fetch this page",
@@ -10,7 +10,7 @@ when_to_use: |
   Also use proactively whenever you're about to call WebFetch on a docs
   page, API reference, README, or changelog — fetch-docs is strictly more
   grounded because the full source lands in a file you can Read.
-allowed-tools: Bash(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh *) Bash(curl *) Bash(npx *) Read
+allowed-tools: "Bash(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh *) Bash(curl *) Bash(npx *) Read"
 ---
 
 # fetch-docs

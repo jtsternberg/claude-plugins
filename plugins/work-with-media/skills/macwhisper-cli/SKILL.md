@@ -1,13 +1,13 @@
 ---
 name: macwhisper-cli
-description: Transcribes local audio and video files on macOS using the MacWhisper `mw` CLI. Use whenever the user has an audio/video file on disk (or downloaded to /tmp from another skill) that needs to become text — even when they don't explicitly name MacWhisper. Handles whisper-cpp, WhisperKit, Parakeet, and Apple speech models, with streaming, one-off model overrides, and persist-to-history. URL-based requests (YouTube, Vimeo, direct URLs) route through the yt-dlp skill first — subs-first is usually cheaper than audio transcription; this skill takes over when yt-dlp decides transcription is actually needed.
+description: "Transcribes local audio and video files on macOS using the MacWhisper `mw` CLI. Use whenever the user has an audio/video file on disk (or downloaded to /tmp from another skill) that needs to become text — even when they don't explicitly name MacWhisper. Handles whisper-cpp, WhisperKit, Parakeet, and Apple speech models, with streaming, one-off model overrides, and persist-to-history. URL-based requests (YouTube, Vimeo, direct URLs) route through the yt-dlp skill first — subs-first is usually cheaper than audio transcription; this skill takes over when yt-dlp decides transcription is actually needed."
 when_to_use: |
   Triggers on "transcribe this file", "transcribe this recording", "macwhisper",
   "mw transcribe", "transcribe meeting", "dictation transcript", "audio to text"
   for a local file, "video to text" for a local file, or any request to convert
   a recording already on disk (`.m4a`/`.wav`/`.mp3`/`.mp4`) into text on macOS.
   URL-based requests belong to the yt-dlp skill.
-allowed-tools: Bash(mw *) Bash(tee *) Bash(pbcopy)
+allowed-tools: "Bash(mw *) Bash(tee *) Bash(pbcopy)"
 ---
 
 # MacWhisper CLI

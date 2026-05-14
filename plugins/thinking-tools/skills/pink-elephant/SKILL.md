@@ -1,6 +1,6 @@
 ---
 name: pink-elephant
-description: Use when the user calls out a "pink elephant" — i.e. flags that an instruction, prompt, or guideline is counterproductively telling an agent NOT to do something. Triggers on phrases like "pink elephant", "don't think about a pink elephant", or critiques about negative instructions, prohibition framing, or rules phrased as "do not X" / "never X" / "avoid X" that draw attention to the very behavior they're trying to prevent. Helps rewrite negative prohibitions into positive directives.
+description: "Use when the user calls out a \"pink elephant\" — i.e. flags that an instruction, prompt, or guideline is counterproductively telling an agent NOT to do something. Triggers on phrases like \"pink elephant\", \"don't think about a pink elephant\", or critiques about negative instructions, prohibition framing, or rules phrased as \"do not X\" / \"never X\" / \"avoid X\" that draw attention to the very behavior they're trying to prevent. Helps rewrite negative prohibitions into positive directives."
 ---
 
 # Pink Elephant

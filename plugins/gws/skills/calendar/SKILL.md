@@ -1,12 +1,12 @@
 ---
 name: gws-calendar
-description: Query and manage Google Calendar events via the gws CLI for the currently active gws account. Triggers on "what's on my calendar", "today's meetings", "what's my schedule", "list events tomorrow", "find my next meeting with X", "get the meet link for [event]", "what's the zoom link for my coaching session", "create a calendar event", "list my calendars". Use this skill instead of constructing raw `gws calendar events list` invocations.
+description: "Query and manage Google Calendar events via the gws CLI for the currently active gws account. Triggers on \"what's on my calendar\", \"today's meetings\", \"what's my schedule\", \"list events tomorrow\", \"find my next meeting with X\", \"get the meet link for [event]\", \"what's the zoom link for my coaching session\", \"create a calendar event\", \"list my calendars\". Use this skill instead of constructing raw `gws calendar events list` invocations."
 when_to_use: |
   Use whenever the user asks about their Google Calendar — listing events,
   looking up a single meeting, extracting Meet/Zoom links, listing accessible
   calendars, or creating an event. Respects the active gws account set by
   the gws-account skill.
-argument-hint: <list|get|links|calendars|create> [flags]
+argument-hint: "<list|get|links|calendars|create> [flags]"
 allowed-tools: 'Bash(bash *) Bash(gws *) Bash(python3 *)'
 ---
 

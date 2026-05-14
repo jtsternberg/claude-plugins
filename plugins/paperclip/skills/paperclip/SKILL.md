@@ -1,3 +1,9 @@
+---
+name: paperclip
+description: "Operate a locally-running Paperclip instance via the `paperclipai` CLI and direct filesystem access to agent instruction files."
+allowed-tools: "Bash(paperclipai *), Bash(ls ~/.paperclip/instances/default/companies/*), Bash(find ~/.paperclip/instances/default/companies/*), Bash(${CLAUDE_SKILL_DIR}/scripts/*), Read, Edit"
+---
+
 # Paperclip Skill
 
 Use this skill to operate a locally-running [Paperclip](https://paperclip.ing) instance as a power user or admin. Covers CLI operations via `paperclipai` and direct filesystem access to agent instruction files.
