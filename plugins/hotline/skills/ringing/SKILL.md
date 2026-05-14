@@ -75,10 +75,14 @@ Respond based on the MODE from the incoming prompt:
 
 ### Response Format
 
-Structure your response based on mode:
+**Always start every response with `STATUS: WORK_IN_PROGRESS` on its own line.** This is a body-start marker the cmux transport uses to separate your actual answer from the surrounding terminal chrome (shell prompt, claude banner, the `/hotline:ringing` line, etc.). Without it the caller's response extractor has no anchor and surfaces the entire screen capture instead of just your answer.
+
+Structure the rest based on mode:
 
 **Quick call:**
 ```
+STATUS: WORK_IN_PROGRESS
+
 [Your answer — concise and direct]
 
 STATUS: DONE
@@ -86,12 +90,16 @@ STATUS: DONE
 
 **Work order:**
 ```
+STATUS: WORK_IN_PROGRESS
+
 [What you did and the result]
 
 STATUS: WORK_COMPLETE
 ```
-Or if you need another exchange:
+Or if you need another exchange (you can re-emit `STATUS: WORK_IN_PROGRESS` mid-response as a step marker too — the caller resets its body buffer on every WORK_IN_PROGRESS, so only the content after the LAST WORK_IN_PROGRESS counts as the response):
 ```
+STATUS: WORK_IN_PROGRESS
+
 [Progress update and what's remaining]
 
 STATUS: WORK_IN_PROGRESS
@@ -99,7 +107,9 @@ STATUS: WORK_IN_PROGRESS
 
 **Conference call:**
 ```
-[Your response to this exchange — no status signal needed]
+STATUS: WORK_IN_PROGRESS
+
+[Your response to this exchange — no terminal status signal needed]
 ```
 
 ## Logging
