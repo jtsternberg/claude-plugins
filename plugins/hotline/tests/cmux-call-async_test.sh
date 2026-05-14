@@ -48,9 +48,9 @@ build_launch_script() {
 # that would otherwise appear AFTER the real STATUS line.
 latest_status() {
   awk '
-    /^[[:space:]]*STATUS: / {
+    /^[[:space:]]*(⏺[[:space:]]+)?STATUS: / {
       line=$0
-      sub(/^[[:space:]]+/, "", line)
+      sub(/^[[:space:]]*(⏺[[:space:]]+)?/, "", line)
       s=line
     }
     END {print s}
@@ -60,15 +60,20 @@ latest_status() {
 # Response extraction — mirrors the production poller. Resets on every
 # WORK_IN_PROGRESS, saves on every terminal STATUS, emits the LAST saved
 # buffer so multi-terminal-status screens use the most recent body.
-# Allows leading whitespace on STATUS lines because claude's REPL indents
-# response content by 2 spaces inside its assistant bubble.
+# Allows leading whitespace AND claude's `⏺ ` assistant-marker prefix
+# on STATUS lines, because the REPL renders the FIRST line of an
+# assistant response with `⏺ ` and subsequent lines with a 2-space
+# indent — so a STATUS line can appear as any of:
+#   "STATUS: DONE"
+#   "  STATUS: DONE"
+#   "⏺ STATUS: DONE"
 extract_cmux_response() {
   grep -v "^bash /tmp/hotline-launch" \
     | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
     | grep -vE "^>[[:space:]]*$" \
     | awk '
-        /^[[:space:]]*STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
-        /^[[:space:]]*STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
+        /^[[:space:]]*(⏺[[:space:]]+)?STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
+        /^[[:space:]]*(⏺[[:space:]]+)?STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
         {buf = buf $0 ORS}
         END {printf "%s", result}
       '
@@ -178,6 +183,30 @@ if [[ "$status" == "STATUS: DONE" ]]; then
   pass "indented STATUS line is detected (claude REPL indents by 2 spaces)"
 else
   fail "indented STATUS line is detected (claude REPL indents by 2 spaces)" "got: $status"
+fi
+
+# Assistant-marker prefix case: claude's REPL prefixes the FIRST line of an
+# assistant response with `⏺ ` (assistant indicator). When the receiver
+# emits `STATUS: WORK_IN_PROGRESS` as its first line per the ringing-skill
+# protocol, the on-screen line is `⏺ STATUS: WORK_IN_PROGRESS`, not just
+# `STATUS: WORK_IN_PROGRESS`. The extractor must accept that prefix or the
+# buf-reset never fires and the response body accumulates the entire screen
+# (preamble, banner, /hotline:ringing line, tool-call chrome, …) before the
+# actual answer. Reproduced live on the 2026-05-14 PR #803 status dial.
+screen=$'shell preamble line\n/hotline:ringing [MODE: quick_call] hello\ngh output noise\n⏺ STATUS: WORK_IN_PROGRESS\n\n  PR #803 — actual answer\n  - state: open\n  STATUS: DONE\n'
+status=$(printf '%s' "$screen" | latest_status)
+response=$(printf '%s' "$screen" | extract_cmux_response)
+
+if [[ "$status" == "STATUS: DONE" ]]; then
+  pass "⏺-prefixed STATUS is detected"
+else
+  fail "⏺-prefixed STATUS is detected" "got: $status"
+fi
+if [[ "$response" == *"PR #803 — actual answer"* && "$response" != *"shell preamble"* && "$response" != *"hotline:ringing"* ]]; then
+  pass "⏺-prefixed WORK_IN_PROGRESS resets buf — preamble is excluded from response"
+else
+  fail "⏺-prefixed WORK_IN_PROGRESS resets buf — preamble is excluded from response" \
+       "got: $(printf '%q' "$response")"
 fi
 
 # Trailing-chrome case: the LAST line in the screen is shell/REPL chrome,

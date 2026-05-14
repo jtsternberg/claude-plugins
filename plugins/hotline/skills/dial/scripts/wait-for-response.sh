@@ -118,14 +118,18 @@ if $CMUX_MODE; then
     # bottom, etc.). Receivers put their real STATUS at message tail — if a
     # response body quotes STATUS strings earlier, the real one still wins
     # because we always take the last occurrence.
-    # Match STATUS lines that may have leading whitespace — claude's REPL
-    # renders response content indented by 2 spaces inside its assistant
-    # bubble, so the line on screen is "  STATUS: DONE" not "STATUS: DONE".
-    # Trim leading whitespace for downstream comparisons.
+    # Match STATUS lines that may have leading whitespace OR the claude
+    # assistant marker `⏺ `. claude's REPL renders the FIRST line of an
+    # assistant response prefixed with `⏺ ` and subsequent lines indented
+    # by 2 spaces, so the on-screen line can be any of:
+    #   "STATUS: DONE"
+    #   "  STATUS: DONE"
+    #   "⏺ STATUS: DONE"
+    # Trim either prefix before downstream comparisons.
     LATEST_STATUS=$(echo "$CLEAN" | awk '
-      /^[[:space:]]*STATUS: / {
+      /^[[:space:]]*(⏺[[:space:]]+)?STATUS: / {
         line=$0
-        sub(/^[[:space:]]+/, "", line)
+        sub(/^[[:space:]]*(⏺[[:space:]]+)?/, "", line)
         s=line
       }
       END {print s}
@@ -155,8 +159,8 @@ if $CMUX_MODE; then
         | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
         | grep -vE "^>[[:space:]]*$" \
         | awk '
-            /^[[:space:]]*STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
-            /^[[:space:]]*STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
+            /^[[:space:]]*(⏺[[:space:]]+)?STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
+            /^[[:space:]]*(⏺[[:space:]]+)?STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
             {buf = buf $0 ORS}
             END {printf "%s", result}
           ')
