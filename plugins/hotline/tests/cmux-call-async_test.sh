@@ -46,34 +46,29 @@ build_launch_script() {
 # Latest STATUS line anywhere — mirrors the production poller. Robust against
 # trailing terminal chrome (shell prompts, `│ > │` REPL prompt box bottoms)
 # that would otherwise appear AFTER the real STATUS line.
+# End-of-line anchor only — accepts any prefix (none / whitespace / `⏺ ` /
+# future claude REPL chrome) without per-variant regex. "Latest match wins"
+# combined with the EOL anchor handles all the rendering variants in one
+# rule; quoted STATUS strings inside response prose almost never end a line.
 latest_status() {
   awk '
-    /^[[:space:]]*(⏺[[:space:]]+)?STATUS: / {
-      line=$0
-      sub(/^[[:space:]]*(⏺[[:space:]]+)?/, "", line)
-      s=line
+    match($0, /STATUS: [A-Z_]+[[:space:]]*$/) {
+      s=substr($0, RSTART); sub(/[[:space:]]*$/, "", s)
     }
     END {print s}
   '
 }
 
-# Response extraction — mirrors the production poller. Resets on every
+# Response extraction — same loose-anchor logic. Resets buf on every
 # WORK_IN_PROGRESS, saves on every terminal STATUS, emits the LAST saved
 # buffer so multi-terminal-status screens use the most recent body.
-# Allows leading whitespace AND claude's `⏺ ` assistant-marker prefix
-# on STATUS lines, because the REPL renders the FIRST line of an
-# assistant response with `⏺ ` and subsequent lines with a 2-space
-# indent — so a STATUS line can appear as any of:
-#   "STATUS: DONE"
-#   "  STATUS: DONE"
-#   "⏺ STATUS: DONE"
 extract_cmux_response() {
   grep -v "^bash /tmp/hotline-launch" \
     | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
     | grep -vE "^>[[:space:]]*$" \
     | awk '
-        /^[[:space:]]*(⏺[[:space:]]+)?STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
-        /^[[:space:]]*(⏺[[:space:]]+)?STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
+        /STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
+        /STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
         {buf = buf $0 ORS}
         END {printf "%s", result}
       '

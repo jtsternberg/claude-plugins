@@ -118,19 +118,20 @@ if $CMUX_MODE; then
     # bottom, etc.). Receivers put their real STATUS at message tail — if a
     # response body quotes STATUS strings earlier, the real one still wins
     # because we always take the last occurrence.
-    # Match STATUS lines that may have leading whitespace OR the claude
-    # assistant marker `⏺ `. claude's REPL renders the FIRST line of an
-    # assistant response prefixed with `⏺ ` and subsequent lines indented
-    # by 2 spaces, so the on-screen line can be any of:
-    #   "STATUS: DONE"
-    #   "  STATUS: DONE"
-    #   "⏺ STATUS: DONE"
-    # Trim either prefix before downstream comparisons.
+    # Match any line that ENDS with `STATUS: <signal>` (allowing trailing
+    # whitespace). The "latest such line wins" rule combined with the
+    # end-of-line anchor handles every claude REPL rendering variant —
+    # column-0, 2-space indent, `⏺ ` assistant marker, future UI tweaks —
+    # without needing per-variant regex updates. Quoted STATUS strings
+    # inside response prose almost never appear at end-of-line in
+    # practice; if they do, "latest wins" still picks the receiver's real
+    # terminal STATUS that comes after them.
+    #
+    # Trim everything before the matched STATUS for the comparison value.
     LATEST_STATUS=$(echo "$CLEAN" | awk '
-      /^[[:space:]]*(⏺[[:space:]]+)?STATUS: / {
-        line=$0
-        sub(/^[[:space:]]*(⏺[[:space:]]+)?/, "", line)
-        s=line
+      match($0, /STATUS: [A-Z_]+[[:space:]]*$/) {
+        s=substr($0, RSTART)
+        sub(/[[:space:]]*$/, "", s)
       }
       END {print s}
     ')
@@ -159,8 +160,8 @@ if $CMUX_MODE; then
         | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
         | grep -vE "^>[[:space:]]*$" \
         | awk '
-            /^[[:space:]]*(⏺[[:space:]]+)?STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
-            /^[[:space:]]*(⏺[[:space:]]+)?STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
+            /STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
+            /STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
             {buf = buf $0 ORS}
             END {printf "%s", result}
           ')
