@@ -100,8 +100,13 @@ if [[ -n "$RESUME_ID" ]]; then
 else
   SESSION_ID_PRESET=$(
     uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' \
-    || python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null \
     || cat /proc/sys/kernel/random/uuid 2>/dev/null \
+    || {
+         b=$(od -A n -N 16 -t x1 /dev/urandom | tr -d ' \n')
+         printf '%s-%s-4%s-%x%s-%s\n' \
+           "${b:0:8}" "${b:8:4}" "${b:13:3}" \
+           "$(( (16#${b:16:1} & 0x3) | 0x8 ))" "${b:17:3}" "${b:20:12}"
+       } \
     || true
   )
 fi
