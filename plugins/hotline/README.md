@@ -40,7 +40,7 @@ Delegate a task to another workspace and let it work autonomously. You'll get a 
 
 > "I need you to work with the design workspace on the new landing page — coordinate the component structure and styles."
 
-Back-and-forth collaboration between workspaces. Multiple exchanges, iterative refinement. If the conversation runs long, Hotline auto-escalates to a `cmux` window (if available) for better visibility.
+Back-and-forth collaboration between workspaces. Multiple exchanges, iterative refinement. If `cmux` is available, Hotline opens a visible `cmux` workspace immediately; otherwise it falls back to headless Claude.
 
 ### Dialing by Session ID
 
@@ -100,11 +100,12 @@ Hotline also caches workspace identities (via the `hotline-pickup` skill) — na
 
 ## `cmux` Integration
 
-[cmux](https://cmux.com/) is an optional enhancement for conference calls. When available, Hotline uses it for deep collaboration sessions where headless CLI would be limiting.
+[cmux](https://cmux.com/) is an optional but preferred transport for all call modes. When available, Hotline uses it instead of `claude -p` to avoid consuming programmatic usage credits.
 
 - **Auto-detected**: Hotline checks for `cmux` availability automatically — no config needed.
-- **Auto-escalation**: Conference calls start headless. If the back-and-forth goes past ~3 exchanges and `cmux` is available, Hotline upgrades the connection to a full `cmux` workspace session.
-- **Manual override**: You can always ask for a `cmux` session explicitly.
+- **Credit-aware**: Interactive `claude` sessions (no `-p` flag) draw from your interactive quota, not the separate Agent SDK credit. When cmux is present, all call modes benefit automatically.
+- **All modes covered**: Quick calls and work orders use an async cmux transport that polls `cmux read-screen` for the ringing skill's STATUS signals. Conference calls use an interactive cmux workspace. Headless `claude -p` is the fallback when cmux isn't running.
+- **Visible by default**: cmux workspaces are visible in your terminal, so you can observe or take over any call at any time.
 
 `cmux` gives the remote agent a proper terminal, which is handy when the conversation involves running commands, reviewing output, or doing anything more complex than a Q&A.
 
@@ -125,6 +126,50 @@ By default, workspace identities (cached by the `pickup` skill) are considered f
 ```
 
 Set it higher if your workspaces don't change much, lower if you're in rapid development across multiple projects.
+
+### Skip permission prompts in cmux receivers (opt-in)
+
+When Hotline routes a call through `cmux` (interactive `claude`), the receiver runs in an unattended pane. Any permission gate the receiver hits — skill invocation, a Bash command not on `--allowedTools`, etc. — stalls the call until a human clicks "Yes." There's no human watching.
+
+If you want autonomous calls to skip that gate, set:
+
+```json
+{
+  "env": {
+    "HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS": "1"
+  }
+}
+```
+
+…or export it in your shell rc. Accepts `1` / `true` / `yes` (case-insensitive). Adds `--dangerously-skip-permissions` to the cmux-side `claude` invocation.
+
+**Default is off.** This is a real trust decision — bypassing permissions means the receiver can run any tool, including ones you wouldn't approve interactively. Only enable it if you trust the workspaces you're dialing into. Headless (`claude -p`) calls do not need this — non-interactive mode handles permissions without prompting.
+
+### Force headless transport (opt-in)
+
+By default, dial picks `cmux` when it's available (free interactive usage) and falls back to `headless-call.sh` only when cmux isn't running. Two ways to override:
+
+**Per call** — pass `--headless` as a flag in the dial slash command:
+
+```
+/hotline-dial --headless dotfiles what branch are you on?
+```
+
+The flag is parsed by the dial skill and stripped from the args before workspace resolution. Forces just that one dial through the headless transport.
+
+**Always-on** — set the env var in `~/.claude/settings.json` (or your shell):
+
+```json
+{
+  "env": {
+    "HOTLINE_FORCE_HEADLESS": "1"
+  }
+}
+```
+
+Accepts `1` / `true` / `yes` (case-insensitive). When set, `check-cmux.sh` always exits 1 and every dial takes the headless path regardless of cmux availability.
+
+Use cases for either path: debugging the headless transport, A/B comparing receiver behavior across modes, or wanting `claude -p`'s structured stream-json output instead of cmux read-screen scraping. Headless calls draw from the programmatic-usage credit; cmux interactive calls don't — the opt-in default reflects that cost difference.
 
 ---
 
@@ -163,24 +208,28 @@ Set it higher if your workspaces don't change much, lower if you're in rapid dev
 │    MY_SESSION_ID    TARGET_PATH    EXISTING_SESSION?                │
 │                          │                                          │
 │                          ▼                                          │
-│                 ┌─────────────────┐                                 │
-│                 │ headless-call.sh│  (or cmux-call.sh for deep      │
-│                 │                 │   conference calls)              │
-│                 └────────┬────────┘                                 │
-│                          │                                          │
-└──────────────────────────┼──────────────────────────────────────────┘
-                           │
-              cd $TARGET && claude -p \
-                "/hotline-ringing [MODE: ...] \
-                 [CALLER: ...] [SESSION: ...] \
-                 <the actual prompt>" \
-                --allowedTools Bash \
-                --output-format stream-json --verbose
-                           │
-                           │  (first contact)
-                           │  or: claude -p "..." --resume $ID [--fork-session]
-                           │  (follow-up / fork when dialing by session ID)
-                           │
+│                 ┌─────────────────────────────┐                     │
+│                 │ Transport select (per mode) │                     │
+│                 │                             │                     │
+│                 │ cmux available?             │                     │
+│                 │  ├─ quick / work order ──►  │  cmux-call-async.sh │
+│                 │  └─ conference call    ──►  │  cmux-call.sh       │
+│                 │ cmux unavailable        ─►  │  headless-call*.sh  │
+│                 └─────────────┬───────────────┘                     │
+│                               │                                     │
+└───────────────────────────────┼─────────────────────────────────────┘
+                                │
+              First contact (no --resume):
+                <launch script> --prompt \
+                  "/hotline-ringing [MODE: ...] \
+                   [CALLER: ...] [SESSION: ...] \
+                   <the actual prompt>"
+
+              Follow-up (--resume <session-id>):
+                <launch script> --prompt "$YOUR_MESSAGE"
+                  (raw message — ringing skill is already
+                   loaded in the remote session's context)
+                                │
 ┌──────────────────────────┼──────────────────────────────────────────┐
 │  WORKSPACE B (Receiver)  ▼                                          │
 │                                                                     │
@@ -206,7 +255,7 @@ Set it higher if your workspaces don't change much, lower if you're in rapid dev
 │            └─────────────┬───────────┘                              │
 │                          │                                          │
 │            Response + STATUS signal                                 │
-│            (WORK_COMPLETE / WORK_IN_PROGRESS / OUT_OF_SCOPE)        │
+│            (DONE / WORK_COMPLETE / WORK_IN_PROGRESS / OUT_OF_SCOPE) │
 │            + optional HOTLINE_NOTE for protocol issues               │
 │                          │                                          │
 └──────────────────────────┼──────────────────────────────────────────┘

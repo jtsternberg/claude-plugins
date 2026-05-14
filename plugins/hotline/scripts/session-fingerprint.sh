@@ -30,7 +30,10 @@ CLAUDE_PID=""
 pid=$$
 while [[ "$pid" != "1" && -n "$pid" ]]; do
   comm=$(ps -o comm= -p "$pid" 2>/dev/null | xargs)
-  if [[ "$comm" == "claude" ]]; then
+  # macOS `ps -o comm=` returns the full executable path (e.g.
+  # `/opt/homebrew/bin/claude`), Linux returns the bare command name. Strip
+  # the path prefix so the check works on both.
+  if [[ "${comm##*/}" == "claude" ]]; then
     CLAUDE_PID="$pid"
     break
   fi
