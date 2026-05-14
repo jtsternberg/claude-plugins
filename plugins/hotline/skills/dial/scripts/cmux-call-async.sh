@@ -9,7 +9,11 @@
 # format is identical either way.
 #
 # Same call_dir interface as headless-call-async.sh:
-#   session_id.txt    — written immediately (preset via --session-id UUID)
+#   session_id.txt    — written by the background poller AFTER it observes the
+#                       Claude Code REPL banner in cmux read-screen (so
+#                       wait-for-session.sh blocks until claude is really up,
+#                       not just when the wrapper script generated a UUID).
+#                       Contents are the preset --session-id UUID.
 #   response.json     — {"session_id":"..","response":".."} on completion
 #   done              — empty sentinel written when call finishes
 #   error.txt         — written on failure
@@ -115,7 +119,14 @@ else
     || true
   )
 fi
-[[ -n "$SESSION_ID_PRESET" ]] && echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id.txt"
+# NOTE: session_id.txt is intentionally NOT written here. Writing it upfront
+# (the previous behavior) made wait-for-session.sh return instantly, even
+# when claude never actually started — callers treated that as "connected"
+# and waited 30 minutes for STATUS lines from a session that never existed
+# (see failed-hotline-call.txt postmortem). The background poller below
+# writes session_id.txt only after observing the Claude Code REPL banner in
+# cmux read-screen, so wait-for-session.sh now blocks until claude is really
+# up — or fails fast at SESSION_START_DEADLINE if the REPL never appears.
 
 # Write a launch script so the full prompt reaches claude without escaping
 # issues. printf %q produces bash-safe quoting for newlines, brackets, etc.
@@ -198,6 +209,8 @@ export WS_REF LAUNCH_SCRIPT KEEP_WORKSPACE PRE_LINES MAX_WAIT \
   ELAPSED=0
   POLL_INTERVAL=1
   ESC=$(printf '\x1b')
+  SESSION_STARTED=false
+  SESSION_START_DEADLINE=60
 
   finish() {
     local session_id="$1" response="$2" is_error="${3:-false}"
@@ -240,7 +253,25 @@ export WS_REF LAUNCH_SCRIPT KEEP_WORKSPACE PRE_LINES MAX_WAIT \
     CLEAN=$(echo "$NEW_CONTENT" \
       | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
 
-    # Find the LATEST STATUS line in the screen. Live testing showed that the
+    # Stage 1: wait for the Claude Code REPL to actually boot before writing
+    # session_id.txt. Without this gate, wait-for-session.sh returns
+    # instantly (because session_id.txt was written upfront) and the caller
+    # thinks claude is up when it isn't. The splash banner ("Claude Code v"
+    # in the top of the box, or "Welcome back" in the welcome line) is the
+    # earliest reliable evidence the REPL exists.
+    if ! $SESSION_STARTED; then
+      if echo "$CLEAN" | grep -qE 'Claude Code v|Welcome back'; then
+        [[ -n "$SESSION_ID_PRESET" ]] && \
+          echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id.txt"
+        SESSION_STARTED=true
+      elif [[ $ELAPSED -ge $SESSION_START_DEADLINE ]]; then
+        finish "" "Claude REPL did not boot within ${SESSION_START_DEADLINE}s. cmux send succeeded but no Claude Code banner appeared on screen. Common causes: (a) launch-script claude invocation is malformed — e.g. --allowedTools without a -- separator before the positional prompt, which silently consumes the prompt as a tool name and leaves an empty REPL; (b) workspace was opened without --focus true, so the terminal surface has no tty. Inspect $LAUNCH_SCRIPT and the cmux workspace screen for the real failure." true
+        exit 0
+      fi
+      continue
+    fi
+
+    # Stage 2: find the LATEST STATUS line in the screen. Live testing showed that the
     # "last meaningful line" heuristic is fragile against trailing terminal
     # chrome (shell prompts, the claude REPL's `│ > │` box bottom, etc.) — any
     # of those would appear after the real STATUS and defeat the check.

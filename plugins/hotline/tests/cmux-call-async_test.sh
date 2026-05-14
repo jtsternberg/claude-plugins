@@ -85,6 +85,16 @@ assert_async_error_contract() {
     fail "$label writes done and error.txt" "call_dir=$call_dir"
   fi
 
+  # Regression: session_id.txt must NOT exist on early-failure paths.
+  # Writing it upfront (the old behavior) caused wait-for-session.sh to
+  # report success even when claude never started.
+  if [[ ! -f "$call_dir/session_id.txt" ]]; then
+    pass "$label does not write a stale session_id.txt"
+  else
+    fail "$label does not write a stale session_id.txt" \
+         "session_id.txt present: $(cat "$call_dir/session_id.txt" 2>/dev/null)"
+  fi
+
   rm -rf "$call_dir"
 }
 
