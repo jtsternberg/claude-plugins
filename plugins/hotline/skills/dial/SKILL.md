@@ -227,14 +227,14 @@ Clean up: `rm -rf "$CALL_DIR"`
 
 #### Follow-Up (Existing Session from Our Cache)
 
-Use the same transport logic as Step 3 — check cmux first:
+Use the `mode` field you parsed from Step 4's session-cache.sh JSON (it's one of `quick_call`, `work_order`, or `conference_call`). Then apply the same transport logic as Step 3 — check cmux first:
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 ```
 
-- **Exit 0 + quick call or work order**: use `cmux-call-async.sh` with `--resume`
-- **Exit 0 + conference call**: use `cmux-call.sh` with `--resume`  
+- **Exit 0 + `mode` is `quick_call` or `work_order`**: use `cmux-call-async.sh` with `--resume`
+- **Exit 0 + `mode` is `conference_call`**: use `cmux-call.sh` with `--resume`
 - **Exit 1**: fall back to `headless-call.sh`
 
 ```bash

@@ -209,8 +209,11 @@ cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"
     if echo "$NEW_CONTENT" | grep -qE "^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$"; then
       # Strip ANSI escape sequences and carriage returns first so that
       # subsequent line-oriented greps work reliably on colorized output.
+      # Use $(printf '\x1b') so the ESC byte is expanded at the shell level —
+      # \x1b is a GNU sed extension that BSD sed (macOS default) ignores silently.
+      ESC=$(printf '\x1b')
       CLEAN=$(echo "$NEW_CONTENT" \
-        | sed 's/\x1b\[[0-9;]*[mGKHFJKsu]//g; s/\x1b(B//g; s/\r//g')
+        | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
 
       # Remove terminal chrome: the bash launch command line, claude's
       # banner box-drawing characters, and the bare REPL idle prompt.
