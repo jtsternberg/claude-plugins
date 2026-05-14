@@ -100,11 +100,12 @@ Hotline also caches workspace identities (via the `hotline-pickup` skill) — na
 
 ## `cmux` Integration
 
-[cmux](https://cmux.com/) is an optional enhancement for conference calls. When available, Hotline uses it for deep collaboration sessions where headless CLI would be limiting.
+[cmux](https://cmux.com/) is an optional but preferred transport for all call modes. When available, Hotline uses it instead of `claude -p` to avoid consuming programmatic usage credits.
 
 - **Auto-detected**: Hotline checks for `cmux` availability automatically — no config needed.
-- **Auto-escalation**: Conference calls start headless. If the back-and-forth goes past ~3 exchanges and `cmux` is available, Hotline upgrades the connection to a full `cmux` workspace session.
-- **Manual override**: You can always ask for a `cmux` session explicitly.
+- **Credit-aware**: Interactive `claude` sessions (no `-p` flag) draw from your interactive quota, not the separate Agent SDK credit. When cmux is present, all call modes benefit automatically.
+- **All modes covered**: Quick calls and work orders use an async cmux transport that polls `cmux read-screen` for the ringing skill's STATUS signals. Conference calls use an interactive cmux workspace. Headless `claude -p` is the fallback when cmux isn't running.
+- **Visible by default**: cmux workspaces are visible in your terminal, so you can observe or take over any call at any time.
 
 `cmux` gives the remote agent a proper terminal, which is handy when the conversation involves running commands, reviewing output, or doing anything more complex than a Q&A.
 

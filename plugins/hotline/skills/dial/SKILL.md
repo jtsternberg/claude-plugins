@@ -227,10 +227,18 @@ Clean up: `rm -rf "$CALL_DIR"`
 
 #### Follow-Up (Existing Session from Our Cache)
 
-Continue the conversation — no fork, this is our own session:
+Continue the conversation using the same transport used for first contact:
 
 ```bash
-bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" --prompt "$YOUR_MESSAGE" --resume "$REMOTE_SESSION_ID"
+# CMUX transport (quick call / work order):
+CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
+  --resume "$REMOTE_SESSION_ID" --prompt "$YOUR_MESSAGE")
+CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
+# Then wait-for-session / wait-for-response as normal.
+
+# Headless fallback:
+bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
+  --prompt "$YOUR_MESSAGE" --resume "$REMOTE_SESSION_ID"
 ```
 
 Update the cache timestamp:

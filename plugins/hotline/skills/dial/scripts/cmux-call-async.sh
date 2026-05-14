@@ -4,19 +4,23 @@
 # running inside a cmux workspace, then poll cmux read-screen for completion.
 #
 # Prefers interactive claude (no -p flag) over headless so calls do not consume
-# programmatic usage credits. The hotline protocol (STATUS signals) is defined
-# by the ringing skill, not the transport, so the response format is identical.
+# programmatic usage credits. The hotline protocol (STATUS signals, response
+# format) is defined by the ringing skill, not the transport, so the response
+# format is identical either way.
 #
 # Same call_dir interface as headless-call-async.sh:
-#   session_id.txt    — written if SESSION_ID: tag found in response
+#   session_id.txt    — written immediately (preset via --session-id UUID)
 #   response.json     — {"session_id":"..","response":".."} on completion
 #   done              — empty sentinel written when call finishes
 #   error.txt         — written on failure
-#   workspace_ref.txt — the cmux workspace ref (for follow-up calls)
+#   workspace_ref.txt — the cmux workspace ref (kept open unless --keep-workspace
+#                       is passed by a conference call caller; quick/work callers
+#                       get it cleaned up automatically)
 #
 # Usage:
 #   cmux-call-async.sh --cwd <path> --prompt <text> [--resume <id>]
-#                      [--name <name>] [--fork-session]
+#                      [--name <name>] [--fork-session] [--tools <list>]
+#                      [--keep-workspace]
 #   # Returns immediately with: {"call_dir": "/tmp/hotline-call-xxxxx"}
 # =============================================================================
 set -euo pipefail
@@ -25,19 +29,24 @@ if [[ "${1:-}" == "--help" ]]; then
   cat <<'EOF'
 Usage: cmux-call-async.sh --cwd <path> --prompt <text> [--resume <id>]
                           [--name <name>] [--fork-session]
+                          [--tools <list>] [--keep-workspace]
 
 Opens an interactive claude session in a cmux workspace, delivers the hotline
-prompt via a temp launch script (avoids shell-escaping issues with complex
-prompts), and polls cmux read-screen for STATUS completion signals.
+prompt via a temp launch script, and polls cmux read-screen for STATUS signals.
 
 Returns immediately with {"call_dir": "/tmp/hotline-call-XXXXX"}.
-The caller then uses wait-for-session.sh and wait-for-response.sh as normal.
+The caller uses wait-for-session.sh and wait-for-response.sh as normal.
+
+Options:
+  --tools <list>     Allowed tools (default: "Bash Read Edit Write Grep Glob")
+  --keep-workspace   Do not close the cmux workspace after the call completes.
+                     workspace_ref.txt in the call_dir always has the ref.
 
 STATUS signals polled for:
   STATUS: DONE           — quick call complete
   STATUS: WORK_COMPLETE  — work order complete
   STATUS: OUT_OF_SCOPE   — workspace declined the work
-  STATUS: WORK_IN_PROGRESS — work order still running (keeps polling)
+  STATUS: WORK_IN_PROGRESS — still running (keeps polling)
 EOF
   exit 0
 fi
@@ -47,15 +56,19 @@ PROMPT=""
 RESUME_ID=""
 SESSION_NAME=""
 FORK_SESSION=false
+ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
+KEEP_WORKSPACE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cwd)          CWD="$2";          shift 2 ;;
-    --prompt)       PROMPT="$2";       shift 2 ;;
-    --resume)       RESUME_ID="$2";    shift 2 ;;
-    --name)         SESSION_NAME="$2"; shift 2 ;;
-    --fork-session) FORK_SESSION=true; shift   ;;
-    *)              shift ;;
+    --cwd)            CWD="$2";            shift 2 ;;
+    --prompt)         PROMPT="$2";         shift 2 ;;
+    --resume)         RESUME_ID="$2";      shift 2 ;;
+    --name)           SESSION_NAME="$2";   shift 2 ;;
+    --fork-session)   FORK_SESSION=true;   shift   ;;
+    --tools)          ALLOWED_TOOLS="$2";  shift 2 ;;
+    --keep-workspace) KEEP_WORKSPACE=true; shift   ;;
+    *)                shift ;;
   esac
 done
 
@@ -71,15 +84,30 @@ fi
 
 CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
 
-# Write a launch script so the full prompt reaches claude without escaping issues.
-# printf %q produces bash-safe quoting that handles newlines, brackets, quotes, etc.
+# Generate a session ID up front and pass it via --session-id so the caller
+# can surface it to the user immediately (same as the headless stream path)
+# without waiting for the call to complete or grepping transcripts after the
+# fact. uuidgen is available on macOS and most Linux distros; python3 is the
+# fallback.
+SESSION_ID_PRESET=$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' \
+  || python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null \
+  || true)
+
+# Write it immediately so wait-for-session.sh returns right away.
+[[ -n "$SESSION_ID_PRESET" ]] && echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id.txt"
+
+# Write a launch script so the full prompt reaches claude without escaping
+# issues. printf %q produces bash-safe quoting for newlines, brackets, etc.
 LAUNCH_SCRIPT=$(mktemp /tmp/hotline-launch-XXXXX.sh)
 {
   printf '#!/usr/bin/env bash\n'
   printf 'claude'
-  [[ -n "$RESUME_ID"   ]] && printf ' --resume %s'    "$RESUME_ID"
-  $FORK_SESSION          && printf ' --fork-session'
-  [[ -n "$SESSION_NAME" ]] && printf ' -n %q'          "$SESSION_NAME"
+  [[ -n "$RESUME_ID"       ]] && printf ' --resume %s'     "$RESUME_ID"
+  [[ -n "$SESSION_ID_PRESET" && -z "$RESUME_ID" ]] && \
+                                  printf ' --session-id %s' "$SESSION_ID_PRESET"
+  $FORK_SESSION              && printf ' --fork-session'
+  [[ -n "$SESSION_NAME"    ]] && printf ' -n %q'           "$SESSION_NAME"
+  printf ' --allowedTools %s' "$ALLOWED_TOOLS"
   printf ' %q\n' "$PROMPT"
 } > "$LAUNCH_SCRIPT"
 chmod +x "$LAUNCH_SCRIPT"
@@ -99,11 +127,20 @@ if [[ -z "$WS_REF" ]]; then
 fi
 
 echo "$WS_REF" > "$CALL_DIR/workspace_ref.txt"
+echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 
-# Snapshot current line count so the poller can isolate new output.
-sleep 0.5
-PRE_LINES=$(cmux read-screen --workspace "$WS_REF" --scrollback --lines 9999 \
-  2>/dev/null | wc -l | tr -d ' ' || echo 0)
+# Wait for the workspace shell to be ready before snapshotting the baseline.
+# Poll until the screen is non-empty (up to 5s) rather than a fixed sleep.
+PRE_LINES=0
+for _ in $(seq 1 10); do
+  INIT_SCREEN=$(cmux read-screen --workspace "$WS_REF" --scrollback --lines 9999 \
+    2>/dev/null || true)
+  if [[ -n "$INIT_SCREEN" ]]; then
+    PRE_LINES=$(echo "$INIT_SCREEN" | wc -l | awk '{print $1}')
+    break
+  fi
+  sleep 0.5
+done
 echo "$PRE_LINES" > "$CALL_DIR/pre_lines.txt"
 
 # Fire the claude session.
@@ -113,8 +150,23 @@ cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"
 (
   MAX_WAIT=300
   ELAPSED=0
-  POLL_INTERVAL=3
+  POLL_INTERVAL=1
   PRE=$(cat "$CALL_DIR/pre_lines.txt" 2>/dev/null || echo 0)
+  KEEP=$(cat "$CALL_DIR/keep_workspace.txt" 2>/dev/null || echo false)
+
+  finish() {
+    local session_id="$1" response="$2" is_error="${3:-false}"
+    if [[ "$is_error" == "true" ]]; then
+      echo "$response" > "$CALL_DIR/error.txt"
+    else
+      jq -n --arg sid "$session_id" --arg resp "$response" \
+        '{session_id: $sid, response: $resp}' > "$CALL_DIR/response.json"
+    fi
+    [[ "$KEEP" != "true" ]] && \
+      cmux close-workspace --workspace "$WS_REF" 2>/dev/null || true
+    rm -f "$LAUNCH_SCRIPT"
+    touch "$CALL_DIR/done"
+  }
 
   while [[ $ELAPSED -lt $MAX_WAIT ]]; do
     sleep $POLL_INTERVAL
@@ -124,45 +176,40 @@ cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"
       2>/dev/null || true)
     [[ -z "$SCREEN" ]] && continue
 
-    # Extract only lines added since launch.
-    TOTAL=$(echo "$SCREEN" | wc -l | tr -d ' ')
+    # Isolate lines added since the baseline snapshot.
+    TOTAL=$(echo "$SCREEN" | wc -l | awk '{print $1}')
     NEW_COUNT=$((TOTAL - PRE))
     [[ $NEW_COUNT -le 0 ]] && NEW_COUNT="$TOTAL"
     NEW_CONTENT=$(echo "$SCREEN" | tail -n "$NEW_COUNT")
 
-    # WORK_IN_PROGRESS means keep polling — the remote agent isn't done yet.
+    # WORK_IN_PROGRESS: keep polling — the remote agent isn't done yet.
     if echo "$NEW_CONTENT" | grep -qE "^STATUS: WORK_IN_PROGRESS$"; then
       continue
     fi
 
-    # Terminal statuses: extract and write response.
+    # Terminal statuses — extract response and wrap up.
     if echo "$NEW_CONTENT" | grep -qE "^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$"; then
-      # Strip terminal chrome: banner box-drawing chars, claude prompts, the
-      # launch command line, and leading/trailing blank lines.
-      RESPONSE=$(echo "$NEW_CONTENT" \
+      # Strip ANSI escape sequences and carriage returns first so that
+      # subsequent line-oriented greps work reliably on colorized output.
+      CLEAN=$(echo "$NEW_CONTENT" \
+        | sed 's/\x1b\[[0-9;]*[mGKHFJKsu]//g; s/\x1b(B//g; s/\r//g')
+
+      # Remove terminal chrome: the bash launch command line, claude's
+      # banner box-drawing characters, and the bare REPL idle prompt.
+      # NOTE: we do NOT filter lines starting with ">" because those are
+      # valid markdown blockquotes in responses.
+      RESPONSE=$(echo "$CLEAN" \
         | grep -v "^bash /tmp/hotline-launch" \
-        | grep -vE "^[╭│╰ℹ>]" \
-        | awk '/^STATUS: /{exit} {print}' \
-        | sed '/^[[:space:]]*$/d')
+        | grep -vE "^[╭│╰ℹ─]" \
+        | grep -vE "^> $" \
+        | awk '/^STATUS: /{exit} {print}')
 
-      SESSION_ID=$(echo "$NEW_CONTENT" \
-        | grep -oE '^SESSION_ID: [a-f0-9-]+' \
-        | awk '{print $2}' | head -1 || true)
-
-      [[ -n "$SESSION_ID" ]] && echo "$SESSION_ID" > "$CALL_DIR/session_id.txt"
-
-      jq -n --arg sid "${SESSION_ID:-}" --arg resp "$RESPONSE" \
-        '{session_id: $sid, response: $resp}' > "$CALL_DIR/response.json"
-      touch "$CALL_DIR/done"
-      rm -f "$LAUNCH_SCRIPT"
+      finish "$SESSION_ID_PRESET" "$RESPONSE"
       exit 0
     fi
   done
 
-  jq -n --arg err "Timeout: no STATUS signal received after ${MAX_WAIT}s" \
-    '{error: $err}' > "$CALL_DIR/error.txt"
-  touch "$CALL_DIR/done"
-  rm -f "$LAUNCH_SCRIPT"
+  finish "" "Timeout: no STATUS signal received after ${MAX_WAIT}s" true
 ) &>/dev/null &
 
 jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'
