@@ -92,7 +92,7 @@ CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
 # Follow-up (--resume): the session already exists — use RESUME_ID directly.
 # Do NOT generate a new UUID; that would write a wrong ID to session_id.txt.
 #
-# uuidgen (macOS/Linux), python3 uuid, and /proc/sys/kernel/random/uuid are
+# uuidgen (macOS/Linux), /proc/sys/kernel/random/uuid, and /dev/urandom are
 # tried in order so the script degrades gracefully on minimal systems.
 SESSION_ID_PRESET=""
 if [[ -n "$RESUME_ID" ]]; then
@@ -117,7 +117,6 @@ fi
 # chmod 700 prevents other local users from reading prompt contents.
 LAUNCH_SCRIPT=$(mktemp /tmp/hotline-launch-XXXXX.sh)
 chmod 700 "$LAUNCH_SCRIPT"
-trap 'rm -f "$LAUNCH_SCRIPT"' EXIT
 {
   printf '#!/usr/bin/env bash\n'
   printf 'claude'
@@ -171,6 +170,7 @@ cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"
   POLL_INTERVAL=1
   PRE=$(cat "$CALL_DIR/pre_lines.txt" 2>/dev/null || echo 0)
   KEEP=$(cat "$CALL_DIR/keep_workspace.txt" 2>/dev/null || echo false)
+  ESC=$(printf '\x1b')
 
   finish() {
     local session_id="$1" response="$2" is_error="${3:-false}"
@@ -199,22 +199,19 @@ cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"
     NEW_COUNT=$((TOTAL - PRE))
     [[ $NEW_COUNT -le 0 ]] && NEW_COUNT="$TOTAL"
     NEW_CONTENT=$(echo "$SCREEN" | tail -n "$NEW_COUNT")
+    # Strip ANSI escape sequences and carriage returns before any line-oriented
+    # matching. cmux may return colorized terminal output, including colored
+    # STATUS lines, and raw matching would miss those completion signals.
+    CLEAN=$(echo "$NEW_CONTENT" \
+      | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
 
     # WORK_IN_PROGRESS: keep polling — the remote agent isn't done yet.
-    if echo "$NEW_CONTENT" | grep -qE "^STATUS: WORK_IN_PROGRESS$"; then
+    if echo "$CLEAN" | grep -qE "^STATUS: WORK_IN_PROGRESS$"; then
       continue
     fi
 
     # Terminal statuses — extract response and wrap up.
-    if echo "$NEW_CONTENT" | grep -qE "^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$"; then
-      # Strip ANSI escape sequences and carriage returns first so that
-      # subsequent line-oriented greps work reliably on colorized output.
-      # Use $(printf '\x1b') so the ESC byte is expanded at the shell level —
-      # \x1b is a GNU sed extension that BSD sed (macOS default) ignores silently.
-      ESC=$(printf '\x1b')
-      CLEAN=$(echo "$NEW_CONTENT" \
-        | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
-
+    if echo "$CLEAN" | grep -qE "^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$"; then
       # Remove terminal chrome: the bash launch command line, claude's
       # banner box-drawing characters, and the bare REPL idle prompt.
       # NOTE: we do NOT filter lines starting with ">" because those are
