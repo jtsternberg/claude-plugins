@@ -134,6 +134,8 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 
 > **Heads-up:** CMUX calls land in an unattended pane. The receiver will stall on the first permission gate (skill invocation, an unauthorized Bash command, etc.) because there's no human there to click "Yes." Users who want autonomous hotline calls can set `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` in `~/.claude/settings.json`'s `"env"` block (or their shell) to add `--dangerously-skip-permissions` to the receiver's `claude` invocation. **Default is off** — this is a real trust decision. If a call hangs at "Combobulating…" with no progress, suspect a permission prompt in the receiver pane.
 
+> **Force headless mode:** Set `HOTLINE_FORCE_HEADLESS=1` (or `true`/`yes`) in the env to skip cmux entirely — `check-cmux.sh` returns exit 1 and the dial falls through to `headless-call.sh` / `headless-call-async.sh`. Useful for debugging the headless transport, comparing behavior across modes, or when you want `claude -p`'s structured stream-json output instead of the cmux read-screen scraping path. Headless calls draw from the programmatic-usage credit, so this is opt-in.
+
 | Mode | CMUX available | No CMUX |
 |------|----------------|---------|
 | Quick call | `cmux-call-async.sh` | Headless CLI |

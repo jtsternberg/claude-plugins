@@ -145,6 +145,20 @@ If you want autonomous calls to skip that gate, set:
 
 **Default is off.** This is a real trust decision — bypassing permissions means the receiver can run any tool, including ones you wouldn't approve interactively. Only enable it if you trust the workspaces you're dialing into. Headless (`claude -p`) calls do not need this — non-interactive mode handles permissions without prompting.
 
+### Force headless transport (opt-in)
+
+By default, dial picks `cmux` when it's available (free interactive usage) and falls back to `headless-call.sh` only when cmux isn't running. To force headless on every dial — useful for debugging the headless transport, A/B comparing modes, or when you want `claude -p`'s structured stream-json output instead of cmux read-screen scraping:
+
+```json
+{
+  "env": {
+    "HOTLINE_FORCE_HEADLESS": "1"
+  }
+}
+```
+
+…or export it for a single shell. Accepts `1` / `true` / `yes` (case-insensitive). When set, `check-cmux.sh` exits 1 and the dial skill takes the headless path. Headless calls draw from the programmatic-usage credit; cmux interactive calls don't. The opt-in nature reflects that cost difference.
+
 ---
 
 ## How It Works
