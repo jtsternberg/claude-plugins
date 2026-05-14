@@ -130,6 +130,8 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 
 > **Tip:** If the `/cmux-cli:using-cmux-cli` skill is available in this session, invoke it before firing a CMUX-routed call. It documents the workspace/surface/tty semantics, the `cmux send` escape rules (`\n` = Enter), and the focus-required-to-spawn-tty quirk that this transport depends on — using it helps you reason about connection failures rather than guessing.
 
+> **Heads-up:** CMUX calls land in an unattended pane. The receiver will stall on the first permission gate (skill invocation, an unauthorized Bash command, etc.) because there's no human there to click "Yes." Users who want autonomous hotline calls can set `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` in `~/.claude/settings.json`'s `"env"` block (or their shell) to add `--dangerously-skip-permissions` to the receiver's `claude` invocation. **Default is off** — this is a real trust decision. If a call hangs at "Combobulating…" with no progress, suspect a permission prompt in the receiver pane.
+
 | Mode | CMUX available | No CMUX |
 |------|----------------|---------|
 | Quick call | `cmux-call-async.sh` | Headless CLI |
