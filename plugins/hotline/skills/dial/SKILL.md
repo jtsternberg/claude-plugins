@@ -199,7 +199,12 @@ REMOTE_SESSION_ID=$(echo "$CMUX_RESULT" | jq -r '.session_id')
 
 > Connected to **[workspace name]** in CMUX (`[workspace-ref]`). The conference prompt has been delivered in the visible workspace.
 
-Then cache the session with mode `conference_call`, and stop here unless the user asks you to continue the conference from the caller side.
+Then cache the session with mode `conference_call`, and stop here unless the user asks you to continue the conference from the caller side:
+
+```bash
+bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
+  --caller-session "$MY_SESSION_ID" --session "$REMOTE_SESSION_ID" --mode "conference_call"
+```
 
 **Wait for the session ID** (returns quickly once the remote agent starts):
 

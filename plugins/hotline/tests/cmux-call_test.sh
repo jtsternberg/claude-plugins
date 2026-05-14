@@ -7,6 +7,7 @@ set -u
 PASS=0
 FAIL=0
 FAILED_CASES=()
+LAUNCH_SCRIPTS=()
 SCRIPT_UNDER_TEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/dial/scripts/cmux-call.sh"
 
 pass() {
@@ -65,11 +66,16 @@ else
 fi
 
 send_args=$(cat "$tmp/send_args" 2>/dev/null || true)
-assert_contains "first-contact sends claude command" "$send_args" "send --workspace workspace:123 claude"
-assert_contains "first-contact pre-sets session id" "$send_args" "--session-id"
-assert_contains "first-contact sends conference prompt" "$send_args" "/hotline-ringing"
-assert_contains "first-contact preserves conference mode" "$send_args" "conference_call"
+assert_contains "first-contact sends launch script" "$send_args" "send --workspace workspace:123 bash /tmp/hotline-cmux-launch-"
 assert_contains "first-contact appends enter" "$send_args" "\\n"
+
+launch_script=$(printf '%s' "$send_args" | sed -E 's/.*bash (\/tmp\/hotline-cmux-launch-[^\\[:space:]]+).*/\1/')
+LAUNCH_SCRIPTS+=("$launch_script")
+launch_body=$(cat "$launch_script" 2>/dev/null || true)
+assert_contains "first-contact launch script runs claude" "$launch_body" "claude"
+assert_contains "first-contact pre-sets session id" "$launch_body" "--session-id"
+assert_contains "first-contact launch script contains conference prompt" "$launch_body" "/hotline-ringing"
+assert_contains "first-contact preserves conference mode" "$launch_body" "conference_call"
 
 session_id=$(jq -r '.session_id' "$tmp/out.json" 2>/dev/null || true)
 if [[ "$session_id" =~ ^[0-9a-f-]{36}$ ]]; then
@@ -92,8 +98,13 @@ else
 fi
 
 send_args=$(cat "$tmp/send_args" 2>/dev/null || true)
-assert_contains "resume call keeps --resume" "$send_args" "--resume"
-assert_contains "resume call sends follow-up prompt" "$send_args" "follow\\ up\\ message"
+assert_contains "resume call sends launch script" "$send_args" "send --workspace workspace:123 bash /tmp/hotline-cmux-launch-"
+
+launch_script=$(printf '%s' "$send_args" | sed -E 's/.*bash (\/tmp\/hotline-cmux-launch-[^\\[:space:]]+).*/\1/')
+LAUNCH_SCRIPTS+=("$launch_script")
+launch_body=$(cat "$launch_script" 2>/dev/null || true)
+assert_contains "resume call keeps --resume" "$launch_body" "--resume"
+assert_contains "resume call sends follow-up prompt" "$launch_body" "follow\\ up\\ message"
 
 session_id=$(jq -r '.session_id' "$tmp/out2.json" 2>/dev/null || true)
 if [[ "$session_id" == "resume id with spaces" ]]; then
@@ -102,6 +113,7 @@ else
   fail "resume call returns resume id" "got: $session_id"
 fi
 
+rm -f "${LAUNCH_SCRIPTS[@]}"
 rm -rf "$tmp"
 
 echo ""

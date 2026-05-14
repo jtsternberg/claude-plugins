@@ -71,29 +71,30 @@ else
   )
 fi
 
-CMD="claude"
-if [[ -n "$RESUME_ID" ]]; then
-  printf -v quoted_resume "%q" "$RESUME_ID"
-  CMD+=" --resume $quoted_resume"
-elif [[ -n "$SESSION_ID_PRESET" ]]; then
-  printf -v quoted_session "%q" "$SESSION_ID_PRESET"
-  CMD+=" --session-id $quoted_session"
-fi
-if [[ -n "$SESSION_NAME" ]]; then
-  printf -v quoted_name "%q" "$SESSION_NAME"
-  CMD+=" -n $quoted_name"
-fi
-if $FORK_SESSION; then
-  CMD+=" --fork-session"
-fi
-printf -v quoted_tools "%q" "$ALLOWED_TOOLS"
-CMD+=" --allowedTools $quoted_tools"
-if [[ -n "$PROMPT" ]]; then
-  printf -v quoted_prompt "%q" "$PROMPT"
-  CMD+=" $quoted_prompt"
-fi
+LAUNCH_SCRIPT=$(mktemp /tmp/hotline-cmux-launch-XXXXX)
+chmod 700 "$LAUNCH_SCRIPT"
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'cleanup() { rm -f "$0"; }\n'
+  printf 'trap cleanup EXIT\n'
+  printf 'claude'
+  if [[ -n "$RESUME_ID" ]]; then
+    printf ' --resume %q' "$RESUME_ID"
+  elif [[ -n "$SESSION_ID_PRESET" ]]; then
+    printf ' --session-id %q' "$SESSION_ID_PRESET"
+  fi
+  [[ -n "$SESSION_NAME" ]] && printf ' -n %q' "$SESSION_NAME"
+  $FORK_SESSION && printf ' --fork-session'
+  printf ' --allowedTools %q' "$ALLOWED_TOOLS"
+  [[ -n "$PROMPT" ]] && printf ' %q' "$PROMPT"
+  printf '\n'
+} > "$LAUNCH_SCRIPT"
 
-cmux send --workspace "$WS_REF" "$CMD\n"
+if ! cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"; then
+  rm -f "$LAUNCH_SCRIPT"
+  jq -n --arg err "cmux send failed" '{error: $err}'
+  exit 1
+fi
 
 jq -n --arg ws "$WS_REF" --arg cwd "$CWD" --arg sid "${SESSION_ID_PRESET:-new}" \
   '{workspace_ref: $ws, cwd: $cwd, session_id: $sid, message: "CMUX workspace opened with Claude session"}'
