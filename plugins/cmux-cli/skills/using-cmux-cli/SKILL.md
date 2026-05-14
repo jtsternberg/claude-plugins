@@ -147,6 +147,21 @@ cmux read-screen --help
 
 Use `--scrollback --lines <n>` to grab history. Without them you only get the visible viewport — often omitting the command output you actually care about.
 
+#### Gotcha: Claude Code's grayed-out next-prompt suggestion looks like real input
+
+When the surface you're reading is running **Claude Code** (the `claude` CLI in its REPL), Claude Code renders an autosuggest hint inside its input box — a slightly-grayed string showing what it predicts the user might type next. In `cmux read-screen` output that hint appears as plain text on the prompt line, **indistinguishable from text the user actually typed**.
+
+This has burned previous agents who were watching another claude session via `read-screen`: they saw the ghost suggestion, assumed *the user* had entered that command, and started narrating phantom actions ("the user just asked you to do X, and you're now running it…") — when in reality the user had typed nothing and the inner agent was still idle.
+
+How to tell the difference:
+
+- **Real submitted user input** is followed by output (assistant response, tool calls, screen updates further down). The prompt is usually empty or shows the *next* incoming suggestion.
+- **A ghost autosuggest** sits alone inside the input box (e.g. `╭─...─╮ / │ > update the PR description / ╰─...─╯`) with no output below it, and the cursor often sits at column 0–1 of that line, not at the end of the suggested text.
+
+When in doubt, don't infer intent from a single `read-screen` snapshot of a claude-running surface. Re-read after a moment — real input commits and gets replaced by output; ghost text either persists unchanged or disappears as the user types something different.
+
+Same caveat applies to other agent REPLs that render input autosuggestions (opencode, omc/omx, etc.). The pattern — text inside the input prompt with no downstream activity — is the tell, regardless of vendor.
+
 ### Send keystrokes
 
 ```!
