@@ -141,6 +141,13 @@ chmod 700 "$LAUNCH_SCRIPT"
                                     printf ' --session-id %q' "$SESSION_ID_PRESET"
   $FORK_SESSION                && printf ' --fork-session'
   [[ -n "$SESSION_NAME"      ]] && printf ' -n %q'           "$SESSION_NAME"
+  # --dangerously-skip-permissions: hotline calls are autonomous work orders
+  # delivered to a trusted local workspace. Without this flag, the receiver
+  # stalls on the first permission gate (skill invocation, Bash command not
+  # in --allowedTools, etc.) waiting for human approval that will never come
+  # in an unattended cmux pane. Headless `claude -p` doesn't need it because
+  # non-interactive mode handles permissions differently.
+  printf ' --dangerously-skip-permissions'
   printf ' --allowedTools %q' "$ALLOWED_TOOLS"
   # `--` is REQUIRED before the positional prompt because --allowedTools is
   # variadic (`<tools...>`) and would otherwise swallow the prompt as an

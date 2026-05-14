@@ -88,6 +88,8 @@ chmod 700 "$LAUNCH_SCRIPT"
   fi
   [[ -n "$SESSION_NAME" ]] && printf ' -n %q' "$SESSION_NAME"
   $FORK_SESSION && printf ' --fork-session'
+  # See cmux-call-async.sh for the rationale on --dangerously-skip-permissions.
+  printf ' --dangerously-skip-permissions'
   printf ' --allowedTools %q' "$ALLOWED_TOOLS"
   # `--` is REQUIRED before the positional prompt because --allowedTools is
   # variadic (`<tools...>`) and would otherwise swallow the prompt as an
