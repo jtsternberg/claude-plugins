@@ -1,6 +1,7 @@
 ---
-name: watch-pr
+name: watch-pr-then-action
 description: "Polls a GitHub PR for a specific condition, then executes a follow-up action. Conditions include waiting for Copilot to finish work, waiting for a draft PR to be marked ready for review, or waiting for someone to submit a review. Use when the user says things like \"watch copilot\", \"wait for copilot\", \"watch this PR\", \"let me know when the PR is ready\", or \"notify me when it's reviewed\"."
+disable-model-invocation: true
 ---
 
 # Watch PR
@@ -10,7 +11,7 @@ Poll a GitHub PR until a condition is met, then execute a follow-up action.
 ## Arguments
 
 ```
-/watch-pr <pr-number-or-url> [for <condition>] [then <action>]
+/watch-pr-then-action <pr-number-or-url> [for <condition>] [then <action>]
 ```
 
 - **`<pr-number-or-url>`** (required) — A PR number (e.g., `2165`) or full URL
@@ -18,10 +19,10 @@ Poll a GitHub PR until a condition is met, then execute a follow-up action.
 - **`then <action>`** (optional) — Follow-up prompt or slash command. Defaults to `/review-pr <number>`.
 
 Examples:
-- `/watch-pr 2165` — wait for Copilot to finish, then review
-- `/watch-pr 2165 for ready` — wait for PR to leave draft, then review
-- `/watch-pr 2165 for copilot then merge it` — wait for Copilot, then merge
-- `/watch-pr https://github.com/org/repo/pull/99 for ready then /address-pr-comments`
+- `/watch-pr-then-action 2165` — wait for Copilot to finish, then review
+- `/watch-pr-then-action 2165 for ready` — wait for PR to leave draft, then review
+- `/watch-pr-then-action 2165 for copilot then merge it` — wait for Copilot, then merge
+- `/watch-pr-then-action https://github.com/org/repo/pull/99 for ready then /address-pr-comments`
 
 ## Conditions
 

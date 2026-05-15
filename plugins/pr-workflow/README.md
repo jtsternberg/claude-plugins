@@ -74,12 +74,12 @@ Update PR description based on code changes since last edit.
 
 ## Skills
 
-### `/watch-pr`
+### `/watch-pr-then-action`
 
 Poll a GitHub PR until a condition is met, then execute a follow-up action.
 
 ```
-/watch-pr <pr-number-or-url> [for <condition>] [then <action>]
+/watch-pr-then-action <pr-number-or-url> [for <condition>] [then <action>]
 ```
 
 **Conditions:**
@@ -88,10 +88,10 @@ Poll a GitHub PR until a condition is met, then execute a follow-up action.
 - `review` — wait for a new review to be submitted
 
 **Examples:**
-- `/watch-pr 2165` — wait for Copilot to finish, then review
-- `/watch-pr 2165 for ready` — wait for PR to leave draft, then review
-- `/watch-pr 2165 for copilot then merge it` — wait for Copilot, then merge
-- `/watch-pr https://github.com/org/repo/pull/99 for ready then /address-pr-comments`
+- `/watch-pr-then-action 2165` — wait for Copilot to finish, then review
+- `/watch-pr-then-action 2165 for ready` — wait for PR to leave draft, then review
+- `/watch-pr-then-action 2165 for copilot then merge it` — wait for Copilot, then merge
+- `/watch-pr-then-action https://github.com/org/repo/pull/99 for ready then /address-pr-comments`
 
 **Workflow:**
 1. Parses the PR identifier, condition, and optional follow-up action
@@ -103,12 +103,12 @@ Poll a GitHub PR until a condition is met, then execute a follow-up action.
 **Prerequisites:**
 - GitHub CLI (`gh`) must be installed and authenticated
 
-### `/qa-walkthrough`
+### `/qa-walkthrough-pr`
 
 Guided manual QA walkthrough for a PR — extracts a test plan, builds beads tasks, and walks you through each test one at a time.
 
 ```
-/qa-walkthrough [<pr-number-or-url>]
+/qa-walkthrough-pr [<pr-number-or-url>]
 ```
 
 **Workflow:**
@@ -139,16 +139,16 @@ Guided manual QA walkthrough for a PR — extracts a test plan, builds beads tas
 /update-pr-description
 
 # Wait for Copilot to finish, then review
-/watch-pr 2165
+/watch-pr-then-action 2165
 
 # Wait for a draft PR to be marked ready, then review
-/watch-pr 2165 for ready
+/watch-pr-then-action 2165 for ready
 
 # QA walkthrough for the current branch's PR
-/qa-walkthrough
+/qa-walkthrough-pr
 
 # QA walkthrough for a specific PR
-/qa-walkthrough 519
+/qa-walkthrough-pr 519
 ```
 
 ## Additional Documentation
@@ -156,5 +156,5 @@ Guided manual QA walkthrough for a PR — extracts a test plan, builds beads tas
 - [commands/address-pr-comments.md](commands/address-pr-comments.md) - Auto-resolve PR comments
 - [commands/address-pr-comments-human.md](commands/address-pr-comments-human.md) - Human-in-the-loop PR comment resolution
 - [commands/update-pr-description.md](commands/update-pr-description.md) - Update PR description from changes
-- [skills/watch-pr/SKILL.md](skills/watch-pr/SKILL.md) - Watch PR for conditions (Copilot, ready, review)
-- [skills/qa-walkthrough/SKILL.md](skills/qa-walkthrough/SKILL.md) - Guided manual QA walkthrough
+- [skills/watch-pr-then-action/SKILL.md](skills/watch-pr-then-action/SKILL.md) - Watch PR for conditions (Copilot, ready, review)
+- [skills/qa-walkthrough-pr/SKILL.md](skills/qa-walkthrough-pr/SKILL.md) - Guided manual QA walkthrough

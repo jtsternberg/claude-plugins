@@ -67,10 +67,10 @@ parent/
 
 ```bash
 # Swap to a worktree for testing
-/git-tree swap <branch-name>
+/create-git-tree swap <branch-name>
 
 # Restore main repo to original location
-/git-tree restore
+/create-git-tree restore
 ```
 
 ### Hook Support

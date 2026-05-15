@@ -1,6 +1,7 @@
 ---
-name: qa-walkthrough
+name: qa-walkthrough-pr
 description: "Guided manual QA walkthrough for PRs, branch changes, or ad-hoc testing. Generates a test plan, builds a beads epic, and walks the user through each test interactively."
+disable-model-invocation: true
 when_to_use: "Use when the user says \"QA this PR\", \"qa walkthrough\", \"manual testing\", \"walk me through testing\", \"QA my changes\", \"test my changes\", or wants to manually verify work before merging or pushing."
 argument-hint: "[<pr-number> | --branch | --describe \"...\"]"
 allowed-tools: "Bash(gh *) Bash(git *) Bash(bd *) Bash(bash \"${CLAUDE_SKILL_DIR}/scripts/*\")"
@@ -18,9 +19,9 @@ Guided manual QA walkthrough that generates a test plan from a PR, branch diff, 
 ## Arguments
 
 ```
-/qa-walkthrough [<pr-number-or-url>]
-/qa-walkthrough --branch [--base=<ref>]
-/qa-walkthrough --describe "<what to test>"
+/qa-walkthrough-pr [<pr-number-or-url>]
+/qa-walkthrough-pr --branch [--base=<ref>]
+/qa-walkthrough-pr --describe "<what to test>"
 ```
 
 - **`<pr-number-or-url>`** (optional) — A PR number or full URL. If omitted with no flags, use the current branch's PR.
@@ -251,4 +252,4 @@ bd update <epic-id> --notes="QA incomplete — <N> bugs remain open: <bug-id-1>,
 - **Don't over-test.** If a test is essentially the same code path as another with different input, suggest combining or skipping with user approval.
 - **Pre-setup is a real task.** Environment requirements (webhook forwarding, test data creation, etc.) should be their own task — don't assume the user has everything running.
 - **Handle surprises gracefully.** If the user reports behavior that is correct but differs from the test plan's assumptions (e.g., a field being hidden in a certain state), acknowledge it and adjust the test accordingly rather than treating it as a failure.
-- **Compaction resilience.** If context compresses mid-walkthrough, run `bd ready` to recover state. The beads epic and task structure persist independently of the conversation. Re-invoke `/qa-walkthrough` if the skill instructions feel absent after compaction.
+- **Compaction resilience.** If context compresses mid-walkthrough, run `bd ready` to recover state. The beads epic and task structure persist independently of the conversation. Re-invoke `/qa-walkthrough-pr` if the skill instructions feel absent after compaction.

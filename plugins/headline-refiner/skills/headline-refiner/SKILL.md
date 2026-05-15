@@ -1,6 +1,7 @@
 ---
 name: headline-refiner
 description: "Refines headlines using the 5-Part Headline Framework (Number, What, Who, Why, Twist the Knife). Triggers when writing or improving headlines for articles, blog posts, email subject lines, landing pages, or social media. Activates on requests like \"improve this headline\", \"write a better title\", or \"make this catchier\"."
+disable-model-invocation: true
 ---
 
 # Headline Refiner

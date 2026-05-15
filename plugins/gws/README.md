@@ -4,7 +4,7 @@ A Claude Code plugin for interacting with Google Workspace via the official [`gw
 
 ## Skills
 
-### md-to-gdoc
+### md-to-google-doc
 
 Upload a local markdown file to Google Drive as a Google Doc, or update an existing one. Handles:
 
@@ -18,24 +18,24 @@ Upload a local markdown file to Google Drive as a Google Doc, or update an exist
 
 ```bash
 # Create a new Google Doc in a Drive folder
-/md-to-gdoc ./notes.md FOLDER_ID
+/md-to-google-doc ./notes.md FOLDER_ID
 
 # With a custom title
-/md-to-gdoc ./notes.md FOLDER_ID --title "My Document"
+/md-to-google-doc ./notes.md FOLDER_ID --title "My Document"
 
 # Update an existing Google Doc
-/md-to-gdoc ./notes.md "https://docs.google.com/document/d/DOC_ID/edit"
+/md-to-google-doc ./notes.md "https://docs.google.com/document/d/DOC_ID/edit"
 ```
 
 The folder ID is the last segment of a Drive folder URL:
 `https://drive.google.com/drive/u/0/folders/FOLDER_ID_HERE`
 
-### gdoc-to-md
+### google-doc-to-md
 
 Download a Google Doc as a local markdown file using the Drive API's native `text/markdown` export.
 
 ```bash
-/gdoc-to-md DOC_ID_OR_URL [output.md] [--title]
+/google-doc-to-md DOC_ID_OR_URL [output.md] [--title]
 ```
 
 ### gws-account
@@ -94,13 +94,13 @@ claude plugins add /path/to/claude-plugins/plugins/gws
 
 | File | Purpose |
 |------|---------|
-| `skills/md-to-gdoc/SKILL.md` | Skill definition — triggers, usage, troubleshooting |
+| `skills/md-to-google-doc/SKILL.md` | Skill definition — triggers, usage, troubleshooting |
 | `scripts/gdoc.sh` | Router: auto-detects create vs update |
 | `scripts/upload.sh` | Creates a new Google Doc from markdown |
 | `scripts/update.sh` | Updates an existing Google Doc from markdown |
 | `scripts/clean.sh` | Strips YAML frontmatter and Obsidian callouts |
 | `references/MANUAL.md` | Step-by-step fallback if scripts are unavailable |
-| `skills/gdoc-to-md/SKILL.md` | Download a Google Doc as markdown |
+| `skills/google-doc-to-md/SKILL.md` | Download a Google Doc as markdown |
 | `skills/account/SKILL.md` | Multi-account management for the `gws` CLI |
 | `skills/calendar/SKILL.md` | Calendar events, meet/zoom links, calendar listing |
 | `scripts/calendar-list-events.sh` | List events in a date range |

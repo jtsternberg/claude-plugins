@@ -1,7 +1,7 @@
 {
   "name": "mac-caffeinate",
   "description": "Keep your Mac awake while long-running Claude Code agents or commands run, using macOS's built-in caffeinate.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

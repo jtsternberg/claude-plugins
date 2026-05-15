@@ -1,6 +1,7 @@
 ---
-name: git-tree
+name: create-git-tree
 description: "Create git worktrees with symlinked dependencies. Use when user says \"git worktree\", \"work on two branches\", \"parallel branch work\", \"review PR without switching\", \"keep my changes while checking out another branch\", or wants isolated branch directories sharing vendor/node_modules."
+disable-model-invocation: true
 ---
 
 # Git Tree
@@ -11,7 +12,7 @@ Create git worktrees in parallel directories with automatic symlinks to vendor, 
 
 ```bash
 # From skill directory
-SKILL_DIR="$HOME/.claude/skills/git-tree"
+SKILL_DIR="$HOME/.claude/skills/create-git-tree"
 $SKILL_DIR/scripts/git-tree.sh <branch-name> [--repo <path>] [--create]
 ```
 
@@ -20,7 +21,7 @@ $SKILL_DIR/scripts/git-tree.sh <branch-name> [--repo <path>] [--create]
 Run the script with the branch name. If no branch provided, ask the user.
 
 ```bash
-SKILL_DIR="$HOME/.claude/skills/git-tree"
+SKILL_DIR="$HOME/.claude/skills/create-git-tree"
 $SKILL_DIR/scripts/git-tree.sh <branch-name> [--repo <path>] [--create]
 ```
 

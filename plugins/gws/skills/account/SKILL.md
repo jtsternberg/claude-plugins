@@ -103,7 +103,7 @@ Each account directory contains:
 
 ## Integration with Other Skills
 
-When using `gdoc-to-md` or `md-to-gdoc` with a doc/folder that belongs to
+When using `google-doc-to-md` or `md-to-google-doc` with a doc/folder that belongs to
 a different account, switch first then run the command:
 
 1. Switch: `account-switch.sh work`

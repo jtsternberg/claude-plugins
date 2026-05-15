@@ -1,7 +1,7 @@
 # QA Walkthrough Skill Review
 
 **Date**: 2025-03-23
-**Skill**: `plugins/pr-workflow/skills/qa-walkthrough/SKILL.md`
+**Skill**: `plugins/pr-workflow/skills/qa-walkthrough-pr/SKILL.md`
 
 ## Summary
 

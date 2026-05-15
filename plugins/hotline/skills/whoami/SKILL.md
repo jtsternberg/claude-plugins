@@ -1,6 +1,7 @@
 ---
 name: hotline-whoami
 description: "Identifies the current workspace's dirmap slug. Use when the agent needs caller ID for hotline calls, or to check if a workspace is registered in the directory map."
+disable-model-invocation: true
 argument-hint: "[path]"
 allowed-tools: Bash
 ---

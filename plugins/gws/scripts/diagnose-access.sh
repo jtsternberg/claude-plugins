@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Diagnose why a Google Drive file/folder is inaccessible.
-# Called on failure paths by gdoc-to-md and md-to-gdoc scripts.
+# Called on failure paths by google-doc-to-md and md-to-google-doc scripts.
 # Usage: diagnose-access.sh <resource-id>
 # Output: Actionable error message on stdout. Exits non-zero.
 set -euo pipefail

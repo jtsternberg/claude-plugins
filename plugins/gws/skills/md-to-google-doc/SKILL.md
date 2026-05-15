@@ -1,6 +1,7 @@
 ---
-name: md-to-gdoc
+name: md-to-google-doc
 description: "Upload markdown to Google Drive as a Google Doc via gws CLI. Strips frontmatter and Obsidian callouts. Triggers on \"upload to google docs\", \"push to drive\", \"sync to gdoc\", \"create a google doc\", \"gws upload\"."
+disable-model-invocation: true
 argument-hint: '[file.md] [folder-id-or-doc-url] [--title "Title"]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *)'
 ---

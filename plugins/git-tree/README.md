@@ -28,7 +28,7 @@ The skill automatically triggers when you mention:
 ### Direct Script Usage
 
 ```bash
-SKILL_DIR="$HOME/.claude/skills/git-tree"
+SKILL_DIR="$HOME/.claude/skills/create-git-tree"
 $SKILL_DIR/scripts/git-tree.sh <branch-name> [--repo <path>] [--create]
 ```
 

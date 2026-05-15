@@ -1,6 +1,7 @@
 ---
 name: paperclip
 description: "Operate a locally-running Paperclip instance via the `paperclipai` CLI and direct filesystem access to agent instruction files."
+disable-model-invocation: true
 allowed-tools: "Bash(paperclipai *), Bash(ls ~/.paperclip/instances/default/companies/*), Bash(find ~/.paperclip/instances/default/companies/*), Bash(${CLAUDE_SKILL_DIR}/scripts/*), Read, Edit"
 ---
 
