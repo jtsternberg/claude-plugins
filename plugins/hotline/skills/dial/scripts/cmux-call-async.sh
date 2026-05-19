@@ -126,6 +126,24 @@ else
 fi
 [[ -n "$SESSION_ID_PRESET" ]] && echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id_preset.txt"
 
+# Per-call nonce. Prevents replayed STATUS lines (e.g. `claude --resume`
+# replaying the prior transcript into a fresh workspace's scrollback) from
+# being mistaken for completion of THIS call. The receiver echoes the nonce
+# back as `STATUS: <signal> call_id=<nonce>`; wait-for-response.sh ignores
+# any STATUS line whose nonce doesn't match. 16 hex chars is plenty for
+# disambiguation and keeps the marker compact in scrollback.
+CALL_ID=$(
+  openssl rand -hex 8 2>/dev/null \
+  || od -A n -N 8 -t x1 /dev/urandom 2>/dev/null | tr -d ' \n' \
+  || date +%s%N | sha256sum 2>/dev/null | cut -c1-16
+)
+echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
+# Prepend [CALL_ID: ...] to the prompt so the receiver can parse it and
+# include it in its STATUS markers. Lives outside /hotline-ringing's normal
+# metadata bracket group but the receiver SKILL.md picks it up from anywhere
+# in the prompt body.
+PROMPT="[CALL_ID: $CALL_ID] $PROMPT"
+
 # Write a launch script so the full prompt reaches claude without escaping
 # issues. printf %q produces bash-safe quoting for newlines, brackets, etc.
 # chmod 700 prevents other local users from reading prompt contents.

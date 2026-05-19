@@ -83,6 +83,23 @@ if $CMUX_MODE; then
     SESSION_ID=$(cat "$CALL_DIR/session_id_preset.txt")
   ESC=$(printf '\x1b')
 
+  # Per-call nonce match. When call_id.txt is present (new launcher), we
+  # require every STATUS line we accept to carry `call_id=<nonce>`. This
+  # makes replayed scrollback from `claude --resume` (which restores the
+  # prior transcript including its STATUS markers) impossible to mistake
+  # for completion of THIS call. Without the nonce, the bare regex would
+  # match the replayed STATUS and return stale response text — see
+  # claude-plugins-gkj for the failure mode.
+  CALL_ID=""
+  [[ -f "$CALL_DIR/call_id.txt" ]] && CALL_ID=$(cat "$CALL_DIR/call_id.txt")
+  if [[ -n "$CALL_ID" ]]; then
+    STATUS_TAIL=" call_id=${CALL_ID}[[:space:]]*\$"
+    STATUS_TAIL_AWK=" call_id=${CALL_ID}[[:space:]]*$"
+  else
+    STATUS_TAIL="[[:space:]]*\$"
+    STATUS_TAIL_AWK="[[:space:]]*$"
+  fi
+
   cleanup_workspace_and_script() {
     rm -f "$LAUNCH_SCRIPT" 2>/dev/null || true
     if [[ "$KEEP" != "true" ]]; then
@@ -128,17 +145,19 @@ if $CMUX_MODE; then
     # terminal STATUS that comes after them.
     #
     # Trim everything before the matched STATUS for the comparison value.
-    LATEST_STATUS=$(echo "$CLEAN" | awk '
-      match($0, /STATUS: [A-Z_]+[[:space:]]*$/) {
+    STATUS_RE="STATUS: [A-Z_]+${STATUS_TAIL_AWK}"
+    LATEST_STATUS=$(echo "$CLEAN" | awk -v re="$STATUS_RE" '
+      match($0, re) {
         s=substr($0, RSTART)
-        sub(/[[:space:]]*$/, "", s)
+        sub(/[[:space:]]+$/, "", s)
       }
       END {print s}
     ')
 
-    [[ "$LATEST_STATUS" == "STATUS: WORK_IN_PROGRESS" || -z "$LATEST_STATUS" ]] && continue
+    [[ -z "$LATEST_STATUS" ]] && continue
+    [[ "$LATEST_STATUS" =~ ^STATUS:\ WORK_IN_PROGRESS ]] && continue
 
-    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE)$ ]]; then
+    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE) ]]; then
       # Strip terminal chrome before extracting the response. Aggressive
       # prefix match strips lines starting with claude's box-drawing
       # characters (the REPL renders its idle prompt as a multi-line box
@@ -155,13 +174,15 @@ if $CMUX_MODE; then
       # Walk lines, reset buffer on every WORK_IN_PROGRESS, save buffer on
       # every terminal STATUS, emit the LAST saved buffer — matches the
       # LATEST_STATUS we chose for detection.
+      WIP_RE="STATUS: WORK_IN_PROGRESS${STATUS_TAIL_AWK}"
+      TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)${STATUS_TAIL_AWK}"
       RESPONSE=$(echo "$CLEAN" \
         | grep -v "^bash /tmp/hotline-launch" \
         | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
         | grep -vE "^>[[:space:]]*$" \
-        | awk '
-            /STATUS: WORK_IN_PROGRESS[[:space:]]*$/ {buf=""; next}
-            /STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)[[:space:]]*$/ {result=buf; buf=""; next}
+        | awk -v wip="$WIP_RE" -v term="$TERM_RE" '
+            $0 ~ wip  {buf=""; next}
+            $0 ~ term {result=buf; buf=""; next}
             {buf = buf $0 ORS}
             END {printf "%s", result}
           ')

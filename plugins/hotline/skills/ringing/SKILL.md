@@ -48,11 +48,13 @@ The above sets `HOTLINE_SCRIPTS`, `HOTLINE_DIAL_SCRIPTS`, and `HOTLINE_PICKUP_SC
 The caller's prompt follows this structure:
 
 ```
-/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: <workspace-path>] [SESSION: <session-id>]
+[CALL_ID: <nonce>] /hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: <workspace-path>] [SESSION: <session-id>]
 <the actual request>
 ```
 
-Parse the `MODE`, `CALLER`, and `SESSION` from the prompt metadata. Use them for logging and to determine your response style.
+Parse `CALL_ID`, `MODE`, `CALLER`, and `SESSION` from the prompt metadata. `CALL_ID` is a per-call nonce that you **must echo back in every `STATUS:` line you emit** (see Response Format below). `MODE`, `CALLER`, and `SESSION` are used for logging and to determine response style.
+
+**Why CALL_ID matters:** On `--resume` calls, claude replays the prior transcript into scrollback. Without a per-call nonce, the caller's response extractor cannot distinguish replayed STATUS markers from fresh ones, and silently returns stale response text. Always include `call_id=<nonce>` on every STATUS line you emit. If the incoming prompt has no `[CALL_ID: ...]` tag (older caller), emit bare STATUS lines as before.
 
 ## Communication Protocol
 
@@ -71,43 +73,47 @@ Respond based on the MODE from the incoming prompt:
 - Be concise. The caller is another agent, not a human — skip pleasantries.
 - If you're working on a work order, provide a clear status: what you did, what the result was, whether it's complete.
 - If you need clarification, ask in your response. The caller will relay to the user if needed.
-- If the task is outside your workspace's scope, respond with `STATUS: OUT_OF_SCOPE` (see Workspace Isolation above). Do NOT attempt the work in another directory.
+- If the task is outside your workspace's scope, respond with `STATUS: OUT_OF_SCOPE call_id=<CALL_ID>` (see Workspace Isolation above). Do NOT attempt the work in another directory.
 
 ### Response Format
 
-**Always start every response with `STATUS: WORK_IN_PROGRESS` on its own line.** This is a body-start marker the cmux transport uses to separate your actual answer from the surrounding terminal chrome (shell prompt, claude banner, the `/hotline:ringing` line, etc.). Without it the caller's response extractor has no anchor and surfaces the entire screen capture instead of just your answer.
+**Always start every response with `STATUS: WORK_IN_PROGRESS call_id=<CALL_ID>` on its own line.** This is a body-start marker the cmux transport uses to separate your actual answer from the surrounding terminal chrome (shell prompt, claude banner, the `/hotline:ringing` line, etc.). Without it the caller's response extractor has no anchor and surfaces the entire screen capture instead of just your answer.
+
+**Every STATUS line you emit MUST end with ` call_id=<CALL_ID>`** where `<CALL_ID>` is the nonce from the `[CALL_ID: ...]` tag in the incoming prompt. The caller's extractor ignores any STATUS line without a matching nonce. (If the prompt has no `[CALL_ID: ...]` tag, omit the suffix — older caller fallback.)
+
+In the examples below, replace `<id>` with the actual CALL_ID value from the incoming prompt.
 
 Structure the rest based on mode:
 
 **Quick call:**
 ```
-STATUS: WORK_IN_PROGRESS
+STATUS: WORK_IN_PROGRESS call_id=<id>
 
 [Your answer — concise and direct]
 
-STATUS: DONE
+STATUS: DONE call_id=<id>
 ```
 
 **Work order:**
 ```
-STATUS: WORK_IN_PROGRESS
+STATUS: WORK_IN_PROGRESS call_id=<id>
 
 [What you did and the result]
 
-STATUS: WORK_COMPLETE
+STATUS: WORK_COMPLETE call_id=<id>
 ```
-Or if you need another exchange (you can re-emit `STATUS: WORK_IN_PROGRESS` mid-response as a step marker too — the caller resets its body buffer on every WORK_IN_PROGRESS, so only the content after the LAST WORK_IN_PROGRESS counts as the response):
+Or if you need another exchange (you can re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` mid-response as a step marker too — the caller resets its body buffer on every WORK_IN_PROGRESS, so only the content after the LAST WORK_IN_PROGRESS counts as the response):
 ```
-STATUS: WORK_IN_PROGRESS
+STATUS: WORK_IN_PROGRESS call_id=<id>
 
 [Progress update and what's remaining]
 
-STATUS: WORK_IN_PROGRESS
+STATUS: WORK_IN_PROGRESS call_id=<id>
 ```
 
 **Conference call:**
 ```
-STATUS: WORK_IN_PROGRESS
+STATUS: WORK_IN_PROGRESS call_id=<id>
 
 [Your response to this exchange — no terminal status signal needed]
 ```
