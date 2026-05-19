@@ -138,11 +138,24 @@ CALL_ID=$(
   || date +%s%N | sha256sum 2>/dev/null | cut -c1-16
 )
 echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
-# Prepend [CALL_ID: ...] to the prompt so the receiver can parse it and
-# include it in its STATUS markers. Lives outside /hotline-ringing's normal
-# metadata bracket group but the receiver SKILL.md picks it up from anywhere
-# in the prompt body.
-PROMPT="[CALL_ID: $CALL_ID] $PROMPT"
+# Insert [CALL_ID: ...] into the prompt so the receiver can parse it and
+# include it in its STATUS markers. If the prompt begins with a slash command
+# (e.g. /hotline-ringing), the CALL_ID must go AFTER the command token —
+# otherwise the leading bracket prevents claude from parsing the slash command
+# at all. For non-slash prompts, prepend as before.
+if [[ "$PROMPT" == /* ]]; then
+  # Split on first space: "<cmd> <rest>" -> "<cmd> [CALL_ID: ...] <rest>"
+  CMD_TOKEN="${PROMPT%% *}"
+  REST="${PROMPT#* }"
+  if [[ "$CMD_TOKEN" == "$PROMPT" ]]; then
+    # No space — prompt is just the slash command itself
+    PROMPT="$CMD_TOKEN [CALL_ID: $CALL_ID]"
+  else
+    PROMPT="$CMD_TOKEN [CALL_ID: $CALL_ID] $REST"
+  fi
+else
+  PROMPT="[CALL_ID: $CALL_ID] $PROMPT"
+fi
 
 # Write a launch script so the full prompt reaches claude without escaping
 # issues. printf %q produces bash-safe quoting for newlines, brackets, etc.
