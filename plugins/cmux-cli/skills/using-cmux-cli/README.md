@@ -38,6 +38,7 @@ The skill activates on anything cmux-adjacent:
 - `scripts/open-side-surface.sh` — decide between `new-surface --pane <adjacent>` and `new-pane --direction right`, based on current layout.
 - `references/browser.md` — full embedded-browser automation reference (loaded on demand).
 - `references/ssh.md` — `cmux ssh` remote workspace reference — relay daemon, browser routing, drag-drop, reconnect semantics (loaded on demand).
+- `references/progress-loops.md` — sidebar progress-loop recipe — two-loop pattern (updater + `pgrep` exit detector), clear/notify pairing (loaded on demand).
 
 The main `SKILL.md` stays lean by delegating the browser and SSH subsystems to their reference docs. Agents only load those when the task actually involves them.
 

@@ -1,8 +1,13 @@
 ---
 name: using-cmux-cli
-description: "Controls cmux (macOS terminal multiplexer / workspace manager) via the `cmux` CLI. Use when the user mentions cmux, workspaces, panes, surfaces, tabs, or splits; asks to send keystrokes to / read output from a terminal; wants to drive cmux's embedded browser; or wants to post a notification into a workspace. Also triggers on tmux-style commands (capture-pane, wait-for, swap-pane) when cmux is in play."
-argument-hint: "[list|send|read|split|focus|notify|browser] [natural language description]"
-allowed-tools: "Bash(cmux *), Bash(which cmux), Bash(${CLAUDE_SKILL_DIR}/scripts/*)"
+description: "Drives cmux (macOS terminal multiplexer / workspace manager) via the `cmux` CLI — windows, workspaces, panes, surfaces, tabs, terminal I/O, the embedded browser, notifications, and sidebar progress."
+when_to_use: "Use when the user mentions cmux, workspaces, panes, surfaces, tabs, or splits; asks to send keystrokes to or read output from a terminal; wants to drive cmux's embedded browser; wants to post a notification into a workspace; or runs tmux-style commands (capture-pane, wait-for, swap-pane) where cmux is the multiplexer in play."
+argument-hint: "[describe what you want to do]"
+allowed-tools:
+  - "Bash(cmux *)"
+  - "Bash(which cmux)"
+  - "Bash(${CLAUDE_SKILL_DIR}/scripts/*)"
+  - "Bash(jq *)"
 ---
 
 # cmux CLI
@@ -256,6 +261,8 @@ cmux log --help
 
 Reach for these when work takes more than a few seconds and the user might look away — "Running tests (3/42)" as a progress bar is much better than nothing visible.
 
+**Progress is not fire-and-forget.** `set-progress` and `set-status` are one-shot writes — the value sticks until you push another one. For long-running work, pair a periodic updater with a `pgrep`-based exit detector, then clear and `notify` when the process exits. See [`references/progress-loops.md`](references/progress-loops.md) for the worked recipe.
+
 ---
 
 ## Workflow: open a side-by-side surface in the current window
@@ -362,87 +369,19 @@ After sending, re-read with `cmux read-screen --surface <ref> --scrollback --lin
 
 ---
 
-## Everything else (run `--help` on demand)
+## Everything else (run `cmux <cmd> --help` on demand)
 
-For any command below, run `cmux <cmd> --help` before constructing an invocation. The one-liner is just enough context to pick the right command.
+Vocabulary for less-frequent commands — just enough so you know what exists. Signatures live in `--help`.
 
-### Windows
-
-- `cmux list-windows` — enumerate windows
-- `cmux current-window` — print the focused window
-- `cmux new-window` — open a new window
-- `cmux focus-window --window <ref>` — focus a window
-- `cmux close-window --window <ref>` — close a window
-- `cmux move-workspace-to-window --workspace <ref> --window <ref>` — relocate a workspace
-
-### Workspaces (beyond the inlined set)
-
-- `cmux select-workspace --workspace <ref>` — focus a workspace
-- `cmux close-workspace --workspace <ref>` — close a workspace
-- `cmux rename-workspace [--workspace <ref>] <title>` — rename
-- `cmux reorder-workspace --workspace <ref> (--index <n>|--before <ref>|--after <ref>)` — reorder tabs
-- `cmux workspace-action --action <name> [--workspace <ref>]` — title/color/description actions
-- `cmux ssh <destination>` — open a remote SSH workspace (browser routing, drag-drop, session persistence, remote agents). Details in [references/ssh.md](references/ssh.md).
-
-### Panes & surfaces (beyond `new-split`)
-
-- `cmux new-pane [--type terminal|browser] [--direction <dir>]` — create a new pane with type control. **Use this instead of `new-split` when you need a browser pane** (`new-split` only makes terminals).
-- `cmux new-surface --type <terminal|browser> [--pane <ref>]` — add a surface to a pane
-- `cmux focus-pane --pane <ref>` — focus a pane
-- `cmux move-surface --surface <ref> [--pane <ref>] [--window <ref>]` — relocate a surface
-- `cmux reorder-surface --surface <ref> (--index <n>|--before <ref>|--after <ref>)` — reorder within a pane
-- `cmux close-surface [--surface <ref>]` — close a surface
-- `cmux list-panes [--workspace <ref>]` — enumerate panes
-- `cmux list-pane-surfaces [--workspace <ref>] [--pane <ref>]` — panes with surfaces
-- `cmux drag-surface-to-split --surface <ref> <left|right|up|down>` — convert into a split
-
-### I/O targeted at panels (not surfaces)
-
-- `cmux send-panel --panel <ref> <text>` — text to a specific panel
-- `cmux send-key-panel --panel <ref> <key>` — key to a specific panel
-
-### Notifications (management)
-
-- `cmux list-notifications` — see queued notifications
-- `cmux clear-notifications` — clear them
-
-### Embedded browser
-
-Browser-specific subcommands (navigate, click, type, snapshot, screenshot, cookies, storage, eval, waits, etc.) live in [references/browser.md](references/browser.md). Load that file when a task actually involves the browser — the master index is `cmux browser --help`, and `cmux browser snapshot` is your default way to "see" a page (use `screenshot` only when producing a PNG for a human).
-
-### tmux-compat layer
-
-If the user's request reads like a tmux recipe, cmux exposes:
-
-- `cmux capture-pane [--scrollback] [--lines <n>]` — tmux's capture-pane
-- `cmux resize-pane --pane <ref> (-L|-R|-U|-D) [--amount <n>]` — resize
-- `cmux wait-for [-S|--signal] <name> [--timeout <seconds>]` — block until signaled
-- `cmux swap-pane --pane <ref> --target-pane <ref>` — swap two panes
-- `cmux break-pane` / `cmux join-pane` — detach / merge panes
-- `cmux next-window` / `cmux previous-window` / `cmux last-window` / `cmux last-pane` — navigation
-- `cmux find-window [--content] [--select] <query>` — search
-- `cmux clear-history` — clear scrollback
-- `cmux set-buffer <text>` / `cmux list-buffers` / `cmux paste-buffer` — buffers
-- `cmux display-message [-p] <text>` — status-bar message
-- `cmux set-hook <event> <command>` / `cmux bind-key` / `cmux unbind-key` / `cmux copy-mode` — hooks & bindings
-- `cmux respawn-pane` / `cmux pipe-pane` — process management
-
-### Misc
-
-- `cmux markdown [open] <path>` — open a markdown file in the formatted viewer
-- `cmux refresh-surfaces` — force a redraw
-- `cmux reload-config` — reload cmux's config without restarting
-- `cmux surface-health [--workspace <ref>]` — diagnostic
-- `cmux trigger-flash` — visual flash (debugging / notifications)
-- `cmux claude-hook <session-start|stop|notification>` — hook integration points
-
-### RPC escape hatch
-
-```
-cmux rpc <method> [json-params]
-```
-
-Use only when no first-class subcommand exists. Raw method call — skips the typed validation the wrapped subcommands get. Run `cmux rpc --help` for the invocation format.
+- **Windows**: `list-windows`, `current-window`, `new-window`, `focus-window`, `close-window`, `move-workspace-to-window`
+- **Workspaces** (beyond the inlined set): `select-workspace`, `close-workspace`, `rename-workspace`, `reorder-workspace`, `workspace-action`, `ssh <destination>` (full SSH subsystem: [references/ssh.md](references/ssh.md))
+- **Panes & surfaces** (beyond `new-split`): `new-pane`, `new-surface`, `focus-pane`, `move-surface`, `reorder-surface`, `close-surface`, `list-panes`, `list-pane-surfaces`, `drag-surface-to-split`. **Use `new-pane --type browser` for browser panes — `new-split` is terminal-only.**
+- **Panel I/O** (surfaces ≠ panels): `send-panel --panel <ref>`, `send-key-panel --panel <ref>`
+- **Notification mgmt**: `list-notifications`, `clear-notifications`
+- **Embedded browser**: full subsystem in [references/browser.md](references/browser.md). Master index: `cmux browser --help`. Default to `browser snapshot` over `screenshot` unless producing a PNG for a human.
+- **tmux-compat**: `capture-pane`, `resize-pane`, `wait-for`, `swap-pane`, `break-pane` / `join-pane`, `next-window` / `previous-window` / `last-window` / `last-pane`, `find-window`, `clear-history`, `set-buffer` / `list-buffers` / `paste-buffer`, `display-message`, `set-hook` / `bind-key` / `unbind-key` / `copy-mode`, `respawn-pane`, `pipe-pane`
+- **Misc**: `markdown [open] <path>`, `refresh-surfaces`, `reload-config`, `surface-health`, `trigger-flash`, `claude-hook <session-start|stop|notification>`
+- **RPC escape hatch**: `cmux rpc <method> [json-params]` when no first-class subcommand exists. Skips the typed validation wrapped subcommands get — last resort.
 
 ---
 
