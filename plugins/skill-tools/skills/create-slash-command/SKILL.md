@@ -1,6 +1,10 @@
 ---
+name: create-slash-command
 description: "Create a new Claude command with proper structure and documentation"
 argument-hint: "<command-name> <description>"
+disable-model-invocation: true
+effort: medium
+allowed-tools: Read Write Edit Glob Grep
 ---
 
 I'll help you create a new Claude command. Based on the Claude Code slash commands documentation at https://docs.anthropic.com/en/docs/claude-code/slash-commands, I'll create a properly structured command file.

@@ -1,14 +1,17 @@
 ---
-description: Review a slash command for opportunities to split into subagents
-argument-hint: <command-name>
-allowed-tools: Read, Glob, Grep
+name: review-slash-command
+description: "Review a slash command for opportunities to split into subagents"
+argument-hint: "<command-name>"
+disable-model-invocation: true
+effort: high
+allowed-tools: Read Glob Grep
 ---
 
 You are reviewing a slash command to identify opportunities to break it down into specialized subagents.
 
-For context on how to structure commands and subagents, refer to:
-- @.claude/commands/create-slash-command.md - Best practices for slash command structure
-- @.claude/commands/create-subagent.md - Subagent creation guidelines
+For context on how to structure commands and subagents, refer to the sibling skills:
+- `plugins/skill-tools/skills/create-slash-command/SKILL.md` — Best practices for slash command structure
+- `plugins/skill-tools/skills/create-subagent/SKILL.md` — Subagent creation guidelines
 
 # Command/Agent Pattern Philosophy
 
@@ -60,7 +63,7 @@ Benefits:
 
 # Task
 
-Analyze the slash command file `.claude/commands/$1.md` and:
+Analyze the slash command file `.claude/commands/$ARGUMENTS.md` and:
 
 1. **Read and understand the command**: Parse its frontmatter, description, and full prompt content
 
@@ -182,7 +185,7 @@ When recommending subagents, emphasize Agent-Computer Interface (ACI) design:
 - Consider if suggested subagents could be useful for other commands
 - Recommend testing approach for validating improvements
 - Suggest success metrics to measure if subagents actually help
-- Reference @.claude/commands/create-subagent.md for implementation best practices
+- Reference the `create-subagent` skill for implementation best practices
 
 ## Philosophy
 

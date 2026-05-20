@@ -1,6 +1,10 @@
 ---
-description: Create a new Claude subagent with best practices and proper configuration
-argument-hint: <subagent-name> <description-of-purpose>
+name: create-subagent
+description: "Create a new Claude subagent with best practices and proper configuration"
+argument-hint: "<subagent-name> <description-of-purpose>"
+disable-model-invocation: true
+effort: medium
+allowed-tools: Read Write Edit Glob Grep
 ---
 
 I'll help you create a new Claude subagent. Based on the Claude Code slash commands documentation at https://docs.claude.com/en/docs/claude-code/sub-agents, I'll create a properly structured subagent file.
@@ -111,7 +115,7 @@ Choose the right pattern for your use case:
 
 ## Task
 
-Based on the user's request: `{{ARGUMENTS}}`
+Based on the user's request: `$ARGUMENTS`
 
 Follow this process:
 

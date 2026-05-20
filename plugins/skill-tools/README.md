@@ -1,6 +1,6 @@
 # Skill Tools Plugin
 
-Commands for creating and reviewing Claude Code skills, slash commands, and subagents.
+Skills for creating and reviewing Claude Code skills, slash commands, and subagents.
 
 ## Installation
 
@@ -16,26 +16,28 @@ claude plugin install skill-tools@jtsternberg
 
 Provides scaffolding and review tools for developing Claude Code extensions. Helps maintain consistency and quality across skills and commands.
 
-## Commands
+All skills in this plugin are name-only (`disable-model-invocation: true`) — invoke them explicitly by their namespaced path.
 
-### `/create-skill`
+## Skills
+
+### `/skill-tools:create-skill`
 
 End-to-end skill builder. Chains the official `skill-creator` → `review-skill` → auto-applies the review → opens the finished SKILL.md in your editor.
 
 ```
-/create-skill <skill-name-or-description>
+/skill-tools:create-skill <skill-name-or-description>
 ```
 
 One up-front confirmation covers classification (project / personal / public) and save path; everything after runs straight through. Public skills get parameterized automatically using the same env-var pattern as `plugins/session-tools` (`$SESSIONS_RECAP_EXAMPLE`-style overrides with safe defaults).
 
 Set `$CLAUDE_PUBLIC_SKILLS_DIR` to have the wrapper propose a default location for new public skills.
 
-### `/create-slash-command`
+### `/skill-tools:create-slash-command`
 
 Create a new slash command with proper structure.
 
 ```
-/create-slash-command
+/skill-tools:create-slash-command <command-name> <description>
 ```
 
 Guides you through creating a new slash command file with:
@@ -44,12 +46,12 @@ Guides you through creating a new slash command file with:
 - Tool allowlists
 - Documentation templates
 
-### `/create-subagent`
+### `/skill-tools:create-subagent`
 
 Create a new subagent configuration.
 
 ```
-/create-subagent
+/skill-tools:create-subagent <subagent-name> <description-of-purpose>
 ```
 
 Scaffolds a subagent definition with:
@@ -58,12 +60,12 @@ Scaffolds a subagent definition with:
 - Trigger patterns
 - Best practices
 
-### `/review-skill`
+### `/skill-tools:review-skill`
 
 Review a skill for improvement opportunities.
 
 ```
-/review-skill <path-to-skill.md>
+/skill-tools:review-skill <path-to-skill.md>
 ```
 
 Analyzes a skill file against best practices:
@@ -73,12 +75,12 @@ Analyzes a skill file against best practices:
 - Trigger pattern effectiveness
 - Tool usage patterns
 
-### `/review-slash-command`
+### `/skill-tools:review-slash-command`
 
 Review a slash command for quality and consistency.
 
 ```
-/review-slash-command <path-to-command.md>
+/skill-tools:review-slash-command <command-name>
 ```
 
 Evaluates command files for:
@@ -91,14 +93,14 @@ Evaluates command files for:
 ## Example Usage
 
 ```bash
-# Create a new command
-/create-slash-command
+# Create a new slash command
+/skill-tools:create-slash-command my-command "Does a thing"
 
 # Review an existing skill
-/review-skill plugins/my-skill/SKILL.md
+/skill-tools:review-skill plugins/my-skill/SKILL.md
 
-# Review a command
-/review-slash-command plugins/my-plugin/commands/my-command.md
+# Review a slash command
+/skill-tools:review-slash-command my-command
 ```
 
 ## Use Cases
@@ -112,7 +114,7 @@ Evaluates command files for:
 ## Additional Documentation
 
 - [skills/create-skill/SKILL.md](skills/create-skill/SKILL.md)
+- [skills/create-slash-command/SKILL.md](skills/create-slash-command/SKILL.md)
+- [skills/create-subagent/SKILL.md](skills/create-subagent/SKILL.md)
 - [skills/review-skill/SKILL.md](skills/review-skill/SKILL.md)
-- [commands/create-slash-command.md](commands/create-slash-command.md)
-- [commands/create-subagent.md](commands/create-subagent.md)
-- [commands/review-slash-command.md](commands/review-slash-command.md)
+- [skills/review-slash-command/SKILL.md](skills/review-slash-command/SKILL.md)
