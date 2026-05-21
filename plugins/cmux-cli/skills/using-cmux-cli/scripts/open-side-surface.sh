@@ -24,6 +24,8 @@ SUBJECT="caller"     # caller | focused
 SURFACE_TYPE="terminal"
 URL=""
 OUTPUT_JSON=0
+WAIT_READY=0
+WAIT_READY_TIMEOUT=5
 
 usage() {
   cat <<'EOF'
@@ -40,6 +42,13 @@ Options:
       --type <t>         Surface type: terminal (default) or browser.
       --url <url>        URL for browser surfaces. Ignored for terminal.
       --json             Emit a JSON object on success. Default: human-readable.
+      --wait-ready       For terminal surfaces, block until the PTY is attached
+                          and the shell is actually executing input. Forces
+                          PTY attachment (cmux focus-pane) and round-trips a
+                          probe (echo <marker>) to verify execution. No-op
+                          for browser surfaces.
+      --wait-ready-timeout <seconds>
+                          Override the --wait-ready timeout (default: 5).
   -h, --help             Show this help.
 
 The script decides between `cmux new-pane --direction right` (when the
@@ -56,9 +65,10 @@ Output (--json):
 Requires: cmux, jq.
 
 Exit codes:
-  0 = surface created
+  0 = surface created (and ready, if --wait-ready)
   1 = cmux command failed (see stderr)
   2 = usage / dependency / context error
+  3 = --wait-ready timed out (surface exists but PTY never echoed probe)
   130 = interrupted (Ctrl-C)
 EOF
 }
@@ -71,6 +81,8 @@ while [[ $# -gt 0 ]]; do
     --type)     SURFACE_TYPE="${2:-}"; shift 2 ;;
     --url)      URL="${2:-}"; shift 2 ;;
     --json)     OUTPUT_JSON=1; shift ;;
+    --wait-ready) WAIT_READY=1; shift ;;
+    --wait-ready-timeout) WAIT_READY_TIMEOUT="${2:-}"; shift 2 ;;
     -h|--help)  usage; exit 0 ;;
     *)          echo "open-side-surface: unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -185,6 +197,68 @@ if [[ -z "$new_surface" ]]; then
   exit 1
 fi
 
+# --- Optional: wait for PTY readiness ---
+#
+# Solves two known footguns on freshly-spawned terminal surfaces:
+#   1. `read-screen` returns "Terminal surface not found" until the PTY backend
+#      attaches. `cmux focus-pane --pane <new_pane>` forces attachment.
+#   2. The shell's `\n` gets swallowed by startup output, so `send "foo\n"` types
+#      `foo` but never executes it. We round-trip an `echo <marker>` probe and
+#      wait until the marker appears as command output (not just typed input).
+#
+# Re-sends the probe periodically — if a `\n` is swallowed by init, a later
+# resend will land cleanly. Same nonce across resends; we only need ≥1 hit.
+ready_status="skipped"
+if [[ $WAIT_READY -eq 1 ]]; then
+  if [[ "$SURFACE_TYPE" != "terminal" ]]; then
+    ready_status="n/a"
+  else
+    # Force the PTY backend to attach so read-screen / send actually work.
+    cmux focus-pane --pane "$new_pane" >/dev/null 2>&1 || true
+
+    nonce="$(date +%s)$$${RANDOM:-0}"
+    marker="__CMUX_PTYREADY_${nonce}__"
+    start_ts=$(date +%s)
+    ready_status="timeout"
+    attempt=0
+
+    while :; do
+      now_ts=$(date +%s)
+      elapsed=$((now_ts - start_ts))
+      if (( elapsed >= WAIT_READY_TIMEOUT )); then
+        break
+      fi
+
+      # (Re)send the probe every ~1s in case earlier sends were swallowed.
+      if (( attempt % 5 == 0 )); then
+        cmux send --surface "$new_surface" "echo ${marker}\n" >/dev/null 2>&1 || true
+      fi
+      attempt=$((attempt + 1))
+      sleep 0.2
+
+      # The typed `echo MARKER` echoes back as input (1 hit); shell execution
+      # adds the output line (2nd hit). >=2 hits => the shell actually ran it.
+      hits=$(cmux read-screen --surface "$new_surface" --scrollback --lines 200 2>/dev/null \
+             | grep -Fc "${marker}" || true)
+      if [[ "${hits:-0}" -ge 2 ]]; then
+        ready_status="ready"
+        break
+      fi
+    done
+
+    if [[ "$ready_status" != "ready" ]]; then
+      {
+        echo "open-side-surface: --wait-ready timed out after ${WAIT_READY_TIMEOUT}s for $new_surface ($new_pane)."
+        echo "  Possible causes:"
+        echo "    • PTY backend never attached (try: cmux focus-pane --pane $new_pane)"
+        echo "    • Shell still initializing (slow rc files, network mounts, login banner)"
+        echo "    • Surface running a non-shell program that doesn't echo input"
+      } >&2
+      exit 3
+    fi
+  fi
+fi
+
 # --- Output ---
 if [[ $OUTPUT_JSON -eq 1 ]]; then
   jq -n \
@@ -195,9 +269,11 @@ if [[ $OUTPUT_JSON -eq 1 ]]; then
     --arg subject "$SUBJECT" \
     --arg type    "$SURFACE_TYPE" \
     --arg url     "$URL" \
+    --arg ready   "$ready_status" \
     '{surface_ref: $surface, pane_ref: $pane, workspace_ref: $ws,
       mode: $mode, subject: $subject, surface_type: $type,
-      url: (if $url == "" then null else $url end)}'
+      url: (if $url == "" then null else $url end),
+      ready: $ready}'
 else
   printf 'OK %s %s %s (via %s, next to %s %s)\n' \
     "$new_surface" "$new_pane" "$new_ws" "$mode" "$SUBJECT" "$subject_pane"

@@ -103,34 +103,35 @@ Two subsystems live in separate files to keep this skill lean. Read them only wh
 
 For any "open X" / "start X" / "ssh to X" / "run Y in a new terminal" request that *doesn't* specify a destination, route through the side-by-side workflow below. Don't reach for `cmux new-workspace`, `cmux new-window`, or bare `cmux ssh <host>` — those spawn in places the user can't see without switching context.
 
-**Fresh surfaces need a moment before their PTY accepts input — sending immediately can drop your `\n` (the shell's "Last login" banner prints *after* your typed command, swallowing the newline, leaving the command sitting at the prompt unexecuted).**
+**Fresh surfaces need a moment before their PTY accepts input — sending immediately can drop your `\n` (the shell's "Last login" banner prints *after* your typed command, swallowing the newline, leaving the command sitting at the prompt unexecuted).** Use `--wait-ready` on `open-side-surface.sh` and the script handles both this and the "Terminal surface not found" PTY-attach race internally.
 
 The one-call recipe:
 
 ```bash
-# 1. Open a sibling surface next to the user's current view.
-REF=$(${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh --json | jq -r '.surface_ref')
+# 1. Open a sibling surface next to the user's current view AND wait until
+#    its PTY is attached + shell is actually executing input. --wait-ready
+#    handles both the focus-pane attach step and a round-trip probe; on
+#    timeout it exits 3 with a diagnostic instead of returning a non-ready
+#    surface ref.
+REF=$(${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh --wait-ready --json | jq -r '.surface_ref')
 
-# 2. Wait for the PTY to be ready. The shell prompt ($, %, #, or >) is the
-#    signal that input will be accepted. Poll read-screen rather than guessing
-#    a sleep — on a slow box the shell init can take 1–2s.
-for _ in $(seq 1 20); do
-  if cmux read-screen --surface "$REF" 2>/dev/null | grep -qE '[\$%#>] *$'; then
-    break
-  fi
-  sleep 0.2
-done
-# If read-screen errors with "Terminal surface not found" here, see Troubleshooting —
-# the PTY backend may not be attached yet; `cmux focus-pane --pane <pane-ref>` forces it.
-
-# 3. Send the work into it. Append \n so the command actually runs.
+# 2. Send the work into it. Append \n so the command actually runs.
 cmux send --surface "$REF" "ssh user@host\n"
 # or: cmux send --surface "$REF" "npm run dev\n"
 # or: cmux send --surface "$REF" "cargo watch -x test\n"
 
-# 4. Verify it actually executed — see "Send keystrokes" below for why.
+# 3. Verify it actually executed — see "Send keystrokes" below for why.
 cmux read-screen --surface "$REF" --lines 20
 ```
+
+> **Manual fallback** (historical — most callers should use `--wait-ready`):
+> if you can't use the script, poll for readiness yourself by sending an
+> `echo <unique-marker>` probe and grepping `read-screen` for ≥2 hits of the
+> marker (typed input + executed output). Don't rely on a `[$%#>]` prompt
+> regex — it silently misses powerline / NerdFont prompts (`❯`, `➜`, custom
+> glyphs) and spins to its retry ceiling. If `read-screen` errors with
+> `Terminal surface not found`, run `cmux focus-pane --pane <pane-ref>` first
+> to force PTY attachment.
 
 Use `--focused` on `open-side-surface.sh` when the user says "next to the tab I'm looking at" instead of "next to yours" — the defaults diverge when the user is viewing a different tab than the one the agent lives in.
 
@@ -281,9 +282,11 @@ Key options (run `--help` for the full list):
 - `--focused` — open next to the pane the **user** is currently looking at. Use when the user says *"next to what I'm looking at"*. `caller` and `focused` usually coincide but diverge when the user is viewing a different tab than the one the agent lives in.
 - `--type terminal|browser` (default terminal).
 - `--url <url>` — for browser surfaces.
-- `--json` — emit `{surface_ref, pane_ref, workspace_ref, mode, subject, surface_type, url}` for chaining.
+- `--json` — emit `{surface_ref, pane_ref, workspace_ref, mode, subject, surface_type, url, ready}` for chaining.
+- `--wait-ready` — for terminal surfaces, block until the PTY is attached *and* the shell is actually executing input (forces `focus-pane`, then round-trips an `echo <marker>` probe). Without this you have to hand-roll a readiness loop and dodge the "Terminal surface not found" race. No-op for browser surfaces.
+- `--wait-ready-timeout <seconds>` — override the wait-ready budget (default 5).
 
-On success it prints the new surface's ref + pane + workspace, plus which branch it took (`new-surface` vs `new-pane`). Failure goes to stderr with exit 1 (cmux error) or 2 (context error).
+On success it prints the new surface's ref + pane + workspace, plus which branch it took (`new-surface` vs `new-pane`). Failure goes to stderr with exit 1 (cmux error), 2 (context error), or 3 (`--wait-ready` timed out — surface exists but PTY never echoed the probe).
 
 ### What it decides under the hood
 
@@ -429,7 +432,7 @@ If commands fail, work through these in order:
 5. **Version mismatch?** `cmux version` + `cmux capabilities` — if a flag the skill surfaces isn't there, the running app is older than the CLI (or vice versa).
 6. **Unknown subcommand?** `cmux --help` lists everything the current build understands. If it's not there, the build predates it — consider `cmux rpc <method>` as a last resort. (The [official API docs](https://cmux.com/docs/api) list some commands like `list-surfaces` that don't exist on every build; trust `cmux --help` over the docs when they disagree.)
 7. **Socket disabled / wrong mode?** `CMUX_SOCKET_ENABLE=1` to force-enable; `CMUX_SOCKET_MODE=allowAll` if you're calling cmux from a process it didn't spawn (CI runner, foreign wrapper). Default mode is `cmuxOnly`, which rejects non-cmux ancestry.
-8. **`Terminal surface not found` on a surface that exists?** If `cmux read-screen --surface surface:N` returns `Error: internal_error: ERROR: Terminal surface not found` but `cmux tree` clearly shows `surface:N` exists, the surface is real — its PTY backend just isn't attached yet. Common on surfaces created less than ~1 second ago (e.g., right after `open-side-surface.sh`). The error wording is misleading: it says "doesn't exist" but means "not attached." Two fixes:
+8. **`Terminal surface not found` on a surface that exists?** Mostly historical — `open-side-surface.sh --wait-ready` handles this internally. If you hit it from a different code path: `cmux read-screen --surface surface:N` returns `Error: internal_error: ERROR: Terminal surface not found` but `cmux tree` clearly shows `surface:N` exists. The surface is real — its PTY backend just isn't attached yet. Common on surfaces created less than ~1 second ago. The error wording is misleading: it says "doesn't exist" but means "not attached." Two fixes:
    - **Wait + retry** — poll `read-screen` with a short sleep; the backend usually attaches within 1–2s.
    - **Force attachment** — `cmux focus-pane --pane <pane-ref>` on the surface's pane wakes the backend immediately. Useful when you can't afford to wait.
    Don't chase this as a "stale ref" or "wrong workspace" bug — the surface is fine, the PTY just isn't ready.
