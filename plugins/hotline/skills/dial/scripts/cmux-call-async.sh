@@ -95,6 +95,10 @@ fi
 
 CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
 echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
+# Persist CWD so wait-for-session.sh can compute the claude transcript path
+# (~/.claude/projects/<encoded-cwd>/<session-id>.jsonl) as a second REPL-boot
+# signal alongside the read-screen banner regex. Only written when known.
+[[ -n "$CWD" ]] && echo "$CWD" > "$CALL_DIR/cwd.txt"
 
 # Determine the session ID upfront. We don't write it to session_id.txt yet —
 # wait-for-session.sh promotes session_id_preset.txt → session_id.txt only

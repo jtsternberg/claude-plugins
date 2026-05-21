@@ -142,6 +142,85 @@ else
 fi
 rm -rf "$tmp"
 
+# Case 3b: no banner, but transcript file exists (Signal B) → session_id.txt
+# promoted from preset. Verifies the second REPL-boot signal independently.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_fake_cmux "$tmp/bin"
+cat > "$tmp/screen.txt" <<'EOF'
+Last login: Thu May 14 16:00:00 on ttys001
+ some shell prompt with no banner yet
+EOF
+cd="$tmp/call"
+stage_call_dir "$cd" "preset-uuid-3b" "workspace:99"
+# Stage the receiver's cwd + a non-empty transcript file under a fake HOME.
+RECV_CWD="/Users/fake/Code/proj.name"
+echo "$RECV_CWD" > "$cd/cwd.txt"
+ENC=$(printf '%s' "$RECV_CWD" | sed 's|[/.]|-|g')
+mkdir -p "$tmp/home/.claude/projects/$ENC"
+echo '{"type":"user"}' > "$tmp/home/.claude/projects/$ENC/preset-uuid-3b.jsonl"
+
+out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 5 2>"$tmp/err.txt")
+rc=$?
+if [[ $rc -eq 0 && "$out" == "preset-uuid-3b" ]]; then
+  pass "transcript-file signal: prints preset session id without banner"
+else
+  fail "transcript-file signal: prints preset session id without banner" \
+       "rc=$rc stdout=$out stderr=$(cat "$tmp/err.txt")"
+fi
+if [[ -f "$cd/session_id.txt" && "$(cat "$cd/session_id.txt")" == "preset-uuid-3b" ]]; then
+  pass "transcript-file signal: promotes session_id_preset.txt → session_id.txt"
+else
+  fail "transcript-file signal: promotes session_id_preset.txt → session_id.txt"
+fi
+rm -rf "$tmp"
+
+# Case 3c: no banner AND no transcript file → timeout, error message
+# enumerates which signals were missing (actionable diagnostic).
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_fake_cmux "$tmp/bin"
+echo "no banner here" > "$tmp/screen.txt"
+cd="$tmp/call"
+stage_call_dir "$cd" "preset-uuid-3c" "workspace:99"
+RECV_CWD="/Users/fake/Code/proj"
+echo "$RECV_CWD" > "$cd/cwd.txt"
+mkdir -p "$tmp/home/.claude/projects"  # but no transcript
+
+out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 2 2>"$tmp/err.txt")
+rc=$?
+if [[ $rc -ne 0 ]] && grep -q "no transcript file" "$tmp/err.txt"; then
+  pass "neither signal: timeout error names the missing transcript path"
+else
+  fail "neither signal: timeout error names the missing transcript path" \
+       "rc=$rc stderr=$(cat "$tmp/err.txt")"
+fi
+rm -rf "$tmp"
+
+# Case 3d: empty transcript file (claude created it but hasn't written yet)
+# is NOT enough — we require -s (non-empty). Banner remains the only signal.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_fake_cmux "$tmp/bin"
+echo "no banner" > "$tmp/screen.txt"
+cd="$tmp/call"
+stage_call_dir "$cd" "preset-uuid-3d" "workspace:99"
+RECV_CWD="/Users/fake/Code/proj"
+echo "$RECV_CWD" > "$cd/cwd.txt"
+ENC=$(printf '%s' "$RECV_CWD" | sed 's|[/.]|-|g')
+mkdir -p "$tmp/home/.claude/projects/$ENC"
+: > "$tmp/home/.claude/projects/$ENC/preset-uuid-3d.jsonl"  # empty
+
+out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 2 2>"$tmp/err.txt")
+rc=$?
+if [[ $rc -ne 0 && ! -f "$cd/session_id.txt" ]]; then
+  pass "empty transcript file does NOT count as a liveness signal"
+else
+  fail "empty transcript file does NOT count as a liveness signal" \
+       "rc=$rc session_id.txt exists=$([[ -f "$cd/session_id.txt" ]] && echo yes || echo no)"
+fi
+rm -rf "$tmp"
+
 echo ""
 echo "wait-for-response cmux mode:"
 
