@@ -13,9 +13,11 @@ set -euo pipefail
 
 LABEL="com.jtsternberg.sessions-weekly-recap"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+RUNNER="$HOME/Library/LaunchAgents/${LABEL}.runner.sh"
 LOG_DIR="$HOME/.claude/logs"
 OUT_LOG="$LOG_DIR/sessions-weekly-recap.out.log"
 ERR_LOG="$LOG_DIR/sessions-weekly-recap.err.log"
+LOOKBACK_WEEKS="${SESSIONS_RECAP_LOOKBACK_WEEKS:-4}"
 
 die() { echo "Error: $*" >&2; exit 1; }
 
@@ -72,17 +74,48 @@ cmd_install() {
 
   mkdir -p "$LOG_DIR" "$HOME/Library/LaunchAgents" "$output_dir"
 
-  local prompt_raw prompt_escaped output_escaped claude_escaped
-  prompt_raw="/sessions-weekly-recap --weekly --output-dir \"$output_dir\""
-  prompt_escaped="$(xml_escape "$prompt_raw")"
-  output_escaped="$(xml_escape "$output_dir")"
-  claude_escaped="$(xml_escape "$claude_bin")"
+  # Write a runner script that catches up any missing weekly recaps from the
+  # last $LOOKBACK_WEEKS completed weeks. Skips weeks whose file already exists.
+  # Filename convention matches the skill output: Week-M.D.YY.md (no zero-pad).
+  cat > "$RUNNER" <<RUNNER
+#!/usr/bin/env bash
+set -uo pipefail
+OUTPUT_DIR="$output_dir"
+CLAUDE_BIN="$claude_bin"
+LOOKBACK_WEEKS=${LOOKBACK_WEEKS}
 
-  # Shell line used inside the plist. Paths with spaces are single-quoted.
-  local shell_line
-  shell_line="cd \"\$HOME\" && '$claude_bin' -p '$prompt_raw' --dangerously-skip-permissions"
-  local shell_escaped
-  shell_escaped="$(xml_escape "$shell_line")"
+dow=\$(date +%u)              # 1=Mon..7=Sun
+days_back=\$((dow - 1))       # days since most recent Monday
+
+ran_any=0
+for i in \$(seq 1 "\$LOOKBACK_WEEKS"); do
+  offset=\$((days_back + i * 7))
+  mon=\$(date -v-\${offset}d +%Y-%m-%d)
+  sun=\$(date -j -v+6d -f %Y-%m-%d "\$mon" +%Y-%m-%d)
+  m=\$(date -j -f %Y-%m-%d "\$mon" +%-m)
+  d=\$(date -j -f %Y-%m-%d "\$mon" +%-d)
+  yy=\$(date -j -f %Y-%m-%d "\$mon" +%y)
+  fname="Week-\${m}.\${d}.\${yy}.md"
+  fpath="\$OUTPUT_DIR/\$fname"
+  if [ -f "\$fpath" ]; then
+    echo "[\$(date '+%F %T')] skip \$fname (exists)"
+    continue
+  fi
+  echo "[\$(date '+%F %T')] run  \$fname (\$mon → \$sun)"
+  cd "\$HOME"
+  "\$CLAUDE_BIN" -p "/sessions-weekly-recap --weekly --since \$mon --until \$sun --output-dir \"\$OUTPUT_DIR\"" --dangerously-skip-permissions || \\
+    echo "[\$(date '+%F %T')] claude exited non-zero for \$fname"
+  ran_any=1
+done
+
+if [ "\$ran_any" = "0" ]; then
+  echo "[\$(date '+%F %T')] no missing weeks in last \$LOOKBACK_WEEKS"
+fi
+RUNNER
+  chmod +x "$RUNNER"
+
+  local runner_escaped
+  runner_escaped="$(xml_escape "$RUNNER")"
 
   cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -94,8 +127,8 @@ cmd_install() {
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>-lc</string>
-        <string>${shell_escaped}</string>
+        <string>-l</string>
+        <string>${runner_escaped}</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -118,7 +151,7 @@ cmd_install() {
     <key>StandardErrorPath</key>
     <string>${ERR_LOG}</string>
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 </dict>
 </plist>
 PLIST
@@ -138,7 +171,7 @@ PLIST
 cmd_uninstall() {
   if [ -f "$PLIST" ]; then
     launchctl unload "$PLIST" 2>/dev/null || true
-    rm -f "$PLIST"
+    rm -f "$PLIST" "$RUNNER"
     echo "Uninstalled: $LABEL"
   else
     echo "Not installed (no plist at $PLIST)"
