@@ -1,12 +1,12 @@
 ---
 name: promote-draft
 description: "Move a draft out of /tmp/collab-tools/ (or an explicit source path) into its real home, optionally renaming off the -draft / -YYYY-MM-DD suffix."
-when_to_use: "Use when the user invokes /collab-tools:promote-draft, or when they say the temp-draft is ready, ask to 'move the draft to <path>', 'promote this draft', 'land the draft', or otherwise indicate that a draft should now live somewhere permanent. Do NOT use for arbitrary file moves — this is specifically the companion to the temp-draft skill. The default source location is /tmp/collab-tools/, but the user may name any source path explicitly."
+when_to_use: "Use when the user invokes /promote-draft, or when they say the temp-draft is ready, ask to 'move the draft to <path>', 'promote this draft', 'land the draft', or otherwise indicate that a draft should now live somewhere permanent. Do NOT use for arbitrary file moves — this is specifically the companion to the temp-draft skill. The default source location is /tmp/collab-tools/, but the user may name any source path explicitly."
 ---
 
 # promote-draft
 
-Companion to `collab-tools:temp-draft`. Once a draft in `/tmp/collab-tools/` is ready to live somewhere permanent — a blog post directory, a project doc, an email file, a code snippet in a repo — this skill moves it out of the staging dir, optionally renames off the "drafty" filename, and surfaces the right next step (typically `git add`).
+Companion to `temp-draft` skill. Once a draft in `/tmp/collab-tools/` is ready to live somewhere permanent — a blog post directory, a project doc, an email file, a code snippet in a repo — this skill moves it out of the staging dir, optionally renames off the "drafty" filename, and surfaces the right next step (typically `git add`).
 
 The default source location is `/tmp/collab-tools/` (where `temp-draft` writes). The user can also pass an explicit source path from anywhere in the filesystem — useful for drafts that started somewhere else or were created in a prior session.
 
@@ -16,7 +16,7 @@ The same content-stays-in-the-file philosophy applies: the file is the deliverab
 
 Use this skill when:
 
-- The user invokes `/collab-tools:promote-draft` directly.
+- The user invokes `/promote-draft` directly.
 - The user explicitly says "move the draft to X", "promote that draft", "land the draft", "the draft is done — put it in <path>", or any equivalent.
 - The user finished iterating on a temp-draft in editor and now references where it should live.
 

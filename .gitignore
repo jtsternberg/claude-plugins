@@ -29,3 +29,5 @@ HANDOFF*.md
 .beads-credential-key
 
 .claude/CLAUDE.md
+.amskills.json
+amskills/

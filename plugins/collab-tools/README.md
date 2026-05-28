@@ -1,0 +1,46 @@
+# Collab Tools Plugin
+
+Skills that help Claude collaborate more naturally — routing work out of chat and into appropriate channels (files, editors, the filesystem) when chat isn't the right surface.
+
+## Installation
+
+```bash
+# Add the marketplace (if not already added)
+claude plugin marketplace add jtsternberg/claude-plugins
+
+# Install the plugin
+claude plugin install collab-tools@jtsternberg
+```
+
+## Description
+
+The default behavior for an LLM is to dump everything into the chat. That works for short answers and inline conversation, but it gets in the way for long-form drafting work — blog posts, emails, refactor plans, talk outlines — where the user wants real editor tools and a persistent file they can iterate on across many turns.
+
+The skills in this plugin shift that default for the cases where it matters. They keep chat lean and give the user a real file to work with.
+
+## Skills
+
+### `/collab-tools:temp-draft`
+
+Routes a long-form draft to `/tmp/collab-tools/<slug>-<YYYY-MM-DD>.<ext>` opened in `$EDITOR` — instead of having Claude paste the full draft into chat. Keeps context lean, gives you real editor affordances (syntax highlighting, find/replace, spellcheck), and makes iterative edits painless.
+
+```
+/collab-tools:temp-draft Draft a cold email to the Acme team introducing our Q3 partnership.
+```
+
+Or just describe a long-form thing you'd rather edit in your editor than read in chat — Claude reaches for the skill when the context matches.
+
+### `/collab-tools:promote-draft`
+
+Companion to `temp-draft`. Moves a finished draft out of `/tmp/collab-tools/` (or any explicit source path) to its real home, optionally strips the `-draft` / `-YYYY-MM-DD` suffix from the filename, and suggests `git add` if the destination is inside a repo. Never auto-commits — staging is your call.
+
+```
+/collab-tools:promote-draft ~/blog/posts/
+/collab-tools:promote-draft ~/work/emails/cold-email-acme.md
+```
+
+If no destination is given, the skill asks. If no source is given, it pulls candidates from `/tmp/collab-tools/`. Explicit source paths can come from anywhere in the filesystem.
+
+## Philosophy
+
+Both skills follow the same rule: **the file is the deliverable, chat stays lean.** Neither skill pastes the draft body into chat — they confirm the path and let the user work in their editor. This keeps token context budget available for follow-up turns and gives the user real editing power instead of a Markdown blob in a scrollback buffer.
