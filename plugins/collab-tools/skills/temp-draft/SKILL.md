@@ -41,10 +41,12 @@ When in doubt, ask the user once whether they want the draft in chat or in `/tmp
 3. **Open it in the user's editor** with this exact form:
 
    ```bash
-   eval "${EDITOR:-vi}" '/tmp/collab-tools/your-file.md'
+   eval "${EDITOR:-vi}" '/tmp/collab-tools/your-file.md' &
+   disown 2>/dev/null || true
    ```
 
-   The `eval` form is what makes multi-word editor settings work — values like `code --wait`, `cursor --wait`, or `subl -n -w` need shell-level word splitting. Single-quote the path so spaces and special characters are safe.
+   - The `eval` form is what makes multi-word editor settings work — values like `code --wait`, `cursor --wait`, or `subl -n -w` need shell-level word splitting. Single-quote the path so spaces and special characters are safe.
+   - The trailing `&` + `disown` launch the editor non-blocking. Don't wait for the editor to close — the user's `--wait` flag (if they have one) still makes *their* editor window stay open until they're done, but the shell returns immediately. The actual turn boundary is the user's next chat message ("good to go", "tweak section 2", "I changed X") — not the editor exit.
 
 4. **Briefly tell the user where it landed.** One short sentence with the path. Do NOT paste the draft content into the chat — the entire point is that the chat stays clean and the work lives in the editor.
 
