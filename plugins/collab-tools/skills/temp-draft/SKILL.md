@@ -27,20 +27,21 @@ When in doubt, ask the user once whether they want the draft in chat or in `/tmp
 
 ## Procedure
 
-1. **Pick a descriptive filename.** Format: `/tmp/<short-slug>-<YYYY-MM-DD>.<ext>`.
+1. **Pick a descriptive filename.** Format: `/tmp/collab-tools/<short-slug>-<YYYY-MM-DD>.<ext>`.
+   - All drafts live under `/tmp/collab-tools/` so the companion `promote-draft` skill can find them. Create the directory if it doesn't exist: `mkdir -p /tmp/collab-tools`.
    - `<short-slug>` is 3-5 kebab-case words describing the draft. Match the content, not generic ("blog-post-fence-fences", not "draft").
    - `<ext>` matches the content type: `.md` for prose, plans, notes, structured docs; `.txt` for plain unformatted text; `.html`, `.py`, `.ts`, etc. for code.
    - Examples:
-     - `/tmp/cold-email-to-acme-2026-05-28.md`
-     - `/tmp/refactor-plan-auth-module-2026-05-28.md`
-     - `/tmp/talk-outline-react-conf-2026-05-28.md`
+     - `/tmp/collab-tools/cold-email-to-acme-2026-05-28.md`
+     - `/tmp/collab-tools/refactor-plan-auth-module-2026-05-28.md`
+     - `/tmp/collab-tools/talk-outline-react-conf-2026-05-28.md`
 
 2. **Write the draft to that file** using the `Write` tool. The file is the deliverable.
 
 3. **Open it in the user's editor** with this exact form:
 
    ```bash
-   eval "${EDITOR:-vi}" '/tmp/your-file.md'
+   eval "${EDITOR:-vi}" '/tmp/collab-tools/your-file.md'
    ```
 
    The `eval` form is what makes multi-word editor settings work — values like `code --wait`, `cursor --wait`, or `subl -n -w` need shell-level word splitting. Single-quote the path so spaces and special characters are safe.
@@ -51,7 +52,7 @@ When in doubt, ask the user once whether they want the draft in chat or in `/tmp
 
 Good:
 
-> Drafted to `/tmp/blog-post-fence-fences-2026-05-28.md` and opened in your editor.
+> Drafted to `/tmp/collab-tools/blog-post-fence-fences-2026-05-28.md` and opened in your editor.
 
 Bad:
 
@@ -70,7 +71,7 @@ Pasting long drafts into the chat:
 - Loses syntax highlighting, spellcheck, find/replace, and every other editor affordance.
 - Makes iterative edits painful — every change re-renders the whole block.
 
-A file in `/tmp` opened in `$EDITOR` keeps chat lean, gives the user real editing power, and lets both sides refer back to "the draft" by path across many turns.
+A file in `/tmp/collab-tools/` opened in `$EDITOR` keeps chat lean, gives the user real editing power, and lets both sides refer back to "the draft" by path across many turns. The shared directory also gives the companion `promote-draft` skill a known place to look when moving a finished draft to its permanent home.
 
 ## Notes for follow-up turns
 

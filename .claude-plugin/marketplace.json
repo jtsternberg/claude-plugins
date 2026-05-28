@@ -29,6 +29,7 @@
     { "name": "work-with-media", "source": "./plugins/work-with-media" },
     { "name": "research-tools", "source": "./plugins/research-tools" },
     { "name": "cmux-cli", "source": "./plugins/cmux-cli" },
-    { "name": "mac-caffeinate", "source": "./plugins/mac-caffeinate" }
+    { "name": "mac-caffeinate", "source": "./plugins/mac-caffeinate" },
+    { "name": "collab-tools", "source": "./plugins/collab-tools" }
   ]
 }
