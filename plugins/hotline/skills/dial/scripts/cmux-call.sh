@@ -44,6 +44,16 @@ if [[ -z "$CWD" ]]; then
   exit 1
 fi
 
+# --fork-session COPIES the resumed session's transcript into a new id. With no
+# --resume target there is nothing to copy, so claude forks an EMPTY session — the
+# call appears to succeed but the receiver reports "fresh session, nothing run here".
+# In hotline usage --fork-session is only ever valid alongside --resume, so refuse
+# the combination instead of silently forking nothing.
+if $FORK_SESSION && [[ -z "$RESUME_ID" ]]; then
+  echo '{"error": "--fork-session requires --resume <id>; forking with no resume target silently creates an empty session"}'
+  exit 1
+fi
+
 # --focus true is REQUIRED: without it cmux does not spawn a real tty for the
 # workspace's terminal surface, and subsequent `cmux send` calls fail with
 # "Terminal surface not found". Discovered via live testing.

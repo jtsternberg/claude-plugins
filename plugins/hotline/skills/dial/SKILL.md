@@ -168,11 +168,20 @@ bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-sessio
 
 **Fork behavior when the user provided a session ID directly** (not from our cache):
 
-If the user gave you a specific session ID to dial (e.g., "dial session abc123"), that's someone else's session. **Fork by default** (`--fork-session` flag) to avoid cluttering their conversation with hotline protocol noise.
+If the user gave you a specific session ID to dial (e.g., "dial session abc123"), that's someone else's session. Store it:
 
-**Override:** If the user's intent is clearly to contribute to or help that session (e.g., "help that session fix its bug," "continue that conversation"), don't fork — they want to add to the existing session. When in doubt, fork.
+```
+TARGET_SESSION_ID="<the session ID the user gave you>"
+```
 
-**CRITICAL: When dialing by session ID, the `--cwd` MUST come from Step 1's resolve output** (which reverse-looks up the session ID to find its workspace via transcript files). Do NOT use your own workspace as `--cwd` — the target session lives in a different directory, and using the wrong `--cwd` causes `--fork-session` to silently fail with empty output.
+**Fork by default** to avoid cluttering their conversation with hotline protocol noise. **Forking a session requires BOTH flags together: `--resume "$TARGET_SESSION_ID"` AND `--fork-session`.** `--fork-session` works by *copying the resumed session's transcript into a new id* — so without `--resume` pointing at the session to copy, there is nothing to fork. Never pass `--fork-session` alone.
+
+**Override:** If the user's intent is clearly to contribute to or help that session (e.g., "help that session fix its bug," "continue that conversation"), don't fork — pass `--resume "$TARGET_SESSION_ID"` *without* `--fork-session` to add to the existing session directly. When in doubt, fork (both flags).
+
+**CRITICAL: Two ways the fork-by-session-id path silently produces an empty session:**
+
+1. **Missing `--resume`.** Passing `--fork-session` *without* `--resume "$TARGET_SESSION_ID"` is the most common cause. The launch scripts then generate a fresh `--session-id` and `--fork-session` has nothing to copy → a brand-new EMPTY session. The remote agent reports "fresh session, nothing run here" even though the target had done real work. Always pass the two flags together. (The launch scripts now hard-error on this combination, but the skill must still emit it correctly.)
+2. **Wrong `--cwd`.** When dialing by session ID, the `--cwd` MUST come from Step 1's resolve output (which reverse-looks up the session ID to find its workspace via transcript files). Do NOT use your own workspace as `--cwd` — the target session lives in a different directory, and using the wrong `--cwd` causes `--fork-session` to fail with empty output.
 
 ### Step 5: Execute the Call
 
@@ -188,26 +197,55 @@ Construct a session name for the `/resume` picker. Format: `hotline: <caller-dir
 
 For quick calls and work orders, fire the call asynchronously. This returns immediately with a `call_dir` — the session ID and response will be written to files in that directory. For conference calls with CMUX, open the visible workspace and deliver the prompt there.
 
+There are two distinct first-contact cases. Pick the one that matches how the target was specified:
+
+- **Case (A) — fresh workspace** (no session ID given; you resolved a workspace path in Step 1): start a brand-new session. **No `--resume`, no `--fork-session`.**
+- **Case (B) — fork a given session ID** (the user handed you a specific session ID; see Step 4): fork it. **Pass `--resume "$TARGET_SESSION_ID"` AND `--fork-session` together** — never one without the other.
+
 ```bash
+# === Case (A): fresh workspace — no resume, no fork ===
+
 # CMUX transport (quick call / work order):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
-  --name "$SESSION_NAME" [--fork-session] \
+  --name "$SESSION_NAME" \
   --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 
 # CMUX transport (conference call):
 CMUX_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
-  --name "$SESSION_NAME" [--fork-session] \
+  --name "$SESSION_NAME" \
   --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 
 # Headless fallback (any mode):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
-  --name "$SESSION_NAME" [--fork-session] \
+  --name "$SESSION_NAME" \
+  --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
+
+
+# === Case (B): fork a given session ID — resume + fork TOGETHER ===
+# $TARGET_SESSION_ID is the session ID the user gave you (Step 4).
+# $TARGET_PATH MUST be that session's own workspace (from Step 1's resolve), NOT yours.
+
+# CMUX transport (quick call / work order):
+CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
+  --name "$SESSION_NAME" --resume "$TARGET_SESSION_ID" --fork-session \
+  --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
+
+# CMUX transport (conference call):
+CMUX_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
+  --name "$SESSION_NAME" --resume "$TARGET_SESSION_ID" --fork-session \
+  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+
+# Headless fallback (any mode):
+CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
+  --name "$SESSION_NAME" --resume "$TARGET_SESSION_ID" --fork-session \
   --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 ```
 
-Include `--fork-session` when dialing someone else's session ID. Omit it for fresh calls to a workspace (no session to fork from).
+**`--fork-session` and `--resume` are inseparable** when forking someone else's session ID: `--fork-session` copies the resumed transcript into a new id, so with no `--resume` target it copies nothing and yields an empty session. For the "contribute to / help that session" override (Step 4), pass `--resume "$TARGET_SESSION_ID"` *without* `--fork-session`. For fresh calls to a workspace (Case A), pass neither — there is no session to resume or fork from.
 
 If you used `cmux-call.sh` for a conference call, report the visible workspace result to the user and skip the async wait steps below:
 

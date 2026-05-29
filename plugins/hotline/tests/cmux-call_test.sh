@@ -157,6 +157,16 @@ fi
 rm -f "${LAUNCH_SCRIPTS[@]}"
 rm -rf "$tmp"
 
+# --fork-session without --resume must hard-error (forking with no resume target
+# silently creates an empty session — the bug this guard prevents).
+fork_out=$(bash "$SCRIPT_UNDER_TEST" --cwd /tmp --prompt "hello" --fork-session 2>&1)
+fork_rc=$?
+if [[ $fork_rc -eq 1 ]] && printf '%s' "$fork_out" | grep -q "fork-session requires --resume"; then
+  pass "--fork-session without --resume errors and exits 1"
+else
+  fail "--fork-session without --resume errors and exits 1" "rc=$fork_rc out=$fork_out"
+fi
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then

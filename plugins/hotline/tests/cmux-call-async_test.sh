@@ -275,6 +275,24 @@ fi
 assert_async_error_contract "send failure" "$tmp"
 rm -rf "$tmp"
 
+# --fork-session without --resume must hard-error (forking with no resume target
+# silently creates an empty session — the bug this guard prevents).
+fork_out=$(bash "$SCRIPT_UNDER_TEST" --cwd /tmp --prompt "hello" --fork-session 2>&1)
+fork_rc=$?
+if [[ $fork_rc -eq 1 ]] && printf '%s' "$fork_out" | grep -q "fork-session requires --resume"; then
+  pass "--fork-session without --resume errors and exits 1"
+else
+  fail "--fork-session without --resume errors and exits 1" "rc=$fork_rc out=$fork_out"
+fi
+
+# --fork-session WITH --resume must pass the guard (no fork error emitted).
+fork_ok_out=$(bash "$SCRIPT_UNDER_TEST" --cwd /tmp --prompt "hello" --fork-session --resume abc123 2>&1)
+if printf '%s' "$fork_ok_out" | grep -q "fork-session requires --resume"; then
+  fail "--fork-session with --resume passes the guard" "unexpected fork error: $fork_ok_out"
+else
+  pass "--fork-session with --resume passes the guard"
+fi
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
