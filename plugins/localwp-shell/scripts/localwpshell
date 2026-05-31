@@ -28,6 +28,21 @@ msg() {
 	fi
 }
 
+# Compare two paths by filesystem identity (device:inode) rather than string
+# equality. macOS APFS is case-insensitive, so /Users/jt and /Users/JT are the
+# SAME directory — but a string compare of two resolved paths can still differ
+# when a symlink stores its target in a different case than the live cwd. The
+# device:inode pair is immune to case, symlink representation, and trailing
+# slashes. `stat -f` is BSD/macOS syntax (this script is macOS-only). Guard for
+# empty output with `|| return 1` so a nonexistent path can't make two failed
+# stat calls compare equal.
+same_dir() {
+	local a b
+	a=$(stat -f '%d:%i' "$1" 2>/dev/null) || return 1
+	b=$(stat -f '%d:%i' "$2" 2>/dev/null) || return 1
+	[ "$a" = "$b" ]
+}
+
 # Get the current project path (should be the LocalWP site root, not the WordPress public directory)
 CURRENT_PROJECT_PATH=$(pwd | sed 's|/wp-content.*||' | sed 's|/app/public$||')
 
@@ -60,7 +75,7 @@ if [ -f "$SITES_JSON" ]; then
 				spath="${spath/#\~/$HOME}"
 				# Resolve the app/public symlink if it exists
 				RESOLVED=$(cd "$spath/app/public" 2>/dev/null && pwd -P) || continue
-				if [ "$RESOLVED" = "$REAL_PROJECT_PATH" ]; then
+				if same_dir "$RESOLVED" "$REAL_PROJECT_PATH"; then
 					SITE_ID="$sid"
 					LOCALWP_SHELL="$HOME/Library/Application Support/Local/ssh-entry/${SITE_ID}.sh"
 					msg "Found LocalWP site ID via symlink resolution: $SITE_ID"
