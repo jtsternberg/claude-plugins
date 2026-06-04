@@ -41,6 +41,19 @@ Companion to `temp-draft`. Moves a finished draft out of `/tmp/collab-tools/` (o
 
 If no destination is given, the skill asks. If no source is given, it pulls candidates from `/tmp/collab-tools/`. Explicit source paths can come from anywhere in the filesystem.
 
+### `/collab-tools:diff-view`
+
+Generates a rich, **self-contained HTML code-diff view** — 2-way side-by-side or 3-way — from files, pasted code, or git refs, and can screenshot it full-page for dropping straight into a GitHub PR or Slack. Dark GitHub-ish theme, line numbers, syntax highlighting, and word-level intra-line marks on lines that changed. The diff is computed by a small vanilla-JS pass embedded in the file (no dependencies, no network); the output lands under `/tmp/collab-tools/` and opens in `$EDITOR`/browser.
+
+```
+/collab-tools:diff-view Compare the old and new versions of this function side by side and screenshot it.
+```
+
+- **2-way** (2 sources): line-level LCS alignment, adjacent del/insert runs paired into "changed" rows.
+- **3-way** (3 sources): a 3D LCS finds the lines shared by all three (the spine); column-unique lines stack in per-column gaps — ideal for *before / after / extracted-shared* refactors.
+
+Whitespace-insensitive matching (re-indentation isn't a change), blank lines neutral, pluggable syntax keyword set (`--lang php|js|ts|python|go|ruby|rust|sql|generic`, inferred from extension by default). Screenshots are best-effort: Playwright (exact full-page) → headless Chrome (fallback) → graceful HTML-only message if no browser is found.
+
 ## Philosophy
 
 Both skills follow the same rule: **the file is the deliverable, chat stays lean.** Neither skill pastes the draft body into chat — they confirm the path and let the user work in their editor. This keeps token context budget available for follow-up turns and gives the user real editing power instead of a Markdown blob in a scrollback buffer.
