@@ -88,6 +88,35 @@ else
 	msg "LocalWP sites.json not found at: $SITES_JSON"
 fi
 
+# Still no match? Maybe pwd is a PROJECT directory whose contents symlink
+# INTO a LocalWP site tree (e.g. myproject/links/theme -> ~/Sites/wp-site/
+# wp-content/themes/x). Follow each symlink (up to 2 levels deep), derive a
+# candidate site root from its real target, and re-match against sites.json.
+if [ -z "${LOCALWP_SHELL:-}" ] && [ -f "$SITES_JSON" ] && command -v jq >/dev/null 2>&1; then
+	while IFS= read -r project_link; do
+		LINK_TARGET=$(cd "$project_link" 2>/dev/null && pwd -P) || continue
+		CANDIDATE=$(echo "$LINK_TARGET" | sed 's|/wp-content.*||' | sed 's|/app/public$||')
+		[ -d "$CANDIDATE" ] || continue
+		while IFS=$'\t' read -r sid spath; do
+			spath="${spath/#\~/$HOME}"
+			RESOLVED=$(cd "$spath/app/public" 2>/dev/null && pwd -P) || RESOLVED=""
+			if same_dir "$spath" "$CANDIDATE" || { [ -n "$RESOLVED" ] && same_dir "$RESOLVED" "$CANDIDATE"; }; then
+				SITE_ID="$sid"
+				LOCALWP_SHELL="$HOME/Library/Application Support/Local/ssh-entry/${SITE_ID}.sh"
+				# cwd isn't inside the WP tree, so commands (wp, composer) need
+				# to run from the site's WordPress root instead.
+				if [ -f "$CANDIDATE/wp-load.php" ]; then
+					PROJECT_SYMLINK_WP_DIR="$CANDIDATE"
+				elif [ -f "$CANDIDATE/app/public/wp-load.php" ]; then
+					PROJECT_SYMLINK_WP_DIR="$CANDIDATE/app/public"
+				fi
+				msg "Found LocalWP site ID via project symlink ($project_link -> $CANDIDATE): $SITE_ID"
+				break 2
+			fi
+		done < <(jq -r 'to_entries[] | "\(.key)\t\(.value.path)"' "$SITES_JSON")
+	done < <(find "$CURRENT_PROJECT_PATH" -maxdepth 2 -type l 2>/dev/null)
+fi
+
 # Fallback: if we didn't find it via JSON, try the old method
 if [ -z "$LOCALWP_SHELL" ] || [ ! -f "$LOCALWP_SHELL" ]; then
 	msg "Falling back to directory-based search..."
@@ -149,6 +178,13 @@ if [ -n "$LOCALWP_SHELL" ] && [ -f "$LOCALWP_SHELL" ]; then
 	msg "Composer: $(composer --version 2>/dev/null | cut -d' ' -f3 || echo 'not found')  $(which composer)"
 	msg "MySQL:    $(mysql --version 2>/dev/null | sed -nE 's/.*Ver[[:space:]]+([0-9.]+).*/\1/p' || echo 'not found')  $(which mysql)"
 	msg "----"
+
+	# If the site was found via a project symlink, run from the WP root —
+	# the current directory isn't a WordPress installation.
+	if [ -n "${PROJECT_SYMLINK_WP_DIR:-}" ]; then
+		cd "$PROJECT_SYMLINK_WP_DIR"
+		msg "Working directory: $PROJECT_SYMLINK_WP_DIR"
+	fi
 
 	# Run the command passed as arguments
 	if [ $# -gt 0 ]; then

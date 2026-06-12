@@ -7,7 +7,7 @@ description: "Wraps WP-CLI, PHP, MySQL, and Composer commands through LocalWP's 
 
 > **Platform:** macOS only.
 
-Run commands through LocalWP's sandboxed environment (PHP, MySQL, WP-CLI, Composer). Auto-detects the correct LocalWP site from the current working directory, including through symlinked `app/public` directories.
+Run commands through LocalWP's sandboxed environment (PHP, MySQL, WP-CLI, Composer). Auto-detects the correct LocalWP site from the current working directory, including through symlinked `app/public` directories **and project directories whose contents symlink into a site tree** (e.g. `myproject/links/theme -> ~/Sites/wp-site/wp-content/themes/x` — the script follows the project's symlinks, finds the site, and runs commands from its WordPress root).
 
 ## Usage
 
@@ -45,6 +45,18 @@ bash scripts/silentlocalwpshell php -r 'echo PHP_VERSION;'
 - The path contains `Local Sites/`
 - The path is inside a symlinked LocalWP directory (handled automatically)
 - The project has the typical LocalWP structure: `app/public/wp-content/`
+- The project directory contains symlinks INTO a LocalWP site (handled automatically — searched up to 2 levels deep)
+
+## Critical Warnings
+
+**NEVER source a LocalWP ssh-entry script directly** (`source "~/Library/Application Support/Local/ssh-entry/XXX.sh"`). It launches an interactive shell that blocks the agent indefinitely. Always go through `localwpshell` / `silentlocalwpshell` / `wplocal`, which extract the environment without spawning a shell.
+
+**WordPress Multisite: always pass `--url=`.** On a multisite install, WP-CLI without `--url` targets the network's primary site — pages, options, and plugin changes land on the WRONG site silently. Find the right URL first (`wp site list`), then include it in every command:
+
+```bash
+bash scripts/wplocal site list
+bash scripts/wplocal post list --post_type=page --url=https://wp.wpengine/coaching
+```
 
 ### Error Patterns That Mean "Use This Skill"
 
