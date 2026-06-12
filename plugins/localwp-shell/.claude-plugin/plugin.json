@@ -1,6 +1,6 @@
 {
   "name": "localwp-shell",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "description": "Run WP-CLI, PHP, MySQL, and Composer through LocalWP's sandboxed environment",
   "author": {
     "name": "JT Sternberg",
