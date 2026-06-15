@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Upload a markdown file to Google Drive as a Google Doc.
-# Usage: upload.sh <markdown-file> <folder-id> [--title "Custom Title"]
+# Usage: upload.sh <markdown-file> <folder-id-or-url> [--title "Custom Title"]
+#        upload.sh <markdown-file> --folder <folder-id-or-url> [--title "Custom Title"]
+# The folder may be given positionally or via --folder, as a bare ID or a full
+# Drive folder URL (https://drive.google.com/drive/u/0/folders/FOLDER_ID).
 # Output: Google Doc URL on stdout. Errors on stderr.
 set -euo pipefail
 
@@ -16,23 +19,44 @@ if [[ -z "${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-}" ]]; then
 fi
 
 usage() {
-  echo "Usage: $(basename "$0") <markdown-file> <folder-id> [--title \"Title\"]" >&2
+  echo "Usage: $(basename "$0") <markdown-file> <folder-id-or-url> [--title \"Title\"]" >&2
+  echo "       $(basename "$0") <markdown-file> --folder <folder-id-or-url> [--title \"Title\"]" >&2
   exit 1
 }
 
-[[ $# -lt 2 ]] && usage
+[[ $# -lt 1 ]] && usage
 
 FILE="$1"
-FOLDER_ID="$2"
-shift 2
+shift
 
+FOLDER_ID=""
 TITLE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --title) TITLE="$2"; shift 2 ;;
-    *) echo "Unknown option: $1" >&2; usage ;;
+    --folder) FOLDER_ID="$2"; shift 2 ;;
+    --title)  TITLE="$2"; shift 2 ;;
+    --*)      echo "Unknown option: $1" >&2; usage ;;
+    *)
+      # First bare positional after the file is the folder id/url.
+      if [[ -z "$FOLDER_ID" ]]; then
+        FOLDER_ID="$1"; shift
+      else
+        echo "Unexpected argument: $1" >&2; usage
+      fi
+      ;;
   esac
 done
+
+if [[ -z "$FOLDER_ID" ]]; then
+  echo "ERROR: No folder specified. Pass a folder ID/URL positionally or via --folder." >&2
+  usage
+fi
+
+# Accept a full Drive folder URL and reduce it to the bare folder ID the
+# Drive API expects in parents[]. URL: .../folders/FOLDER_ID(/|?|#|end)
+if [[ "$FOLDER_ID" == *"/folders/"* ]]; then
+  FOLDER_ID=$(printf '%s' "$FOLDER_ID" | sed -E 's|.*/folders/([^/?#]+).*|\1|')
+fi
 
 if [[ ! -f "$FILE" ]]; then
   echo "ERROR: File not found: $FILE" >&2
