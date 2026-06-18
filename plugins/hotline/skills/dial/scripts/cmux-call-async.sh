@@ -69,6 +69,13 @@ SESSION_NAME=""
 FORK_SESSION=false
 ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
 KEEP_WORKSPACE=false
+# Placement: where the callee's claude session lands.
+#   sidebyside (default) — a visible surface next to the caller's pane in the
+#                          SAME cmux window (open-side-surface.sh).
+#   detached             — today's behavior: a disconnected new-workspace tab.
+#   window               — a surface in a specific window (open-window-surface.sh).
+PLACEMENT="sidebyside"
+WINDOW_REF=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -79,6 +86,10 @@ while [[ $# -gt 0 ]]; do
     --fork-session)   FORK_SESSION=true;   shift   ;;
     --tools)          ALLOWED_TOOLS="$2";  shift 2 ;;
     --keep-workspace) KEEP_WORKSPACE=true; shift   ;;
+    # Opt out of side-by-side: restore the original new-workspace placement.
+    --detached|--new-workspace) PLACEMENT="detached"; shift ;;
+    # Land in a specific window (find-or-create), for grouping workers by project.
+    --window)         PLACEMENT="window"; WINDOW_REF="$2"; shift 2 ;;
     *)                shift ;;
   esac
 done
@@ -179,6 +190,12 @@ LAUNCH_SCRIPT=$(mktemp /tmp/hotline-launch-XXXXX)
 chmod 700 "$LAUNCH_SCRIPT"
 {
   printf '#!/usr/bin/env bash\n'
+  # Side-by-side / windowed surfaces inherit the CALLER's shell cwd, not the
+  # target workspace's — unlike `cmux new-workspace --cwd`, which sets it. cd
+  # into the target dir so the callee's claude session resolves files (and
+  # --resume's cwd-matched session) correctly. Harmless for the detached path
+  # where the new workspace already opened in CWD.
+  [[ -n "$CWD" ]] && printf 'cd %q || exit 1\n' "$CWD"
   printf 'claude'
   [[ -n "$RESUME_ID"         ]] && printf ' --resume %q'     "$RESUME_ID"
   [[ -z "$RESUME_ID" && -n "$SESSION_ID_PRESET" ]] && \
@@ -200,51 +217,95 @@ chmod 700 "$LAUNCH_SCRIPT"
 } > "$LAUNCH_SCRIPT"
 echo "$LAUNCH_SCRIPT" > "$CALL_DIR/launch_script.txt"
 
-# Open cmux workspace. --focus true is REQUIRED: without it cmux does not
-# spawn a real tty for the workspace's terminal surface, and subsequent
-# `cmux send` and `cmux read-screen` calls fail with "Terminal surface not
-# found". Discovered via live testing.
-WS_NAME="${SESSION_NAME:-hotline}"
-if ! WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --name "$WS_NAME" --focus true 2>&1); then
-  jq -n --arg err "cmux new-workspace failed: $WS_OUTPUT" '{error: $err}' \
-    > "$CALL_DIR/error.txt"
+# Common early-failure exit: write error.txt + done, drop the launch script,
+# return the call_dir (the async contract: the launcher always returns a usable
+# call_dir; the wait-for-* scripts surface the error).
+fail_async() {
+  jq -n --arg err "$1" '{error: $err}' > "$CALL_DIR/error.txt"
   touch "$CALL_DIR/done"
   rm -f "$LAUNCH_SCRIPT"
   jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'
   exit 0
+}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "$PLACEMENT" == "detached" ]]; then
+  # ---- Detached: today's behavior — a new workspace tab. -------------------
+  # --focus true is REQUIRED: without it cmux does not spawn a real tty for the
+  # workspace's terminal surface, and subsequent `cmux send` / `cmux read-screen`
+  # calls fail with "Terminal surface not found". Discovered via live testing.
+  WS_NAME="${SESSION_NAME:-hotline}"
+  if ! WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --name "$WS_NAME" --focus true 2>&1); then
+    fail_async "cmux new-workspace failed: $WS_OUTPUT"
+  fi
+  WS_REF=$(echo "$WS_OUTPUT" | grep -oE 'workspace:[0-9]+' | head -1 || true)
+  [[ -z "$WS_REF" ]] && fail_async "cmux new-workspace failed: $WS_OUTPUT"
+  echo "$WS_REF" > "$CALL_DIR/workspace_ref.txt"
+  SEND_TARGET=(--workspace "$WS_REF")
+
+  # Wait for the workspace shell to be ready before firing the launch script.
+  # Poll until the screen is non-empty (up to 5s) rather than a fixed sleep.
+  for _ in $(seq 1 10); do
+    INIT_SCREEN=$(cmux read-screen --workspace "$WS_REF" --scrollback --lines 9999 \
+      2>/dev/null || true)
+    [[ -n "$INIT_SCREEN" ]] && break
+    sleep 0.5
+  done
+else
+  # ---- Surface placements: side-by-side (default) or a specific window. -----
+  # Both open a VISIBLE terminal surface and wait until its PTY is attached and
+  # the shell is executing input (--wait-ready) — the surface-mode equivalent
+  # of `new-workspace --focus true`. This protects the fresh-PTY race (a
+  # swallowed launch-command \n) and "Terminal surface not found" (PTY not yet
+  # attached). The opener always returns the surface ref even on a readiness
+  # timeout, so we never orphan a surface.
+  READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-8}"
+  if [[ "$PLACEMENT" == "window" ]]; then
+    [[ -z "$WINDOW_REF" ]] && fail_async "--window requires a name or ref"
+    SURF_JSON=$(bash "$SCRIPT_DIR/open-window-surface.sh" --window "$WINDOW_REF" \
+      ${CWD:+--working-directory "$CWD"} --wait-ready --wait-ready-timeout "$READY_TIMEOUT" \
+      --json 2>"$CALL_DIR/surface_err.txt") \
+      || fail_async "open-window-surface.sh failed: $(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
+  else
+    SURF_JSON=$(bash "$SCRIPT_DIR/open-side-surface.sh" --caller --wait-ready \
+      --wait-ready-timeout "$READY_TIMEOUT" --json 2>"$CALL_DIR/surface_err.txt") \
+      || fail_async "open-side-surface.sh failed: $(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
+  fi
+
+  SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
+  SURF_PANE=$(printf '%s' "$SURF_JSON" | jq -r '.pane_ref // empty')
+  SURF_READY=$(printf '%s' "$SURF_JSON" | jq -r '.ready // empty')
+  [[ -z "$SURF_REF" ]] && fail_async "surface opener returned no surface_ref: $SURF_JSON"
+
+  if [[ "$SURF_READY" == "timeout" ]]; then
+    # PTY never confirmed ready — sending now would likely drop the launch
+    # command's \n. Close the surface we created and fail loudly rather than
+    # leave a wedged surface behind.
+    cmux close-surface --surface "$SURF_REF" >/dev/null 2>&1 || true
+    fail_async "surface $SURF_REF PTY never became ready (see surface_err.txt)"
+  fi
+
+  # surface_ref.txt is the cmux-SURFACE-mode signal to the wait-for-* scripts
+  # (mirrors how workspace_ref.txt signals workspace mode). pane_ref.txt lets
+  # them re-attach the PTY if a read-screen ever races.
+  echo "$SURF_REF" > "$CALL_DIR/surface_ref.txt"
+  [[ -n "$SURF_PANE" ]] && echo "$SURF_PANE" > "$CALL_DIR/pane_ref.txt"
+  SEND_TARGET=(--surface "$SURF_REF")
+  # Surface placements live in the caller's own window — keep them visible after
+  # the call instead of auto-closing (the whole point is to SEE the call). The
+  # caller closes the surface when done.
+  KEEP_WORKSPACE=true
+  echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 fi
-WS_REF=$(echo "$WS_OUTPUT" | grep -oE 'workspace:[0-9]+' | head -1 || true)
 
-if [[ -z "$WS_REF" ]]; then
-  jq -n --arg err "cmux new-workspace failed: $WS_OUTPUT" '{error: $err}' \
-    > "$CALL_DIR/error.txt"
-  touch "$CALL_DIR/done"
-  rm -f "$LAUNCH_SCRIPT"
-  jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'
-  exit 0
-fi
-
-echo "$WS_REF" > "$CALL_DIR/workspace_ref.txt"
-
-# Wait for the workspace shell to be ready before firing the launch script.
-# Poll until the screen is non-empty (up to 5s) rather than a fixed sleep.
-for _ in $(seq 1 10); do
-  INIT_SCREEN=$(cmux read-screen --workspace "$WS_REF" --scrollback --lines 9999 \
-    2>/dev/null || true)
-  [[ -n "$INIT_SCREEN" ]] && break
-  sleep 0.5
-done
-
-# Fire the claude session.
-if ! SEND_OUTPUT=$(cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n" 2>&1); then
-  jq -n --arg err "cmux send failed: $SEND_OUTPUT" '{error: $err}' \
-    > "$CALL_DIR/error.txt"
-  [[ "$KEEP_WORKSPACE" != "true" ]] && \
-    cmux close-workspace --workspace "$WS_REF" 2>/dev/null || true
-  rm -f "$LAUNCH_SCRIPT"
-  touch "$CALL_DIR/done"
-  jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'
-  exit 0
+# Fire the claude session into whichever surface/workspace we landed on.
+if ! SEND_OUTPUT=$(cmux send "${SEND_TARGET[@]}" "bash $LAUNCH_SCRIPT\n" 2>&1); then
+  if [[ "$PLACEMENT" == "detached" ]]; then
+    [[ "$KEEP_WORKSPACE" != "true" ]] && \
+      cmux close-workspace "${SEND_TARGET[@]}" 2>/dev/null || true
+  fi
+  fail_async "cmux send failed: $SEND_OUTPUT"
 fi
 
 jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'

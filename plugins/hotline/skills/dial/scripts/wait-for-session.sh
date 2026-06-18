@@ -50,8 +50,18 @@ done
 # Mode detection. cmux mode gets a longer default timeout (60s) because we're
 # waiting for the receiver claude REPL to actually boot, not just a file to
 # appear. Headless mode keeps its existing 30s default.
+#
+# Two cmux sub-modes, auto-detected like the launcher signals them:
+#   surface mode    — surface_ref.txt present (side-by-side / --window placement).
+#                     Poll the cmux SURFACE.
+#   workspace mode  — workspace_ref.txt present (--detached placement).
+#                     Poll the cmux WORKSPACE.
 CMUX_MODE=false
-if [[ -f "$CALL_DIR/workspace_ref.txt" ]]; then
+SURFACE_MODE=false
+if [[ -f "$CALL_DIR/surface_ref.txt" ]]; then
+  CMUX_MODE=true
+  SURFACE_MODE=true
+elif [[ -f "$CALL_DIR/workspace_ref.txt" ]]; then
   CMUX_MODE=true
 fi
 if [[ -z "$TIMEOUT" ]]; then
@@ -67,7 +77,19 @@ check_early_fail() {
 }
 
 if $CMUX_MODE; then
-  WS_REF=$(cat "$CALL_DIR/workspace_ref.txt")
+  # Resolve the read-screen target: a surface (side-by-side/window) or a
+  # workspace (detached). pane_ref (surface mode) lets us re-attach the PTY
+  # if a read-screen ever races with PTY detachment.
+  if $SURFACE_MODE; then
+    REF=$(cat "$CALL_DIR/surface_ref.txt")
+    READ_TARGET=(--surface "$REF")
+    [[ -f "$CALL_DIR/pane_ref.txt" ]] && \
+      cmux focus-pane --pane "$(cat "$CALL_DIR/pane_ref.txt")" >/dev/null 2>&1 || true
+  else
+    REF=$(cat "$CALL_DIR/workspace_ref.txt")
+    READ_TARGET=(--workspace "$REF")
+  fi
+  WS_REF="$REF"
   if [[ ! -f "$CALL_DIR/session_id_preset.txt" ]]; then
     echo "CMUX call_dir missing session_id_preset.txt — launcher bug" >&2
     exit 1
@@ -108,12 +130,12 @@ if $CMUX_MODE; then
       else
         DIAG=" (no banner matched on screen; transcript-file check skipped — cwd.txt absent)"
       fi
-      echo "Timed out waiting for Claude REPL to boot in cmux workspace ${WS_REF} (${TIMEOUT}s).${DIAG} Common causes: launch-script claude invocation is malformed (e.g. --allowedTools without a -- separator before the positional prompt), or the workspace lost its tty." >&2
+      echo "Timed out waiting for Claude REPL to boot in cmux ${REF} (${TIMEOUT}s).${DIAG} Common causes: launch-script claude invocation is malformed (e.g. --allowedTools without a -- separator before the positional prompt), or the surface/workspace lost its tty." >&2
       exit 1
     fi
 
     # Signal A: banner on cmux read-screen.
-    SCREEN=$(cmux read-screen --workspace "$WS_REF" --scrollback --lines 9999 \
+    SCREEN=$(cmux read-screen "${READ_TARGET[@]}" --scrollback --lines 9999 \
       2>/dev/null || true)
     if [[ -n "$SCREEN" ]]; then
       CLEAN=$(echo "$SCREEN" | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")

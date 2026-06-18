@@ -26,6 +26,12 @@ RESUME_ID=""
 SESSION_NAME=""
 FORK_SESSION=false
 ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
+# Placement (see cmux-call-async.sh for the full rationale):
+#   sidebyside (default) — visible surface next to the caller, SAME window.
+#   detached             — original behavior: a new-workspace tab.
+#   window               — a surface in a specific window (find-or-create).
+PLACEMENT="sidebyside"
+WINDOW_REF=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -35,6 +41,8 @@ while [[ $# -gt 0 ]]; do
     --name) SESSION_NAME="$2"; shift 2 ;;
     --fork-session) FORK_SESSION=true; shift ;;
     --tools) ALLOWED_TOOLS="$2"; shift 2 ;;
+    --detached|--new-workspace) PLACEMENT="detached"; shift ;;
+    --window) PLACEMENT="window"; WINDOW_REF="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -54,17 +62,44 @@ if $FORK_SESSION && [[ -z "$RESUME_ID" ]]; then
   exit 1
 fi
 
-# --focus true is REQUIRED: without it cmux does not spawn a real tty for the
-# workspace's terminal surface, and subsequent `cmux send` calls fail with
-# "Terminal surface not found". Discovered via live testing.
-WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --focus true 2>&1)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# cmux returns "OK workspace:<N>" — extract the ref
-WS_REF=$(echo "$WS_OUTPUT" | grep -oE 'workspace:[0-9]+' | head -1 || true)
-
-if [[ -z "$WS_REF" ]]; then
-  jq -n --arg err "cmux new-workspace failed: $WS_OUTPUT" '{error: $err}'
-  exit 1
+# Decide where the conference surface lands. SEND_TARGET is the cmux send/output
+# target; PLACE_REF + PLACE_KIND describe it for the returned JSON.
+SEND_TARGET=()
+PLACE_REF=""
+PLACE_KIND=""
+if [[ "$PLACEMENT" == "detached" ]]; then
+  # --focus true is REQUIRED: without it cmux does not spawn a real tty for the
+  # workspace's terminal surface, and subsequent `cmux send` calls fail with
+  # "Terminal surface not found". Discovered via live testing.
+  WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --focus true 2>&1)
+  WS_REF=$(echo "$WS_OUTPUT" | grep -oE 'workspace:[0-9]+' | head -1 || true)
+  if [[ -z "$WS_REF" ]]; then
+    jq -n --arg err "cmux new-workspace failed: $WS_OUTPUT" '{error: $err}'
+    exit 1
+  fi
+  SEND_TARGET=(--workspace "$WS_REF")
+  PLACE_REF="$WS_REF"; PLACE_KIND="workspace"
+else
+  # Surface placement: open a VISIBLE surface and wait for its PTY (--wait-ready),
+  # the surface-mode equivalent of `new-workspace --focus true`. Protects the
+  # fresh-PTY race + "Terminal surface not found".
+  READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-8}"
+  if [[ "$PLACEMENT" == "window" ]]; then
+    [[ -z "$WINDOW_REF" ]] && { jq -n '{error: "--window requires a name or ref"}'; exit 1; }
+    SURF_JSON=$(bash "$SCRIPT_DIR/open-window-surface.sh" --window "$WINDOW_REF" \
+      ${CWD:+--working-directory "$CWD"} --wait-ready --wait-ready-timeout "$READY_TIMEOUT" --json 2>&1) \
+      || { jq -n --arg e "open-window-surface failed: $SURF_JSON" '{error: $e}'; exit 1; }
+  else
+    SURF_JSON=$(bash "$SCRIPT_DIR/open-side-surface.sh" --caller --wait-ready \
+      --wait-ready-timeout "$READY_TIMEOUT" --json 2>&1) \
+      || { jq -n --arg e "open-side-surface failed: $SURF_JSON" '{error: $e}'; exit 1; }
+  fi
+  SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
+  [[ -z "$SURF_REF" ]] && { jq -n --arg e "surface opener returned no ref: $SURF_JSON" '{error: $e}'; exit 1; }
+  SEND_TARGET=(--surface "$SURF_REF")
+  PLACE_REF="$SURF_REF"; PLACE_KIND="surface"
 fi
 
 SESSION_ID_PRESET=""
@@ -90,6 +125,9 @@ chmod 700 "$LAUNCH_SCRIPT"
   printf '#!/usr/bin/env bash\n'
   printf 'cleanup() { rm -f "$0"; }\n'
   printf 'trap cleanup EXIT\n'
+  # Surface placements inherit the caller's shell cwd — cd into the target dir
+  # so the callee resolves files / cwd-matched --resume sessions correctly.
+  [[ -n "$CWD" ]] && printf 'cd %q || exit 1\n' "$CWD"
   printf 'claude'
   if [[ -n "$RESUME_ID" ]]; then
     printf ' --resume %q' "$RESUME_ID"
@@ -111,11 +149,20 @@ chmod 700 "$LAUNCH_SCRIPT"
   printf '\n'
 } > "$LAUNCH_SCRIPT"
 
-if ! cmux send --workspace "$WS_REF" "bash $LAUNCH_SCRIPT\n"; then
+if ! cmux send "${SEND_TARGET[@]}" "bash $LAUNCH_SCRIPT\n"; then
   rm -f "$LAUNCH_SCRIPT"
   jq -n --arg err "cmux send failed" '{error: $err}'
   exit 1
 fi
 
-jq -n --arg ws "$WS_REF" --arg cwd "$CWD" --arg sid "${SESSION_ID_PRESET:-new}" \
-  '{workspace_ref: $ws, cwd: $cwd, session_id: $sid, message: "CMUX workspace opened with Claude session"}'
+# Emit both workspace_ref and surface_ref keys (one null) so callers can read
+# whichever they need. workspace_ref stays populated in detached mode for
+# backward compatibility; surface placements populate surface_ref instead.
+WS_OUT=""; SURF_OUT=""
+if [[ "$PLACE_KIND" == "surface" ]]; then SURF_OUT="$PLACE_REF"; else WS_OUT="$PLACE_REF"; fi
+jq -n --arg ws "$WS_OUT" --arg surf "$SURF_OUT" --arg cwd "$CWD" \
+  --arg sid "${SESSION_ID_PRESET:-new}" --arg kind "$PLACE_KIND" \
+  '{workspace_ref: (if $ws == "" then null else $ws end),
+    surface_ref:   (if $surf == "" then null else $surf end),
+    placement: $kind, cwd: $cwd, session_id: $sid,
+    message: "CMUX \($kind) opened with Claude session"}'
