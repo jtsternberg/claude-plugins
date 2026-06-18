@@ -164,27 +164,22 @@ rm -f "${LAUNCH_SCRIPTS[@]}"
 rm -rf "$tmp"
 
 # --- Default placement: side-by-side surface ---------------------------------
-# With no --detached, cmux-call.sh opens a sibling surface via
-# open-side-surface.sh (delegating readiness to surface-ready.sh) and sends the
-# launch script to that SURFACE, not a new workspace.
+# With no --detached, cmux-call.sh RESOLVES and calls cmux-cli's canonical
+# open-side-surface.sh (injected here via a stub), then sends the launch script
+# to that SURFACE, not a new workspace.
 tmp=$(mktemp -d /tmp/hotline-cmux-call-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd"
-: > "$tmp/screen.txt"
+cat > "$tmp/open-side.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "invoked: $*" >> "${SIDE_STUB_LOG:?}"
+printf '%s\n' '{"surface_ref":"surface:777","pane_ref":"pane:55","workspace_ref":"workspace:5","ready":"ready"}'
+EOF
+chmod +x "$tmp/open-side.sh"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 ST="${CMUX_FAKE_STATE:?}"
 case "$1" in
-  identify) echo '{"caller":{"pane_ref":"pane:1","workspace_ref":"workspace:5","window_ref":"window:2","surface_ref":"surface:9"}}' ;;
-  tree) echo '{"windows":[{"ref":"window:2","workspaces":[{"ref":"workspace:5","panes":[{"ref":"pane:1","index":0}]}]}]}' ;;
-  new-pane|new-surface) echo "OK surface:777 pane:55 workspace:5" ;;
-  focus-pane) echo "$*" >> "$ST/focus_calls" ;;
-  send)
-    echo "$*" >> "$ST/send_calls"
-    if [[ "$*" == *"__HOTLINE_PTYREADY_"* ]]; then
-      m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
-      { echo "$m"; echo "$m"; } >> "$ST/screen.txt"
-    fi
-    ;;
+  send) echo "$*" >> "$ST/send_calls" ;;
   read-screen) cat "$ST/screen.txt" 2>/dev/null ;;
   *) exit 0 ;;
 esac
@@ -192,7 +187,9 @@ EOF
 chmod +x "$tmp/bin/cmux"
 
 env -u HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS \
-  PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" bash "$SCRIPT_UNDER_TEST" \
+  PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
+  bash "$SCRIPT_UNDER_TEST" \
   --cwd "$tmp/cwd" --name "sbs test" \
   --prompt "/hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hi" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
@@ -201,6 +198,13 @@ if [[ $rc -eq 0 ]]; then
   pass "side-by-side default exits successfully"
 else
   fail "side-by-side default exits successfully" "rc=$rc stderr=$(cat "$tmp/stderr.txt")"
+fi
+
+if grep -q "invoked:.*--wait-ready" "$tmp/side_log" 2>/dev/null; then
+  pass "side-by-side resolves and calls cmux-cli's opener with --wait-ready"
+else
+  fail "side-by-side resolves and calls cmux-cli's opener with --wait-ready" \
+       "side_log=$(cat "$tmp/side_log" 2>/dev/null || echo NONE)"
 fi
 
 send_calls=$(cat "$tmp/send_calls" 2>/dev/null || true)
@@ -216,16 +220,29 @@ else
   fail "side-by-side reports placement=surface with surface_ref and null workspace_ref" \
        "placement=$placement surface_ref=$surf_ref workspace_ref=$ws_ref"
 fi
-
-# Gotcha (Terminal surface not found): readiness must focus-pane before probing.
-if [[ -s "$tmp/focus_calls" ]] && grep -q "focus-pane" "$tmp/focus_calls"; then
-  pass "side-by-side forces PTY attach (focus-pane) before sending"
-else
-  fail "side-by-side forces PTY attach (focus-pane) before sending" \
-       "focus_calls=$(cat "$tmp/focus_calls" 2>/dev/null || echo NONE)"
-fi
 ls=$(printf '%s' "$send_calls" | sed -E 's/.*bash (\/tmp\/hotline-cmux-launch-[^\\[:space:]]+).*/\1/' | tail -1)
 rm -f "$ls" 2>/dev/null || true
+rm -rf "$tmp"
+
+# --- Headless fallback: cmux present, cmux-cli opener absent -----------------
+tmp=$(mktemp -d /tmp/hotline-cmux-call-test-XXXXXX)
+mkdir -p "$tmp/bin" "$tmp/cwd" "$tmp/empty"
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "${CMUX_FAKE_STATE:?}/cmux_calls"
+exit 0
+EOF
+chmod +x "$tmp/bin/cmux"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/nope.sh" HOTLINE_PLUGINS_DIR="$tmp/empty" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hi" 2>"$tmp/stderr.txt")
+fb=$(printf '%s' "$out" | jq -r '.fallback // empty' 2>/dev/null)
+if [[ "$fb" == "headless" && ! -f "$tmp/cmux_calls" ]]; then
+  pass "missing opener signals fallback:headless and touches no cmux"
+else
+  fail "missing opener signals fallback:headless and touches no cmux" \
+       "out=$out cmux_calls=$(cat "$tmp/cmux_calls" 2>/dev/null || echo NONE)"
+fi
 rm -rf "$tmp"
 
 # --fork-session without --resume must hard-error (forking with no resume target

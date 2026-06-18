@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Tests for the side-by-side / --window surface-placement primitives:
-#   surface-ready.sh        — PTY-readiness probe (shared by both paths)
-#   open-side-surface.sh    — split-vs-adjacent decision tree
+# Tests for the hotline-net-new surface-placement primitives:
+#   surface-ready.sh        — PTY-readiness probe (used by the --window path)
 #   open-window-surface.sh  — find-or-create window, land a surface
 #
+# The side-by-side split-vs-adjacent decision tree is NOT tested here: hotline
+# no longer carries a copy of it — it resolves and calls cmux-cli's canonical
+# open-side-surface.sh at runtime (covered by the resolution + degrade tests in
+# cmux-call-async_test.sh / cmux-call_test.sh, and by cmux-cli's own suite).
+#
 # Each protected gotcha from the work order has a named case here against the
-# NEW surface path:
+# surface path:
 #   • "Terminal surface not found" → readiness focus-pane's the pane first.
 #   • Fresh-PTY race (swallowed \n)  → readiness RE-SENDS the probe and only
 #                                       reports ready on >=2 marker hits.
@@ -19,7 +23,6 @@ set -u
 
 SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/dial/scripts"
 READY="$SCRIPTS/surface-ready.sh"
-SIDE="$SCRIPTS/open-side-surface.sh"
 WIN="$SCRIPTS/open-window-surface.sh"
 
 PASS=0
@@ -117,58 +120,6 @@ if [[ $rc -eq 3 ]] && grep -q "timed out" "$tmp/err.txt"; then
   pass "readiness exits 3 with a diagnostic when the PTY never echoes"
 else
   fail "readiness exits 3 with a diagnostic when the PTY never echoes" "rc=$rc err=$(cat "$tmp/err.txt")"
-fi
-rm -rf "$tmp"
-
-echo ""
-echo "open-side-surface.sh decision tree:"
-
-# Shared identify output: caller in window:2 / workspace:5 / pane:1.
-IDENTIFY='{"caller":{"pane_ref":"pane:1","workspace_ref":"workspace:5","window_ref":"window:2","surface_ref":"surface:9"},"focused":{"pane_ref":"pane:1","workspace_ref":"workspace:5","window_ref":"window:2","surface_ref":"surface:9"}}'
-
-# Case D1: single pane → new-pane --direction right.
-tmp=$(mktemp -d /tmp/hotline-side-XXXXXX); mkdir -p "$tmp/bin"
-cat > "$tmp/bin/cmux" <<EOF
-#!/usr/bin/env bash
-ST="\${CMUX_FAKE_STATE:?}"
-case "\$1" in
-  identify) echo '$IDENTIFY' ;;
-  tree) echo '{"windows":[{"ref":"window:2","workspaces":[{"ref":"workspace:5","panes":[{"ref":"pane:1","index":0}]}]}]}' ;;
-  new-pane)    echo "\$*" >> "\$ST/create_calls"; echo "OK surface:100 pane:2 workspace:5" ;;
-  new-surface) echo "\$*" >> "\$ST/create_calls"; echo "OK surface:100 pane:2 workspace:5" ;;
-  *) exit 0 ;;
-esac
-EOF
-chmod +x "$tmp/bin/cmux"
-out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" bash "$SIDE" --caller --json 2>"$tmp/err.txt")
-mode=$(printf '%s' "$out" | jq -r '.mode // empty' 2>/dev/null)
-if [[ "$mode" == "new-pane" ]] && grep -q "new-pane --direction right" "$tmp/create_calls" 2>/dev/null; then
-  pass "single-pane workspace → new-pane --direction right"
-else
-  fail "single-pane workspace → new-pane --direction right" "mode=$mode calls=$(cat "$tmp/create_calls" 2>/dev/null) err=$(cat "$tmp/err.txt")"
-fi
-rm -rf "$tmp"
-
-# Case D2: multiple panes → new-surface --pane <adjacent> (reuse existing column).
-tmp=$(mktemp -d /tmp/hotline-side-XXXXXX); mkdir -p "$tmp/bin"
-cat > "$tmp/bin/cmux" <<EOF
-#!/usr/bin/env bash
-ST="\${CMUX_FAKE_STATE:?}"
-case "\$1" in
-  identify) echo '$IDENTIFY' ;;
-  tree) echo '{"windows":[{"ref":"window:2","workspaces":[{"ref":"workspace:5","panes":[{"ref":"pane:1","index":0},{"ref":"pane:2","index":1}]}]}]}' ;;
-  new-pane)    echo "\$*" >> "\$ST/create_calls"; echo "OK surface:100 pane:2 workspace:5" ;;
-  new-surface) echo "\$*" >> "\$ST/create_calls"; echo "OK surface:100 pane:2 workspace:5" ;;
-  *) exit 0 ;;
-esac
-EOF
-chmod +x "$tmp/bin/cmux"
-out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" bash "$SIDE" --caller --json 2>"$tmp/err.txt")
-mode=$(printf '%s' "$out" | jq -r '.mode // empty' 2>/dev/null)
-if [[ "$mode" == "new-surface" ]] && grep -q "new-surface --pane pane:2" "$tmp/create_calls" 2>/dev/null; then
-  pass "multi-pane workspace → new-surface on the adjacent pane"
-else
-  fail "multi-pane workspace → new-surface on the adjacent pane" "mode=$mode calls=$(cat "$tmp/create_calls" 2>/dev/null) err=$(cat "$tmp/err.txt")"
 fi
 rm -rf "$tmp"
 
