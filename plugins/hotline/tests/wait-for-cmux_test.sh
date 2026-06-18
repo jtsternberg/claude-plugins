@@ -378,6 +378,149 @@ fi
 rm -rf "$tmp"
 
 echo ""
+echo "Surface mode (side-by-side / --window placement):"
+
+# Stage a call_dir mimicking the surface-placement launcher output:
+# surface_ref.txt (NOT workspace_ref.txt) is the surface-mode signal.
+stage_surface_call_dir() {
+  local cd="$1" preset="$2" surf_ref="$3" keep="${4:-true}"
+  mkdir -p "$cd"
+  echo "$preset"   > "$cd/session_id_preset.txt"
+  echo "$surf_ref" > "$cd/surface_ref.txt"
+  echo "pane:55"   > "$cd/pane_ref.txt"
+  echo "$keep"     > "$cd/keep_workspace.txt"
+  echo "/tmp/hotline-launch-FAKE-$$" > "$cd/launch_script.txt"
+}
+
+# A fake cmux that records close-surface / close-workspace separately so we can
+# assert surface mode closes the SURFACE, not a workspace.
+make_surface_fake_cmux() {
+  local bin_dir="$1"
+  mkdir -p "$bin_dir"
+  cat > "$bin_dir/cmux" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  read-screen)    cat "${CMUX_FAKE_SCREEN:?}" ;;
+  close-surface)  echo "$@" >> "${CMUX_FAKE_STATE:?}/close_surface_calls" ;;
+  close-workspace)echo "$@" >> "${CMUX_FAKE_STATE:?}/close_workspace_calls" ;;
+  *)              exit 0 ;;
+esac
+EOF
+  chmod +x "$bin_dir/cmux"
+}
+
+# Case S1: wait-for-session promotes session_id via the surface read-screen path.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_surface_fake_cmux "$tmp/bin"
+cat > "$tmp/screen.txt" <<'EOF'
+ ▐▛███▜▌   Claude Code v2.1.141
+▝▜█████▛▘  Opus 4.7
+EOF
+cd="$tmp/call"
+stage_surface_call_dir "$cd" "surf-preset-1" "surface:777"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" CMUX_FAKE_STATE="$tmp" \
+  bash "$WAIT_SESSION" "$cd" --timeout 5 2>"$tmp/err.txt")
+rc=$?
+if [[ $rc -eq 0 && "$out" == "surf-preset-1" ]]; then
+  pass "surface mode: wait-for-session reads the surface and prints the session id"
+else
+  fail "surface mode: wait-for-session reads the surface and prints the session id" \
+       "rc=$rc stdout=$out stderr=$(cat "$tmp/err.txt")"
+fi
+rm -rf "$tmp"
+
+# Case S2: wait-for-response extracts STATUS via the surface and, with keep=true
+# (the surface-mode default), does NOT close the surface or any workspace.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_surface_fake_cmux "$tmp/bin"
+cat > "$tmp/screen.txt" <<'EOF'
+ ▐▛███▜▌   Claude Code v2.1.141
+STATUS: WORK_IN_PROGRESS
+side-by-side answer body
+STATUS: WORK_COMPLETE
+EOF
+cd="$tmp/call"
+stage_surface_call_dir "$cd" "surf-preset-2" "surface:777" "true"
+echo "surf-preset-2" > "$cd/session_id.txt"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" CMUX_FAKE_STATE="$tmp" \
+  bash "$WAIT_RESPONSE" "$cd" --timeout 10 2>"$tmp/err.txt")
+rc=$?
+resp=$(echo "$out" | jq -r '.response' 2>/dev/null || echo "")
+if [[ $rc -eq 0 && "$resp" == *"side-by-side answer body"* ]]; then
+  pass "surface mode: wait-for-response extracts the body from the surface"
+else
+  fail "surface mode: wait-for-response extracts the body from the surface" \
+       "rc=$rc resp=$(printf '%q' "$resp") stderr=$(cat "$tmp/err.txt")"
+fi
+if [[ ! -f "$tmp/close_surface_calls" && ! -f "$tmp/close_workspace_calls" ]]; then
+  pass "surface mode: keep=true leaves the surface open (no close-surface/close-workspace)"
+else
+  fail "surface mode: keep=true leaves the surface open" \
+       "surface=$(cat "$tmp/close_surface_calls" 2>/dev/null) workspace=$(cat "$tmp/close_workspace_calls" 2>/dev/null)"
+fi
+rm -rf "$tmp"
+
+# Case S3: with keep=false, surface mode closes the SURFACE (close-surface),
+# never close-workspace (which would nuke the caller's own window).
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_surface_fake_cmux "$tmp/bin"
+cat > "$tmp/screen.txt" <<'EOF'
+ ▐▛███▜▌   Claude Code v2.1.141
+done body
+STATUS: DONE
+EOF
+cd="$tmp/call"
+stage_surface_call_dir "$cd" "surf-preset-3" "surface:777" "false"
+echo "surf-preset-3" > "$cd/session_id.txt"
+PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" CMUX_FAKE_STATE="$tmp" \
+  bash "$WAIT_RESPONSE" "$cd" --timeout 5 >/dev/null 2>"$tmp/err.txt"
+if grep -q "close-surface --surface surface:777" "$tmp/close_surface_calls" 2>/dev/null; then
+  pass "surface mode: keep=false closes the SURFACE"
+else
+  fail "surface mode: keep=false closes the SURFACE" \
+       "calls=$(cat "$tmp/close_surface_calls" 2>/dev/null || echo NONE)"
+fi
+if [[ ! -f "$tmp/close_workspace_calls" ]]; then
+  pass "surface mode: never calls close-workspace (would kill the caller's window)"
+else
+  fail "surface mode: never calls close-workspace" \
+       "calls=$(cat "$tmp/close_workspace_calls")"
+fi
+rm -rf "$tmp"
+
+# Case S4 (CALL_ID nonce on the new path): a replayed STATUS line WITHOUT the
+# nonce (e.g. --resume scrollback) must be ignored; only the fresh STATUS that
+# carries call_id=<nonce> terminates the call. Mirrors the workspace-mode
+# guarantee but proves it holds when polling a surface.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_surface_fake_cmux "$tmp/bin"
+# Realistic scrollback: a prior call's transcript was replayed (un-nonced
+# STATUS lines), then THIS call's fresh turn runs — beginning, per the ringing
+# protocol, with a nonce-tagged WORK_IN_PROGRESS that resets the body buffer.
+cat > "$tmp/screen.txt" <<'EOF'
+ ▐▛███▜▌   Claude Code v2.1.141
+replayed stale body from a prior call
+STATUS: WORK_COMPLETE
+STATUS: WORK_IN_PROGRESS call_id=abcdef0123456789
+fresh body for THIS call
+STATUS: WORK_COMPLETE call_id=abcdef0123456789
+EOF
+cd="$tmp/call"
+stage_surface_call_dir "$cd" "surf-preset-4" "surface:777" "true"
+echo "surf-preset-4" > "$cd/session_id.txt"
+echo "abcdef0123456789" > "$cd/call_id.txt"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" CMUX_FAKE_STATE="$tmp" \
+  bash "$WAIT_RESPONSE" "$cd" --timeout 10 2>"$tmp/err.txt")
+resp=$(echo "$out" | jq -r '.response' 2>/dev/null || echo "")
+if [[ "$resp" == *"fresh body for THIS call"* && "$resp" != *"replayed stale body"* ]]; then
+  pass "surface mode: nonce-matched STATUS wins; un-nonced replayed STATUS ignored"
+else
+  fail "surface mode: nonce-matched STATUS wins; un-nonced replayed STATUS ignored" \
+       "resp=$(printf '%q' "$resp")"
+fi
+rm -rf "$tmp"
+
+echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
   echo ""

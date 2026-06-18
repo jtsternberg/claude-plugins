@@ -238,7 +238,9 @@ fi
 exit 0
 EOF
 chmod +x "$tmp/bin/cmux"
-PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" \
+# --detached targets the new-workspace placement explicitly (the default is now
+# side-by-side, exercised in surface-placement_test.sh).
+PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --detached --cwd "$tmp/cwd" --prompt "hello" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
 rc=$?
 if [[ $rc -eq 0 ]]; then
@@ -264,7 +266,7 @@ case "$1" in
 esac
 EOF
 chmod +x "$tmp/bin/cmux"
-PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" \
+PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --detached --cwd "$tmp/cwd" --prompt "hello" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
 rc=$?
 if [[ $rc -eq 0 ]]; then
@@ -274,6 +276,124 @@ else
 fi
 assert_async_error_contract "send failure" "$tmp"
 rm -rf "$tmp"
+
+# ---------------------------------------------------------------------------
+# Default placement (side-by-side surface): the async launcher opens a sibling
+# surface, waits for its PTY, writes surface_ref.txt (NOT workspace_ref.txt),
+# defaults keep_workspace.txt=true, and sends the launch script to the SURFACE.
+# ---------------------------------------------------------------------------
+make_surface_fake_cmux() {
+  # $1 = bin dir. Honors CMUX_FAKE_STATE for recording + screen buffer.
+  mkdir -p "$1"
+  cat > "$1/cmux" <<'EOF'
+#!/usr/bin/env bash
+ST="${CMUX_FAKE_STATE:?}"
+case "$1" in
+  identify) echo '{"caller":{"pane_ref":"pane:1","workspace_ref":"workspace:5","window_ref":"window:2","surface_ref":"surface:9"}}' ;;
+  tree) echo '{"windows":[{"ref":"window:2","workspaces":[{"ref":"workspace:5","panes":[{"ref":"pane:1","index":0}]}]}]}' ;;
+  new-pane|new-surface) echo "OK surface:777 pane:55 workspace:5" ;;
+  focus-pane) echo "$*" >> "$ST/focus_calls" ;;
+  send)
+    echo "$*" >> "$ST/send_calls"
+    if [[ "$*" == *"__HOTLINE_PTYREADY_"* ]]; then
+      m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
+      { echo "$m"; echo "$m"; } >> "$ST/screen.txt"
+    fi
+    ;;
+  read-screen) cat "$ST/screen.txt" 2>/dev/null ;;
+  close-surface) echo "$*" >> "$ST/close_calls" ;;
+  *) exit 0 ;;
+esac
+EOF
+  chmod +x "$1/cmux"
+}
+
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/cwd"
+: > "$tmp/screen.txt"
+make_surface_fake_cmux "$tmp/bin"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello surface" 2>"$tmp/stderr.txt")
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+
+if [[ -n "$call_dir" && -f "$call_dir/surface_ref.txt" && "$(cat "$call_dir/surface_ref.txt")" == "surface:777" ]]; then
+  pass "side-by-side async writes surface_ref.txt (surface-mode signal)"
+else
+  fail "side-by-side async writes surface_ref.txt (surface-mode signal)" \
+       "call_dir=$call_dir stderr=$(cat "$tmp/stderr.txt")"
+fi
+if [[ -n "$call_dir" && ! -f "$call_dir/workspace_ref.txt" ]]; then
+  pass "side-by-side async does NOT write workspace_ref.txt"
+else
+  fail "side-by-side async does NOT write workspace_ref.txt"
+fi
+if [[ -n "$call_dir" && "$(cat "$call_dir/keep_workspace.txt" 2>/dev/null)" == "true" ]]; then
+  pass "side-by-side async keeps the surface (keep_workspace.txt=true)"
+else
+  fail "side-by-side async keeps the surface (keep_workspace.txt=true)" \
+       "got: $(cat "$call_dir/keep_workspace.txt" 2>/dev/null)"
+fi
+if grep -q "send --surface surface:777 bash /tmp/hotline-launch" "$tmp/send_calls" 2>/dev/null; then
+  pass "side-by-side async sends launch script to the surface"
+else
+  fail "side-by-side async sends launch script to the surface" \
+       "send_calls=$(cat "$tmp/send_calls" 2>/dev/null)"
+fi
+# Gotcha (fresh-PTY race): readiness re-sends the echo probe AND focus-pane runs
+# first (Terminal-surface-not-found). Both must have happened before launch send.
+if grep -q "focus-pane" "$tmp/focus_calls" 2>/dev/null && \
+   grep -q "__HOTLINE_PTYREADY_" "$tmp/send_calls" 2>/dev/null; then
+  pass "side-by-side async waits for PTY readiness (focus-pane + echo probe)"
+else
+  fail "side-by-side async waits for PTY readiness (focus-pane + echo probe)"
+fi
+[[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
+# Surface readiness TIMEOUT: if the PTY never echoes the probe, the launcher
+# must close the surface it created (no orphan) and write the async error
+# contract — never leave a wedged surface behind.
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/cwd"
+: > "$tmp/screen.txt"
+mkdir -p "$tmp/bin"
+# Like the surface fake, but send() never echoes the marker → readiness times out.
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+ST="${CMUX_FAKE_STATE:?}"
+case "$1" in
+  identify) echo '{"caller":{"pane_ref":"pane:1","workspace_ref":"workspace:5","window_ref":"window:2"}}' ;;
+  tree) echo '{"windows":[{"ref":"window:2","workspaces":[{"ref":"workspace:5","panes":[{"ref":"pane:1","index":0}]}]}]}' ;;
+  new-pane|new-surface) echo "OK surface:777 pane:55 workspace:5" ;;
+  focus-pane) : ;;
+  send) echo "$*" >> "$ST/send_calls" ;;
+  read-screen) echo "no marker here" ;;
+  close-surface) echo "$*" >> "$ST/close_calls" ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/bin/cmux"
+# HOTLINE_SURFACE_READY_TIMEOUT keeps the test fast (open-side-surface passes it
+# through to --wait-ready-timeout).
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" HOTLINE_SURFACE_READY_TIMEOUT=1 \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" 2>"$tmp/stderr.txt")
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+if [[ -n "$call_dir" && -f "$call_dir/done" && -f "$call_dir/error.txt" ]]; then
+  pass "surface readiness timeout writes the async error contract"
+else
+  fail "surface readiness timeout writes the async error contract" \
+       "call_dir=$call_dir stderr=$(cat "$tmp/stderr.txt")"
+fi
+if grep -q "close-surface --surface surface:777" "$tmp/close_calls" 2>/dev/null; then
+  pass "surface readiness timeout closes the surface (no orphan)"
+else
+  fail "surface readiness timeout closes the surface (no orphan)" \
+       "close_calls=$(cat "$tmp/close_calls" 2>/dev/null || echo NONE)"
+fi
+[[ -n "$call_dir" && ! -f "$call_dir/surface_ref.txt" ]] && \
+  pass "surface readiness timeout does NOT signal surface-mode to the wait scripts" || \
+  fail "surface readiness timeout does NOT signal surface-mode to the wait scripts"
+rm -rf "$tmp" "$call_dir"
 
 # --fork-session without --resume must hard-error (forking with no resume target
 # silently creates an empty session — the bug this guard prevents).
