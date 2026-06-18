@@ -111,7 +111,9 @@ Hotline also caches workspace identities (via the `hotline-pickup` skill) — na
 
 ### Where the call lands (placement)
 
-When a call routes through `cmux`, Hotline opens the callee **side-by-side with your current pane, in the same window** — you watch the call happen beside the original conversation. The launch scripts open the surface with the split-vs-adjacent decision tree (from the `cmux-cli` skill) and wait for its PTY to attach before sending the prompt, so the callee's first keystrokes are never dropped. Side-by-side surfaces stay open after the call (they live in your window); the caller closes them when done.
+When a call routes through `cmux`, Hotline opens the callee **side-by-side with your current pane, in the same window** — you watch the call happen beside the original conversation. It does this by calling the [`cmux-cli`](https://cmux.com/) plugin's `open-side-surface.sh` (resolved at runtime — Hotline keeps no copy of the split-vs-adjacent decision tree), which waits for the new surface's PTY to attach before the prompt is sent, so the callee's first keystrokes are never dropped. Side-by-side surfaces stay open after the call (they live in your window); the caller closes them when done.
+
+**If `cmux` is running but the `cmux-cli` plugin isn't installed**, side-by-side placement isn't available, so Hotline falls back to the **headless** transport for that call (it doesn't silently drop the callee into a detached tab). `--detached` and `--window` don't need `cmux-cli` and keep working on `cmux` regardless.
 
 Two opt-outs, passed as flags on the dial command:
 

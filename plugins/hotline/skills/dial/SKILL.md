@@ -166,12 +166,14 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 
 **Why prefer CMUX?** Interactive `claude` sessions (no `-p` flag) do not consume programmatic usage credits. The hotline protocol — STATUS signals, response format — is defined by the ringing skill, not the transport, so the receiver's output is identical either way. Headless is the fallback for machines where cmux isn't running.
 
-> **Default cmux placement: side-by-side surface (since v0.13).** A cmux-routed call lands the callee in a **visible terminal surface next to your current pane, in the same window** — so you watch the call happen beside the original conversation. This replaces the old behavior of spawning a disconnected new-workspace tab. The launch scripts open the surface via `open-side-surface.sh` (split-vs-adjacent decision tree) and wait for its PTY to attach before sending the prompt, so the callee's first keystrokes never get dropped. Two opt-outs (Arguments above):
+> **Default cmux placement: side-by-side surface (since v0.13).** A cmux-routed call lands the callee in a **visible terminal surface next to your current pane, in the same window** — so you watch the call happen beside the original conversation. This replaces the old behavior of spawning a disconnected new-workspace tab. The launch scripts open the surface by calling the **`cmux-cli` plugin's** `open-side-surface.sh` (resolved at runtime — hotline carries no copy of the split-vs-adjacent decision tree) and wait for its PTY to attach before sending the prompt, so the callee's first keystrokes never get dropped. Two opt-outs (Arguments above):
 >
 > - `--detached` / `--new-workspace` → the original new-workspace-tab placement.
 > - `--window <name|ref>` → a surface in a specific window (find-or-create), for grouping workers by project.
 >
 > Side-by-side and windowed surfaces stay open after the call (they live in your window — closing them would yank a pane you're looking at); detached workspaces are auto-closed once the response is captured. The `PLACEMENT_FLAG` you parsed in Arguments is appended to the launch-script call below; an empty value means the side-by-side default.
+>
+> **cmux present, but cmux-cli not installed → headless fallback.** Side-by-side placement is the only path that needs the cmux-cli plugin. If it isn't installed, the launch scripts can't resolve `open-side-surface.sh`, so — for the **default** placement only — they return `{"fallback":"headless"}` instead of a `call_dir`/result, and you must re-route this call through the headless transport (Step 5 shows the check). `--detached` and `--window` never need cmux-cli (detached uses `new-workspace`; `--window` uses hotline's own `open-window-surface.sh`), so they proceed on cmux regardless.
 
 ### Step 4: Check for Existing Session and Determine Fork Behavior
 
@@ -240,6 +242,20 @@ CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET
   --name "$SESSION_NAME" \
   --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
+```
+
+**Handle the headless-fallback signal (cmux transport, default placement only).** When a cmux-call returns `{"fallback":"headless"}` instead of a `call_dir`, cmux is up but the `cmux-cli` plugin isn't installed, so side-by-side placement is unavailable. Re-route this exact call through the headless transport — same `--cwd`/`--prompt`/`--resume`/`--fork-session` args, just the headless launcher:
+
+```bash
+if [[ "$(echo "$CALL_RESULT" | jq -r '.fallback // empty')" == "headless" ]]; then
+  # Re-issue via headless-call-async.sh (quick call / work order) or
+  # headless-call.sh (conference). Do NOT pass $PLACEMENT_FLAG — headless
+  # ignores placement.
+  CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
+    --name "$SESSION_NAME" \
+    --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
+fi
 
 
 # === Case (B): fork a given session ID — resume + fork TOGETHER ===

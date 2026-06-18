@@ -71,9 +71,13 @@ Common failure modes and how to recover from them.
 
 ### Surface placement (side-by-side / `--window`)
 
-**`open-side-surface.sh failed` / `open-window-surface.sh failed` in error.txt**
-- The launcher couldn't open the side-by-side or windowed surface — usually `cmux identify` failed (you're outside cmux or the socket is unreachable), or `cmux tree` returned no panes.
-- Recovery: the error.txt carries the opener's stderr. If cmux itself is fine, retry with `--detached` to use the new-workspace placement (which doesn't depend on `cmux identify`). If `cmux identify` consistently fails, fall back to headless (`--headless`).
+**`{"fallback":"headless"}` returned instead of a `call_dir`**
+- cmux is up but the `cmux-cli` plugin isn't installed, so the side-by-side opener (`open-side-surface.sh`) couldn't be resolved. This is expected, not an error.
+- Recovery: re-issue the same call through the headless transport (`headless-call-async.sh` / `headless-call.sh`). The dial SKILL's Step 5 does this automatically. To force side-by-side, install the `cmux-cli` plugin; or pass `--detached` / `--window` (neither needs `cmux-cli`).
+
+**`open-side-surface failed` / `open-window-surface failed` in error.txt (opener resolved but errored)**
+- The opener ran but couldn't create the surface — usually `cmux identify` failed (socket unreachable) or `cmux tree` returned no panes.
+- Recovery: the error.txt carries the opener's stderr. If cmux itself is fine, retry with `--detached` (new-workspace placement, no `cmux identify` dependency). If `cmux identify` consistently fails, force headless with `--headless`.
 
 **`surface <ref> PTY never became ready`**
 - The new surface was created but its shell never echoed the readiness probe within the timeout (`surface-ready.sh` exited 3). Common causes: a very slow shell rc, a non-shell program in the surface, or the PTY backend never attaching.
