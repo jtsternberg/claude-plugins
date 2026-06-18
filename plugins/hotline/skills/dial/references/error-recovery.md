@@ -69,6 +69,24 @@ Common failure modes and how to recover from them.
 - CMUX couldn't open a new workspace (maybe at workspace limit).
 - Recovery: Fall back to headless for this call. Log the failure for debugging.
 
+### Surface placement (side-by-side / `--window`)
+
+**`open-side-surface.sh failed` / `open-window-surface.sh failed` in error.txt**
+- The launcher couldn't open the side-by-side or windowed surface — usually `cmux identify` failed (you're outside cmux or the socket is unreachable), or `cmux tree` returned no panes.
+- Recovery: the error.txt carries the opener's stderr. If cmux itself is fine, retry with `--detached` to use the new-workspace placement (which doesn't depend on `cmux identify`). If `cmux identify` consistently fails, fall back to headless (`--headless`).
+
+**`surface <ref> PTY never became ready`**
+- The new surface was created but its shell never echoed the readiness probe within the timeout (`surface-ready.sh` exited 3). Common causes: a very slow shell rc, a non-shell program in the surface, or the PTY backend never attaching.
+- Recovery: the launcher already closed the surface (no orphan) and wrote the async error. Bump the budget with `HOTLINE_SURFACE_READY_TIMEOUT=<seconds>` (default 8) and retry, or use `--detached`.
+
+**"Terminal surface not found" mid-call**
+- The surface lost (or never attached) its PTY. The wait scripts re-`focus-pane` the surface's pane each poll in surface mode to recover, but a surface the user manually closed can't be recovered.
+- Recovery: if the user closed the surface, the call is gone — re-dial. Otherwise retry; the readiness probe + focus-pane normally handles transient attach races.
+
+**`--window <name>` keeps creating new windows**
+- cmux windows are not directly name-addressable, so Hotline identifies a "named window" by a workspace titled `<name>` inside it. If that titled workspace was renamed or closed, the next `--window <name>` won't find it and will create a fresh window.
+- Recovery: pass the explicit `window:<n>` ref instead of a name when you need to target a specific existing window, or accept that the name reseeds a new window + titled workspace.
+
 ## Identity Cache Issues
 
 **Stale identity — resolution picks wrong workspace**
