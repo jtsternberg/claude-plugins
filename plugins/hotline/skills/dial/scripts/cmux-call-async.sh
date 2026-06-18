@@ -115,6 +115,22 @@ if $FORK_SESSION && [[ -z "$RESUME_ID" ]]; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Side-by-side placement delegates to cmux-cli's canonical open-side-surface.sh
+# (single source of truth — no vendored copy). cmux can be present without the
+# cmux-cli plugin installed, in which case the opener won't resolve. Detect that
+# BEFORE creating any call_dir / launch script and signal the dial skill to fall
+# back to the HEADLESS transport (--detached / --window don't need the opener:
+# detached uses new-workspace, --window uses hotline's own open-window-surface).
+OPEN_SIDE_SURFACE=""
+if [[ "$PLACEMENT" == "sidebyside" ]]; then
+  if ! OPEN_SIDE_SURFACE=$(bash "$SCRIPT_DIR/resolve-side-opener.sh" 2>/dev/null); then
+    jq -n '{fallback: "headless", reason: "cmux-cli open-side-surface.sh not found; side-by-side placement unavailable"}'
+    exit 0
+  fi
+fi
+
 CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
 echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 # Persist CWD so wait-for-session.sh can compute the claude transcript path
@@ -228,10 +244,8 @@ fail_async() {
   exit 0
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 if [[ "$PLACEMENT" == "detached" ]]; then
-  # ---- Detached: today's behavior — a new workspace tab. -------------------
+  # ---- Detached: original placement — a new workspace tab. ------------------
   # --focus true is REQUIRED: without it cmux does not spawn a real tty for the
   # workspace's terminal surface, and subsequent `cmux send` / `cmux read-screen`
   # calls fail with "Terminal surface not found". Discovered via live testing.
@@ -258,32 +272,45 @@ else
   # the shell is executing input (--wait-ready) — the surface-mode equivalent
   # of `new-workspace --focus true`. This protects the fresh-PTY race (a
   # swallowed launch-command \n) and "Terminal surface not found" (PTY not yet
-  # attached). The opener always returns the surface ref even on a readiness
-  # timeout, so we never orphan a surface.
+  # attached). On any readiness failure we close the surface we created rather
+  # than leave a wedged surface behind.
   READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-8}"
+  SURF_REF=""; SURF_PANE=""
   if [[ "$PLACEMENT" == "window" ]]; then
+    # open-window-surface.sh is hotline-net-new (cmux-cli only opens side-by-side,
+    # not arbitrary-window placement). It emits JSON even on a readiness timeout
+    # (ready:"timeout"), exit 0.
     [[ -z "$WINDOW_REF" ]] && fail_async "--window requires a name or ref"
     SURF_JSON=$(bash "$SCRIPT_DIR/open-window-surface.sh" --window "$WINDOW_REF" \
       ${CWD:+--working-directory "$CWD"} --wait-ready --wait-ready-timeout "$READY_TIMEOUT" \
       --json 2>"$CALL_DIR/surface_err.txt") \
       || fail_async "open-window-surface.sh failed: $(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
+    SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
+    SURF_PANE=$(printf '%s' "$SURF_JSON" | jq -r '.pane_ref // empty')
+    [[ -z "$SURF_REF" ]] && fail_async "open-window-surface returned no surface_ref: $SURF_JSON"
+    if [[ "$(printf '%s' "$SURF_JSON" | jq -r '.ready // empty')" == "timeout" ]]; then
+      cmux close-surface --surface "$SURF_REF" >/dev/null 2>&1 || true
+      fail_async "surface $SURF_REF PTY never became ready (see surface_err.txt)"
+    fi
   else
-    SURF_JSON=$(bash "$SCRIPT_DIR/open-side-surface.sh" --caller --wait-ready \
-      --wait-ready-timeout "$READY_TIMEOUT" --json 2>"$CALL_DIR/surface_err.txt") \
-      || fail_async "open-side-surface.sh failed: $(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
-  fi
-
-  SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
-  SURF_PANE=$(printf '%s' "$SURF_JSON" | jq -r '.pane_ref // empty')
-  SURF_READY=$(printf '%s' "$SURF_JSON" | jq -r '.ready // empty')
-  [[ -z "$SURF_REF" ]] && fail_async "surface opener returned no surface_ref: $SURF_JSON"
-
-  if [[ "$SURF_READY" == "timeout" ]]; then
-    # PTY never confirmed ready — sending now would likely drop the launch
-    # command's \n. Close the surface we created and fail loudly rather than
-    # leave a wedged surface behind.
-    cmux close-surface --surface "$SURF_REF" >/dev/null 2>&1 || true
-    fail_async "surface $SURF_REF PTY never became ready (see surface_err.txt)"
+    # Side-by-side: cmux-cli's canonical opener. On a --wait-ready timeout it
+    # exits 3 with NO JSON (the surface ref is named in its stderr diagnostic);
+    # parse it so we can close the orphan rather than leak it.
+    if SURF_JSON=$("$OPEN_SIDE_SURFACE" --caller --wait-ready \
+        --wait-ready-timeout "$READY_TIMEOUT" --json 2>"$CALL_DIR/surface_err.txt"); then
+      SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
+      SURF_PANE=$(printf '%s' "$SURF_JSON" | jq -r '.pane_ref // empty')
+      [[ -z "$SURF_REF" ]] && fail_async "open-side-surface returned no surface_ref: $SURF_JSON"
+    else
+      rc=$?
+      ORPHAN=$(grep -oE 'surface:[0-9]+' "$CALL_DIR/surface_err.txt" 2>/dev/null | head -1 || true)
+      [[ -n "$ORPHAN" ]] && cmux close-surface --surface "$ORPHAN" >/dev/null 2>&1 || true
+      if [[ "$rc" -eq 3 ]]; then
+        fail_async "side-by-side surface PTY never became ready (see surface_err.txt)"
+      else
+        fail_async "open-side-surface.sh failed (rc=$rc): $(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
+      fi
+    fi
   fi
 
   # surface_ref.txt is the cmux-SURFACE-mode signal to the wait-for-* scripts

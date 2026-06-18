@@ -17,11 +17,14 @@
 #     windows. Found → reuse that workspace. Not found → new-window +
 #     new-workspace --name <name>, then land the surface there.
 #
-# PTY readiness is delegated to the sibling surface-ready.sh (shared with the
-# side-by-side path) so a just-created surface never drops the trailing \n of
-# the launch command (fresh-PTY race) and never hits "Terminal surface not
-# found" (PTY-not-attached). New surfaces/workspaces are created with
-# --focus true, the surface-mode equivalent of `new-workspace --focus true`.
+# This opener is hotline-net-new: cmux-cli's open-side-surface.sh only places a
+# surface SIDE-BY-SIDE with the caller, never in an arbitrary find-or-create
+# window, so there is nothing in cmux-cli to reuse for this. PTY readiness is
+# delegated to the sibling surface-ready.sh so a just-created surface never
+# drops the trailing \n of the launch command (fresh-PTY race) and never hits
+# "Terminal surface not found" (PTY-not-attached). New surfaces/workspaces are
+# created with --focus true, the surface-mode equivalent of
+# `new-workspace --focus true`.
 #
 # Usage:
 #   open-window-surface.sh --window <name|ref> [--working-directory <cwd>]

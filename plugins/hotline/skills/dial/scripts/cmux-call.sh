@@ -64,6 +64,18 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Side-by-side delegates to cmux-cli's canonical open-side-surface.sh (single
+# source of truth — no vendored copy). cmux can be present without the cmux-cli
+# plugin; when the opener won't resolve, signal the dial skill to fall back to
+# the HEADLESS transport. (--detached / --window don't need the opener.)
+OPEN_SIDE_SURFACE=""
+if [[ "$PLACEMENT" == "sidebyside" ]]; then
+  if ! OPEN_SIDE_SURFACE=$(bash "$SCRIPT_DIR/resolve-side-opener.sh" 2>/dev/null); then
+    jq -n '{fallback: "headless", reason: "cmux-cli open-side-surface.sh not found; side-by-side placement unavailable"}'
+    exit 0
+  fi
+fi
+
 # Decide where the conference surface lands. SEND_TARGET is the cmux send/output
 # target; PLACE_REF + PLACE_KIND describe it for the returned JSON.
 SEND_TARGET=()
@@ -81,21 +93,28 @@ if [[ "$PLACEMENT" == "detached" ]]; then
   fi
   SEND_TARGET=(--workspace "$WS_REF")
   PLACE_REF="$WS_REF"; PLACE_KIND="workspace"
-else
-  # Surface placement: open a VISIBLE surface and wait for its PTY (--wait-ready),
-  # the surface-mode equivalent of `new-workspace --focus true`. Protects the
-  # fresh-PTY race + "Terminal surface not found".
+elif [[ "$PLACEMENT" == "window" ]]; then
+  # Surface placement in a specific window (hotline-net-new opener). --wait-ready
+  # is the surface-mode equivalent of `new-workspace --focus true`.
   READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-8}"
-  if [[ "$PLACEMENT" == "window" ]]; then
-    [[ -z "$WINDOW_REF" ]] && { jq -n '{error: "--window requires a name or ref"}'; exit 1; }
-    SURF_JSON=$(bash "$SCRIPT_DIR/open-window-surface.sh" --window "$WINDOW_REF" \
-      ${CWD:+--working-directory "$CWD"} --wait-ready --wait-ready-timeout "$READY_TIMEOUT" --json 2>&1) \
-      || { jq -n --arg e "open-window-surface failed: $SURF_JSON" '{error: $e}'; exit 1; }
-  else
-    SURF_JSON=$(bash "$SCRIPT_DIR/open-side-surface.sh" --caller --wait-ready \
-      --wait-ready-timeout "$READY_TIMEOUT" --json 2>&1) \
-      || { jq -n --arg e "open-side-surface failed: $SURF_JSON" '{error: $e}'; exit 1; }
+  [[ -z "$WINDOW_REF" ]] && { jq -n '{error: "--window requires a name or ref"}'; exit 1; }
+  SURF_JSON=$(bash "$SCRIPT_DIR/open-window-surface.sh" --window "$WINDOW_REF" \
+    ${CWD:+--working-directory "$CWD"} --wait-ready --wait-ready-timeout "$READY_TIMEOUT" --json 2>&1) \
+    || { jq -n --arg e "open-window-surface failed: $SURF_JSON" '{error: $e}'; exit 1; }
+  SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
+  [[ -z "$SURF_REF" ]] && { jq -n --arg e "surface opener returned no ref: $SURF_JSON" '{error: $e}'; exit 1; }
+  SEND_TARGET=(--surface "$SURF_REF")
+  PLACE_REF="$SURF_REF"; PLACE_KIND="surface"
+else
+  # Side-by-side via cmux-cli's canonical opener. On a --wait-ready timeout it
+  # exits 3 (no JSON); surface its stderr as the error.
+  READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-8}"
+  if ! SURF_JSON=$("$OPEN_SIDE_SURFACE" --caller --wait-ready \
+      --wait-ready-timeout "$READY_TIMEOUT" --json 2>/tmp/hotline-side-err.$$); then
+    err=$(cat /tmp/hotline-side-err.$$ 2>/dev/null); rm -f /tmp/hotline-side-err.$$
+    jq -n --arg e "open-side-surface failed: $err" '{error: $e}'; exit 1
   fi
+  rm -f /tmp/hotline-side-err.$$
   SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
   [[ -z "$SURF_REF" ]] && { jq -n --arg e "surface opener returned no ref: $SURF_JSON" '{error: $e}'; exit 1; }
   SEND_TARGET=(--surface "$SURF_REF")

@@ -18,9 +18,14 @@
 #      the marker appears as command OUTPUT (≥2 on-screen hits: the typed input
 #      line + the executed echo line), proving the shell actually ran input.
 #
-# The probe logic is lifted from the cmux-cli plugin's open-side-surface.sh
-# `--wait-ready` handling so hotline has a SINGLE, unit-testable readiness
-# primitive shared by both the side-by-side and --window placement paths.
+# NET-NEW hotline infrastructure: the side-by-side path delegates entirely to
+# cmux-cli's open-side-surface.sh (which has its own --wait-ready), but the
+# --window placement path (open-window-surface.sh) is hotline-only — cmux-cli
+# offers no standalone readiness helper for a surface we created ourselves. So
+# this script exists to give the --window path the same PTY-readiness guarantee.
+# The probe algorithm mirrors cmux-cli's --wait-ready by necessity (it's the
+# only correct way to detect a swallowed \n), but there is no callable cmux-cli
+# equivalent to reuse here.
 #
 # Usage:
 #   surface-ready.sh --surface <surface_ref> --pane <pane_ref> [--timeout <seconds>]
