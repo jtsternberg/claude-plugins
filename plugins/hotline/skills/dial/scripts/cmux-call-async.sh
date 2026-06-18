@@ -71,8 +71,9 @@ ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
 KEEP_WORKSPACE=false
 # Placement: where the callee's claude session lands.
 #   sidebyside (default) — a visible surface next to the caller's pane in the
-#                          SAME cmux window (open-side-surface.sh).
-#   detached             — today's behavior: a disconnected new-workspace tab.
+#                          SAME cmux window (via cmux-cli's open-side-surface.sh,
+#                          resolved at runtime; headless fallback if absent).
+#   detached             — original behavior: a disconnected new-workspace tab.
 #   window               — a surface in a specific window (open-window-surface.sh).
 PLACEMENT="sidebyside"
 WINDOW_REF=""
