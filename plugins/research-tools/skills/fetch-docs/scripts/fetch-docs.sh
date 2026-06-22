@@ -113,11 +113,13 @@ if [ -z "$SLUG" ]; then
 fi
 
 # URL-based markdown detection — ignore query string / fragment.
+# .mdx/.mdoc are markdown supersets (Astro/Starlight, Cloudflare docs, etc.);
+# treat them as markdown-native so they're saved .md, not .html.
 path_only="${URL%%\?*}"
 path_only="${path_only%%#*}"
 IS_MD_SOURCE=0
 case "$path_only" in
-	*.md|*.markdown) IS_MD_SOURCE=1 ;;
+	*.md|*.markdown|*.mdx|*.mdoc) IS_MD_SOURCE=1 ;;
 esac
 
 OUT_HTML="/tmp/fetch-docs-${SLUG}.html"

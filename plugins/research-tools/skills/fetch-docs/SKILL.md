@@ -40,9 +40,9 @@ Outputs `/tmp/fetch-docs-<slug>.html`. Claude reads HTML natively — no convers
 
 ## Markdown-native URLs (automatic)
 
-Some docs sites publish `.md` alongside HTML (e.g. `https://code.claude.com/docs/en/skills.md`, raw GitHub READMEs). The script detects them two ways:
+Some docs sites publish `.md` alongside HTML (e.g. `https://code.claude.com/docs/en/skills.md`, raw GitHub READMEs), or author in `.mdx`/`.mdoc` (Astro/Starlight, Cloudflare docs, and most modern docs sites). The script detects them two ways:
 
-1. URL path ends in `.md` or `.markdown` (query strings and fragments are ignored).
+1. URL path ends in `.md`, `.markdown`, `.mdx`, or `.mdoc` (query strings and fragments are ignored).
 2. Response `Content-Type` header is `text/markdown` or `text/x-markdown`.
 
 Either way, the file is saved as `.md` and the conversion pipeline is skipped. `--md` becomes a no-op on markdown sources — no round-trip loss.
@@ -131,5 +131,5 @@ This mirrors the `/tmp/` pattern used by the [`work-with-media`](../../../work-w
 - **Page looks empty or says "Loading..."** — The docs site is client-rendered (React/Vue/Svelte SPA). `curl` fetches the raw HTML before JS executes, so there's no content for readability to extract. Common on Anthropic's and other modern docs sites. Work around: find a raw markdown URL for the same page (many docs sites publish `.md` alongside HTML at `/docs/foo.md`), or fall back to WebFetch for this one page.
 - **`readability-cli could not extract an article`** — The page isn't article-shaped (SPA landing pages, product pages). The script runs `readability-cli -l exit` by design, which fails fast rather than emitting CSS-leaked garbage. Drop `--md` and work with the raw HTML, or call `readability-cli` directly with `-l keep` if you really want the best-effort output.
 - **Cache returned stale content** — Pass `--ttl=0` to force a refetch.
-- **Content-Type misdetection** — If a site serves markdown with `Content-Type: text/plain`, the script treats it as HTML. Work around: use a URL with `.md` in the path, or skip `--md` and treat the raw file as text.
+- **Content-Type misdetection** — If a site serves markdown with `Content-Type: text/plain` *and* the URL has no markdown extension, the script treats it as HTML. (URLs ending in `.md`/`.markdown`/`.mdx`/`.mdoc` are caught by path regardless of Content-Type — e.g. raw.githubusercontent.com `.mdx` files, which it serves as `text/plain`.) Work around: use a URL with a markdown extension in the path, or skip `--md` and treat the raw file as text.
 - **`npx` cold-start is slow** — First `--md` call pulls `readability-cli` and `turndown-cli` into npx's cache. Subsequent calls are fast. Nothing to install globally.
