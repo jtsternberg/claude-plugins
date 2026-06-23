@@ -48,10 +48,24 @@ By default, the page is saved exactly as the website sent it. If the page is HTM
 
 Behind the scenes, Claude adds a `--md` flag to the command. The first time you do this it may take a few seconds because it's downloading a small helper program on the fly. If you find yourself using the markdown version often, Claude will offer to install the helper permanently so future calls are ~6× faster. Say yes and it'll handle the install for you.
 
+## JavaScript-heavy pages
+
+Some sites (a lot of API references, dashboards, and app-style docs) don't put their content in the page itself — they ship a near-empty page and let JavaScript fill it in once it loads in a real browser. A plain downloader sees only the empty shell, so those pages come back blank.
+
+If you have [`agent-browser`](https://github.com/vercel-labs/agent-browser) installed, `fetch-docs` can fetch through a real headless browser instead — it lets the page's JavaScript run, then captures the finished page. Just ask:
+
+> "fetch this with a real browser: https://example.com/app-docs"
+>
+> "that came back empty — try rendering it"
+
+Claude adds a `--render` flag behind the scenes. When a normal fetch comes back as an empty shell and `agent-browser` is installed, Claude will also notice on its own and suggest rendering. It's a touch slower (it's driving an actual browser), so it's used only when the simple download isn't enough — not for every page.
+
+`agent-browser` is **optional**. If it isn't installed, Claude will tell you how to install it and otherwise fall back to its regular fetch. The skill never installs it on your behalf without asking.
+
 ## What it can't do
 
 - **Password-protected pages** — the skill doesn't log in for you. If a page requires authentication, this won't reach it.
-- **Some modern docs sites** — sites built with frameworks like React sometimes load their content only after the page renders in a browser. `fetch-docs` reads the page like a simple downloader would, so those sites show up empty. Claude will tell you when this happens. For those, fall back to Claude's regular WebFetch or look for a "raw" or `.md` version of the same page (many docs sites publish both).
+- **Some modern docs sites, *without* `--render`** — sites built with frameworks like React sometimes load their content only after the page renders in a browser, so a plain download shows them empty. The fix is the `--render` option above (needs `agent-browser`); failing that, look for a "raw" or `.md` version of the same page, or fall back to Claude's regular WebFetch.
 
 ## Where the files go
 
@@ -59,4 +73,4 @@ Everything lands in your computer's `/tmp/` folder, which your Mac cleans up aut
 
 ## Requirements
 
-This skill works out of the box on both macOS and Linux. If you're asking for the markdown version (`--md`), you also need Node.js on your computer — most developer setups have it. If it's missing, Claude will tell you.
+This skill works out of the box on both macOS and Linux. If you're asking for the markdown version (`--md`), you also need Node.js on your computer — most developer setups have it. For rendering JavaScript-heavy pages (`--render`), you need [`agent-browser`](https://github.com/vercel-labs/agent-browser) installed. Both are optional — if either is missing, Claude will tell you and fall back gracefully.
