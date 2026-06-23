@@ -3,13 +3,13 @@
 # Purpose: give Claude the raw source to Read, bypassing WebFetch's
 # small-model summarization pass that routinely drops specifics.
 #
-# Usage: fetch-docs.sh <url> [--slug=name] [--ttl=seconds] [--md]
+# Usage: fetch-docs.sh <url> [--slug=name] [--ttl=seconds] [--md] [--render]
 
 set -euo pipefail
 
 print_help() {
 	cat <<'EOF'
-Usage: fetch-docs <url> [--slug=name] [--ttl=seconds] [--md]
+Usage: fetch-docs <url> [--slug=name] [--ttl=seconds] [--md] [--render]
 
 Positional:
   <url>           Any http/https URL. Quote it plainly with double quotes
@@ -24,6 +24,13 @@ Flags:
                   ~4s overhead per call). For speed, run:
                     npm i -g readability-cli turndown-cli
                   No-op when the source is already markdown.
+  --render        Fetch via a real headless browser (agent-browser) instead of
+                  curl, so client-rendered pages (React/Vue/Svelte SPAs that
+                  curl returns as an empty shell) come back fully rendered.
+                  Requires agent-browser on PATH — this script never installs
+                  it. Combine with --md to convert the rendered HTML.
+  --check         Print availability of curl / node+npx / agent-browser and
+                  exit. No URL needed. Used by the skill's prerequisites check.
 
 Outputs:
   The cached file path on stdout. Paths use /tmp/fetch-docs-<slug>.<ext>
@@ -41,12 +48,16 @@ URL=""
 SLUG=""
 TTL=86400
 WANT_MD=0
+WANT_RENDER=0
+WANT_CHECK=0
 
 for arg in "$@"; do
 	case "$arg" in
 		--slug=*) SLUG="${arg#--slug=}" ;;
 		--ttl=*) TTL="${arg#--ttl=}" ;;
 		--md) WANT_MD=1 ;;
+		--render) WANT_RENDER=1 ;;
+		--check) WANT_CHECK=1 ;;
 		-h|--help) print_help; exit 0 ;;
 		--*)
 			echo "fetch-docs: unknown flag: $arg" >&2
@@ -63,6 +74,28 @@ for arg in "$@"; do
 	esac
 done
 
+# Tool-availability report. Lives here (not in a SKILL.md ```! fence) because a
+# compound `(cmd && echo) || echo` line trips Claude Code's shell-operator
+# permission gate; routing through this allowlisted script avoids that entirely.
+if [ "$WANT_CHECK" = 1 ]; then
+	if command -v curl >/dev/null 2>&1; then
+		echo "curl: OK ($(curl --version | head -1))"
+	else
+		echo "curl: NOT INSTALLED (required)"
+	fi
+	if command -v node >/dev/null 2>&1 && command -v npx >/dev/null 2>&1; then
+		echo "node+npx: OK (npx $(npx --version)) — only needed for --md on HTML sources"
+	else
+		echo "node+npx: not installed (only needed for --md on HTML sources; markdown sources skip the pipeline)"
+	fi
+	if command -v agent-browser >/dev/null 2>&1; then
+		echo "agent-browser: OK ($(agent-browser --version 2>/dev/null | head -1)) — enables --render for JS pages"
+	else
+		echo "agent-browser: not installed (optional; only needed for --render on client-rendered SPAs)"
+	fi
+	exit 0
+fi
+
 if [ -z "$URL" ]; then
 	echo "fetch-docs: URL is required. See --help." >&2
 	exit 2
@@ -75,6 +108,15 @@ fi
 
 if ! command -v curl >/dev/null 2>&1; then
 	echo "fetch-docs: curl is required but not on PATH" >&2
+	exit 1
+fi
+
+if [ "$WANT_RENDER" = 1 ] && ! command -v agent-browser >/dev/null 2>&1; then
+	echo "fetch-docs: --render requires agent-browser on PATH (not installed)." >&2
+	echo "fetch-docs: install it with one of, then 'agent-browser install' once:" >&2
+	echo "    npm install -g agent-browser" >&2
+	echo "    brew install agent-browser" >&2
+	echo "fetch-docs: then retry with --render. This script will not install it for you." >&2
 	exit 1
 fi
 
@@ -145,27 +187,62 @@ fi
 
 HDRS=$(mktemp -t fetch-docs-hdrs.XXXXXX)
 BODY=$(mktemp -t fetch-docs-body.XXXXXX)
+AB_ERR=$(mktemp -t fetch-docs-ab.XXXXXX)
 CLEAN=""
+AB_SESSION=""
 cleanup() {
-	rm -f "$HDRS" "$BODY"
+	rm -f "$HDRS" "$BODY" "$AB_ERR"
 	[ -n "$CLEAN" ] && rm -f "$CLEAN"
+	# Close the isolated render session so we don't leak browser daemons.
+	[ -n "$AB_SESSION" ] && agent-browser --session "$AB_SESSION" close >/dev/null 2>&1
 	return 0
 }
 trap cleanup EXIT
 
-if ! http_code=$(curl -sLD "$HDRS" -o "$BODY" -w '%{http_code}' "$URL"); then
-	echo "fetch-docs: curl failed for $URL" >&2
-	exit 1
-fi
+if [ "$WANT_RENDER" = 1 ]; then
+	# Dedicated, isolated session so we never touch a user's other agent-browser
+	# sessions. A single fixed name (not per-PID) keeps `session list` from
+	# accumulating dead records — agent-browser has no non-destructive way to
+	# drop one session record (`close --all` would nuke the user's too), so we
+	# reuse one name. Each open() re-navigates fresh; the trap closes the
+	# browser on exit. (Two truly-concurrent --render runs would share this
+	# session — unlikely for an interactive docs fetch, but worth knowing.)
+	AB_SESSION="fetch-docs-render"
+	if ! agent-browser --session "$AB_SESSION" open "$URL" >/dev/null 2>"$AB_ERR"; then
+		echo "fetch-docs: agent-browser failed to open $URL" >&2
+		sed 's/^/fetch-docs: agent-browser: /' "$AB_ERR" >&2
+		exit 1
+	fi
+	# Best-effort settle for XHR/lazy content. A networkidle timeout on pages
+	# with long-lived connections (analytics, websockets) must not fail the
+	# render — we still capture whatever has painted by then.
+	agent-browser --session "$AB_SESSION" wait --load networkidle >/dev/null 2>&1 || true
+	# `get html html` returns the innerHTML of <html> (head+body) as clean raw
+	# HTML — no JSON escaping, unlike `eval`. Wrap it back into a valid document.
+	if ! agent-browser --session "$AB_SESSION" get html html >"$BODY" 2>"$AB_ERR" || [ ! -s "$BODY" ]; then
+		echo "fetch-docs: agent-browser could not read the rendered DOM for $URL" >&2
+		sed 's/^/fetch-docs: agent-browser: /' "$AB_ERR" >&2
+		exit 1
+	fi
+	{ printf '<!DOCTYPE html><html>\n'; cat "$BODY"; printf '\n</html>\n'; } >"${BODY}.w" \
+		&& mv "${BODY}.w" "$BODY"
+	# Rendered output is always HTML; skip curl's content-type sniffing below.
+	http_code=200
+else
+	if ! http_code=$(curl -sLD "$HDRS" -o "$BODY" -w '%{http_code}' "$URL"); then
+		echo "fetch-docs: curl failed for $URL" >&2
+		exit 1
+	fi
 
-if [ "$http_code" != "200" ]; then
-	echo "fetch-docs: HTTP $http_code for $URL" >&2
-	exit 1
-fi
+	if [ "$http_code" != "200" ]; then
+		echo "fetch-docs: HTTP $http_code for $URL" >&2
+		exit 1
+	fi
 
-if [ ! -s "$BODY" ]; then
-	echo "fetch-docs: empty response body from $URL" >&2
-	exit 1
+	if [ ! -s "$BODY" ]; then
+		echo "fetch-docs: empty response body from $URL" >&2
+		exit 1
+	fi
 fi
 
 if [ "$IS_MD_SOURCE" = 0 ]; then

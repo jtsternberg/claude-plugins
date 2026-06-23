@@ -24,11 +24,12 @@ When Claude Code calls WebFetch, a small-model pass filters the page through the
 ## Prerequisites
 
 ```!
-(command -v curl >/dev/null 2>&1 && echo "curl: OK ($(curl --version | head -1))") || echo "curl: NOT INSTALLED (required)"
-(command -v npx >/dev/null 2>&1 && echo "npx: OK ($(npx --version))") || echo "npx: NOT INSTALLED (only needed for --md on HTML sources; markdown sources skip the pipeline)"
+bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh --check
 ```
 
-`curl` is required for every call. `npx` (with Node) is only needed when `--md` is passed *and* the URL returns HTML. Markdown-native URLs skip the conversion pipeline entirely.
+(The check runs through the script rather than an inline `(cmd && echo) || echo` one-liner — a compound command like that trips Claude Code's shell-operator permission gate, whereas the script invocation is covered by this skill's `allowed-tools`.)
+
+`curl` is required for every call. `npx` (with Node) is only needed when `--md` is passed *and* the URL returns HTML. Markdown-native URLs skip the conversion pipeline entirely. `agent-browser` is optional and only used by `--render` (see below) — the script never installs it.
 
 ## The default: raw HTML
 
@@ -83,6 +84,43 @@ When you do surface it, say something like:
 
 The reader-mode extraction is opinionated — it removes page chrome by design. If the user needs truly unfiltered HTML, drop `--md` and read the raw file.
 
+## JS-rendered pages (`--render`)
+
+`curl` fetches the raw HTML *before* any JavaScript runs. For client-rendered sites (React/Vue/Svelte SPAs — many API references, dashboards, and app-style docs), that raw HTML is just an empty shell like `<div id="root"></div>`, with the real content injected by JS that never executed. `curl` can't see it; neither can WebFetch reliably.
+
+`--render` closes that gap. It fetches through a real headless browser ([`agent-browser`](https://github.com/vercel-labs/agent-browser)) instead of `curl`, waits for the page to settle, then captures the fully-rendered DOM:
+
+```bash
+file=$(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --render)
+file=$(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --render --md)   # render, then convert to markdown
+```
+
+This is a **fallback tier, not the default.** Reach for it only when the cheaper paths come up empty:
+
+1. **Plain `curl`** (default) — instant, zero deps. Works for static/SSR pages.
+2. **`.md` sidecar** (automatic) — many modern docs sites publish markdown alongside HTML; the script detects and prefers it for free.
+3. **`--render`** — only when 1 and 2 yield an empty shell, *and* `agent-browser` is installed.
+
+### When to escalate to `--render`
+
+- The script emits this stderr hint after a plain fetch when it detects an empty SPA shell **and** `agent-browser` is on PATH:
+
+  ```
+  fetch-docs: tip — this page looks client-rendered (empty SPA shell, ~NNN chars of visible text). agent-browser is installed; re-run with --render to capture the JS-rendered DOM.
+  ```
+
+  When you see it, re-run the same URL with `--render`.
+
+- You don't see the hint but you Read a fetched HTML file and it's an empty shell / says "Loading..." → re-run with `--render` if `agent-browser` is installed.
+
+### If `agent-browser` isn't installed
+
+`--render` exits 1 with install guidance (`npm install -g agent-browser` or `brew install agent-browser`). **Never run that install without explicit user consent** — same rule as the `--md` global-install offer. Offer it, and if they decline, fall back to WebFetch for that one page. The script will not install anything on its own.
+
+### Cost vs. fidelity
+
+`--render` launches a headless Chrome and waits for network idle, so it's measured in seconds, not the sub-second `curl` path. Use it for the pages that genuinely need it — not as a blanket replacement. Output caches like any other fetch (same `--ttl` rules, same `/tmp/` path).
+
 ## Custom slug
 
 ```bash
@@ -118,7 +156,7 @@ This mirrors the `/tmp/` pattern used by the [`work-with-media`](../../../work-w
 
 2. **`--md` is a no-op on markdown sources.** If the URL returns markdown (by path or `Content-Type`), the script stores `.md` regardless of `--md`. Don't try to "force HTML output" on a markdown source — just read the `.md`.
 
-3. **Authenticated URLs are out of scope for v1.** No cookie forwarding, no headers, no auth flags. Use `curl` directly for those.
+3. **Authenticated URLs are out of scope for v1.** No cookie forwarding, no headers, no auth flags. Use `curl` directly for those. (If you need auth *and* JS rendering, `agent-browser` has its own profile/cookie/header flags — call it directly rather than through this skill.)
 
 4. **Reader-mode transforms content.** `readability-cli` strips page chrome. If the user explicitly needs the full page (e.g. to inspect navigation or ads), omit `--md` and read the raw HTML.
 
@@ -128,7 +166,7 @@ This mirrors the `/tmp/` pattern used by the [`work-with-media`](../../../work-w
 
 - **Non-200 responses** — The script fails loudly (`fetch-docs: HTTP 404 for <url>`, exit 1). Check the URL; if it requires auth, this skill can't fetch it.
 - **Empty body** — Some sites return 200 with no body when they detect a bot. Try a different URL or pass a User-Agent via direct `curl` as a fallback.
-- **Page looks empty or says "Loading..."** — The docs site is client-rendered (React/Vue/Svelte SPA). `curl` fetches the raw HTML before JS executes, so there's no content for readability to extract. Common on Anthropic's and other modern docs sites. Work around: find a raw markdown URL for the same page (many docs sites publish `.md` alongside HTML at `/docs/foo.md`), or fall back to WebFetch for this one page.
+- **Page looks empty or says "Loading..."** — The docs site is client-rendered (React/Vue/Svelte SPA). `curl` fetches the raw HTML before JS executes, so there's no content for readability to extract. Common on Anthropic's and other modern docs sites. Work around, cheapest first: (1) find a raw markdown URL for the same page (many docs sites publish `.md` alongside HTML at `/docs/foo.md`); (2) if `agent-browser` is installed, re-run with `--render` to capture the JS-rendered DOM (see "JS-rendered pages" above); (3) fall back to WebFetch for this one page.
 - **`readability-cli could not extract an article`** — The page isn't article-shaped (SPA landing pages, product pages). The script runs `readability-cli -l exit` by design, which fails fast rather than emitting CSS-leaked garbage. Drop `--md` and work with the raw HTML, or call `readability-cli` directly with `-l keep` if you really want the best-effort output.
 - **Cache returned stale content** — Pass `--ttl=0` to force a refetch.
 - **Content-Type misdetection** — If a site serves markdown with `Content-Type: text/plain` *and* the URL has no markdown extension, the script treats it as HTML. (URLs ending in `.md`/`.markdown`/`.mdx`/`.mdoc` are caught by path regardless of Content-Type — e.g. raw.githubusercontent.com `.mdx` files, which it serves as `text/plain`.) Work around: use a URL with a markdown extension in the path, or skip `--md` and treat the raw file as text.
