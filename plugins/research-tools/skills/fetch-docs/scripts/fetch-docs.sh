@@ -44,6 +44,23 @@ Exit codes:
 EOF
 }
 
+# Emit the "looks client-rendered — try --render" tip to stderr when the given
+# HTML file looks like an empty SPA shell and agent-browser is on PATH to act on
+# it. Conservative thresholds keep false positives low. Called on BOTH a fresh
+# fetch and a cache hit, so the nudge survives the 24h cache window (a second
+# plain fetch of a shell within TTL would otherwise return it silently). Always
+# returns 0 so it's safe as a bare statement under `set -e`.
+emit_spa_hint() {
+	local f="$1"
+	command -v agent-browser >/dev/null 2>&1 || return 0
+	grep -qiE 'id="(root|app|__next|swagger-ui|___gatsby)"|data-reactroot|ng-app=' "$f" || return 0
+	local vis_chars
+	vis_chars=$(sed 's/<[^>]*>//g' "$f" | tr -s ' \t\n' ' ' | wc -c | tr -d ' ')
+	[ "${vis_chars:-0}" -lt 500 ] || return 0
+	echo "fetch-docs: tip — this page looks client-rendered (empty SPA shell, ~${vis_chars} chars of visible text). agent-browser is installed; re-run with --render to capture the JS-rendered DOM." >&2
+	return 0
+}
+
 URL=""
 SLUG=""
 TTL=86400
@@ -187,6 +204,11 @@ if [ -f "$TARGET" ] && [ "$TTL" -gt 0 ]; then
 	else mtime=$(stat -c %Y "$TARGET" 2>/dev/null || echo 0)
 	fi
 	if [ -n "$mtime" ] && [ "$((now - mtime))" -lt "$TTL" ]; then
+		# Re-emit the SPA tip on a cache hit too — only for a raw-HTML plain
+		# fetch (not --render, not the .md paths, where it doesn't apply).
+		if [ "$WANT_RENDER" = 0 ] && [ "$TARGET" = "$OUT_HTML" ]; then
+			emit_spa_hint "$TARGET"
+		fi
 		echo "$TARGET"
 		exit 0
 	fi
@@ -273,6 +295,12 @@ if [ "$IS_MD_SOURCE" = 1 ]; then
 fi
 
 mv "$BODY" "$OUT_HTML"
+
+# Discoverability: if curl returned what looks like an empty client-rendered
+# shell, nudge toward --render. (Same check runs on cache hits above.)
+if [ "$WANT_RENDER" = 0 ]; then
+	emit_spa_hint "$OUT_HTML"
+fi
 
 if [ "$WANT_MD" = 1 ]; then
 	CLEAN=$(mktemp -t fetch-docs-clean.XXXXXX).html
