@@ -138,7 +138,7 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --ttl=0       # force ref
 bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --ttl=3600    # 1h cache
 ```
 
-Raw and converted outputs cache separately: fetching `<url>` without `--md` writes `<slug>.html`; with `--md` writes `<slug>.md`. Both can coexist in `/tmp/`.
+Raw, converted, and rendered outputs cache separately: a plain fetch writes `<slug>.html`; `--md` writes `<slug>.md`; `--render` writes `<slug>.rendered.html` (and `--render --md` writes `<slug>.rendered.md`). They coexist in `/tmp/` and never overwrite each other — so a cheap curl fetch of a URL can't satisfy a later `--render` of the same URL with its stale empty shell.
 
 ## Output conventions
 

@@ -164,8 +164,15 @@ case "$path_only" in
 	*.md|*.markdown|*.mdx|*.mdoc) IS_MD_SOURCE=1 ;;
 esac
 
-OUT_HTML="/tmp/fetch-docs-${SLUG}.html"
-OUT_MD="/tmp/fetch-docs-${SLUG}.md"
+# Rendered output caches under a distinct path so a prior cheap curl fetch of
+# the same URL can't satisfy a later --render call (and vice versa). Mirrors the
+# way raw .html and converted .md already cache independently. Without this, the
+# canonical "plain fetch → see SPA tip → re-run with --render" sequence would
+# return the stale empty shell from cache.
+RENDER_TAG=""
+[ "$WANT_RENDER" = 1 ] && RENDER_TAG=".rendered"
+OUT_HTML="/tmp/fetch-docs-${SLUG}${RENDER_TAG}.html"
+OUT_MD="/tmp/fetch-docs-${SLUG}${RENDER_TAG}.md"
 
 if [ "$IS_MD_SOURCE" = 1 ] || [ "$WANT_MD" = 1 ]; then
 	TARGET="$OUT_MD"
