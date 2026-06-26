@@ -105,9 +105,27 @@ Hotline also caches workspace identities (via the `hotline-pickup` skill) — na
 - **Auto-detected**: Hotline checks for `cmux` availability automatically — no config needed.
 - **Credit-aware**: Interactive `claude` sessions (no `-p` flag) draw from your interactive quota, not the separate Agent SDK credit. When cmux is present, all call modes benefit automatically.
 - **All modes covered**: Quick calls and work orders use an async cmux transport that polls `cmux read-screen` for the ringing skill's STATUS signals. Conference calls use an interactive cmux workspace. Headless `claude -p` is the fallback when cmux isn't running.
-- **Visible by default**: cmux workspaces are visible in your terminal, so you can observe or take over any call at any time.
+- **Visible by default**: the callee lands in a surface right next to your current pane, so you can observe or take over any call at any time.
 
 `cmux` gives the remote agent a proper terminal, which is handy when the conversation involves running commands, reviewing output, or doing anything more complex than a Q&A.
+
+### Where the call lands (placement)
+
+When a call routes through `cmux`, Hotline opens the callee **side-by-side with your current pane, in the same window** — you watch the call happen beside the original conversation. It does this by calling the [`cmux-cli`](https://cmux.com/) plugin's `open-side-surface.sh` (resolved at runtime — Hotline keeps no copy of the split-vs-adjacent decision tree), which waits for the new surface's PTY to attach before the prompt is sent, so the callee's first keystrokes are never dropped. Side-by-side surfaces stay open after the call (they live in your window); the caller closes them when done.
+
+**If `cmux` is running but the `cmux-cli` plugin isn't installed**, side-by-side placement isn't available, so Hotline falls back to the **headless** transport for that call (it doesn't silently drop the callee into a detached tab). `--detached` and `--window` don't need `cmux-cli` and keep working on `cmux` regardless.
+
+Two opt-outs, passed as flags on the dial command:
+
+```
+/hotline-dial --detached dotfiles run the full test suite   # disconnected new-workspace tab (pre-0.13 behavior)
+/hotline-dial --window lindris backend tests, please        # group callees in a specific window (find-or-create)
+```
+
+- **`--detached`** (alias `--new-workspace`) restores the original placement: a new workspace tab, auto-closed once the response is captured.
+- **`--window <name|ref>`** lands the callee in a specific window. A `window:<n>` ref targets that window; a bare name reuses the window holding a workspace titled `<name>`, creating one (window + titled workspace) if none exists — so repeated `--window <name>` calls group together. (cmux windows aren't directly nameable, so the titled-workspace acts as the window's findable label.)
+
+Both flags affect only the `cmux` transport; they're ignored on the headless path.
 
 ---
 

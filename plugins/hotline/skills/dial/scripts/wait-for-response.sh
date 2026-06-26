@@ -55,7 +55,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 CMUX_MODE=false
-if [[ -f "$CALL_DIR/workspace_ref.txt" ]]; then
+SURFACE_MODE=false
+if [[ -f "$CALL_DIR/surface_ref.txt" ]]; then
+  CMUX_MODE=true
+  SURFACE_MODE=true
+elif [[ -f "$CALL_DIR/workspace_ref.txt" ]]; then
   CMUX_MODE=true
 fi
 # CMUX mode gets a longer default (30 min) since work orders can run a while.
@@ -74,7 +78,16 @@ emit_response_json() {
 }
 
 if $CMUX_MODE; then
-  WS_REF=$(cat "$CALL_DIR/workspace_ref.txt")
+  # Resolve the read-screen target: a surface (side-by-side/window placement)
+  # or a workspace (detached placement).
+  if $SURFACE_MODE; then
+    REF=$(cat "$CALL_DIR/surface_ref.txt")
+    READ_TARGET=(--surface "$REF")
+  else
+    REF=$(cat "$CALL_DIR/workspace_ref.txt")
+    READ_TARGET=(--workspace "$REF")
+  fi
+  WS_REF="$REF"
   KEEP=$(cat "$CALL_DIR/keep_workspace.txt" 2>/dev/null || echo false)
   LAUNCH_SCRIPT=$(cat "$CALL_DIR/launch_script.txt" 2>/dev/null || true)
   SESSION_ID=""
@@ -103,10 +116,16 @@ if $CMUX_MODE; then
   cleanup_workspace_and_script() {
     rm -f "$LAUNCH_SCRIPT" 2>/dev/null || true
     if [[ "$KEEP" != "true" ]]; then
-      # Suppress BOTH stdout and stderr — close-workspace's "OK …" message
-      # would otherwise pollute the JSON we emit on stdout, breaking jq
-      # parsing in callers.
-      cmux close-workspace --workspace "$WS_REF" >/dev/null 2>&1 || true
+      # Suppress BOTH stdout and stderr — close-{surface,workspace}'s "OK …"
+      # message would otherwise pollute the JSON we emit on stdout, breaking
+      # jq parsing in callers. Surface placements default to KEEP=true (the
+      # surface lives in the caller's own window and is meant to stay visible),
+      # so this close path is normally only taken in detached/workspace mode.
+      if $SURFACE_MODE; then
+        cmux close-surface --surface "$WS_REF" >/dev/null 2>&1 || true
+      else
+        cmux close-workspace --workspace "$WS_REF" >/dev/null 2>&1 || true
+      fi
     fi
   }
 
@@ -121,7 +140,7 @@ if $CMUX_MODE; then
     sleep "$POLL_INTERVAL"
     ELAPSED=$((ELAPSED + POLL_INTERVAL))
 
-    SCREEN=$(cmux read-screen --workspace "$WS_REF" --scrollback --lines 9999 \
+    SCREEN=$(cmux read-screen "${READ_TARGET[@]}" --scrollback --lines 9999 \
       2>/dev/null || true)
     [[ -z "$SCREEN" ]] && continue
 
@@ -199,7 +218,7 @@ if $CMUX_MODE; then
 
   # Timeout: write error.txt and done so future callers see the failure
   # without re-polling.
-  echo "Timed out waiting for STATUS in cmux workspace ${WS_REF} (${TIMEOUT}s)" \
+  echo "Timed out waiting for STATUS in cmux ${WS_REF} (${TIMEOUT}s)" \
     > "$CALL_DIR/error.txt"
   touch "$CALL_DIR/done"
   cleanup_workspace_and_script

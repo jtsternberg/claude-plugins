@@ -53,8 +53,12 @@ chmod +x "$tmp/bin/cmux"
 
 # Default invocation: explicitly unset HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS so
 # the test doesn't pick up a value from the developer's own shell/settings.json.
+# --detached exercises the original new-workspace placement, whose launch-script
+# construction is identical across placements. The side-by-side default is
+# covered separately below (and in surface-placement_test.sh).
 env -u HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS \
   PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" bash "$SCRIPT_UNDER_TEST" \
+  --detached \
   --cwd "$tmp/cwd" \
   --name "hotline test" \
   --tools "Bash(git *) Edit" \
@@ -106,6 +110,7 @@ else
 fi
 
 PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" bash "$SCRIPT_UNDER_TEST" \
+  --detached \
   --cwd "$tmp/cwd" \
   --resume "resume id with spaces" \
   --prompt "follow up message" \
@@ -138,6 +143,7 @@ fi
 # env var set must include --dangerously-skip-permissions.
 HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
   bash "$SCRIPT_UNDER_TEST" \
+  --detached \
   --cwd "$tmp/cwd" \
   --prompt "test perms" \
   > "$tmp/out3.json" 2> "$tmp/stderr3.txt"
@@ -155,6 +161,88 @@ else
 fi
 
 rm -f "${LAUNCH_SCRIPTS[@]}"
+rm -rf "$tmp"
+
+# --- Default placement: side-by-side surface ---------------------------------
+# With no --detached, cmux-call.sh RESOLVES and calls cmux-cli's canonical
+# open-side-surface.sh (injected here via a stub), then sends the launch script
+# to that SURFACE, not a new workspace.
+tmp=$(mktemp -d /tmp/hotline-cmux-call-test-XXXXXX)
+mkdir -p "$tmp/bin" "$tmp/cwd"
+cat > "$tmp/open-side.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "invoked: $*" >> "${SIDE_STUB_LOG:?}"
+printf '%s\n' '{"surface_ref":"surface:777","pane_ref":"pane:55","workspace_ref":"workspace:5","ready":"ready"}'
+EOF
+chmod +x "$tmp/open-side.sh"
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+ST="${CMUX_FAKE_STATE:?}"
+case "$1" in
+  send) echo "$*" >> "$ST/send_calls" ;;
+  read-screen) cat "$ST/screen.txt" 2>/dev/null ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/bin/cmux"
+
+env -u HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS \
+  PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
+  bash "$SCRIPT_UNDER_TEST" \
+  --cwd "$tmp/cwd" --name "sbs test" \
+  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hi" \
+  > "$tmp/out.json" 2> "$tmp/stderr.txt"
+rc=$?
+if [[ $rc -eq 0 ]]; then
+  pass "side-by-side default exits successfully"
+else
+  fail "side-by-side default exits successfully" "rc=$rc stderr=$(cat "$tmp/stderr.txt")"
+fi
+
+if grep -q "invoked:.*--wait-ready" "$tmp/side_log" 2>/dev/null; then
+  pass "side-by-side resolves and calls cmux-cli's opener with --wait-ready"
+else
+  fail "side-by-side resolves and calls cmux-cli's opener with --wait-ready" \
+       "side_log=$(cat "$tmp/side_log" 2>/dev/null || echo NONE)"
+fi
+
+send_calls=$(cat "$tmp/send_calls" 2>/dev/null || true)
+assert_contains "side-by-side sends launch script to the SURFACE (not a workspace)" \
+  "$send_calls" "send --surface surface:777 bash /tmp/hotline-cmux-launch-"
+
+placement=$(jq -r '.placement // empty' "$tmp/out.json" 2>/dev/null || true)
+surf_ref=$(jq -r '.surface_ref // empty' "$tmp/out.json" 2>/dev/null || true)
+ws_ref=$(jq -r '.workspace_ref // "null"' "$tmp/out.json" 2>/dev/null || true)
+if [[ "$placement" == "surface" && "$surf_ref" == "surface:777" && "$ws_ref" == "null" ]]; then
+  pass "side-by-side reports placement=surface with surface_ref and null workspace_ref"
+else
+  fail "side-by-side reports placement=surface with surface_ref and null workspace_ref" \
+       "placement=$placement surface_ref=$surf_ref workspace_ref=$ws_ref"
+fi
+ls=$(printf '%s' "$send_calls" | sed -E 's/.*bash (\/tmp\/hotline-cmux-launch-[^\\[:space:]]+).*/\1/' | tail -1)
+rm -f "$ls" 2>/dev/null || true
+rm -rf "$tmp"
+
+# --- Headless fallback: cmux present, cmux-cli opener absent -----------------
+tmp=$(mktemp -d /tmp/hotline-cmux-call-test-XXXXXX)
+mkdir -p "$tmp/bin" "$tmp/cwd" "$tmp/empty"
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "${CMUX_FAKE_STATE:?}/cmux_calls"
+exit 0
+EOF
+chmod +x "$tmp/bin/cmux"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/nope.sh" HOTLINE_PLUGINS_DIR="$tmp/empty" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hi" 2>"$tmp/stderr.txt")
+fb=$(printf '%s' "$out" | jq -r '.fallback // empty' 2>/dev/null)
+if [[ "$fb" == "headless" && ! -f "$tmp/cmux_calls" ]]; then
+  pass "missing opener signals fallback:headless and touches no cmux"
+else
+  fail "missing opener signals fallback:headless and touches no cmux" \
+       "out=$out cmux_calls=$(cat "$tmp/cmux_calls" 2>/dev/null || echo NONE)"
+fi
 rm -rf "$tmp"
 
 # --fork-session without --resume must hard-error (forking with no resume target

@@ -238,7 +238,9 @@ fi
 exit 0
 EOF
 chmod +x "$tmp/bin/cmux"
-PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" \
+# --detached targets the new-workspace placement explicitly (the default is now
+# side-by-side, exercised in surface-placement_test.sh).
+PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --detached --cwd "$tmp/cwd" --prompt "hello" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
 rc=$?
 if [[ $rc -eq 0 ]]; then
@@ -264,7 +266,7 @@ case "$1" in
 esac
 EOF
 chmod +x "$tmp/bin/cmux"
-PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" \
+PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --detached --cwd "$tmp/cwd" --prompt "hello" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
 rc=$?
 if [[ $rc -eq 0 ]]; then
@@ -274,6 +276,190 @@ else
 fi
 assert_async_error_contract "send failure" "$tmp"
 rm -rf "$tmp"
+
+# ---------------------------------------------------------------------------
+# Default placement (side-by-side surface): the async launcher RESOLVES and
+# calls cmux-cli's canonical open-side-surface.sh (single source of truth — no
+# vendored copy), then writes surface_ref.txt (NOT workspace_ref.txt), defaults
+# keep_workspace.txt=true, and sends the launch script to the SURFACE.
+#
+# We inject the opener via HOTLINE_OPEN_SIDE_SURFACE (a stub) so the test never
+# depends on cmux-cli being installed. The side-by-side PTY-readiness gotcha is
+# owned by cmux-cli's opener (and exercised at the unit level for the --window
+# path in surface-placement_test.sh).
+# ---------------------------------------------------------------------------
+
+# Stub standing in for cmux-cli's open-side-surface.sh: records that it ran and
+# emits the success JSON the launcher expects.
+make_side_stub() {
+  cat > "$1" <<'EOF'
+#!/usr/bin/env bash
+echo "open-side-surface invoked: $*" >> "${SIDE_STUB_LOG:?}"
+printf '%s\n' '{"surface_ref":"surface:777","pane_ref":"pane:55","workspace_ref":"workspace:5","mode":"new-surface","ready":"ready"}'
+EOF
+  chmod +x "$1"
+}
+
+# Minimal cmux fake for the surface path: only send / read-screen / close-surface.
+make_min_surface_cmux() {
+  mkdir -p "$1"
+  cat > "$1/cmux" <<'EOF'
+#!/usr/bin/env bash
+ST="${CMUX_FAKE_STATE:?}"
+case "$1" in
+  send) echo "$*" >> "$ST/send_calls" ;;
+  read-screen) cat "$ST/screen.txt" 2>/dev/null ;;
+  close-surface) echo "$*" >> "$ST/close_calls" ;;
+  *) exit 0 ;;
+esac
+EOF
+  chmod +x "$1/cmux"
+}
+
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/cwd"
+: > "$tmp/screen.txt"
+make_min_surface_cmux "$tmp/bin"
+make_side_stub "$tmp/open-side.sh"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello surface" 2>"$tmp/stderr.txt")
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+
+if grep -q "open-side-surface invoked:.*--wait-ready" "$tmp/side_log" 2>/dev/null; then
+  pass "side-by-side async resolves and calls cmux-cli's opener with --wait-ready"
+else
+  fail "side-by-side async resolves and calls cmux-cli's opener with --wait-ready" \
+       "side_log=$(cat "$tmp/side_log" 2>/dev/null || echo NONE) stderr=$(cat "$tmp/stderr.txt")"
+fi
+if [[ -n "$call_dir" && -f "$call_dir/surface_ref.txt" && "$(cat "$call_dir/surface_ref.txt")" == "surface:777" ]]; then
+  pass "side-by-side async writes surface_ref.txt (surface-mode signal)"
+else
+  fail "side-by-side async writes surface_ref.txt (surface-mode signal)" \
+       "call_dir=$call_dir stderr=$(cat "$tmp/stderr.txt")"
+fi
+if [[ -n "$call_dir" && ! -f "$call_dir/workspace_ref.txt" ]]; then
+  pass "side-by-side async does NOT write workspace_ref.txt"
+else
+  fail "side-by-side async does NOT write workspace_ref.txt"
+fi
+if [[ -n "$call_dir" && "$(cat "$call_dir/pane_ref.txt" 2>/dev/null)" == "pane:55" ]]; then
+  pass "side-by-side async records pane_ref.txt for PTY re-attach"
+else
+  fail "side-by-side async records pane_ref.txt" "got: $(cat "$call_dir/pane_ref.txt" 2>/dev/null)"
+fi
+if [[ -n "$call_dir" && "$(cat "$call_dir/keep_workspace.txt" 2>/dev/null)" == "true" ]]; then
+  pass "side-by-side async keeps the surface (keep_workspace.txt=true)"
+else
+  fail "side-by-side async keeps the surface (keep_workspace.txt=true)" \
+       "got: $(cat "$call_dir/keep_workspace.txt" 2>/dev/null)"
+fi
+if grep -q "send --surface surface:777 bash /tmp/hotline-launch" "$tmp/send_calls" 2>/dev/null; then
+  pass "side-by-side async sends launch script to the surface"
+else
+  fail "side-by-side async sends launch script to the surface" \
+       "send_calls=$(cat "$tmp/send_calls" 2>/dev/null)"
+fi
+[[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
+# Headless FALLBACK: cmux present but cmux-cli's opener not resolvable. The
+# launcher must signal {"fallback":"headless"} (so the dial skill re-routes to
+# the headless transport) and must NOT create a call_dir or any cmux surface.
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/bin" "$tmp/cwd" "$tmp/empty"
+# A cmux that records ANY invocation, so we can prove no side effects happened.
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "${CMUX_FAKE_STATE:?}/cmux_calls"
+case "$1" in
+  new-workspace) echo "OK workspace:321" ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/bin/cmux"
+# HOTLINE_OPEN_SIDE_SURFACE points at a missing path AND HOTLINE_PLUGINS_DIR is
+# empty, so the resolver can't find the real cmux-cli copy in this repo either.
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/nope.sh" HOTLINE_PLUGINS_DIR="$tmp/empty" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" 2>"$tmp/stderr.txt")
+fb=$(printf '%s' "$out" | jq -r '.fallback // empty' 2>/dev/null)
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty' 2>/dev/null)
+if [[ "$fb" == "headless" && -z "$call_dir" ]]; then
+  pass "missing opener signals {\"fallback\":\"headless\"} (no call_dir)"
+else
+  fail "missing opener signals fallback:headless" "out=$out stderr=$(cat "$tmp/stderr.txt")"
+fi
+if [[ ! -f "$tmp/cmux_calls" ]]; then
+  pass "headless fallback touches no cmux (no workspace/surface created)"
+else
+  fail "headless fallback touches no cmux" "cmux_calls=$(cat "$tmp/cmux_calls")"
+fi
+rm -rf "$tmp"
+
+# --detached does NOT need the opener: even with NO opener resolvable, it must
+# proceed on cmux (new-workspace), never signal headless fallback.
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/bin" "$tmp/cwd" "$tmp/empty"
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+ST="${CMUX_FAKE_STATE:?}"
+case "$1" in
+  new-workspace) echo "$*" >> "$ST/ws_calls"; echo "OK workspace:321" ;;
+  read-screen) echo "$ " ;;
+  send) echo "$*" >> "$ST/send_calls" ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/bin/cmux"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/nope.sh" HOTLINE_PLUGINS_DIR="$tmp/empty" \
+  bash "$SCRIPT_UNDER_TEST" --detached --cwd "$tmp/cwd" --prompt "hello" 2>"$tmp/stderr.txt")
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty' 2>/dev/null)
+fb=$(printf '%s' "$out" | jq -r '.fallback // empty' 2>/dev/null)
+if [[ -z "$fb" && -n "$call_dir" && -f "$call_dir/workspace_ref.txt" ]]; then
+  pass "--detached proceeds on cmux even with no opener (no headless fallback)"
+else
+  fail "--detached proceeds on cmux even with no opener" "fb=$fb call_dir=$call_dir"
+fi
+[[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
+# Surface readiness TIMEOUT: cmux-cli's opener exits 3 (no JSON) with the surface
+# ref in its stderr. The launcher must close that orphan and write the async
+# error contract — never leave a wedged surface behind.
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/cwd"
+: > "$tmp/screen.txt"
+make_min_surface_cmux "$tmp/bin"
+# Stub opener that mimics cmux-cli's --wait-ready timeout: exit 3, surface named
+# in stderr, NO JSON on stdout.
+cat > "$tmp/open-side.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "open-side-surface: --wait-ready timed out after 1s for surface:777 (pane:55)." >&2
+exit 3
+EOF
+chmod +x "$tmp/open-side.sh"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" 2>"$tmp/stderr.txt")
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+if [[ -n "$call_dir" && -f "$call_dir/done" && -f "$call_dir/error.txt" ]]; then
+  pass "side-by-side readiness timeout (opener exit 3) writes the async error contract"
+else
+  fail "side-by-side readiness timeout writes the async error contract" \
+       "call_dir=$call_dir stderr=$(cat "$tmp/stderr.txt")"
+fi
+if grep -q "close-surface --surface surface:777" "$tmp/close_calls" 2>/dev/null; then
+  pass "side-by-side readiness timeout closes the orphan surface parsed from stderr"
+else
+  fail "side-by-side readiness timeout closes the orphan surface" \
+       "close_calls=$(cat "$tmp/close_calls" 2>/dev/null || echo NONE)"
+fi
+[[ -n "$call_dir" && ! -f "$call_dir/surface_ref.txt" ]] && \
+  pass "side-by-side readiness timeout does NOT signal surface-mode to the wait scripts" || \
+  fail "side-by-side readiness timeout does NOT signal surface-mode to the wait scripts"
+rm -rf "$tmp" "$call_dir"
 
 # --fork-session without --resume must hard-error (forking with no resume target
 # silently creates an empty session — the bug this guard prevents).

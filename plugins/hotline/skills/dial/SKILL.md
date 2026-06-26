@@ -1,7 +1,7 @@
 ---
 name: hotline-dial
 description: "Initiates cross-workspace communication with another Claude Code instance. Supports quick calls, work orders, and conference calls. Use when the user wants to call, dial, message, delegate to, or collaborate with another workspace or project."
-argument-hint: "[--headless] [workspace] [task/question...]"
+argument-hint: "[--headless] [--detached] [--window <name|ref>] [workspace] [task/question...]"
 allowed-tools: Bash
 ---
 
@@ -12,6 +12,8 @@ Dial another workspace to ask questions, delegate work, or collaborate.
 ## Arguments
 
 - **`--headless`** (optional flag, anywhere in args): Force this single dial to use the headless transport (`claude -p`) even if cmux is available. Useful for debugging the headless path, A/B comparing modes, or when the caller wants `claude -p`'s structured stream-json output instead of cmux read-screen scraping. Set `FORCE_HEADLESS=true` for this dial only and skip Step 3's cmux check. Costs programmatic-usage credit; default behavior (cmux when available) doesn't.
+- **`--detached`** / **`--new-workspace`** (optional flag, cmux transport only): Opt out of the default side-by-side placement and spawn the callee in a disconnected **new workspace tab** instead — the pre-0.13 behavior. Use when you don't want the call occupying real estate in your current window. Set `DETACHED=true` for this dial and pass `--detached` through to the launch script. No effect on the headless transport.
+- **`--window <name|ref>`** (optional, cmux transport only): Land the callee as a surface in a specific cmux window (find-or-create), for grouping workers by project. A `window:<n>` ref targets that window directly; a bare name reuses the window holding a workspace titled `<name>`, creating one if none exists. Pass `--window <value>` through to the launch script. Mutually exclusive with `--detached` (if both given, `--window` wins).
 - **`$0`** (optional): Workspace reference — a dirmap ID, path, session ID, or fuzzy name.
 - **`$1+`** (optional): The task/question for the remote workspace.
 
@@ -20,9 +22,18 @@ Dial another workspace to ask questions, delegate work, or collaborate.
 /hotline-dial coaching write the about page
 /hotline-dial 5b1dda91-... what went wrong?
 /hotline-dial --headless dotfiles what branch are you on?
+/hotline-dial --detached dotfiles run the full test suite
+/hotline-dial --window lindris backend tests, please
 ```
 
-**Parse `--headless` first**: scan the raw args for the literal token `--headless` and remove it from the arg list before resolving `$0` and `$1+`. Set `FORCE_HEADLESS=true` if found, `false` otherwise. (For the "always avoid cmux" use case, users can also set `HOTLINE_FORCE_HEADLESS=1` in their env — see Step 3.)
+**Parse the flags first**: scan the raw args for the literal tokens `--headless`, `--detached` (alias `--new-workspace`), and `--window <value>`, and remove them (and `--window`'s value) from the arg list before resolving `$0` and `$1+`:
+
+- `--headless` → set `FORCE_HEADLESS=true` (else `false`). (For the "always avoid cmux" use case, users can also set `HOTLINE_FORCE_HEADLESS=1` in their env — see Step 3.)
+- `--detached` / `--new-workspace` → set `PLACEMENT_FLAG="--detached"`.
+- `--window <value>` → set `PLACEMENT_FLAG="--window <value>"`.
+- none of the placement flags → leave `PLACEMENT_FLAG` empty (default side-by-side).
+
+`PLACEMENT_FLAG` (empty, `--detached`, or `--window <value>`) is appended verbatim to the `cmux-call-async.sh` / `cmux-call.sh` invocation in Step 5. It is ignored on the headless path.
 
 If `$0` is provided (after stripping `--headless`), use it as `USER_REFERENCE` in Step 1. If `$1+` is provided, use it as the prompt in Step 5. If neither, parse both from the user's natural language.
 
@@ -155,6 +166,15 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 
 **Why prefer CMUX?** Interactive `claude` sessions (no `-p` flag) do not consume programmatic usage credits. The hotline protocol — STATUS signals, response format — is defined by the ringing skill, not the transport, so the receiver's output is identical either way. Headless is the fallback for machines where cmux isn't running.
 
+> **Default cmux placement: side-by-side surface (since v0.13).** A cmux-routed call lands the callee in a **visible terminal surface next to your current pane, in the same window** — so you watch the call happen beside the original conversation. This replaces the old behavior of spawning a disconnected new-workspace tab. The launch scripts open the surface by calling the **`cmux-cli` plugin's** `open-side-surface.sh` (resolved at runtime — hotline carries no copy of the split-vs-adjacent decision tree) and wait for its PTY to attach before sending the prompt, so the callee's first keystrokes never get dropped. Two opt-outs (Arguments above):
+>
+> - `--detached` / `--new-workspace` → the original new-workspace-tab placement.
+> - `--window <name|ref>` → a surface in a specific window (find-or-create), for grouping workers by project.
+>
+> Side-by-side and windowed surfaces stay open after the call (they live in your window — closing them would yank a pane you're looking at); detached workspaces are auto-closed once the response is captured. The `PLACEMENT_FLAG` you parsed in Arguments is appended to the launch-script call below; an empty value means the side-by-side default.
+>
+> **cmux present, but cmux-cli not installed → headless fallback.** Side-by-side placement is the only path that needs the cmux-cli plugin. If it isn't installed, the launch scripts can't resolve `open-side-surface.sh`, so — for the **default** placement only — they return `{"fallback":"headless"}` instead of a `call_dir`/result, and you must re-route this call through the headless transport (Step 5 shows the check). `--detached` and `--window` never need cmux-cli (detached uses `new-workspace`; `--window` uses hotline's own `open-window-surface.sh`), so they proceed on cmux regardless.
+
 ### Step 4: Check for Existing Session and Determine Fork Behavior
 
 See if there's already an active session with this workspace:
@@ -206,14 +226,15 @@ There are two distinct first-contact cases. Pick the one that matches how the ta
 # === Case (A): fresh workspace — no resume, no fork ===
 
 # CMUX transport (quick call / work order):
+# $PLACEMENT_FLAG is "", "--detached", or "--window <value>" (from Arguments).
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
-  --name "$SESSION_NAME" \
+  --name "$SESSION_NAME" $PLACEMENT_FLAG \
   --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 
 # CMUX transport (conference call):
 CMUX_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
-  --name "$SESSION_NAME" \
+  --name "$SESSION_NAME" $PLACEMENT_FLAG \
   --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 
 # Headless fallback (any mode):
@@ -221,6 +242,20 @@ CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET
   --name "$SESSION_NAME" \
   --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
+```
+
+**Handle the headless-fallback signal (cmux transport, default placement only).** When a cmux-call returns `{"fallback":"headless"}` instead of a `call_dir`, cmux is up but the `cmux-cli` plugin isn't installed, so side-by-side placement is unavailable. Re-route this exact call through the headless transport — same `--cwd`/`--prompt`/`--resume`/`--fork-session` args, just the headless launcher:
+
+```bash
+if [[ "$(echo "$CALL_RESULT" | jq -r '.fallback // empty')" == "headless" ]]; then
+  # Re-issue via headless-call-async.sh (quick call / work order) or
+  # headless-call.sh (conference). Do NOT pass $PLACEMENT_FLAG — headless
+  # ignores placement.
+  CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
+    --name "$SESSION_NAME" \
+    --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
+fi
 
 
 # === Case (B): fork a given session ID — resume + fork TOGETHER ===
@@ -229,13 +264,13 @@ CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 
 # CMUX transport (quick call / work order):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
-  --name "$SESSION_NAME" --resume "$TARGET_SESSION_ID" --fork-session \
+  --name "$SESSION_NAME" $PLACEMENT_FLAG --resume "$TARGET_SESSION_ID" --fork-session \
   --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 
 # CMUX transport (conference call):
 CMUX_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
-  --name "$SESSION_NAME" --resume "$TARGET_SESSION_ID" --fork-session \
+  --name "$SESSION_NAME" $PLACEMENT_FLAG --resume "$TARGET_SESSION_ID" --fork-session \
   --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 
 # Headless fallback (any mode):
@@ -319,15 +354,17 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 
 ```bash
 # CMUX transport (quick call / work order):
+# Follow-ups honor the same $PLACEMENT_FLAG — a resumed cmux call opens a fresh
+# surface (or workspace, if --detached) and resumes the session into it.
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
-  --resume "$REMOTE_SESSION_ID" \
+  $PLACEMENT_FLAG --resume "$REMOTE_SESSION_ID" \
   --prompt "$YOUR_MESSAGE")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 # Then wait-for-session / wait-for-response as normal.
 
 # CMUX (conference call):
 bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
-  --resume "$REMOTE_SESSION_ID" --prompt "$YOUR_MESSAGE"
+  $PLACEMENT_FLAG --resume "$REMOTE_SESSION_ID" --prompt "$YOUR_MESSAGE"
 
 # Headless fallback (any mode):
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
