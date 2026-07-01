@@ -1,7 +1,7 @@
 {
   "name": "collab-tools",
   "description": "Skills that help Claude collaborate more naturally with the user — routing work out of chat into appropriate channels (editor, files, etc.) when chat isn't the right surface.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

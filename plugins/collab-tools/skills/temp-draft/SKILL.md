@@ -41,12 +41,13 @@ When in doubt, ask the user once whether they want the draft in chat or in `/tmp
 3. **Open it in the user's editor** with this exact form:
 
    ```bash
-   eval "${EDITOR:-vi}" '/tmp/collab-tools/your-file.md' &
+   eval "${OPEN_IN_EDITOR_COMMAND:-${EDITOR:-vi}}" '/tmp/collab-tools/your-file.md' &
    disown 2>/dev/null || true
    ```
 
+   - **`OPEN_IN_EDITOR_COMMAND` takes precedence over `$EDITOR`.** Set it when your `$EDITOR` is a blocking/`--wait` command (e.g. `code --wait`, used by git) that misbehaves when launched here. A backgrounded `--wait` editor leaves a live process waiting for the file to close, which shows up as a duplicate "ghost" app instance in the macOS app switcher. Setting `export OPEN_IN_EDITOR_COMMAND=code` (no `--wait`) opens the file in the existing window and returns immediately — no ghost. Falls back to `$EDITOR`, then `vi`, when unset.
    - The `eval` form is what makes multi-word editor settings work — values like `code --wait`, `cursor --wait`, or `subl -n -w` need shell-level word splitting. Single-quote the path so spaces and special characters are safe.
-   - The trailing `&` + `disown` launch the editor non-blocking. Don't wait for the editor to close — the user's `--wait` flag (if they have one) still makes *their* editor window stay open until they're done, but the shell returns immediately. The actual turn boundary is the user's next chat message ("good to go", "tweak section 2", "I changed X") — not the editor exit.
+   - The trailing `&` + `disown` launch the editor non-blocking. Don't wait for the editor to close — a `--wait` flag (if present) still makes *that* editor window stay open until the user is done, but the shell returns immediately. The actual turn boundary is the user's next chat message ("good to go", "tweak section 2", "I changed X") — not the editor exit.
 
 4. **Briefly tell the user where it landed.** One short sentence with the path. Do NOT paste the draft content into the chat — the entire point is that the chat stays clean and the work lives in the editor.
 
@@ -73,7 +74,7 @@ Pasting long drafts into the chat:
 - Loses syntax highlighting, spellcheck, find/replace, and every other editor affordance.
 - Makes iterative edits painful — every change re-renders the whole block.
 
-A file in `/tmp/collab-tools/` opened in `$EDITOR` keeps chat lean, gives the user real editing power, and lets both sides refer back to "the draft" by path across many turns. The shared directory also gives the companion `promote-draft` skill a known place to look when moving a finished draft to its permanent home.
+A file in `/tmp/collab-tools/` opened in the user's editor keeps chat lean, gives the user real editing power, and lets both sides refer back to "the draft" by path across many turns. The shared directory also gives the companion `promote-draft` skill a known place to look when moving a finished draft to its permanent home.
 
 ## Notes for follow-up turns
 
