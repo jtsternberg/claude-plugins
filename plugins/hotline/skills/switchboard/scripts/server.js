@@ -311,6 +311,8 @@ const server = http.createServer((req, res) => {
 });
 
 // ---- dashboard UI (inline, no build step) -------------------------------------
+// Aesthetic: a 1930s telephone operator's console — bakelite panel, brass
+// jacks, sagging patch cords, glowing exchange lamps, typewritten log sheets.
 
 const DASHBOARD_HTML = /* html */ `<!doctype html>
 <html lang="en">
@@ -318,61 +320,287 @@ const DASHBOARD_HTML = /* html */ `<!doctype html>
 <meta charset="utf-8">
 <title>Hotline Switchboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Limelight&family=Special+Elite&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #12100e; --panel: #1c1917; --panel2: #242019; --line: #3a332a;
-    --text: #e8e0d2; --dim: #9a8f7d; --accent: #e0a458; --live: #7bc47f;
-    --recent: #e0a458; --stale: #6b6154; --user: #58a6e0; --assistant: #e0a458;
+    --bakelite: #191210;
+    --bakelite-hi: #2b1f1a;
+    --panel: #221813;
+    --panel2: #2c211a;
+    --line: #47362a;
+    --brass: #c9973f;
+    --brass-hi: #eec877;
+    --brass-dim: #8a6a34;
+    --cord: #a0522d;
+    --lamp-live: #ffd977;
+    --lamp-recent: #d98e3a;
+    --lamp-stale: #4d4238;
+    --paper: #e9ddc3;
+    --ink: #ded2b8;
+    --dim: #9d8b70;
+    --caller-tag: #7fb4c9;
+    --operator-tag: #d9a253;
+    --serif: 'Spectral', Georgia, serif;
+    --type: 'Special Elite', 'Courier New', monospace;
+    --display: 'Limelight', serif;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "Segoe UI", sans-serif; }
-  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 12px; }
-  header h1 { margin: 0; font-size: 17px; letter-spacing: 1px; }
-  header h1::before { content: "☎ "; color: var(--accent); }
-  header .sub { color: var(--dim); font-size: 12px; }
-  main { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 49px); }
-  #board { border-right: 1px solid var(--line); overflow-y: auto; padding: 10px; }
-  .section-label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; margin: 12px 6px 6px; }
-  .call { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; }
-  .call:hover, .call.active { border-color: var(--accent); }
-  .call .pair { font-weight: 600; display: flex; align-items: center; gap: 6px; }
-  .call .pair .arrow { color: var(--accent); }
-  .call .meta { color: var(--dim); font-size: 12px; margin-top: 3px; display: flex; gap: 10px; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
-  .dot.live { background: var(--live); box-shadow: 0 0 6px var(--live); }
-  .dot.recent { background: var(--recent); }
-  .dot.stale { background: var(--stale); }
+  html, body { height: 100%; }
+  body {
+    margin: 0; color: var(--ink);
+    font: 15px/1.55 var(--serif);
+    background:
+      radial-gradient(1200px 500px at 50% -10%, #33241c 0%, transparent 60%),
+      linear-gradient(180deg, #1d1512 0%, var(--bakelite) 40%);
+    background-color: var(--bakelite);
+  }
+  /* film grain over everything */
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 999;
+    opacity: .05; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ---- header: engraved brass plate ---- */
+  header {
+    display: flex; align-items: center; gap: 18px;
+    padding: 14px 24px 12px;
+    background: linear-gradient(180deg, #2e2119, #1c1410);
+    border-bottom: 3px solid #0c0806;
+    box-shadow: 0 1px 0 #3d2d20 inset, 0 -6px 18px rgba(0,0,0,.6) inset;
+  }
+  .plate {
+    display: inline-flex; align-items: center; gap: 14px;
+    padding: 6px 22px 7px;
+    background: linear-gradient(175deg, var(--brass-hi) 0%, var(--brass) 30%, #96702c 70%, var(--brass-hi) 100%);
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.7), 0 1px 0 rgba(255,240,200,.5) inset, 0 -2px 4px rgba(60,35,0,.5) inset;
+    position: relative;
+  }
+  .plate .screw {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #f4e0ac, #7a5a24 70%);
+    box-shadow: 0 1px 2px rgba(0,0,0,.6) inset;
+    position: relative;
+  }
+  .plate .screw::after {
+    content: ""; position: absolute; left: 1px; right: 1px; top: 50%;
+    height: 1px; background: #4a3612; transform: rotate(38deg);
+  }
+  .plate h1 {
+    margin: 0; font-family: var(--display); font-size: 21px; font-weight: 400;
+    letter-spacing: 3.5px; text-transform: uppercase;
+    color: #33220c;
+    text-shadow: 0 1px 0 rgba(255,240,200,.55), 0 -1px 0 rgba(40,20,0,.6);
+  }
+  header .motto {
+    font-family: var(--type); font-size: 13px; color: var(--dim);
+    letter-spacing: .5px;
+  }
+  header .onair {
+    margin-left: auto; display: flex; align-items: center; gap: 8px;
+    font-family: var(--type); font-size: 11px; letter-spacing: 2px; color: var(--dim);
+    text-transform: uppercase;
+  }
+  header .onair .bulb {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff2c0, var(--lamp-live) 55%, #7a4b00);
+    box-shadow: 0 0 10px 2px rgba(255,205,90,.55);
+    animation: lampglow 2.4s ease-in-out infinite;
+  }
+  @keyframes lampglow {
+    0%,100% { box-shadow: 0 0 10px 2px rgba(255,205,90,.55); }
+    50%     { box-shadow: 0 0 16px 4px rgba(255,205,90,.85); }
+  }
+
+  main { display: grid; grid-template-columns: 372px 1fr; height: calc(100vh - 62px); }
+
+  /* ---- the patch bay (call board) ---- */
+  #board {
+    overflow-y: auto; padding: 14px 12px 24px;
+    background:
+      linear-gradient(90deg, rgba(0,0,0,.35), transparent 12px),
+      linear-gradient(180deg, #241a14, #1a120e);
+    border-right: 3px solid #0d0906;
+    box-shadow: 2px 0 0 #38291e inset;
+  }
+  .section-label {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--type); font-size: 11px; letter-spacing: 2.5px;
+    text-transform: uppercase; color: var(--brass);
+    margin: 18px 6px 10px;
+  }
+  .section-label::before, .section-label::after {
+    content: ""; height: 1px; flex: 1;
+    background: linear-gradient(90deg, transparent, var(--brass-dim));
+  }
+  .section-label::after { background: linear-gradient(90deg, var(--brass-dim), transparent); }
+
+  /* one call = two jacks + a sagging patch cord */
+  .call {
+    position: relative;
+    background: linear-gradient(180deg, var(--panel2), var(--panel));
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px 10px; margin-bottom: 10px; cursor: pointer;
+    box-shadow: 0 3px 8px rgba(0,0,0,.45), 0 1px 0 rgba(255,220,160,.06) inset;
+    transition: transform .15s ease, border-color .15s ease;
+  }
+  .call:hover { transform: translateY(-1px); border-color: var(--brass-dim); }
+  .call.active {
+    border-color: var(--brass);
+    box-shadow: 0 3px 12px rgba(0,0,0,.55), 0 0 0 1px var(--brass-dim), 0 1px 0 rgba(255,220,160,.1) inset;
+  }
+  .patchrow { display: flex; align-items: flex-start; gap: 8px; }
+  .jackpost { width: 86px; flex: 0 0 86px; text-align: center; }
+  .jack {
+    width: 22px; height: 22px; margin: 0 auto 5px; border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, #0a0705 0 30%, transparent 31%),
+      radial-gradient(circle at 35% 30%, var(--brass-hi), var(--brass) 45%, #6d5122 90%);
+    box-shadow: 0 1px 3px rgba(0,0,0,.8), 0 0 0 3px #171008, 0 0 0 4px #3a2c1c;
+  }
+  .call.active .jack {
+    box-shadow: 0 1px 3px rgba(0,0,0,.8), 0 0 0 3px #171008, 0 0 0 4px var(--brass-dim), 0 0 8px 2px rgba(255,205,90,.25);
+  }
+  .jackpost .name {
+    font-family: var(--type); font-size: 12px; line-height: 1.25;
+    color: var(--ink); word-break: break-word;
+  }
+  .cordspan { flex: 1; position: relative; margin-top: 6px; }
+  .cordspan svg { display: block; width: 100%; height: 34px; }
+  .cordspan .cord {
+    fill: none; stroke: var(--cord); stroke-width: 3; stroke-linecap: round;
+    filter: drop-shadow(0 2px 1px rgba(0,0,0,.6));
+  }
+  .cordspan .cord-hi { fill: none; stroke: rgba(255,190,120,.35); stroke-width: 1; }
+  .call.active .cord { stroke: #c96f35; }
+  .lamp {
+    position: absolute; top: -9px; left: 50%; transform: translateX(-50%);
+    width: 10px; height: 10px; border-radius: 50%;
+    box-shadow: 0 0 0 2px #100a06, 0 0 0 3px #3a2c1c;
+  }
+  .lamp.live {
+    background: radial-gradient(circle at 35% 30%, #fff2c0, var(--lamp-live) 55%, #8a5a00);
+    animation: lampglow 1.6s ease-in-out infinite;
+  }
+  .lamp.recent { background: radial-gradient(circle at 35% 30%, #f0c084, var(--lamp-recent) 60%, #5e3a12); box-shadow: 0 0 0 2px #100a06, 0 0 0 3px #3a2c1c, 0 0 6px 1px rgba(217,142,58,.35); }
+  .lamp.stale  { background: radial-gradient(circle at 35% 30%, #6a5c4e, var(--lamp-stale) 60%, #241d16); }
+  .call .meta {
+    display: flex; gap: 12px; justify-content: center; margin-top: 7px;
+    font-family: var(--type); font-size: 10.5px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--dim);
+  }
+  .call .meta .mode { color: var(--brass); }
+
+  /* ---- the operator's log (transcript view) ---- */
   #view { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; }
-  #view.empty { display: flex; align-items: center; justify-content: center; color: var(--dim); }
-  .lane { display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line); }
+  #view.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; }
+  .dialart { position: relative; width: 150px; height: 150px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #3b2c22, #17100c 75%);
+    box-shadow: 0 6px 18px rgba(0,0,0,.6), 0 1px 0 rgba(255,220,160,.08) inset;
+    animation: dialsettle 3.2s ease-in-out infinite;
+  }
+  @keyframes dialsettle { 0%,100% { transform: rotate(0deg);} 50% { transform: rotate(-14deg);} }
+  .dialart .hole {
+    position: absolute; width: 24px; height: 24px; border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #241a12, #060403 70%);
+    box-shadow: 0 0 0 2px #4a3826, 0 1px 2px rgba(0,0,0,.9) inset;
+    left: 50%; top: 50%;
+  }
+  .dialart .hub { position: absolute; inset: 52px; border-radius: 50%;
+    background: radial-gradient(circle at 40% 32%, var(--brass-hi), var(--brass) 50%, #6d5122);
+    box-shadow: 0 2px 5px rgba(0,0,0,.7); }
+  #view.empty .prompt { font-family: var(--type); font-size: 17px; color: var(--dim); letter-spacing: 1px; }
+  #view.empty .prompt em { color: var(--brass); font-style: normal; }
+
+  .lane { display: flex; flex-direction: column; overflow: hidden; border-right: 2px solid #0d0906; }
   .lane:last-child { border-right: none; }
-  .lane h2 { margin: 0; padding: 10px 14px; font-size: 13px; background: var(--panel2); border-bottom: 1px solid var(--line); color: var(--accent); font-weight: 600; }
-  .lane h2 .sid { color: var(--dim); font-weight: 400; font-size: 11px; margin-left: 8px; }
-  .entries { overflow-y: auto; padding: 12px; flex: 1; }
-  .entry { margin-bottom: 12px; }
-  .entry .who { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
-  .entry.user .who { color: var(--user); }
-  .entry.assistant .who { color: var(--assistant); }
-  .entry.tool .who, .entry.system .who { color: var(--dim); }
-  .entry .body { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; overflow-wrap: break-word; }
-  .entry.tool .body, .entry.system .body { color: var(--dim); font-size: 12px; background: transparent; border-style: dashed; }
-  .entry .tools { color: var(--dim); font-size: 12px; font-family: ui-monospace, monospace; margin-top: 4px; }
-  .entry .tools div::before { content: "⚙ "; }
-  .body pre { background: #0c0a08; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; font-size: 12px; }
-  .body code { background: #0c0a08; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .lane h2 {
+    margin: 0; padding: 9px 16px; display: flex; align-items: baseline; gap: 10px;
+    font-family: var(--type); font-weight: 400; font-size: 13px; letter-spacing: 1px;
+    color: #2e1f0a; text-transform: uppercase;
+    background: linear-gradient(175deg, var(--brass-hi), var(--brass) 40%, #96702c);
+    border-bottom: 2px solid #0d0906;
+    text-shadow: 0 1px 0 rgba(255,240,200,.4);
+  }
+  .lane h2 .sid { margin-left: auto; font-size: 10px; color: #57400f; letter-spacing: 2px; }
+  .entries { overflow-y: auto; padding: 18px 18px 26px; flex: 1; }
+
+  .entry { margin-bottom: 14px; animation: slidein .25s ease; }
+  @keyframes slidein { from { opacity: 0; transform: translateY(5px);} to { opacity: 1; transform: none;} }
+  .entry .who {
+    display: inline-block; font-family: var(--type); font-size: 10px;
+    letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px;
+    padding: 1px 8px 0; border: 1px solid; border-radius: 3px;
+  }
+  .entry.user .who { color: var(--caller-tag); border-color: rgba(127,180,201,.4); }
+  .entry.assistant .who { color: var(--operator-tag); border-color: rgba(217,162,83,.45); }
+  .entry.tool .who, .entry.system .who { color: var(--dim); border-color: rgba(157,139,112,.3); }
+  .entry .body {
+    background: linear-gradient(180deg, rgba(255,235,200,.045), rgba(255,235,200,.02));
+    border: 1px solid var(--line); border-left: 3px solid var(--line);
+    border-radius: 4px; padding: 9px 14px; overflow-wrap: break-word;
+  }
+  .entry.user .body { border-left-color: rgba(127,180,201,.55); }
+  .entry.assistant .body { border-left-color: rgba(217,162,83,.6); }
+  .entry.tool .body, .entry.system .body {
+    color: var(--dim); font-size: 12.5px; background: transparent;
+    border-style: dashed; border-left-style: dashed;
+    font-family: var(--type);
+  }
+  .entry.system .body { text-align: center; letter-spacing: 1px; }
+  .entry .tools { color: var(--dim); font-size: 12px; font-family: var(--type); margin-top: 5px; }
+  .entry .tools div { padding-left: 4px; }
+  .entry .tools div::before { content: "⚙ "; color: var(--brass-dim); }
+  .body p { margin: 0 0 9px; } .body p:last-child { margin-bottom: 0; }
+  .body pre {
+    background: #0e0a07; border: 1px solid var(--line); border-radius: 5px;
+    padding: 9px 12px; overflow-x: auto; font-size: 12.5px; line-height: 1.5;
+  }
+  .body code {
+    background: #0e0a07; padding: 1px 6px; border-radius: 4px; font-size: 13px;
+    font-family: ui-monospace, Menlo, monospace; color: #d8b98a;
+  }
   .body pre code { background: none; padding: 0; }
-  .missing { color: var(--dim); font-style: italic; padding: 20px; }
+  .body a { color: var(--brass-hi); }
+  .body strong { color: var(--paper); }
+  .missing { color: var(--dim); font-style: italic; padding: 26px; font-family: var(--type); font-size: 13px; text-align: center; }
+
+  ::-webkit-scrollbar { width: 11px; }
+  ::-webkit-scrollbar-track { background: #140e0a; }
+  ::-webkit-scrollbar-thumb { background: #3d2d20; border-radius: 6px; border: 2px solid #140e0a; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--brass-dim); }
 </style>
 </head>
 <body>
-<header><h1>Hotline Switchboard</h1><span class="sub">read-only · live</span></header>
+<header>
+  <div class="plate"><span class="screw"></span><h1>Hotline Switchboard</h1><span class="screw"></span></div>
+  <span class="motto">"Number, please?" — read-only operator console</span>
+  <div class="onair"><span class="bulb"></span> Exchange live</div>
+</header>
 <main>
   <div id="board"></div>
-  <div id="view" class="empty">Pick up a line…</div>
+  <div id="view" class="empty">
+    <div class="dialart" id="dialart"><div class="hub"></div></div>
+    <div class="prompt">Number, please? <em>Pick a line to listen in.</em></div>
+  </div>
 </main>
 <script>
 let activeCallId = null;
 let eventSource = null;
+
+// rotary dial finger holes
+(function () {
+  const dial = document.getElementById('dialart');
+  for (let i = 0; i < 10; i++) {
+    const a = (i * 30 - 125) * Math.PI / 180;
+    const h = document.createElement('div');
+    h.className = 'hole';
+    h.style.transform = 'translate(' + (Math.cos(a) * 52 - 12) + 'px,' + (Math.sin(a) * 52 - 12) + 'px)';
+    dial.appendChild(h);
+  }
+})();
 
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -385,8 +613,8 @@ function md(text) {
     let t = esc(parts[i]);
     t = t.replace(/\`([^\`\\n]+)\`/g, '<code>$1</code>');
     t = t.replace(/\\*\\*([^*\\n]+)\\*\\*/g, '<strong>$1</strong>');
-    t = t.replace(/(https?:\\/\\/[^\\s<)]+)/g, '<a href="$1" target="_blank" style="color:var(--accent)">$1</a>');
-    t = t.split(/\\n{2,}/).map(p => '<p style="margin:0 0 8px">' + p.replace(/\\n/g, '<br>') + '</p>').join('');
+    t = t.replace(/(https?:\\/\\/[^\\s<)]+)/g, '<a href="$1" target="_blank">$1</a>');
+    t = t.split(/\\n{2,}/).map(p => '<p>' + p.replace(/\\n/g, '<br>') + '</p>').join('');
     html += t;
   }
   return html;
@@ -401,6 +629,31 @@ function fmtAge(ts) {
   return Math.round(s/86400) + 'd ago';
 }
 
+const SECTION_NAMES = { live: 'Active lines', recent: 'Recent calls', stale: 'Cold lines' };
+
+// A patch cord: sagging catenary-ish curve between the two jacks, lamp at apex.
+function cordSvg() {
+  return '<svg viewBox="0 0 100 34" preserveAspectRatio="none">' +
+    '<path class="cord" d="M3,5 C30,32 70,32 97,5"/>' +
+    '<path class="cord-hi" d="M3,4 C30,30 70,30 97,4"/>' +
+    '</svg>';
+}
+
+function callCard(c) {
+  const rings = c.exchange_count === 1 ? '1 ring' : c.exchange_count + ' rings';
+  return '<div class="call' + (c.id === activeCallId ? ' active' : '') + '"' +
+    ' data-id="' + esc(c.id) + '"' +
+    ' data-caller="' + esc(c.caller.session_id) + '" data-callee="' + esc(c.callee.session_id) + '"' +
+    ' data-caller-name="' + esc(c.caller.name) + '" data-callee-name="' + esc(c.callee.name) + '">' +
+    '<div class="patchrow">' +
+      '<div class="jackpost"><div class="jack"></div><div class="name">' + esc(c.caller.name) + '</div></div>' +
+      '<div class="cordspan"><span class="lamp ' + c.status + '"></span>' + cordSvg() + '</div>' +
+      '<div class="jackpost"><div class="jack"></div><div class="name">' + esc(c.callee.name) + '</div></div>' +
+    '</div>' +
+    '<div class="meta"><span class="mode">' + esc(c.mode) + '</span><span>' + fmtAge(c.last_activity) + '</span><span>' + rings + '</span></div>' +
+    '</div>';
+}
+
 async function loadBoard() {
   const { calls } = await (await fetch('/api/calls')).json();
   const board = document.getElementById('board');
@@ -408,20 +661,14 @@ async function loadBoard() {
   calls.forEach(c => groups[c.status].push(c));
   board.innerHTML = ['live','recent','stale'].map(g => {
     if (!groups[g].length) return '';
-    return '<div class="section-label">' + g + ' (' + groups[g].length + ')</div>' +
-      groups[g].map(c => \`
-        <div class="call\${c.id === activeCallId ? ' active' : ''}" data-id="\${esc(c.id)}"
-             data-caller="\${esc(c.caller.session_id)}" data-callee="\${esc(c.callee.session_id)}"
-             data-caller-name="\${esc(c.caller.name)}" data-callee-name="\${esc(c.callee.name)}">
-          <div class="pair"><span class="dot \${c.status}"></span> \${esc(c.caller.name)} <span class="arrow">→</span> \${esc(c.callee.name)}</div>
-          <div class="meta"><span>\${esc(c.mode)}</span><span>\${fmtAge(c.last_activity)}</span><span>\${c.exchange_count}✕</span></div>
-        </div>\`).join('');
+    return '<div class="section-label">' + SECTION_NAMES[g] + ' · ' + groups[g].length + '</div>' +
+      groups[g].map(callCard).join('');
   }).join('');
   board.querySelectorAll('.call').forEach(el => el.addEventListener('click', () => openCall(el.dataset)));
 }
 
 function entryHtml(e) {
-  const who = e.role === 'assistant' ? 'claude' : e.role;
+  const who = e.role === 'assistant' ? 'operator' : (e.role === 'user' ? 'caller' : (e.role === 'tool' ? 'wire' : 'exchange'));
   const tools = (e.tools || []).map(t => '<div>' + esc(t) + '</div>').join('');
   const body = e.text ? '<div class="body">' + md(e.text) + '</div>' : '';
   return '<div class="entry ' + e.role + '"><div class="who">' + esc(who) + '</div>' + body +
@@ -442,23 +689,23 @@ async function openCall(d) {
   const view = document.getElementById('view');
   view.classList.remove('empty');
   const lanes = [
-    { sid: d.caller, name: d.callerName, label: 'caller' },
-    { sid: d.callee, name: d.calleeName, label: 'callee' },
+    { sid: d.caller, name: d.callerName, label: 'Line A · ' },
+    { sid: d.callee, name: d.calleeName, label: 'Line B · ' },
   ];
-  view.innerHTML = lanes.map(l => \`
-    <div class="lane">
-      <h2>\${esc(l.label)}: \${esc(l.name)}<span class="sid">\${esc(l.sid.slice(0,8))}</span></h2>
-      <div class="entries" data-session="\${esc(l.sid)}"><div class="missing">Loading…</div></div>
-    </div>\`).join('');
+  view.innerHTML = lanes.map(l =>
+    '<div class="lane">' +
+      '<h2>' + esc(l.label + l.name) + '<span class="sid">' + esc(l.sid.slice(0,8)) + '</span></h2>' +
+      '<div class="entries" data-session="' + esc(l.sid) + '"><div class="missing">Connecting…</div></div>' +
+    '</div>').join('');
   document.querySelectorAll('.call').forEach(el => el.classList.toggle('active', el.dataset.id === d.id));
 
   const sids = [];
   for (const l of lanes) {
     const lane = document.querySelector('.entries[data-session="' + l.sid + '"]');
     const r = await fetch('/api/transcript?session=' + l.sid);
-    if (!r.ok) { lane.innerHTML = '<div class="missing">No transcript found for this session.</div>'; continue; }
+    if (!r.ok) { lane.innerHTML = '<div class="missing">— line disconnected — no transcript on file for this session —</div>'; continue; }
     const { entries } = await r.json();
-    lane.innerHTML = entries.map(entryHtml).join('') || '<div class="missing">Empty transcript.</div>';
+    lane.innerHTML = entries.map(entryHtml).join('') || '<div class="missing">— silence on the line —</div>';
     lane.scrollTop = lane.scrollHeight;
     sids.push(l.sid);
   }
