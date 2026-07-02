@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Tests for the hotline switchboard: registry reading, transcript parsing/
+# tailing, and server endpoints — all against synthesized fixtures in a temp
+# HOME-like sandbox. No real registry or transcripts are touched.
+#
+# Usage: bash plugins/hotline/tests/switchboard_test.sh
+# Exit 0 on success; exit 1 with failing case names on any failure.
+# =============================================================================
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SB_SCRIPTS="$SCRIPT_DIR/../skills/switchboard/scripts"
+
+PASS=0
+FAIL=0
+FAILED_CASES=()
+
+pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
+fail() { FAIL=$((FAIL + 1)); FAILED_CASES+=("$1"); echo "  ✗ $1"; }
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "SKIP: node not available"
+  exit 0
+fi
+
+# ---- sandbox ----------------------------------------------------------------
+
+SANDBOX=$(mktemp -d)
+trap 'kill "$SERVER_PID" 2>/dev/null; rm -rf "$SANDBOX"' EXIT
+
+SESSIONS_DIR="$SANDBOX/sessions"
+PROJECTS_ROOT="$SANDBOX/projects"
+mkdir -p "$SESSIONS_DIR" "$PROJECTS_ROOT/-tmp-caller-ws" "$PROJECTS_ROOT/-tmp-callee-ws"
+
+CALLER_SID="aaaaaaaa-1111-2222-3333-444444444444"
+CALLEE_SID="bbbbbbbb-5555-6666-7777-888888888888"
+NOW=$(date +%s)
+
+cat > "$SESSIONS_DIR/${CALLER_SID}.json" <<EOF
+{
+  "caller": "/tmp/caller-ws",
+  "caller_session_id": "${CALLER_SID}",
+  "connections": {
+    "/tmp/callee-ws": {
+      "session_id": "${CALLEE_SID}",
+      "started": $((NOW - 300)),
+      "last_contact": ${NOW},
+      "mode": "work_order",
+      "exchange_count": 3
+    }
+  }
+}
+EOF
+
+# Stale entry pointing at a session with no transcript
+cat > "$SESSIONS_DIR/stale.json" <<EOF
+{
+  "caller": "/tmp/old-ws",
+  "caller_session_id": "cccccccc-0000-0000-0000-000000000000",
+  "connections": {
+    "/tmp/gone-ws": {
+      "session_id": "dddddddd-0000-0000-0000-000000000000",
+      "started": $((NOW - 900000)),
+      "last_contact": $((NOW - 900000)),
+      "mode": "quick_call",
+      "exchange_count": 1
+    }
+  }
+}
+EOF
+
+CALLER_T="$PROJECTS_ROOT/-tmp-caller-ws/${CALLER_SID}.jsonl"
+CALLEE_T="$PROJECTS_ROOT/-tmp-callee-ws/${CALLEE_SID}.jsonl"
+
+cat > "$CALLER_T" <<'EOF'
+{"type":"user","timestamp":"2026-07-02T10:00:00Z","message":{"role":"user","content":"Hello there **bold** question"}}
+{"type":"assistant","timestamp":"2026-07-02T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Answering the question."},{"type":"tool_use","name":"Bash","input":{"command":"ls -la"}}]}}
+{"type":"user","timestamp":"2026-07-02T10:00:06Z","message":{"role":"user","content":[{"type":"tool_result","content":"file1\nfile2"}]}}
+{"type":"user","isMeta":true,"message":{"role":"user","content":"meta noise should be skipped"}}
+{"type":"user","isSidechain":true,"message":{"role":"user","content":"sidechain noise should be skipped"}}
+{"type":"summary","summary":"Compacted: earlier discussion"}
+{"type":"user","message":{"role":"user","content":"<system-reminder>injected</system-reminder>real user text"}}
+not-json-garbage-line
+EOF
+
+cat > "$CALLEE_T" <<'EOF'
+{"type":"user","timestamp":"2026-07-02T10:00:01Z","message":{"role":"user","content":"Incoming call payload"}}
+{"type":"assistant","timestamp":"2026-07-02T10:00:09Z","message":{"role":"assistant","content":[{"type":"text","text":"Callee response"}]}}
+EOF
+
+PORT=$(( (RANDOM % 2000) + 42000 ))
+HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
+  node "$SB_SCRIPTS/server.js" --port="$PORT" --stale-hours=24 > "$SANDBOX/server.log" 2>&1 &
+SERVER_PID=$!
+
+# Wait for server up
+for _ in $(seq 1 20); do
+  curl -sf "http://127.0.0.1:$PORT/api/calls" >/dev/null 2>&1 && break
+  sleep 0.25
+done
+
+BASE="http://127.0.0.1:$PORT"
+
+# ---- case: server boots and serves dashboard --------------------------------
+
+if curl -sf "$BASE/" | grep -q "Hotline Switchboard"; then
+  pass "dashboard HTML served"
+else
+  fail "dashboard HTML served"
+fi
+
+# ---- case: /api/calls enumerates registry, classifies status -----------------
+
+CALLS=$(curl -sf "$BASE/api/calls")
+if [[ $(echo "$CALLS" | jq '.calls | length') == "2" ]]; then
+  pass "registry: both calls enumerated"
+else
+  fail "registry: both calls enumerated"
+fi
+
+LIVE_STATUS=$(echo "$CALLS" | jq -r --arg sid "$CALLER_SID" '.calls[] | select(.caller.session_id==$sid) | .status')
+if [[ "$LIVE_STATUS" == "live" ]]; then
+  pass "registry: fresh call classified live"
+else
+  fail "registry: fresh call classified live (got: $LIVE_STATUS)"
+fi
+
+STALE_STATUS=$(echo "$CALLS" | jq -r '.calls[] | select(.mode=="quick_call") | .status')
+if [[ "$STALE_STATUS" == "stale" ]]; then
+  pass "registry: old call classified stale"
+else
+  fail "registry: old call classified stale (got: $STALE_STATUS)"
+fi
+
+HAS_T=$(echo "$CALLS" | jq -r --arg sid "$CALLER_SID" '.calls[] | select(.caller.session_id==$sid) | .callee.has_transcript')
+if [[ "$HAS_T" == "true" ]]; then
+  pass "registry: transcript resolved via slugified cwd"
+else
+  fail "registry: transcript resolved via slugified cwd"
+fi
+
+# ---- case: transcript parsing -------------------------------------------------
+
+TRANS=$(curl -sf "$BASE/api/transcript?session=$CALLER_SID")
+COUNT=$(echo "$TRANS" | jq '.entries | length')
+# Expected: user, assistant(+tool), tool_result, summary, cleaned user = 5
+if [[ "$COUNT" == "5" ]]; then
+  pass "parser: correct entry count (meta/sidechain/garbage skipped)"
+else
+  fail "parser: correct entry count (expected 5, got $COUNT)"
+fi
+
+if [[ $(echo "$TRANS" | jq -r '.entries[1].tools[0]') == "Bash: ls -la" ]]; then
+  pass "parser: tool_use labeled"
+else
+  fail "parser: tool_use labeled"
+fi
+
+if [[ $(echo "$TRANS" | jq -r '.entries[4].text') == "real user text" ]]; then
+  pass "parser: system-reminder noise stripped"
+else
+  fail "parser: system-reminder noise stripped"
+fi
+
+if [[ $(echo "$TRANS" | jq -r '.entries[3].kind') == "summary" ]]; then
+  pass "parser: compaction summary surfaced"
+else
+  fail "parser: compaction summary surfaced"
+fi
+
+# ---- case: missing transcript -> 404 ------------------------------------------
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/transcript?session=dddddddd-0000-0000-0000-000000000000")
+if [[ "$CODE" == "404" ]]; then
+  pass "missing transcript returns 404"
+else
+  fail "missing transcript returns 404 (got $CODE)"
+fi
+
+# ---- case: incremental tailing via offset --------------------------------------
+
+OFFSET=$(echo "$TRANS" | jq '.offset')
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"NEW LIVE ENTRY"}]}}' >> "$CALLER_T"
+TRANS2=$(curl -sf "$BASE/api/transcript?session=$CALLER_SID&offset=$OFFSET")
+if [[ $(echo "$TRANS2" | jq -r '.entries[0].text') == "NEW LIVE ENTRY" && $(echo "$TRANS2" | jq '.entries | length') == "1" ]]; then
+  pass "tailing: offset read returns only new entries"
+else
+  fail "tailing: offset read returns only new entries"
+fi
+
+# ---- case: partial trailing line is not consumed --------------------------------
+
+OFFSET2=$(echo "$TRANS2" | jq '.offset')
+printf '{"type":"assistant","message":{"role":"assistant","con' >> "$CALLER_T"
+TRANS3=$(curl -sf "$BASE/api/transcript?session=$CALLER_SID&offset=$OFFSET2")
+if [[ $(echo "$TRANS3" | jq '.entries | length') == "0" && $(echo "$TRANS3" | jq '.offset') == "$OFFSET2" ]]; then
+  pass "tailing: partial line left unconsumed"
+else
+  fail "tailing: partial line left unconsumed"
+fi
+
+# ---- case: SSE streams new entries ----------------------------------------------
+
+printf 'tent":[{"type":"text","text":"finished line"}]}}\n' >> "$CALLER_T"
+SSE_OUT="$SANDBOX/sse.out"
+curl -sN --max-time 4 "$BASE/api/watch?sessions=$CALLER_SID" > "$SSE_OUT" &
+CURL_PID=$!
+sleep 1.5
+echo '{"type":"user","message":{"role":"user","content":"SSE PUSHED MESSAGE"}}' >> "$CALLER_T"
+wait "$CURL_PID" 2>/dev/null
+if grep -q "SSE PUSHED MESSAGE" "$SSE_OUT"; then
+  pass "sse: new transcript entry pushed to stream"
+else
+  fail "sse: new transcript entry pushed to stream"
+fi
+
+# ---- case: bad session id rejected -----------------------------------------------
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/transcript?session=../../etc/passwd")
+if [[ "$CODE" == "400" ]]; then
+  pass "security: path-traversal session id rejected"
+else
+  fail "security: path-traversal session id rejected (got $CODE)"
+fi
+
+# ---- case: switchboard.sh start/status/stop lifecycle -----------------------------
+
+SB_PORT=$(( PORT + 1 ))
+LIFE_HOME="$SANDBOX/home"
+mkdir -p "$LIFE_HOME"
+START_OUT=$(HOME="$LIFE_HOME" HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
+  bash "$SB_SCRIPTS/switchboard.sh" start --port="$SB_PORT" --no-open)
+if [[ $(echo "$START_OUT" | jq -r '.status') == "started" ]]; then
+  pass "lifecycle: start"
+else
+  fail "lifecycle: start (got: $START_OUT)"
+fi
+
+STATUS_OUT=$(HOME="$LIFE_HOME" bash "$SB_SCRIPTS/switchboard.sh" status)
+if [[ $(echo "$STATUS_OUT" | jq -r '.status') == "running" ]]; then
+  pass "lifecycle: status running"
+else
+  fail "lifecycle: status running (got: $STATUS_OUT)"
+fi
+
+STOP_OUT=$(HOME="$LIFE_HOME" bash "$SB_SCRIPTS/switchboard.sh" stop)
+if [[ $(echo "$STOP_OUT" | jq -r '.status') == "stopped" ]]; then
+  pass "lifecycle: stop"
+else
+  fail "lifecycle: stop (got: $STOP_OUT)"
+fi
+
+STATUS_OUT2=$(HOME="$LIFE_HOME" bash "$SB_SCRIPTS/switchboard.sh" status)
+if [[ $(echo "$STATUS_OUT2" | jq -r '.status') == "not_running" ]]; then
+  pass "lifecycle: status not_running after stop"
+else
+  fail "lifecycle: status not_running after stop (got: $STATUS_OUT2)"
+fi
+
+# ---- summary ----------------------------------------------------------------
+
+echo ""
+echo "PASS: $PASS  FAIL: $FAIL"
+if [[ $FAIL -gt 0 ]]; then
+  printf 'Failed: %s\n' "${FAILED_CASES[@]}"
+  exit 1
+fi
+exit 0

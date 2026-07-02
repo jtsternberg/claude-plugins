@@ -355,6 +355,8 @@ resolve-workspace.sh "<user's words>"
 - **`hotline-pickup`** — Workspace identity introspection. Runs `gather-workspace-info.sh` to examine CLAUDE.md, package files, git history, then caches a concise identity to `~/.agents-hotline/identities/`. Used by workspace resolution for fuzzy matching.
 - **`hotline-add-contact`** — Register a workspace in dirmap so other agents can find it. Uses `dirmap add` if available, edits `~/.dirmap.json` directly otherwise.
 - **`hotline-whoami`** — Reverse-lookup the current workspace's dirmap slug. Caller ID for the hotline.
+- **`hotline-wiretap`** — Locate the current session's JSONL transcript file via fingerprint discovery.
+- **`hotline-switchboard`** — Live, read-only HTML dashboard of all hotline calls. See below.
 
 ### State
 
@@ -362,6 +364,27 @@ All hotline state lives in `~/.agents-hotline/`:
 - `identities/` — Cached workspace identity JSON files
 - `identities/*.dial_history.jsonl` — Append-only call logs per workspace
 - `sessions/` — Outgoing session maps (keyed by caller session ID)
+- `switchboard.pid` / `switchboard.log` — Switchboard server state
+
+---
+
+## The Switchboard
+
+A live, **read-only** dashboard of every hotline conversation — ask Claude to "open the switchboard" (or run the script directly):
+
+```bash
+bash plugins/hotline/skills/switchboard/scripts/switchboard.sh start   # opens the browser
+bash plugins/hotline/skills/switchboard/scripts/switchboard.sh stop
+bash plugins/hotline/skills/switchboard/scripts/switchboard.sh status
+```
+
+What you get:
+
+- **Call board** — every call from the sessions registry, grouped **live** (activity < 15 min), **recent** (< 24h), and **stale**, with mode, age, and exchange count.
+- **Both ends of the line** — click a call to see the caller and callee transcripts rendered side-by-side.
+- **Real-time** — the server tails the Claude Code transcript JSONL files (`~/.claude/projects/*/<session-id>.jsonl`) from byte offsets and streams new entries to the browser over SSE as the conversations evolve. Unlike `claude --resume`, the view stays current.
+
+Zero dependencies: a single-file Node server with an inline UI — no npm install, no build step. It never writes to the registry or transcripts. Default port `4160` (`--port=<n>` or `HOTLINE_SWITCHBOARD_PORT` to change).
 
 ---
 
