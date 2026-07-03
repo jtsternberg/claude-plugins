@@ -291,12 +291,7 @@ REMOTE_SESSION_ID=$(echo "$CMUX_RESULT" | jq -r '.session_id')
 
 > Connected to **[workspace name]** in CMUX (`[workspace-ref]`). The conference prompt has been delivered in the visible workspace.
 
-Then cache the session with mode `conference_call`, and stop here unless the user asks you to continue the conference from the caller side:
-
-```bash
-bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
-  --caller-session "$MY_SESSION_ID" --session "$REMOTE_SESSION_ID" --mode "conference_call"
-```
+The session is cached automatically (`cmux-call.sh` registers it from the ringing prompt's tags). Stop here unless the user asks you to continue the conference from the caller side.
 
 **Wait for the session ID** (returns quickly once the remote agent starts):
 
@@ -329,12 +324,7 @@ echo "$RESPONSE_JSON" | jq -r '.response'
 
 Read from the file (preferred, shown above) or use a here-string: `jq -r '.response' <<<"$RESPONSE_JSON"`. If a caller ever sees a `parse error: Invalid string: control characters from U+0000 through U+001F` on `wait-for-response.sh` output, that's a hotline bug — file it via `bd` under the hotline plugin with the stream.jsonl and response.json captured from the call_dir.
 
-Cache the session:
-
-```bash
-bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
-  --caller-session "$MY_SESSION_ID" --session "$REMOTE_SESSION_ID" --mode "$MODE"
-```
+The session is cached automatically — `wait-for-session.sh` registers the call in the sessions registry the moment it discovers the remote session ID (the launchers persist the ringing prompt's `[MODE:]`/`[CALLER:]`/`[SESSION:]` tags into the call_dir for it). You do NOT need to run `session-cache.sh set`.
 
 Clean up: `rm -rf "$CALL_DIR"`
 

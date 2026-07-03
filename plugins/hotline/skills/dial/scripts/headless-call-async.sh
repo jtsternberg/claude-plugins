@@ -66,9 +66,13 @@ fi
 
 # Create call directory
 CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
+# Persist receiver cwd + [MODE:]/[CALLER:]/[SESSION:] tags from the ringing
+# prompt so wait-for-session.sh can register the call in the sessions registry.
+bash "$(dirname "${BASH_SOURCE[0]}")/persist-call-meta.sh" "$CALL_DIR" "$CWD" "$PROMPT"
 
 # Build the command
 CMD=(claude -p "$PROMPT" --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
+[[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && CMD+=(--model "$HOTLINE_CLAUDE_MODEL")
 
 if [[ -n "$RESUME_ID" ]]; then
   CMD+=(--resume "$RESUME_ID")

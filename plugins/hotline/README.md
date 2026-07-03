@@ -383,6 +383,9 @@ What you get:
 - **Call board** — every call from the sessions registry, grouped **live** (activity < 15 min), **recent** (< 24h), and **stale**, with mode, age, and exchange count.
 - **Both ends of the line** — click a call to see the caller and callee transcripts rendered side-by-side.
 - **Real-time** — the server tails the Claude Code transcript JSONL files (`~/.claude/projects/*/<session-id>.jsonl`) from byte offsets and streams new entries to the browser over SSE as the conversations evolve. Unlike `claude --resume`, the view stays current.
+- **Discovery scan** — calls the registry never recorded are reconstructed from the ringing handshake at the top of each callee transcript (`/hotline-ringing [MODE:…] [CALLER:…] [SESSION:…]`) and shown with a `traced` stamp. Registry entries win on conflicts.
+
+Registration is also now script-level on the dial side: `wait-for-session.sh` records each call in the sessions registry the moment the remote session ID is known, so future calls appear on the board without relying on the dialing agent to cache them.
 
 Zero dependencies: a single-file Node server with an inline UI — no npm install, no build step. It never writes to the registry or transcripts. Default port `4160` (`--port=<n>` or `HOTLINE_SWITCHBOARD_PORT` to change).
 

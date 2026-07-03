@@ -157,6 +157,12 @@ if $CMUX_MODE; then
     ELAPSED=$((ELAPSED + 1))
   done
 
+  # Register the call in the sessions registry the moment the session ID is
+  # known — script-level, so registration no longer depends on the dialing
+  # agent remembering the SKILL.md cache step (routinely skipped on visible
+  # side-by-side work orders). Silent no-op if launch metadata is absent.
+  bash "$(dirname "${BASH_SOURCE[0]}")/register-call.sh" "$CALL_DIR"
+
   cat "$CALL_DIR/session_id.txt"
   exit 0
 fi
@@ -172,5 +178,8 @@ while [[ ! -f "$CALL_DIR/session_id.txt" ]]; do
   sleep 1
   ELAPSED=$((ELAPSED + 1))
 done
+
+# Script-level registration — see the cmux-mode comment above.
+bash "$(dirname "${BASH_SOURCE[0]}")/register-call.sh" "$CALL_DIR"
 
 cat "$CALL_DIR/session_id.txt"

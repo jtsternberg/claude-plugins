@@ -81,6 +81,93 @@ function shortName(p) {
   return p ? path.basename(p) : '?';
 }
 
+// ---- discovery scan: reconstruct calls the registry missed -------------------
+// Every callee transcript opens with the ringing handshake:
+//   /hotline-ringing ... [MODE: x] [CALLER: /path] [SESSION: <caller-sid>]
+// so calls can be reconstructed straight from ~/.claude/projects even when the
+// dialing agent never registered them. Head-of-file parse, cached by mtime.
+
+// Ringing handshake can land tens of KB into the transcript (session preamble,
+// skill listings, and context attachments precede the first user message).
+const HEAD_BYTES = 262144;
+const discoveryCache = new Map(); // file -> {mtime, call|null}
+
+function readHead(file, bytes) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(bytes);
+    const n = fs.readSync(fd, buf, 0, bytes, 0);
+    return buf.toString('utf8', 0, n);
+  } finally { fs.closeSync(fd); }
+}
+
+function parseRingingHandshake(file, sessionId) {
+  let head;
+  try { head = readHead(file, HEAD_BYTES); } catch { return null; }
+  if (!head.includes('/hotline-ringing')) return null;
+  const mode = (head.match(/\[MODE: ([a-z_]+)\]/) || [])[1];
+  const callerPath = (head.match(/\[CALLER: ([^\]]+)\]/) || [])[1];
+  const callerSid = (head.match(/\[SESSION: ([A-Za-z0-9-]+)\]/) || [])[1];
+  if (!callerPath || !callerSid) return null;
+  // A CALLER's transcript also contains ringing text (inside its own dial
+  // commands) — but there the [SESSION:] tag is its own session ID. Only a
+  // callee transcript carries someone else's session in the tag.
+  if (callerSid.toLowerCase() === sessionId.toLowerCase()) return null;
+  // The callee's own cwd is on every transcript line.
+  let calleePath = '';
+  for (const line of head.split('\n')) {
+    const m = line.match(/"cwd":"((?:[^"\\]|\\.)*)"/);
+    if (m) { try { calleePath = JSON.parse('"' + m[1] + '"'); } catch { calleePath = m[1]; } break; }
+  }
+  return {
+    caller: { path: callerPath, session_id: callerSid },
+    callee: { path: calleePath, session_id: sessionId },
+    mode: mode || 'unknown',
+  };
+}
+
+function discoverCalls(knownCalleeSids) {
+  const calls = [];
+  let dirs = [];
+  try { dirs = fs.readdirSync(PROJECTS_ROOT); } catch { return calls; }
+  for (const d of dirs) {
+    let files = [];
+    const dir = path.join(PROJECTS_ROOT, d);
+    try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')); } catch { continue; }
+    for (const f of files) {
+      const sid = f.slice(0, -6);
+      if (knownCalleeSids.has(sid)) continue;
+      const file = path.join(dir, f);
+      let stat;
+      try { stat = fs.statSync(file); } catch { continue; }
+      const cached = discoveryCache.get(file);
+      let parsed;
+      if (cached && cached.mtime === stat.mtimeMs) {
+        parsed = cached.call;
+      } else {
+        parsed = parseRingingHandshake(file, sid);
+        discoveryCache.set(file, { mtime: stat.mtimeMs, call: parsed });
+      }
+      if (!parsed) continue;
+      transcriptCache.set(sid, file);
+      const callerTranscript = findTranscript(parsed.caller.session_id, parsed.caller.path);
+      const lastActivity = Math.max(stat.mtimeMs / 1000, callerTranscript ? fileMtime(callerTranscript) : 0);
+      calls.push({
+        id: `${parsed.caller.session_id}:${sid}`,
+        caller: { path: parsed.caller.path, name: shortName(parsed.caller.path), session_id: parsed.caller.session_id, has_transcript: !!callerTranscript },
+        callee: { path: parsed.callee.path, name: shortName(parsed.callee.path) || d, session_id: sid, has_transcript: true },
+        mode: parsed.mode,
+        started: stat.birthtimeMs ? stat.birthtimeMs / 1000 : 0,
+        last_activity: lastActivity,
+        exchange_count: 0,
+        status: classify(lastActivity),
+        discovered: true,
+      });
+    }
+  }
+  return calls;
+}
+
 function readCalls() {
   let files = [];
   try { files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json')); } catch { /* no registry */ }
@@ -112,6 +199,10 @@ function readCalls() {
       });
     }
   }
+  // Merge in calls reconstructed from ringing handshakes; registry wins on
+  // any callee session it already tracks.
+  const knownCalleeSids = new Set(calls.map(c => c.callee.session_id));
+  calls.push(...discoverCalls(knownCalleeSids));
   calls.sort((a, b) => b.last_activity - a.last_activity);
   return calls;
 }
@@ -640,7 +731,7 @@ function cordSvg() {
 }
 
 function callCard(c) {
-  const rings = c.exchange_count === 1 ? '1 ring' : c.exchange_count + ' rings';
+  const rings = c.discovered ? 'traced' : (c.exchange_count === 1 ? '1 ring' : c.exchange_count + ' rings');
   return '<div class="call' + (c.id === activeCallId ? ' active' : '') + '"' +
     ' data-id="' + esc(c.id) + '"' +
     ' data-caller="' + esc(c.caller.session_id) + '" data-callee="' + esc(c.callee.session_id) + '"' +

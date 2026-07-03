@@ -138,6 +138,9 @@ echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 # (~/.claude/projects/<encoded-cwd>/<session-id>.jsonl) as a second REPL-boot
 # signal alongside the read-screen banner regex. Only written when known.
 [[ -n "$CWD" ]] && echo "$CWD" > "$CALL_DIR/cwd.txt"
+# Persist [MODE:]/[CALLER:]/[SESSION:] tags from the ringing prompt so
+# wait-for-session.sh can register the call in the sessions registry itself.
+bash "$(dirname "${BASH_SOURCE[0]}")/persist-call-meta.sh" "$CALL_DIR" "$CWD" "$PROMPT"
 
 # Determine the session ID upfront. We don't write it to session_id.txt yet —
 # wait-for-session.sh promotes session_id_preset.txt → session_id.txt only
@@ -214,6 +217,9 @@ chmod 700 "$LAUNCH_SCRIPT"
   # where the new workspace already opened in CWD.
   [[ -n "$CWD" ]] && printf 'cd %q || exit 1\n' "$CWD"
   printf 'claude'
+  # Model override, baked in at write time from the caller's env (the pane's
+  # shell won't inherit it). e.g. HOTLINE_CLAUDE_MODEL=opus
+  [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && printf ' --model %q' "$HOTLINE_CLAUDE_MODEL"
   [[ -n "$RESUME_ID"         ]] && printf ' --resume %q'     "$RESUME_ID"
   [[ -z "$RESUME_ID" && -n "$SESSION_ID_PRESET" ]] && \
                                     printf ' --session-id %q' "$SESSION_ID_PRESET"

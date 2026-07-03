@@ -56,6 +56,7 @@ fi
 
 # Build the command as an array
 CMD=(claude -p "$PROMPT" --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
+[[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && CMD+=(--model "$HOTLINE_CLAUDE_MODEL")
 
 if [[ -n "$RESUME_ID" ]]; then
   CMD+=(--resume "$RESUME_ID")

@@ -148,6 +148,8 @@ chmod 700 "$LAUNCH_SCRIPT"
   # so the callee resolves files / cwd-matched --resume sessions correctly.
   [[ -n "$CWD" ]] && printf 'cd %q || exit 1\n' "$CWD"
   printf 'claude'
+  # Model override, baked in at write time from the caller's env.
+  [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && printf ' --model %q' "$HOTLINE_CLAUDE_MODEL"
   if [[ -n "$RESUME_ID" ]]; then
     printf ' --resume %q' "$RESUME_ID"
   elif [[ -n "$SESSION_ID_PRESET" ]]; then
@@ -172,6 +174,20 @@ if ! cmux send "${SEND_TARGET[@]}" "bash $LAUNCH_SCRIPT\n"; then
   rm -f "$LAUNCH_SCRIPT"
   jq -n --arg err "cmux send failed" '{error: $err}'
   exit 1
+fi
+
+# Register the call in the sessions registry (script-level — conference mode
+# has no call_dir/wait-for-session flow, so registration happens right here).
+# Best-effort: skipped silently when the prompt lacks ringing tags.
+EFFECTIVE_SID="${RESUME_ID:-$SESSION_ID_PRESET}"
+if [[ -n "$EFFECTIVE_SID" && -n "$PROMPT" ]]; then
+  REG_MODE=$(sed -n 's/.*\[MODE: \([a-z_]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
+  REG_CALLER_SESSION=$(sed -n 's/.*\[SESSION: \([^]]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
+  if [[ -n "$REG_MODE" && -n "$REG_CALLER_SESSION" ]]; then
+    bash "$(dirname "${BASH_SOURCE[0]}")/session-cache.sh" set "$CWD" \
+      --caller-session "$REG_CALLER_SESSION" --session "$EFFECTIVE_SID" \
+      --mode "$REG_MODE" >/dev/null 2>&1 || true
+  fi
 fi
 
 # Emit both workspace_ref and surface_ref keys (one null) so callers can read

@@ -224,6 +224,85 @@ else
   fail "security: path-traversal session id rejected (got $CODE)"
 fi
 
+# ---- case: discovery scan reconstructs unregistered calls from ringing handshakes -
+
+DISC_SID="eeeeeeee-1234-5678-9abc-def012345678"
+mkdir -p "$PROJECTS_ROOT/-tmp-discovered-ws"
+cat > "$PROJECTS_ROOT/-tmp-discovered-ws/${DISC_SID}.jsonl" <<'EOF'
+{"type":"user","cwd":"/tmp/discovered-ws","timestamp":"2026-07-02T11:00:00Z","message":{"role":"user","content":"/hotline-ringing [CALL_ID: abc123] [MODE: work_order] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] Please do the thing"}}
+{"type":"assistant","cwd":"/tmp/discovered-ws","message":{"role":"assistant","content":[{"type":"text","text":"On it."}]}}
+EOF
+
+DISC_CALLS=$(curl -sf "$BASE/api/calls")
+DISC=$(echo "$DISC_CALLS" | jq -r --arg sid "$DISC_SID" '.calls[] | select(.callee.session_id==$sid)')
+if [[ -n "$DISC" ]]; then
+  pass "discovery: unregistered call reconstructed from ringing handshake"
+else
+  fail "discovery: unregistered call reconstructed from ringing handshake"
+fi
+
+if [[ $(echo "$DISC" | jq -r '.mode') == "work_order" && $(echo "$DISC" | jq -r '.caller.path') == "/tmp/caller-ws" \
+   && $(echo "$DISC" | jq -r '.callee.path') == "/tmp/discovered-ws" && $(echo "$DISC" | jq -r '.discovered') == "true" ]]; then
+  pass "discovery: mode/caller/callee parsed from handshake tags"
+else
+  fail "discovery: mode/caller/callee parsed from handshake tags (got: $DISC)"
+fi
+
+# Registry entries must NOT be duplicated by discovery (callee sid already known)
+DUP_COUNT=$(echo "$DISC_CALLS" | jq --arg sid "$CALLEE_SID" '[.calls[] | select(.callee.session_id==$sid)] | length')
+if [[ "$DUP_COUNT" == "1" ]]; then
+  pass "discovery: registry-tracked calls not duplicated"
+else
+  fail "discovery: registry-tracked calls not duplicated (got $DUP_COUNT)"
+fi
+
+# Non-hotline transcripts are ignored
+PLAIN_SID="ffffffff-0000-1111-2222-333333333333"
+echo '{"type":"user","cwd":"/tmp/discovered-ws","message":{"role":"user","content":"just a normal session"}}' \
+  > "$PROJECTS_ROOT/-tmp-discovered-ws/${PLAIN_SID}.jsonl"
+FOUND_PLAIN=$(curl -sf "$BASE/api/calls" | jq -r --arg sid "$PLAIN_SID" '[.calls[] | select(.callee.session_id==$sid)] | length')
+if [[ "$FOUND_PLAIN" == "0" ]]; then
+  pass "discovery: non-hotline transcripts ignored"
+else
+  fail "discovery: non-hotline transcripts ignored"
+fi
+
+# ---- case: launchers persist call meta; wait-for-session registers the call -------
+
+DIAL_SCRIPTS_DIR="$SCRIPT_DIR/../skills/dial/scripts"
+META_DIR=$(mktemp -d "$SANDBOX/callmeta.XXXX")
+RING_PROMPT="/hotline-ringing [CALL_ID: xyz] [MODE: quick_call] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] hello"
+bash "$DIAL_SCRIPTS_DIR/persist-call-meta.sh" "$META_DIR" "/tmp/reg-target-ws" "$RING_PROMPT"
+if [[ $(cat "$META_DIR/mode.txt" 2>/dev/null) == "quick_call" \
+   && $(cat "$META_DIR/caller_session.txt" 2>/dev/null) == "aaaaaaaa-1111-2222-3333-444444444444" \
+   && $(cat "$META_DIR/cwd.txt" 2>/dev/null) == "/tmp/reg-target-ws" ]]; then
+  pass "auto-cache: persist-call-meta writes mode/caller-session/cwd"
+else
+  fail "auto-cache: persist-call-meta writes mode/caller-session/cwd"
+fi
+
+REG_HOME="$SANDBOX/reghome"
+mkdir -p "$REG_HOME" "/tmp/reg-target-ws" 2>/dev/null || true
+REG_SID="99999999-aaaa-bbbb-cccc-dddddddddddd"
+( sleep 1; echo "$REG_SID" > "$META_DIR/session_id.txt" ) &
+GOT_SID=$(HOME="$REG_HOME" bash "$DIAL_SCRIPTS_DIR/wait-for-session.sh" "$META_DIR" --timeout 10)
+REG_FILE="$REG_HOME/.agents-hotline/sessions/aaaaaaaa-1111-2222-3333-444444444444.json"
+if [[ "$GOT_SID" == "$REG_SID" && -f "$REG_FILE" ]] \
+   && [[ $(jq -r '[.connections[] | .session_id] | first' "$REG_FILE") == "$REG_SID" ]]; then
+  pass "auto-cache: wait-for-session registers call in sessions registry"
+else
+  fail "auto-cache: wait-for-session registers call in sessions registry (sid=$GOT_SID, file=$([[ -f $REG_FILE ]] && echo yes || echo no))"
+fi
+
+# register-call.sh is a silent no-op when metadata is missing
+BARE_DIR=$(mktemp -d "$SANDBOX/bare.XXXX")
+echo "some-sid" > "$BARE_DIR/session_id.txt"
+if HOME="$REG_HOME" bash "$DIAL_SCRIPTS_DIR/register-call.sh" "$BARE_DIR"; then
+  pass "auto-cache: register-call no-ops without metadata"
+else
+  fail "auto-cache: register-call no-ops without metadata"
+fi
+
 # ---- case: start replaces prior instances (pidfile + ad-hoc port squatter) --------
 
 TAKEOVER_PORT=$(( PORT + 2 ))
