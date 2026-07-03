@@ -3,7 +3,7 @@
 Turn audio and video into text on macOS. Two complementary skills:
 
 - **[`macwhisper-cli`](skills/macwhisper-cli/SKILL.md)** — wraps the MacWhisper `mw` CLI for local-file transcription. whisper-cpp, WhisperKit, Parakeet, and Apple's on-device Speech framework — all running locally.
-- **[`yt-dlp`](skills/yt-dlp/SKILL.md)** — pulls captions, descriptions, chapters, and audio from YouTube, Vimeo, and hundreds of other sites. Leads with a subs-first strategy (no audio download) so a TLDR doesn't require a full transcription.
+- **[`yt-dlp`](skills/yt-dlp/SKILL.md)** — pulls captions, descriptions, chapters, and audio from YouTube, Vimeo, and hundreds of other sites. Leads with a subs-first strategy (no audio download) so a TLDR doesn't require a full transcription. Can also output transposed (pitch-shifted) MP3s from a URL via ffmpeg.
 
 The skills compose: for a YouTube URL, the yt-dlp skill usually finishes the job from captions alone; when a video has no captions or the user needs high accuracy, yt-dlp downloads the audio and hands off to macwhisper-cli for transcription.
 
@@ -26,7 +26,7 @@ claude plugin install work-with-media@jtsternberg
 ### yt-dlp skill
 
 - `yt-dlp` on PATH. Required for every URL workflow.
-- `ffmpeg` on PATH. Required only for the audio-transcription fallback path.
+- `ffmpeg` on PATH. Required only for the audio-transcription fallback and transposed-audio paths.
 
 ```bash
 brew install yt-dlp ffmpeg

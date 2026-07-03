@@ -1,13 +1,16 @@
 ---
 name: yt-dlp
-description: "Extracts text, captions, descriptions, chapters, and audio from YouTube, Vimeo, and any yt-dlp-supported URL on macOS or Linux. Leads with a subs-first strategy (description + chapters + auto-captions in one yt-dlp call, no audio download), and falls back to audio download + the macwhisper-cli skill only when captions are missing or insufficient."
+description: "Extracts text, captions, descriptions, chapters, and audio from YouTube, Vimeo, and any yt-dlp-supported URL on macOS or Linux. Leads with a subs-first strategy (description + chapters + auto-captions in one yt-dlp call, no audio download), and falls back to audio download + the macwhisper-cli skill only when captions are missing or insufficient. Also produces transposed (pitch-shifted) MP3s from a URL via ffmpeg."
 when_to_use: |
   Use for any URL-based text/transcript request — "transcribe this video",
   "transcribe this YouTube link", "TLDR of this video",
   "summarize this YouTube link", "teach me about this video",
   "what did [speaker] say in this video", "YouTube transcript",
   "captions of this video", "get the transcript of this link", or any
-  request to extract text/info from a video URL.
+  request to extract text/info from a video URL. Also for audio-output
+  requests from a URL — "download this as mp3", "transpose this song
+  down 2 semitones", "pitch-shift this YouTube link", "give me this in
+  a lower key".
 allowed-tools: "Bash(yt-dlp *) Bash(ffmpeg *) Bash(curl *) Bash(mw *) Bash(cat *) Bash(rm /tmp/*)"
 ---
 
@@ -70,6 +73,47 @@ yt-dlp -x --audio-format m4a -o "/tmp/yt-%(id)s.%(ext)s" "<url>"
 
 yt-dlp pulls the best audio stream and uses ffmpeg internally (via `-x`) to produce `/tmp/yt-<id>.m4a`. From there, `mw transcribe /tmp/yt-<id>.m4a > /tmp/mw-yt-<id>.txt` — follow the [output conventions](../../shared/output-conventions.md).
 
+## Transposed audio output (pitch shift)
+
+For "give me this YouTube link transposed down a semitone / in a lower key" requests: download the audio as MP3, then pitch-shift with ffmpeg. Tempo and duration are preserved — only pitch changes.
+
+```bash
+yt-dlp -x --audio-format mp3 -o "/tmp/yt-%(id)s.%(ext)s" "<url>"
+```
+
+Compute the ratio for `n` semitones (negative = down): `ratio = 2^(n/12)`.
+
+| Semitones | −3 | −2 | −1 | +1 | +2 | +3 |
+|-----------|------|------|------|------|------|------|
+| Ratio | 0.8409 | 0.8909 | 0.9439 | 1.0595 | 1.1225 | 1.1892 |
+
+Preferred filter is `rubberband` (best quality), but most Homebrew/apt ffmpeg builds are compiled **without** librubberband — check first:
+
+```bash
+ffmpeg -hide_banner -filters 2>/dev/null | grep rubberband
+```
+
+**If rubberband is available:**
+
+```bash
+ffmpeg -i /tmp/yt-<id>.mp3 -af "rubberband=pitch=<ratio>" -b:a 256k /tmp/yt-<id>-t<n>.mp3
+```
+
+**Otherwise (the usual case), use `asetrate` + `atempo`** — resample to shift pitch, then correct the tempo back:
+
+```bash
+ffmpeg -i /tmp/yt-<id>.mp3 \
+  -af "asetrate=44100*<ratio>,aresample=44100,atempo=1/<ratio>" \
+  -b:a 256k /tmp/yt-<id>-t<n>.mp3
+```
+
+Notes:
+
+- `atempo` accepts 0.5–100, so `1/<ratio>` is fine for any musical transposition (±12 semitones and beyond).
+- If the source sample rate isn't 44100, either works anyway — but for exactness read it with `ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of csv=p=0 <file>` and substitute.
+- Each MP3 re-encode loses a little quality; `-b:a 256k` keeps it inaudible for most material. For lossless output, use `.wav`/`.flac` as the output extension and drop `-b:a`.
+- Deliver the result with its final name (e.g. `song-down2.mp3`) — copy/rename out of `/tmp` if the user wants to keep it.
+
 ## Direct audio/video URL (not a video-sharing site)
 
 For direct URLs, pick a short `<slug>` (e.g., the URL's basename without extension, or `$(date +%s)` as a fallback) so multiple direct-URL downloads in one session don't clobber each other. See [`../../shared/output-conventions.md`](../../shared/output-conventions.md) for the naming table.
@@ -118,7 +162,7 @@ rm /tmp/ytmeta-<id>.* /tmp/yt-<id>.m4a /tmp/mw-yt-<id>.txt
 Or for everything this skill has produced in a session:
 
 ```bash
-rm /tmp/ytmeta-* /tmp/yt-*.m4a /tmp/dl-* /tmp/mw-dl-*.txt
+rm /tmp/ytmeta-* /tmp/yt-*.m4a /tmp/yt-*.mp3 /tmp/dl-* /tmp/mw-dl-*.txt
 ```
 
 Explicit cleanup is optional (macOS cleans `/tmp` periodically), but worth running for sensitive content.
