@@ -372,6 +372,8 @@ All hotline state lives in `~/.agents-hotline/`:
 
 A live, **read-only** dashboard of every hotline conversation — ask Claude to "open the switchboard" (or run the script directly):
 
+![Hotline Switchboard — call board with patch cords and lamps on the left, both ends of a call rendered side-by-side](assets/switchboard.png)
+
 ```bash
 bash plugins/hotline/skills/switchboard/scripts/switchboard.sh start   # opens the browser
 bash plugins/hotline/skills/switchboard/scripts/switchboard.sh stop
