@@ -24,7 +24,7 @@ bash ${CLAUDE_SKILL_DIR}/scripts/switchboard.sh stop
 bash ${CLAUDE_SKILL_DIR}/scripts/switchboard.sh status
 ```
 
-Each prints a JSON status line. `start` backgrounds the server (pidfile at `~/.agents-hotline/switchboard.pid`, log at `~/.agents-hotline/switchboard.log`) and opens the browser unless `--no-open` is passed.
+Each prints a JSON status line. `start` backgrounds the server (pidfile at `~/.agents-hotline/switchboard.pid`, log at `~/.agents-hotline/switchboard.log`) and opens the browser unless `--no-open` is passed. `start` always replaces any prior switchboard instance on the port (pidfile-tracked or ad-hoc) so it serves fresh code — it doubles as a restart.
 
 ## Usage
 

@@ -55,18 +55,32 @@ open_url() {
   if [[ "$OSTYPE" == "darwin"* ]]; then open "$url"; else xdg-open "$url" 2>/dev/null || true; fi
 }
 
+# Kill any prior switchboard server so a fresh start always serves fresh code:
+# the pidfile instance, plus any ad-hoc `node server.js` squatting on the port.
+# Only kills processes whose command line matches our server script — never an
+# arbitrary port occupant.
+kill_predecessors() {
+  local killed=0 pid
+  if pid=$(running_pid); then
+    kill "$pid" 2>/dev/null && killed=1
+    rm -f "$PID_FILE"
+  fi
+  for pid in $(lsof -ti tcp:"$PORT" 2>/dev/null); do
+    if ps -o command= -p "$pid" 2>/dev/null | grep -qF "switchboard/scripts/server.js"; then
+      kill "$pid" 2>/dev/null && killed=1
+    fi
+  done
+  [[ $killed -eq 1 ]] && sleep 0.5
+  return 0
+}
+
 case "$CMD" in
   start)
     if ! command -v node >/dev/null 2>&1; then
       echo '{"status":"error","message":"node not found — the switchboard server requires Node.js"}'
       exit 1
     fi
-    if PID=$(running_pid); then
-      URL="http://127.0.0.1:${PORT}"
-      [[ $OPEN -eq 1 ]] && open_url "$URL"
-      echo "{\"status\":\"already_running\",\"pid\":${PID},\"url\":\"${URL}\"}"
-      exit 0
-    fi
+    kill_predecessors
     mkdir -p "$STATE_DIR"
     nohup node "$SERVER_JS" --port="$PORT" >> "$LOG_FILE" 2>&1 &
     PID=$!

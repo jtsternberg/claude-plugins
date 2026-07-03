@@ -224,6 +224,36 @@ else
   fail "security: path-traversal session id rejected (got $CODE)"
 fi
 
+# ---- case: start replaces prior instances (pidfile + ad-hoc port squatter) --------
+
+TAKEOVER_PORT=$(( PORT + 2 ))
+TK_HOME="$SANDBOX/tkhome"
+mkdir -p "$TK_HOME"
+# Squat the port with an ad-hoc server (no pidfile — simulates `node server.js` by hand)
+HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
+  node "$SB_SCRIPTS/server.js" --port="$TAKEOVER_PORT" > /dev/null 2>&1 &
+SQUATTER_PID=$!
+sleep 0.5
+TK_OUT=$(HOME="$TK_HOME" HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
+  bash "$SB_SCRIPTS/switchboard.sh" start --port="$TAKEOVER_PORT" --no-open)
+sleep 0.3
+if [[ $(echo "$TK_OUT" | jq -r '.status') == "started" ]] && ! kill -0 "$SQUATTER_PID" 2>/dev/null; then
+  pass "takeover: start kills ad-hoc port squatter and boots fresh"
+else
+  fail "takeover: start kills ad-hoc port squatter and boots fresh (got: $TK_OUT)"
+fi
+FIRST_PID=$(echo "$TK_OUT" | jq -r '.pid')
+# Second start replaces the pidfile instance instead of reporting already_running
+TK_OUT2=$(HOME="$TK_HOME" HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
+  bash "$SB_SCRIPTS/switchboard.sh" start --port="$TAKEOVER_PORT" --no-open)
+sleep 0.3
+if [[ $(echo "$TK_OUT2" | jq -r '.status') == "started" ]] && ! kill -0 "$FIRST_PID" 2>/dev/null; then
+  pass "takeover: restart replaces pidfile instance"
+else
+  fail "takeover: restart replaces pidfile instance (got: $TK_OUT2)"
+fi
+HOME="$TK_HOME" bash "$SB_SCRIPTS/switchboard.sh" stop > /dev/null
+
 # ---- case: switchboard.sh start/status/stop lifecycle -----------------------------
 
 SB_PORT=$(( PORT + 1 ))

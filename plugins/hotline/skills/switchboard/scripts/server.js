@@ -724,6 +724,14 @@ setInterval(loadBoard, 5000);
 </body>
 </html>`;
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Use switchboard.sh start (it replaces prior instances) or pass --port=<n>.`);
+    process.exit(1);
+  }
+  throw err;
+});
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`Hotline Switchboard listening on http://127.0.0.1:${PORT}`);
   console.log(`Registry: ${SESSIONS_DIR}`);
