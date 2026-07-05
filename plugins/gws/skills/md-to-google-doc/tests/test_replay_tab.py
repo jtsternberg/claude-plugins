@@ -232,6 +232,32 @@ class TestTables(unittest.TestCase):
                          if r.get("insertText", {}).get("text") == "x"][0])
 
 
+class TestHorizontalRule(unittest.TestCase):
+    def _hr_doc(self):
+        return doc([
+            para(1, [("Above\n", {})]),
+            {"startIndex": 7, "endIndex": 9, "paragraph": {
+                "paragraphStyle": {"namedStyleType": "NORMAL_TEXT"},
+                "elements": [
+                    {"startIndex": 7, "endIndex": 8, "horizontalRule": {}},
+                    {"startIndex": 8, "endIndex": 9,
+                     "textRun": {"content": "\n", "textStyle": {}}}]}},
+            para(9, [("Below\n", {})]),
+        ])
+
+    def test_hr_becomes_border_paragraph(self):
+        reqs = build_requests(self._hr_doc(), TAB, clear_end=2)
+        borders = [r for r in reqs
+                   if r.get("updateParagraphStyle", {}).get("fields") == "borderBottom"]
+        self.assertEqual(len(borders), 1)
+        # the border paragraph sits where the HR was (index 7), spanning its "\n"
+        rng = borders[0]["updateParagraphStyle"]["range"]
+        self.assertEqual(rng["tabId"], TAB)
+        # "Below" still follows correctly (mirror preserved: Above\n + \n = index 9)
+        self.assertIn({"insertText": {"location": {"index": 8, "tabId": TAB},
+                                      "text": "Below"}}, reqs)
+
+
 class TestSkips(unittest.TestCase):
     def test_inline_object_skipped(self):
         d = doc([{"startIndex": 1, "endIndex": 3, "paragraph": {

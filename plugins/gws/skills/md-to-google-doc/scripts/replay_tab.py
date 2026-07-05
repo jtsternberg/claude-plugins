@@ -44,6 +44,14 @@ PARA_STYLE_FIELDS = ["namedStyleType", "alignment", "indentStart",
 # paragraph makes createParagraphBullets double-count depth, so drop it there.
 PARA_INDENT_FIELDS = ("indentStart", "indentEnd", "indentFirstLine")
 
+# Docs has no "insert horizontal rule" request; a paragraph bottom border is
+# the standard thematic-break equivalent (what Docs itself uses).
+HR_BORDER = {"borderBottom": {
+    "color": {"color": {"rgbColor": {"red": 0.6, "green": 0.6, "blue": 0.6}}},
+    "width": {"magnitude": 1, "unit": "PT"},
+    "padding": {"magnitude": 0, "unit": "PT"},
+    "dashStyle": "SOLID"}}
+
 
 def warn(msg):
     print("WARNING: %s" % msg, file=sys.stderr)
@@ -86,11 +94,19 @@ class Replayer:
             else:
                 kind = next((k for k in el if k not in
                              ("startIndex", "endIndex")), "unknown")
-                warn("skipped unsupported element '%s' at index %s"
-                     % (kind, el.get("startIndex")))
+                # horizontalRule is handled (rendered as a bottom border), not
+                # skipped — don't warn for it.
+                if kind != "horizontalRule":
+                    warn("skipped unsupported element '%s' at index %s"
+                         % (kind, el.get("startIndex")))
                 self.offset -= (el.get("endIndex", 0)
                                 - el.get("startIndex", 0))
         return "".join(parts)
+
+    @staticmethod
+    def is_hr(p_elem):
+        return any("horizontalRule" in el
+                   for el in p_elem["paragraph"].get("elements", []))
 
     def replay_paragraph(self, p_elem, drop_trailing_newline, tab_prefix=0):
         # Compute the insert position BEFORE paragraph_text mutates offset for
@@ -104,6 +120,11 @@ class Replayer:
             self.inserts.append({"insertText": {
                 "location": {"index": insert_at, "tabId": self.tab},
                 "text": text}})
+        # Paragraph target span, anchored to the actual insert position (robust
+        # to in-paragraph skips that shift self.offset). Used for paragraph-level
+        # style + HR border ranges.
+        para_start = insert_at
+        para_end = max(insert_at + len(text), insert_at + 1)
         # Per-run text styles (source ranges + offset + tab prefix; clamp off
         # the dropped trailing newline).
         for el in p_elem["paragraph"].get("elements", []):
@@ -133,15 +154,16 @@ class Replayer:
             p_elem["paragraph"].get("paragraphStyle", {}), allowed)
         if pfields and not (pfields == "namedStyleType"
                             and pstyle.get("namedStyleType") == "NORMAL_TEXT"):
-            end = p_elem["endIndex"]
-            if drop_trailing_newline:
-                end -= 1
             self.styles.append({"updateParagraphStyle": {
-                "range": {"startIndex": self.t(p_elem["startIndex"]),
-                          "endIndex": self.t(max(end, p_elem["startIndex"] + 1))
-                                      + tab_prefix,
+                "range": {"startIndex": para_start, "endIndex": para_end,
                           "tabId": self.tab},
                 "paragraphStyle": pstyle, "fields": pfields}})
+        # Horizontal rule -> render the (empty) paragraph with a bottom border.
+        if self.is_hr(p_elem):
+            self.styles.append({"updateParagraphStyle": {
+                "range": {"startIndex": para_start, "endIndex": para_end,
+                          "tabId": self.tab},
+                "paragraphStyle": HR_BORDER, "fields": "borderBottom"}})
 
     # -- containers -------------------------------------------------------
     def replay_container(self, content):
