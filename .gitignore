@@ -35,3 +35,7 @@ amskills/
 # Beads / Dolt files (added by bd init)
 .beads/proxieddb/
 /.beads/dolt-backup.json
+
+# Python
+__pycache__/
+*.pyc
