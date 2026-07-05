@@ -16,7 +16,7 @@ if [[ -z "${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-}" ]]; then
 fi
 
 usage() {
-  echo "Usage: $(basename "$0") <markdown-file> <doc-id-or-url>" >&2
+  echo "Usage: $(basename "$0") <markdown-file> <doc-id-or-url> [--force]" >&2
   exit 1
 }
 
@@ -24,6 +24,14 @@ usage() {
 
 FILE="$1"
 DOC_ID_OR_URL="$2"
+shift 2
+FORCE=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --force) FORCE=true; shift ;;
+    *) echo "Unknown option: $1" >&2; usage ;;
+  esac
+done
 
 if [[ ! -f "$FILE" ]]; then
   echo "ERROR: File not found: $FILE" >&2
@@ -42,6 +50,25 @@ if [[ "$DOC_ID_OR_URL" == *"docs.google.com"* ]]; then
   DOC_ID=$(echo "$DOC_ID_OR_URL" | sed -E 's|.*/d/([^/]+).*|\1|')
 else
   DOC_ID="$DOC_ID_OR_URL"
+fi
+
+# GUARDRAIL: this update replaces the ENTIRE document via Drive media upload,
+# which deletes every native Docs tab except the first (verified 2026-07-05).
+# Refuse to run against a multi-tab doc unless --force is given.
+TAB_COUNT=$(gws docs documents get \
+  --params "{\"documentId\": \"$DOC_ID\", \"includeTabsContent\": true, \"fields\": \"tabs\"}" 2>/dev/null \
+  | python3 -c '
+import sys, json
+def count(tabs):
+  return sum(1 + count(t.get("childTabs") or []) for t in tabs or [])
+print(count(json.load(sys.stdin).get("tabs")))
+' 2>/dev/null || echo "1")
+
+if [[ "$TAB_COUNT" -gt 1 && "$FORCE" != true ]]; then
+  echo "ERROR: This doc has $TAB_COUNT native tabs. A full update would DELETE every tab but the first." >&2
+  echo "  - To update a single tab (preserving the others): scripts/tab-update.sh <file.md> <doc> --tab <title-or-id>" >&2
+  echo "  - To replace the whole doc anyway (destroys tabs):  re-run with --force" >&2
+  exit 1
 fi
 
 # Clean: strip YAML frontmatter and Obsidian callout headers
