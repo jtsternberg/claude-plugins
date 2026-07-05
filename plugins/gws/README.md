@@ -103,6 +103,9 @@ claude plugins add /path/to/claude-plugins/plugins/gws
 | `skills/google-doc-to-md/SKILL.md` | Download a Google Doc as markdown |
 | `skills/account/SKILL.md` | Multi-account management for the `gws` CLI |
 | `skills/calendar/SKILL.md` | Calendar events, meet/zoom links, calendar listing |
+| `skills/gmail-read/SKILL.md` | Search Gmail and read messages (headers, snippet, plain-text body) |
+| `skills/gmail-draft-from-markdown/SKILL.md` | Create Gmail drafts from markdown (never sends) |
+| `skills/youtube/SKILL.md` | YouTube playlist management (list, add/remove, cleanup) |
 | `scripts/calendar-list-events.sh` | List events in a date range |
 | `scripts/calendar-get-event.sh` | Get a single event by id or fuzzy match |
 | `scripts/calendar-links.sh` | Extract Meet/Zoom links for events |
