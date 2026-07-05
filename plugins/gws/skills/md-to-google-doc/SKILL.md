@@ -1,6 +1,6 @@
 ---
 name: md-to-google-doc
-description: "Upload markdown to Google Drive as a Google Doc via gws CLI. Strips frontmatter and Obsidian callouts. Triggers on \"upload to google docs\", \"push to drive\", \"sync to gdoc\", \"create a google doc\", \"gws upload\"."
+description: "Upload markdown to Google Drive as a Google Doc via gws CLI. Strips frontmatter and Obsidian callouts. Tab-aware: can publish into a single native Doc tab and manage tabs (list/add/rename/delete). Triggers on \"upload to google docs\", \"push to drive\", \"sync to gdoc\", \"create a google doc\", \"gws upload\"."
 disable-model-invocation: true
 argument-hint: '[file.md] [folder-id-or-url | --folder <id-or-url> | doc-id-or-url] [--title "Title"]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *)'
@@ -85,6 +85,34 @@ Also accepts a full Google Doc URL instead of a bare doc ID:
 bash ${CLAUDE_SKILL_DIR}/scripts/update.sh ./file.md "https://docs.google.com/document/d/DOC_ID/edit"
 ```
 
+### Updating a Single Tab (multi-tab docs)
+
+Google Docs supports native tabs (left-sidebar). `update.sh` replaces the
+ENTIRE document and **deletes every tab except the first** — it refuses to
+run against a multi-tab doc unless you pass `--force`.
+
+To publish markdown into one tab while preserving the others:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/tab-update.sh ./file.md DOC_ID --tab "Tab Title"
+bash ${CLAUDE_SKILL_DIR}/scripts/tab-update.sh ./file.md DOC_ID --tab t.abc123
+```
+
+How it works: the markdown is converted server-side via a throwaway temp doc
+(auto-trashed), whose structure is replayed into the target tab with
+tab-scoped `batchUpdate` requests. Supported: headings, bold/italic/links,
+nested bullet & numbered lists, tables. Not supported (skipped with a
+warning): images, horizontal rules, footnotes.
+
+### Managing Tabs
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/tabs.sh list DOC_ID
+bash ${CLAUDE_SKILL_DIR}/scripts/tabs.sh add DOC_ID "Next Steps" --emoji "⭐" --index 1
+bash ${CLAUDE_SKILL_DIR}/scripts/tabs.sh rename DOC_ID "Next Steps" "Action Items"
+bash ${CLAUDE_SKILL_DIR}/scripts/tabs.sh delete DOC_ID t.abc123 --yes
+```
+
 ## Batch Uploads
 
 When uploading multiple files to the same folder, run upload commands in
@@ -110,3 +138,6 @@ the script will tell you which account you're authenticated as and suggest
 sharing or switching accounts. Run `gws auth status` to check.
 **Upload path error:** The `gws` CLI rejects absolute paths outside cwd. Copy
 the file into cwd first, or `cd` to the file's directory before uploading.
+**"This doc has N native tabs" error:** the doc uses native tabs; use
+`tab-update.sh` (see "Updating a Single Tab") or pass `--force` to
+intentionally flatten the doc to one tab.
