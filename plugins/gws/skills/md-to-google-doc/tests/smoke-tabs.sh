@@ -47,3 +47,63 @@ bash "$SCRIPTS/tabs.sh" delete "$DOC_ID" "$TAB_ID" --yes >/dev/null
 pass "deleted tab"
 
 echo "ALL TAB CRUD CHECKS PASSED"
+
+echo "== tab-update.sh publish into a tab =="
+TAB2_ID=$(bash "$SCRIPTS/tabs.sh" add "$DOC_ID" "Publish Target")
+cp "$SCRIPT_DIR/fixtures/tab-fixture.md" ./fixture.md
+URL=$(bash "$SCRIPTS/tab-update.sh" ./fixture.md "$DOC_ID" --tab "Publish Target")
+echo "$URL" | grep -q "tab=$TAB2_ID" || fail "unexpected URL: $URL"
+pass "published fixture into $TAB2_ID"
+
+echo "== verify tab content and isolation =="
+gws docs documents get \
+	--params "{\"documentId\": \"$DOC_ID\", \"includeTabsContent\": true}" 2>/dev/null > verify.json
+python3 - verify.json "$TAB2_ID" <<'PYEOF'
+import json, sys
+
+def text_of(content):
+	out = []
+	for e in content:
+		if "paragraph" in e:
+			for el in e["paragraph"].get("elements", []):
+				out.append(el.get("textRun", {}).get("content", ""))
+		elif "table" in e:
+			for row in e["table"].get("tableRows", []):
+				for cell in row.get("tableCells", []):
+					out.append(text_of(cell.get("content", [])))
+	return "".join(out)
+
+d = json.load(open(sys.argv[1]))
+tabs = {t["tabProperties"]["tabId"]: t for t in d["tabs"]}
+assert len(tabs) == 2, "expected 2 tabs, got %d" % len(tabs)
+target = text_of(tabs[sys.argv[2]]["documentTab"]["body"]["content"])
+for needle in ("Fixture Heading", "bullet one", "nested bullet",
+               "first", "a1", "b2", "Final paragraph"):
+	assert needle in target, "missing %r in published tab" % needle
+# heading style survived
+paras = tabs[sys.argv[2]]["documentTab"]["body"]["content"]
+h1 = [p for p in paras if p.get("paragraph", {})
+      .get("paragraphStyle", {}).get("namedStyleType") == "HEADING_1"]
+assert h1, "no HEADING_1 paragraph in published tab"
+# a table exists
+assert any("table" in p for p in paras), "no table in published tab"
+# other tab untouched (still the empty default first tab)
+first = [t for tid, t in tabs.items() if tid != sys.argv[2]][0]
+assert text_of(first["documentTab"]["body"]["content"]).strip() == "", \
+	"first tab was modified!"
+print("PUBLISH VERIFY OK")
+PYEOF
+pass "tab content correct, sibling tab untouched"
+
+echo "== re-publish (idempotent overwrite) =="
+bash "$SCRIPTS/tab-update.sh" ./fixture.md "$DOC_ID" --tab "$TAB2_ID" >/dev/null
+pass "re-publish into same tab succeeded"
+
+echo "== guardrail: update.sh refuses multi-tab doc =="
+printf '# nope\n' > nope.md
+if bash "$SCRIPTS/update.sh" nope.md "$DOC_ID" 2>/dev/null; then
+	fail "update.sh should have refused a 2-tab doc"
+fi
+pass "update.sh guardrail fired"
+
+echo "ALL SMOKE CHECKS PASSED"
