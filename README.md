@@ -99,7 +99,7 @@ Research infrastructure for Claude Code. Ships `fetch-docs` — pulls a URL's ra
 **Install:** `claude plugin install research-tools@jtsternberg`
 
 #### 🪟 [cmux-cli](plugins/cmux-cli)
-Control [cmux](https://cmux.sh) (macOS terminal multiplexer / workspace manager) from the command line. Bundled workflows cover the two common agent tasks — opening a side-by-side surface in the current window, and finding / reading / driving another tab by name or on-screen content. Also exposes notifications, sidebar progress pills, tmux-compat commands, SSH remote workspaces, and the embedded browser.
+Control [cmux](https://cmux.sh) (macOS terminal multiplexer / workspace manager) from the command line. Bundled workflows cover the two common agent tasks — opening a side-by-side surface in the current window, and finding / reading / driving another tab by name or on-screen content. Also exposes notifications, sidebar progress pills, tmux-compat commands, SSH remote workspaces, and the embedded browser. Includes an `auto-rename` skill that summarizes what a tab or workspace is doing (including claude/codex agent sessions) and gives it a concise, meaningful name.
 
 **Install:** `claude plugin install cmux-cli@jtsternberg`
 

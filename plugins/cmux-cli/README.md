@@ -23,6 +23,11 @@ Two common multi-step patterns are baked in as decision trees rather than left f
 1. **Open a side-by-side surface in the current window** — routes intelligently between `cmux new-surface --pane <adjacent>` (when an adjacent pane already exists, so the new surface lands as a tab there) and `cmux new-split right` (when it doesn't). Uses `cmux identify`'s `caller.pane_ref` to know where the agent is, and `focused.pane_ref` when the user means "next to what I'm looking at" rather than "next to mine".
 2. **Target another surface (find → read → interact)** — uses the bundled `find-surface.sh` helper to locate a surface by workspace name, title, or on-screen content, then `cmux read-screen` / `cmux send` against the returned handle.
 
+## Skills
+
+- **using-cmux-cli** — the core skill described above.
+- **auto-rename** — generates and applies a concise, meaningful name for a tab (surface) or workspace. It summarizes what's actually running there — for claude/codex/agent sessions it reads the scrollback and names the *task* the session is doing, not the tool — then applies it via `cmux rename-tab` / `cmux rename-workspace`. Supports the caller's own tab, the focused tab, a described target, or batch-renaming all workspaces. Trigger with "rename this tab", "auto-rename", "name my workspaces", "fix these tab names".
+
 ## Auto-resolved context
 
 At skill load, the plugin inlines `cmux identify --json` so the agent sees `caller.*` (where it's running), `focused.*` (where the user is looking), and the authoritative `socket_path` before its first turn. No warm-up round-trips needed.
