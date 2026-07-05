@@ -1,8 +1,8 @@
 ---
 name: google-doc-to-md
-description: "Download a Google Doc as a local markdown file via gws CLI. Uses native text/markdown export from the Drive API. Triggers on \"download google doc\", \"pull from drive\", \"gdoc to markdown\", \"export google doc\", \"gws download\"."
+description: "Download a Google Doc as a local markdown file via gws CLI. Uses native text/markdown export from the Drive API. Supports native Doc tabs: --list-tabs and per-tab export via --tab. Triggers on \"download google doc\", \"pull from drive\", \"gdoc to markdown\", \"export google doc\", \"gws download\"."
 disable-model-invocation: true
-argument-hint: '<doc-id-or-url> [output.md] [--title]'
+argument-hint: '<doc-id-or-url> [output.md] [--title] [--list-tabs] [--tab <tab-title-or-id>]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *)'
 ---
 
@@ -72,6 +72,25 @@ When no output path is given:
 ### Export Size Limit
 
 Google limits exported content from `files.export` to **10 MB**.
+
+## Working with Native Doc Tabs
+
+List a doc's tabs (id, index, title — indented by nesting):
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_ID --list-tabs
+```
+
+Export a single tab as markdown (basic fidelity: headings, bold/italic,
+links, lists, tables):
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_ID out.md --tab "Tab Title"
+```
+
+Note: the default (no `--tab`) Drive export flattens ALL tabs into one
+markdown file with each tab's title as a heading — fine for single-tab docs,
+confusing for multi-tab ones. Use `--list-tabs` first when unsure.
 
 ## Batch Downloads
 

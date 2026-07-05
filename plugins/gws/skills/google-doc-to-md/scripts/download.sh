@@ -15,7 +15,7 @@ if [[ -z "${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-}" ]]; then
 fi
 
 usage() {
-  echo "Usage: $(basename "$0") <doc-id-or-url> [output.md] [--title]" >&2
+  echo "Usage: $(basename "$0") <doc-id-or-url> [output.md] [--title] [--list-tabs] [--tab <tab-title-or-id>]" >&2
   exit 1
 }
 
@@ -26,10 +26,14 @@ shift
 
 OUTPUT=""
 USE_TITLE=false
+LIST_TABS=false
+TAB_ARG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --title) USE_TITLE=true; shift ;;
+    --list-tabs) LIST_TABS=true; shift ;;
+    --tab) TAB_ARG="$2"; shift 2 ;;
     -*) echo "Unknown option: $1" >&2; usage ;;
     *) OUTPUT="$1"; shift ;;
   esac
@@ -47,6 +51,29 @@ fi
 if ! gws auth status >/dev/null 2>&1; then
   echo "ERROR: gws not authenticated. Run: gws auth login" >&2
   exit 1
+fi
+
+TABS_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../md-to-google-doc/scripts/tabs.sh"
+
+if [[ "$LIST_TABS" == true ]]; then
+  source "$TABS_SH"
+  list_tabs "$DOC_ID"
+  exit 0
+fi
+
+if [[ -n "$TAB_ARG" ]]; then
+  source "$TABS_SH"
+  TAB_ID=$(resolve_tab_id "$DOC_ID" "$TAB_ARG")
+  [[ -z "$OUTPUT" ]] && OUTPUT="${DOC_ID}-${TAB_ID}.md"
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  TMP_JSON="./__tmp-tabdl-$$-$RANDOM.json"
+  trap 'rm -f "$TMP_JSON"' EXIT
+  gws docs documents get \
+    --params "{\"documentId\": \"$DOC_ID\", \"includeTabsContent\": true}" 2>/dev/null > "$TMP_JSON"
+  python3 "$SCRIPT_DIR/docjson_to_md.py" "$TMP_JSON" "$TAB_ID" > "$OUTPUT"
+  [[ -s "$OUTPUT" ]] || { echo "ERROR: tab export produced empty file." >&2; exit 1; }
+  echo "$OUTPUT"
+  exit 0
 fi
 
 # Fetch doc title from Drive metadata
