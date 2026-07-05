@@ -101,8 +101,24 @@ bash ${CLAUDE_SKILL_DIR}/scripts/tab-update.sh ./file.md DOC_ID --tab t.abc123
 How it works: the markdown is converted server-side via a throwaway temp doc
 (auto-trashed), whose structure is replayed into the target tab with
 tab-scoped `batchUpdate` requests. Supported: headings, bold/italic/links,
-nested bullet & numbered lists, tables. Not supported (skipped with a
-warning): images, horizontal rules, footnotes.
+nested bullet & numbered lists, tables, and horizontal rules (`---`, rendered
+as a paragraph bottom border). Not supported (skipped with a warning): images,
+footnotes, smart chips.
+
+### Linking Section References Across Tabs
+
+After publishing, turn `§N` / `§NB` references into clickable links to the
+matching section heading in another tab (e.g. a "Next Steps" tab linking into
+the main findings tab):
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/link-sections.sh DOC_ID
+bash ${CLAUDE_SKILL_DIR}/scripts/link-sections.sh DOC_ID --target-tab "Findings" --from-tab "Next Steps"
+```
+
+By default the target is the tab with the most numbered-section headings and
+all other tabs are scanned. Idempotent — safe to re-run after edits. Run it
+*after* the tabs are published so the target headings exist.
 
 ### Managing Tabs
 
