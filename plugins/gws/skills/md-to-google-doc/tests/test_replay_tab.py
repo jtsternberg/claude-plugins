@@ -131,6 +131,72 @@ class TestBullets(unittest.TestCase):
                          {"startIndex": 1, "endIndex": 10, "tabId": TAB})
 
 
+class TestBulletOffset(unittest.TestCase):
+    """Regression: inserted nesting-tabs must be accounted for in the index
+    model, or items/headings after a nested item drift (bug z91m)."""
+    def _lists(self):
+        return {"L1": {"listProperties": {"nestingLevels": [
+            {"glyphType": "GLYPH_TYPE_UNSPECIFIED"}]}}}
+
+    def test_item_after_nested_item_inserts_at_correct_index(self):
+        # group: a(lvl0), b(lvl1), c(lvl0). b inserts a leading tab, so c must
+        # land at index 6 (after "a\n" + "\tb\n"), NOT 5.
+        d = doc([
+            para(1, [("a\n", {})], bullet={"listId": "L1"}),
+            para(3, [("b\n", {})], bullet={"listId": "L1", "nestingLevel": 1}),
+            para(5, [("c\n", {})], bullet={"listId": "L1"}),
+            para(7, [("\n", {})]),
+        ], lists=self._lists())
+        reqs = build_requests(d, TAB, clear_end=2)
+        inserts = {r["insertText"]["text"]: r["insertText"]["location"]["index"]
+                   for r in reqs if "insertText" in r}
+        self.assertEqual(inserts.get("\tb\n"), 3)
+        self.assertEqual(inserts.get("c\n"), 6)
+
+    def test_bulleted_paragraph_omits_indent_fields(self):
+        # Source bullets carry auto-indent (indentStart/indentFirstLine) that
+        # reflects their nesting. Replaying it on top of the nesting-tab makes
+        # createParagraphBullets double-count depth (level 1 -> 2). The list
+        # owns indentation, so indent fields must be dropped for bullets.
+        d = doc([
+            para(1, [("a\n", {})], bullet={"listId": "L1"}),
+            para(3, [("b\n", {})], bullet={"listId": "L1", "nestingLevel": 1}),
+            para(5, [("\n", {})]),
+        ], lists=self._lists())
+        d["body"]["content"][2]["paragraph"]["paragraphStyle"].update({
+            "indentStart": {"magnitude": 72, "unit": "PT"},
+            "indentFirstLine": {"magnitude": 54, "unit": "PT"}})
+        reqs = build_requests(d, TAB, clear_end=2)
+        for r in reqs:
+            fields = r.get("updateParagraphStyle", {}).get("fields", "")
+            self.assertNotIn("indentStart", fields)
+            self.assertNotIn("indentFirstLine", fields)
+
+    def test_emission_phase_order(self):
+        # Contract: clear, then ALL inserts, then ALL styles, then
+        # createParagraphBullets in REVERSE document order.
+        d = doc([
+            para(1, [("a\n", {})], bullet={"listId": "L1"}),
+            para(3, [("b\n", {})], bullet={"listId": "L1", "nestingLevel": 1}),
+            para(5, [("Head\n", {})], style="HEADING_2"),
+            para(10, [("x\n", {})], bullet={"listId": "L2"}),
+            para(12, [("\n", {})]),
+        ], lists={"L1": self._lists()["L1"], "L2": self._lists()["L1"]})
+        reqs = build_requests(d, TAB, clear_end=5)
+        kinds = [next(iter(r)) for r in reqs]
+        self.assertEqual(kinds[0], "deleteContentRange")
+        inserts = [i for i, k in enumerate(kinds)
+                   if k in ("insertText", "insertTable")]
+        styles = [i for i, k in enumerate(kinds)
+                  if k in ("updateTextStyle", "updateParagraphStyle")]
+        bullets = [i for i, k in enumerate(kinds)
+                   if k == "createParagraphBullets"]
+        self.assertLess(max(inserts), min(styles))      # all inserts before styles
+        self.assertLess(max(styles), min(bullets))      # all styles before bullets
+        # bullets emitted in reverse: the L2 group (later in doc) comes first
+        self.assertEqual(len(bullets), 2)
+
+
 class TestTables(unittest.TestCase):
     def _table_doc(self):
         # "P\n" (1-3), table (3-13): 1 row × 1 col, cell text "x\n", then "\n" (13-14)
