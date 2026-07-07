@@ -54,6 +54,16 @@ for arg in "$@"; do
   esac
 done
 
+# Override — highest precedence, environment-agnostic. Lets non-Claude callers
+# (Codex, tests, other tools) supply a stable caller ID directly and skip the
+# Claude-only fingerprint/discover dance. Returning "cached" here short-circuits
+# both Step 1 and Step 2, so it wins regardless of which step was invoked.
+if [[ -n "${HOTLINE_CALLER_SESSION_ID:-}" ]]; then
+  jq -nc --arg id "$HOTLINE_CALLER_SESSION_ID" \
+    '{status:"cached", session_id:$id, caller_kind:"override"}'
+  exit 0
+fi
+
 # Step 2: discover from fingerprint
 if [[ "$SUBCOMMAND" == "discover" ]]; then
   if [[ -z "$FINGERPRINT" ]]; then
@@ -124,7 +134,17 @@ case $EXIT_CODE in
     jq -n --arg fp "$FINGERPRINT" '{"status":"planted","fingerprint":$fp,"next":"Run session-init.sh discover <fingerprint> in a SEPARATE tool call"}'
     ;;
   *)
-    # Error (e.g., no claude process found)
+    # No claude process in ancestry. Before erroring, try Codex: it sets
+    # $CODEX_THREAD_ID in every shell it spawns, and that value IS the current
+    # session/thread ID — stable across `codex resume`, present in all launch
+    # modes. Its presence is itself the "this is Codex" signal, so no separate
+    # detection is needed. See skills/dial/references/codex-caller.md.
+    if [[ -n "${CODEX_THREAD_ID:-}" ]]; then
+      jq -nc --arg id "$CODEX_THREAD_ID" \
+        '{status:"cached", session_id:$id, caller_kind:"codex"}'
+      exit 0
+    fi
+    # Error (e.g., no claude process found and not a recognized non-Claude caller)
     ERRMSG=$(cat "$STDERR_FILE")
     jq -n --arg msg "$ERRMSG" '{"status":"error","message":$msg}'
     exit 1

@@ -62,7 +62,9 @@ bash "$HOTLINE_SCRIPTS/session-init.sh" discover "<fingerprint>"
 
 This returns `{"status": "discovered", "session_id": "..."}`. Store as `MY_SESSION_ID`.
 
-- `{"status": "error", "message": "..."}` — Discovery failed. Offer the user two options:
+- `{"status": "cached", "session_id": "...", "caller_kind": "codex"}` — You're running under Codex. `$CODEX_THREAD_ID` was used as your identity. Store `session_id` as `MY_SESSION_ID` and proceed normally — the rest of the flow is unchanged. For the why/how (and the receiver-callback caveat), see `references/codex-caller.md`.
+
+- `{"status": "error", "message": "..."}` — Discovery failed. **If you're running under Codex** and see this instead of a `caller_kind: "codex"` result, `$CODEX_THREAD_ID` isn't set in your shell — see `references/codex-caller.md`. Otherwise, offer the user two options:
 
   1. **Continue without session ID (not recommended):** You can still dial, but session caching won't work — multiple Claude instances in the same directory could collide, and you won't be able to resume calls cleanly. If the user is OK with that, set `MY_SESSION_ID` to a generated UUID and proceed.
 

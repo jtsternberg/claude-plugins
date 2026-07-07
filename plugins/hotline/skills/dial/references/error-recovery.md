@@ -6,7 +6,8 @@ Common failure modes and how to recover from them.
 
 **"Could not find claude process in ancestry"**
 - You're not running inside a Claude Code session, or the process tree is unusual.
-- Recovery: Ask the user to provide their session ID manually, or skip session ID discovery and proceed without session caching.
+- **If you're running under Codex:** this is expected — Codex has no `claude` ancestor. `session-init.sh` should have already returned a `caller_kind: "codex"` identity instead of this error. If you still see the error under Codex, confirm `$CODEX_THREAD_ID` is set in your shell (`printf '%s\n' "$CODEX_THREAD_ID"`) and see `references/codex-caller.md`.
+- Recovery (other non-Claude callers): set `HOTLINE_CALLER_SESSION_ID=<stable-id>` in the environment to supply a caller identity directly, or ask the user for their session ID. As a last resort, proceed with a generated UUID — dialing works, but session caching won't persist across restarts.
 
 **"Fingerprint not found in recent transcripts"**
 - The fingerprint was planted but the transcript file wasn't written yet (both steps ran in the same tool call), or the transcript directory path doesn't match.
