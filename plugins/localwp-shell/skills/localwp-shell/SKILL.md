@@ -11,30 +11,30 @@ Run commands through LocalWP's sandboxed environment (PHP, MySQL, WP-CLI, Compos
 
 ## Usage
 
-All scripts are in this skill's `scripts/` directory. Run them with `bash`:
+All scripts live in this skill's directory, referenced at runtime via `${CLAUDE_SKILL_DIR}`. Run them with `bash`:
 
 ```bash
 # WP-CLI (most common) — silent by default
-bash scripts/wplocal plugin list
-bash scripts/wplocal search-replace 'old.test' 'new.test'
-bash scripts/wplocal db export backup.sql
+bash ${CLAUDE_SKILL_DIR}/scripts/wplocal plugin list
+bash ${CLAUDE_SKILL_DIR}/scripts/wplocal search-replace 'old.test' 'new.test'
+bash ${CLAUDE_SKILL_DIR}/scripts/wplocal db export backup.sql
 
 # PHP, Composer, MySQL — full env with version info
-bash scripts/localwpshell php -v
-bash scripts/localwpshell composer install
-bash scripts/localwpshell mysql -e "SHOW DATABASES;"
+bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell php -v
+bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell composer install
+bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell mysql -e "SHOW DATABASES;"
 
 # Silent mode — only command output, no env info
-bash scripts/silentlocalwpshell php -r 'echo PHP_VERSION;'
+bash ${CLAUDE_SKILL_DIR}/scripts/silentlocalwpshell php -r 'echo PHP_VERSION;'
 ```
 
 ### Commands
 
 | Command | Purpose |
 |---------|---------|
-| `scripts/localwpshell [cmd]` | Load LocalWP env, show versions, optionally run a command |
-| `scripts/silentlocalwpshell [cmd]` | Same as above but suppresses info output |
-| `scripts/wplocal [wp-args]` | Shorthand for `silentlocalwpshell wp ...` |
+| `${CLAUDE_SKILL_DIR}/scripts/localwpshell [cmd]` | Load LocalWP env, show versions, optionally run a command |
+| `${CLAUDE_SKILL_DIR}/scripts/silentlocalwpshell [cmd]` | Same as above but suppresses info output |
+| `${CLAUDE_SKILL_DIR}/scripts/wplocal [wp-args]` | Shorthand for `silentlocalwpshell wp ...` |
 
 ## When to Use
 
@@ -54,8 +54,8 @@ bash scripts/silentlocalwpshell php -r 'echo PHP_VERSION;'
 **WordPress Multisite: always pass `--url=`.** On a multisite install, WP-CLI without `--url` targets the network's primary site — pages, options, and plugin changes land on the WRONG site silently. Find the right URL first (`wp site list`), then include it in every command:
 
 ```bash
-bash scripts/wplocal site list
-bash scripts/wplocal post list --post_type=page --url=https://wp.wpengine/coaching
+bash ${CLAUDE_SKILL_DIR}/scripts/wplocal site list
+bash ${CLAUDE_SKILL_DIR}/scripts/wplocal post list --post_type=page --url=https://wp.wpengine/coaching
 ```
 
 ### Error Patterns That Mean "Use This Skill"
@@ -71,7 +71,7 @@ bash scripts/wplocal post list --post_type=page --url=https://wp.wpengine/coachi
 
 ```bash
 # Instead of:        Use:
-wp plugin list       bash scripts/wplocal plugin list
-php -v               bash scripts/localwpshell php -v
-composer install     bash scripts/localwpshell composer install
+wp plugin list       bash ${CLAUDE_SKILL_DIR}/scripts/wplocal plugin list
+php -v               bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell php -v
+composer install     bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell composer install
 ```

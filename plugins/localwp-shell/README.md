@@ -20,10 +20,10 @@ This skill teaches Claude to automatically detect LocalWP sites and wrap command
 
 | File | Purpose |
 |------|---------|
-| `SKILL.md` | The skill definition Claude loads — trigger patterns, usage docs, error recovery |
-| `scripts/localwpshell` | Core script: resolves the current directory to a LocalWP site (including through symlinks), loads its environment, and runs commands |
-| `scripts/silentlocalwpshell` | Same thing, quiet mode — no version banners, just output |
-| `scripts/wplocal` | Shorthand for `silentlocalwpshell wp ...` (the most common use case) |
+| `skills/localwp-shell/SKILL.md` | The skill definition Claude loads — trigger patterns, usage docs, error recovery |
+| `skills/localwp-shell/scripts/localwpshell` | Core script: resolves the current directory to a LocalWP site (including through symlinks), loads its environment, and runs commands |
+| `skills/localwp-shell/scripts/silentlocalwpshell` | Same thing, quiet mode — no version banners, just output |
+| `skills/localwp-shell/scripts/wplocal` | Shorthand for `silentlocalwpshell wp ...` (the most common use case) |
 
 ## How It Works
 
@@ -36,13 +36,13 @@ This skill teaches Claude to automatically detect LocalWP sites and wrap command
 
 ```bash
 # WP-CLI
-bash scripts/wplocal plugin list
-bash scripts/wplocal search-replace 'old.test' 'new.test'
+bash plugins/localwp-shell/skills/localwp-shell/scripts/wplocal plugin list
+bash plugins/localwp-shell/skills/localwp-shell/scripts/wplocal search-replace 'old.test' 'new.test'
 
 # PHP / Composer / MySQL
-bash scripts/localwpshell php -v
-bash scripts/localwpshell composer install
-bash scripts/localwpshell mysql -e "SHOW DATABASES;"
+bash plugins/localwp-shell/skills/localwp-shell/scripts/localwpshell php -v
+bash plugins/localwp-shell/skills/localwp-shell/scripts/localwpshell composer install
+bash plugins/localwp-shell/skills/localwp-shell/scripts/localwpshell mysql -e "SHOW DATABASES;"
 ```
 
 ## Install
@@ -55,4 +55,4 @@ The skill triggers automatically when Claude detects you're working inside a Loc
 
 ## Troubleshooting
 
-If commands still hit the system PHP after installing, make sure your working directory is inside the LocalWP site (or a symlink that resolves to one). Run `bash scripts/localwpshell php -v` to verify the correct binary is being picked up.
+If commands still hit the system PHP after installing, make sure your working directory is inside the LocalWP site (or a symlink that resolves to one). Run `bash plugins/localwp-shell/skills/localwp-shell/scripts/localwpshell php -v` to verify the correct binary is being picked up.
