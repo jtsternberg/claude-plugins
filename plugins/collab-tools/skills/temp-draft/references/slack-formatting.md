@@ -15,7 +15,7 @@ Slack's paste-and-convert (`cmd+shift+f`) only understands a subset of markdown,
 | `*italic*` or `_italic_` | `_italic_` (underscores only — see caveat below) |
 | `~~strike~~` | `~strike~` (single tildes) |
 | ```` ```php ```` fenced block | ```` ``` ```` fenced block with **no language tag** |
-| `[link text](url)` | Bare URL, or `link text: url` — Slack's converter leaves bracket syntax as visible artifacts |
+| `[link text](url)` | Works as-is — but ONLY with a plain-text label. Any formatting inside the brackets (bold, emoji, another link, a `#channel` ref) leaves bracket artifacts; in that case use a bare URL or `label: url` |
 | Bullet/numbered lists | Flat `-` bullets or `1.` numbered lines — see list caveat below |
 | Horizontal rules `---` | Blank line, or a `*Bold*` section label |
 
