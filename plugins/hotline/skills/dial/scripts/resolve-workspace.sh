@@ -104,6 +104,19 @@ if [[ "$REFERENCE" =~ $UUID_REGEX ]]; then
   PROJECTS_ROOT="$HOME/.claude/projects"
   TRANSCRIPT=$(find "$PROJECTS_ROOT" -name "${REFERENCE}.jsonl" -type f 2>/dev/null | head -1)
   if [[ -n "$TRANSCRIPT" ]]; then
+    # Preferred: read the real cwd straight from the transcript. Claude Code
+    # records a "cwd" field on nearly every event line, so we avoid reversing
+    # the lossy path→dirname encoding — a '-' in the dir name could have been
+    # a '/', a '.', or a space (e.g. '/Users/JT/Documents/Southport UDO' →
+    # '-Users-JT-Documents-Southport-UDO'), which is impossible to decode
+    # unambiguously.
+    RECV_CWD=$(grep -m1 -o '"cwd":"[^"]*"' "$TRANSCRIPT" 2>/dev/null \
+      | sed 's|^"cwd":"||; s|"$||')
+    if [[ -n "$RECV_CWD" ]]; then
+      if resolve_path "$RECV_CWD"; then
+        exit 0
+      fi
+    fi
     ENCODED_DIR=$(basename "$(dirname "$TRANSCRIPT")")
     # Decode: the encoded dir is the path with non-alphanumeric chars replaced by hyphens
     # We can't perfectly reverse this, but we can search for a matching directory

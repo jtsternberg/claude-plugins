@@ -102,15 +102,19 @@ if $CMUX_MODE; then
   # the session, so its existence is a strong REPL-liveness signal that
   # doesn't depend on terminal rendering (banner can scroll out of the read
   # window between polls, ANSI/--resume variance can defeat the regex).
-  # Encoding: replace both '/' and '.' with '-' (verified against existing
-  # entries in ~/.claude/projects/; e.g. '/Users/JT/.dotfiles' →
-  # '-Users-JT--dotfiles'). stat from a cmux-spawned bash child does NOT
-  # hit the cmux socket, so the access_mode=cmuxOnly Broken-pipe constraint
-  # does not apply here.
+  # Encoding: Claude Code replaces EVERY non-alphanumeric char (path
+  # separators, dots, AND spaces) with '-' when deriving the project-dir
+  # name (verified against ~/.claude/projects/; e.g. '/Users/JT/.dotfiles' →
+  # '-Users-JT--dotfiles', '/Users/JT/Documents/Southport UDO' →
+  # '-Users-JT-Documents-Southport-UDO'). An earlier version only replaced
+  # '/' and '.', so cwds containing spaces produced a path that never
+  # existed. stat from a cmux-spawned bash child does NOT hit the cmux
+  # socket, so the access_mode=cmuxOnly Broken-pipe constraint does not
+  # apply here.
   TRANSCRIPT_PATH=""
   if [[ -f "$CALL_DIR/cwd.txt" ]]; then
     RECV_CWD=$(cat "$CALL_DIR/cwd.txt")
-    ENCODED_CWD=$(printf '%s' "$RECV_CWD" | sed 's|[/.]|-|g')
+    ENCODED_CWD=$(printf '%s' "$RECV_CWD" | sed 's|[^a-zA-Z0-9]|-|g')
     TRANSCRIPT_PATH="${HOME}/.claude/projects/${ENCODED_CWD}/${PRESET}.jsonl"
   fi
 
