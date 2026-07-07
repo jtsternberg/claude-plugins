@@ -1,6 +1,6 @@
 ---
 name: temp-draft
-description: "Route a draft to a file in /tmp opened in the user's $EDITOR instead of pasting it into chat."
+description: "Route a draft to a file in /tmp opened in the user's $EDITOR instead of pasting it into chat. Slack-message drafts are written in Slack-flavored markup (no headings, single-asterisk bold, no code-fence language tags) so they paste cleanly."
 when_to_use: "Use when the user invokes /temp-draft, or when they explicitly ask to draft in their editor / in a temp file / collaboratively in editor. Do NOT use for routine writing, short replies, or edits to existing project files — most content belongs in chat or in its real home."
 allowed-tools: Write Edit Bash
 ---
@@ -50,6 +50,14 @@ When in doubt, ask the user once whether they want the draft in chat or in `/tmp
    - The trailing `&` + `disown` launch the editor non-blocking. Don't wait for the editor to close — a `--wait` flag (if present) still makes *that* editor window stay open until the user is done, but the shell returns immediately. The actual turn boundary is the user's next chat message ("good to go", "tweak section 2", "I changed X") — not the editor exit.
 
 4. **Briefly tell the user where it landed.** One short sentence with the path. Do NOT paste the draft content into the chat — the entire point is that the chat stays clean and the work lives in the editor.
+
+## Slack drafts: write Slack-flavored markup, not standard markdown
+
+When the draft is a Slack message (the user says "draft a Slack message/reply/post", mentions a channel or thread, or the destination is clearly Slack), do NOT write standard markdown — Slack's paste-and-convert (`cmd+shift+f`) only understands a subset, and everything outside it survives as literal artifacts.
+
+**Read [references/slack-formatting.md](references/slack-formatting.md) before writing the draft** — it has the full markdown → Slack conversion table and structure guidance.
+
+**Use the `.txt` extension for Slack drafts** — a `.md` file makes editors copy rich text (rendered markdown styling), which corrupts the paste and breaks `cmd+shift+f`. Mention in your one-line confirmation that it's formatted for Slack paste.
 
 ## What this looks like
 

@@ -24,6 +24,8 @@ The skills in this plugin shift that default for the cases where it matters. The
 
 Routes a long-form draft to `/tmp/collab-tools/<slug>-<YYYY-MM-DD>.<ext>` opened in your editor — instead of having Claude paste the full draft into chat. Keeps context lean, gives you real editor affordances (syntax highlighting, find/replace, spellcheck), and makes iterative edits painless.
 
+When the draft is a Slack message, the skill writes Slack-flavored markup instead of standard markdown — no headings (bold section labels instead), `*single-asterisk*` bold, `_underscore_` italic, code fences without language tags, and bare URLs instead of `[text](url)` — so pasting into Slack (with `cmd+shift+f` formatting conversion) leaves no artifacts. Slack drafts are saved as `.txt` (a `.md` file makes editors copy rich text, which corrupts the paste).
+
 The editor command is `OPEN_IN_EDITOR_COMMAND`, falling back to `$EDITOR`, then `vi`. Set `OPEN_IN_EDITOR_COMMAND` when your `$EDITOR` is a blocking/`--wait` command (e.g. `code --wait`): a backgrounded `--wait` editor leaves a live process waiting for the file to close, which shows as a duplicate "ghost" app instance in the macOS app switcher. `export OPEN_IN_EDITOR_COMMAND=code` (no `--wait`) opens the file in your existing window and returns immediately.
 
 ```
