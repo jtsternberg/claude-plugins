@@ -136,29 +136,64 @@ fi
 [[ -s "$TMP_HTML" ]] || { echo "ERROR: Converter produced empty HTML." >&2; exit 1; }
 
 # --- Create draft --------------------------------------------------------
-BODY=$(cat "$TMP_HTML")
+# Build a base64url-encoded MIME message and create the draft via the Gmail
+# API drafts.create method, then verify with drafts.get before claiming
+# success. The draft lands in the ACTIVE gws account (resolved above), which
+# may not be the caller's default — so we surface the account email and put
+# it in the URL as authuser= instead of assuming account index u/0.
+PARAMS=$(TO="$TO" SUBJECT="$SUBJECT" CC="$CC" BCC="$BCC" FROM="$FROM" HTML_FILE="$TMP_HTML" python3 - <<'PY'
+import base64, json, os
+from email.mime.text import MIMEText
 
-ARGS=(gmail +send --to "$TO" --subject "$SUBJECT" --body "$BODY" --html --draft)
-[[ -n "$CC" ]]   && ARGS+=(--cc "$CC")
-[[ -n "$BCC" ]]  && ARGS+=(--bcc "$BCC")
-[[ -n "$FROM" ]] && ARGS+=(--from "$FROM")
+with open(os.environ['HTML_FILE'], encoding='utf-8') as fh:
+    msg = MIMEText(fh.read(), 'html', 'utf-8')
+msg['To'] = os.environ['TO']
+msg['Subject'] = os.environ['SUBJECT']
+for header, env in (('Cc', 'CC'), ('Bcc', 'BCC'), ('From', 'FROM')):
+    if os.environ.get(env):
+        msg[header] = os.environ[env]
 
-RESPONSE=$(gws "${ARGS[@]}")
+raw = base64.urlsafe_b64encode(msg.as_bytes()).decode().rstrip('=')
+print(json.dumps({'message': {'raw': raw}}))
+PY
+)
 
-MSG_ID=$(printf '%s' "$RESPONSE" | python3 -c "
+RESPONSE=$(gws gmail users drafts create --params '{"userId":"me"}' --json "$PARAMS")
+
+read -r DRAFT_ID MSG_ID < <(printf '%s' "$RESPONSE" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
 except Exception:
     sys.exit(1)
-mid = d.get('message', {}).get('id') or d.get('id', '')
-print(mid)
+print(d.get('id', ''), d.get('message', {}).get('id', ''))
 ")
 
-if [[ -z "$MSG_ID" ]]; then
-  echo "ERROR: Could not parse draft message id from gws response." >&2
+if [[ -z "${DRAFT_ID:-}" || -z "${MSG_ID:-}" ]]; then
+  echo "ERROR: Could not parse draft id from gws drafts.create response." >&2
   echo "API response: $RESPONSE" >&2
   exit 1
 fi
 
-echo "https://mail.google.com/mail/u/0/#drafts/$MSG_ID"
+# Verify the draft actually persisted before claiming success.
+if ! gws gmail users drafts get --params "{\"userId\":\"me\",\"id\":\"$DRAFT_ID\"}" >/dev/null 2>&1; then
+  echo "ERROR: Draft $DRAFT_ID was not found after creation (drafts.get failed)." >&2
+  exit 1
+fi
+
+# Which mailbox did this land in? Surface it so nobody hunts for the draft in
+# the wrong account, and address the URL to that account explicitly.
+ACCOUNT_EMAIL=$(gws gmail users getProfile --params '{"userId":"me"}' 2>/dev/null | python3 -c "
+import json, sys
+try:
+    print(json.load(sys.stdin).get('emailAddress', ''))
+except Exception:
+    pass
+")
+
+if [[ -n "$ACCOUNT_EMAIL" ]]; then
+  echo "Draft created in account: $ACCOUNT_EMAIL" >&2
+  echo "https://mail.google.com/mail/?authuser=$ACCOUNT_EMAIL#drafts/$MSG_ID"
+else
+  echo "https://mail.google.com/mail/u/0/#drafts/$MSG_ID"
+fi

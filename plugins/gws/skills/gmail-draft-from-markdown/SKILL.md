@@ -1,7 +1,6 @@
 ---
 name: gmail-draft-from-markdown
 description: "Draft a Gmail message from a local markdown file via the gws CLI. Converts markdown to HTML, saves as a Gmail draft (never sends), and returns a clickable Gmail drafts URL so the user reviews and sends from Gmail's UI. Triggers on \"draft an email from\", \"gmail draft from markdown\", \"create a draft in gmail\", \"draft a follow-up email\", \"turn this note into an email draft\"."
-disable-model-invocation: true
 argument-hint: '[file.md] [recipient-email-or-name] [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) Bash(marked *) Bash(pandoc *)'
 ---
@@ -73,13 +72,18 @@ Before HTML conversion, the script strips:
 - Obsidian callout headers (`> [!note]` etc.)
 
 ### Output
-On success, prints exactly one line to stdout:
+On success, prints the account the draft landed in (stderr) and one URL line
+to stdout, addressed to that account explicitly:
 
 ```
-https://mail.google.com/mail/u/0/#drafts/<message-id>
+Draft created in account: you@example.com
+https://mail.google.com/mail/?authuser=you@example.com#drafts/<message-id>
 ```
 
-Open that URL in a browser to review and send the draft.
+Open that URL in a browser to review and send the draft. The draft is created
+in the **active gws account** (see the `gws:account` skill) — the `authuser=`
+URL means the link opens the right mailbox even when multiple Google accounts
+are signed in. Always relay the account email to the user along with the URL.
 
 ## Examples
 
@@ -103,8 +107,12 @@ bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./note.md alice@example.com
 - **`No markdown→HTML converter found`:** Install one — `npm i -g marked` or
   `brew install pandoc`.
 - **Recipient lookup returned nothing:** Pass an email address instead.
-- **Draft didn't appear in Gmail:** Verify the printed URL opens — it
-  embeds the message id returned by the Gmail API.
+- **Draft didn't appear in Gmail:** Check which account you're looking at —
+  the draft lands in the **active gws account**, which may not be the mailbox
+  you (or your verification commands) are checking. The script prints the
+  account email and an `authuser=`-addressed URL for exactly this reason.
+  Bare `gws` verification commands run against the default account unless
+  `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` is set to the active account's config.
 
 ## Why this skill exists
 
