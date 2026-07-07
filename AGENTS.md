@@ -13,26 +13,53 @@ A collection of Claude Code plugins (skills, commands, hooks) for sharing and re
 ├── plugin.json          # Plugin metadata
 └── marketplace.json     # Marketplace registry of available plugins
 plugins/
-└── <plugin-name>/       # Each plugin in its own directory
-    ├── manifest.json    # or .claude-plugin/plugin.json
-    ├── hooks/           # Hook scripts (optional)
-    └── commands/        # Slash command / skill markdown files (optional)
+└── <plugin-name>/               # Each plugin in its own directory
+    ├── .claude-plugin/
+    │   └── plugin.json          # Plugin metadata (keep at the plugin root)
+    ├── README.md                # Plugin-level docs
+    ├── skills/                  # Skills live here (optional)
+    │   └── <skill-name>/        # One directory per skill
+    │       ├── SKILL.md         # The skill definition — belongs at this path
+    │       └── scripts/         # Scripts the skill runs, bundled with it
+    ├── commands/                # Slash command markdown files (optional)
+    └── hooks/                   # Hook scripts (optional)
 ```
+
+Each skill's `SKILL.md` belongs at `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`. That path is what makes the skill discoverable in autocomplete and invocable as `$<skill-name>`. Keep `.claude-plugin/plugin.json` at the plugin root; everything a skill needs (its `SKILL.md` and any `scripts/`) sits together under its own `skills/<skill-name>/` directory.
+
+When a skill runs bundled scripts, reference them through the runtime-resolved skill path so they work from any working directory:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/<script-name> [args]
+```
+
+Use `${CLAUDE_SKILL_DIR}/scripts/…` in `SKILL.md` (and in the skill's `allowed-tools` frontmatter). This anchors each call to the installed skill directory, so it resolves whether the skill fires from the repo, an install cache, or a user's unrelated project. See `plugins/research-tools/skills/fetch-docs/SKILL.md` for a working example.
 
 ## Adding a New Plugin
 
 1. Create a new directory under `plugins/<plugin-name>/`
-2. Add required files (`manifest.json` or `.claude-plugin/plugin.json`, hooks, commands)
-3. Register the plugin in `.claude-plugin/marketplace.json` by adding an entry to the `plugins` array
-4. Update `README.md` with documentation for the new plugin
+2. Put `plugin.json` at `plugins/<plugin-name>/.claude-plugin/plugin.json`
+3. For each skill, create `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`, and bundle any scripts it runs in that same `skills/<skill-name>/scripts/` directory
+4. Add hooks (`hooks/`) and slash commands (`commands/`) at the plugin root as needed
+5. Register the plugin in `.claude-plugin/marketplace.json` by adding an entry to the `plugins` array
+6. Update `README.md` with documentation for the new plugin
+
+To confirm a new skill sits where discovery expects it, check that it matches the others:
+
+```bash
+find plugins -name SKILL.md    # every result should be plugins/<plugin>/skills/<skill>/SKILL.md
+```
 
 ## Plugin Types
 
 ### Hook-based plugins
 Hook scripts in `hooks/` that intercept Claude Code events (permissions, notifications, etc.) and return JSON decisions.
 
-### Skill/Command-based plugins
-Markdown files in `commands/` that define slash commands or skills Claude can invoke.
+### Skill-based plugins
+Each skill is a `SKILL.md` at `skills/<skill-name>/SKILL.md`, with its scripts bundled in `skills/<skill-name>/scripts/` and referenced via `${CLAUDE_SKILL_DIR}/scripts/…`. This layout is what surfaces the skill in autocomplete and lets Claude invoke it as `$<skill-name>`.
+
+### Command-based plugins
+Markdown files in `commands/` that define slash commands Claude can invoke.
 
 ## Versioning
 
