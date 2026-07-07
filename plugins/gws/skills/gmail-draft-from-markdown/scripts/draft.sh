@@ -4,10 +4,22 @@
 # the Gmail drafts URL so the user can review/send from the Gmail UI.
 #
 # Usage:
-#   draft.sh <markdown-file> <recipient> [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL]
+#   draft.sh <markdown-file> <recipient> [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID]
 #
 # <recipient> may be a literal email address (contains "@") or a name to look
 # up via Gmail search (most recent correspondent matching the name wins).
+#
+# Threading (optional):
+#   --reply-to MESSAGE_ID  Attach the draft to the conversation the given
+#                          message belongs to. The script looks up that
+#                          message's Message-ID, References, and threadId, then
+#                          sets message.threadId on the draft AND injects
+#                          In-Reply-To / References RFC 5322 headers so Gmail
+#                          threads the reply correctly. If no --subject is
+#                          given, the parent's subject (prefixed "Re: ") is used.
+#   --thread THREAD_ID     Attach the draft to a threadId directly (no header
+#                          lookup). Prefer --reply-to for reliable threading.
+# Without either flag, behavior is unchanged: a standalone draft.
 #
 # Subject resolution order:
 #   1. --subject flag
@@ -31,9 +43,14 @@ fi
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") <markdown-file> <recipient> [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL]
+Usage: $(basename "$0") <markdown-file> <recipient> [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID]
 
 <recipient> may be an email address or a name to look up via Gmail search.
+
+Threading:
+  --reply-to MESSAGE_ID  Thread the draft onto that message's conversation
+                         (sets threadId + In-Reply-To/References headers).
+  --thread THREAD_ID     Attach to a threadId directly (no header lookup).
 EOF
   exit 1
 }
@@ -48,12 +65,18 @@ SUBJECT=""
 CC=""
 BCC=""
 FROM=""
+REPLY_TO=""
+THREAD_ID=""
+IN_REPLY_TO=""
+REFERENCES=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --subject) SUBJECT="$2"; shift 2 ;;
     --cc) CC="$2"; shift 2 ;;
     --bcc) BCC="$2"; shift 2 ;;
     --from) FROM="$2"; shift 2 ;;
+    --reply-to) REPLY_TO="$2"; shift 2 ;;
+    --thread) THREAD_ID="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
@@ -98,6 +121,42 @@ print(m.group(1) if m else '')
   echo "Resolved '$RECIPIENT_ARG' → $TO" >&2
 fi
 
+# --- Resolve threading ---------------------------------------------------
+# When --reply-to is given, look up the parent message's threadId and the
+# RFC 5322 threading headers (Message-ID + References) so the draft attaches
+# to the existing Gmail conversation. This both sets message.threadId on the
+# draft resource AND injects In-Reply-To / References into the raw MIME —
+# Gmail needs the headers to thread reliably, not just threadId.
+PARENT_SUBJECT=""
+if [[ -n "$REPLY_TO" ]]; then
+  echo "Looking up parent message $REPLY_TO for threading..." >&2
+  PARENT_JSON=$(gws gmail users messages get --params "$(python3 -c "import json,sys; print(json.dumps({'userId':'me','id':sys.argv[1],'format':'metadata','metadataHeaders':['Message-ID','References','Subject']}))" "$REPLY_TO")") || {
+    echo "ERROR: Could not fetch parent message $REPLY_TO for --reply-to." >&2
+    exit 1
+  }
+  # Parse threadId, parent Message-ID, References, Subject from the response.
+  eval "$(printf '%s' "$PARENT_JSON" | python3 -c "
+import json, shlex, sys
+d = json.load(sys.stdin)
+hs = {h.get('name','').lower(): h.get('value','') for h in d.get('payload', {}).get('headers', [])}
+tid = d.get('threadId', '')
+mid = hs.get('message-id', '')
+refs = hs.get('references', '')
+subj = hs.get('subject', '')
+# References for the reply = existing References chain + parent Message-ID.
+new_refs = (refs + ' ' + mid).strip() if refs else mid
+print('THREAD_ID=' + shlex.quote(tid))
+print('IN_REPLY_TO=' + shlex.quote(mid))
+print('REFERENCES=' + shlex.quote(new_refs))
+print('PARENT_SUBJECT=' + shlex.quote(subj))
+")"
+  if [[ -z "$THREAD_ID" ]]; then
+    echo "ERROR: Parent message $REPLY_TO has no threadId; cannot thread." >&2
+    exit 1
+  fi
+  echo "Threading onto conversation $THREAD_ID" >&2
+fi
+
 # --- Resolve subject -----------------------------------------------------
 if [[ -z "$SUBJECT" ]]; then
   SUBJECT=$(awk '
@@ -110,9 +169,18 @@ if [[ -z "$SUBJECT" ]]; then
     {exit}
   ' "$FILE")
 fi
+# Fall back to the parent's subject when replying and none was supplied.
+if [[ -z "$SUBJECT" && -n "$PARENT_SUBJECT" ]]; then
+  SUBJECT="$PARENT_SUBJECT"
+fi
 if [[ -z "$SUBJECT" ]]; then
   echo "ERROR: No subject. Pass --subject \"...\" or add a 'Subject: ...' line at the top of the markdown." >&2
   exit 1
+fi
+# In reply mode, ensure a conventional "Re: " prefix — matching subjects help
+# Gmail keep the draft inside the parent conversation.
+if [[ -n "$REPLY_TO" ]] && ! printf '%s' "$SUBJECT" | grep -qiE '^re:[[:space:]]'; then
+  SUBJECT="Re: $SUBJECT"
 fi
 
 # --- Clean + convert markdown -------------------------------------------
@@ -141,7 +209,9 @@ fi
 # success. The draft lands in the ACTIVE gws account (resolved above), which
 # may not be the caller's default — so we surface the account email and put
 # it in the URL as authuser= instead of assuming account index u/0.
-PARAMS=$(TO="$TO" SUBJECT="$SUBJECT" CC="$CC" BCC="$BCC" FROM="$FROM" HTML_FILE="$TMP_HTML" python3 - <<'PY'
+PARAMS=$(TO="$TO" SUBJECT="$SUBJECT" CC="$CC" BCC="$BCC" FROM="$FROM" \
+  THREAD_ID="$THREAD_ID" IN_REPLY_TO="$IN_REPLY_TO" REFERENCES="$REFERENCES" \
+  HTML_FILE="$TMP_HTML" python3 - <<'PY'
 import base64, json, os
 from email.mime.text import MIMEText
 
@@ -153,8 +223,18 @@ for header, env in (('Cc', 'CC'), ('Bcc', 'BCC'), ('From', 'FROM')):
     if os.environ.get(env):
         msg[header] = os.environ[env]
 
+# RFC 5322 threading headers (only present when replying).
+if os.environ.get('IN_REPLY_TO'):
+    msg['In-Reply-To'] = os.environ['IN_REPLY_TO']
+if os.environ.get('REFERENCES'):
+    msg['References'] = os.environ['REFERENCES']
+
 raw = base64.urlsafe_b64encode(msg.as_bytes()).decode().rstrip('=')
-print(json.dumps({'message': {'raw': raw}}))
+message = {'raw': raw}
+# Attach to an existing conversation when a threadId is set (--reply-to/--thread).
+if os.environ.get('THREAD_ID'):
+    message['threadId'] = os.environ['THREAD_ID']
+print(json.dumps({'message': message}))
 PY
 )
 

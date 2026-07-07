@@ -1,7 +1,7 @@
 ---
 name: gmail-draft-from-markdown
 description: "Draft a Gmail message from a local markdown file via the gws CLI. Converts markdown to HTML, saves as a Gmail draft (never sends), and returns a clickable Gmail drafts URL so the user reviews and sends from Gmail's UI. Triggers on \"draft an email from\", \"gmail draft from markdown\", \"create a draft in gmail\", \"draft a follow-up email\", \"turn this note into an email draft\"."
-argument-hint: '[file.md] [recipient-email-or-name] [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL]'
+argument-hint: '[file.md] [recipient-email-or-name] [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) Bash(marked *) Bash(pandoc *)'
 ---
 
@@ -48,6 +48,8 @@ recipient (email or name). Subject is optional — the script derives it from a
 | `--cc EMAIL` | no | Comma-separated. |
 | `--bcc EMAIL` | no | Comma-separated. |
 | `--from EMAIL` | no | Send-as alias (defaults to active account). |
+| `--reply-to MESSAGE_ID` | no | Thread the draft onto that message's conversation (see Threading). |
+| `--thread THREAD_ID` | no | Attach the draft to a threadId directly, no header lookup. Prefer `--reply-to`. |
 
 ## Behavior
 
@@ -58,10 +60,35 @@ recipient (email or name). Subject is optional — the script derives it from a
   `From:` header (`gws gmail +read --id ... --headers`).
 - If no match is found, the script errors and asks for an email address.
 
+### Threading (reply drafts)
+By default the script creates a **standalone** draft. To attach the draft to
+an existing Gmail conversation so it shows up as a reply in that thread:
+
+- `--reply-to MESSAGE_ID` — the script looks up that message via
+  `gws gmail users messages get` (format `metadata`) and reads its `threadId`,
+  `Message-ID`, and `References`. It then:
+  - sets `message.threadId` on the draft resource, and
+  - injects `In-Reply-To` (the parent's Message-ID) and `References` (the
+    parent's References chain plus its Message-ID) into the raw MIME message.
+  Gmail needs those RFC 5322 headers — not just `threadId` — to thread the
+  reply reliably. If no `--subject` is given, the parent's subject is reused;
+  in reply mode a conventional `Re: ` prefix is added when missing.
+- `--thread THREAD_ID` — attaches to a threadId directly with no header lookup.
+  Weaker than `--reply-to` (no `In-Reply-To`/`References`), so prefer
+  `--reply-to` when you have the parent message id.
+
+The `MESSAGE_ID` for `--reply-to` is a Gmail message id (as returned by
+`gws gmail users messages list` or the `gws:gmail-read` skill), not the raw
+RFC `Message-ID` header value.
+
 ### Subject resolution (in order)
 1. `--subject "..."` flag
 2. A `Subject: ...` line at the top of the markdown (before the body)
-3. Error — the user must supply a subject
+3. The parent message's subject, when `--reply-to` is used
+4. Error — the user must supply a subject
+
+In reply mode (`--reply-to`), the resolved subject is prefixed with `Re: `
+unless it already starts with one.
 
 The `Subject:` line is stripped from the body before conversion.
 
@@ -96,6 +123,9 @@ bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./coaching-followup.md "Alice Smith"
 
 # Subject embedded in markdown as a leading "Subject: ..." line
 bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./note.md alice@example.com
+
+# Reply draft — thread onto an existing conversation (subject/threading auto-derived)
+bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./reply.md alice@example.com --reply-to 19f3de2c4f9ee065
 ```
 
 ## Troubleshooting

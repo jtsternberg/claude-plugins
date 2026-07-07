@@ -1,7 +1,7 @@
 {
   "name": "gws",
   "description": "Google Workspace CLI (gws) integrations \u2014 upload markdown to Google Docs, draft Gmail messages from markdown, manage Drive files, manage YouTube playlists, and more.",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"
