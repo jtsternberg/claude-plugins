@@ -6,6 +6,7 @@ allowed-tools:
   - "Bash(cmux *)"
   - "Bash(which cmux)"
   - "Bash(jq *)"
+  - "Task"
 ---
 
 # Auto-rename cmux tabs & workspaces
@@ -40,9 +41,23 @@ cmux identify --json --id-format both 2>/dev/null || echo '{"error":"cmux identi
 
 ## Step 2 — Gather evidence for the name
 
-**If the target is this agent's own tab/workspace, you already know the task from the conversation — skip read-screen and name it from what you're actually working on.**
+**If the target is this agent's own tab/workspace, you already know the task from the conversation — skip read-screen and name it from what you're actually working on, using your own (main) model.** Your live context is the best evidence there is; don't delegate it.
 
-Otherwise, read what's happening there:
+**For any surface that is _not_ your own tab, delegate the read-and-distill to Haiku.** Pulling a few hundred lines of someone else's scrollback into your context just to produce a 2–5 word label is wasteful — hand it to a cheap model. Spawn a subagent pinned to Haiku and have it return only the name:
+
+- **Tool:** `Agent` with `model: "haiku"`, `subagent_type: "general-purpose"` (it needs `Bash` to run `cmux read-screen` / `sidebar-state`).
+- **Prompt — make it self-contained** (the subagent gets a fresh context and can't see this file). Include:
+  1. the target's `workspace_id` and `surface_id` (UUIDs);
+  2. the evidence guidance below (agent-session vs non-agent, **and the ghost-autosuggest warning**);
+  3. the Step 3 naming rules;
+  4. the instruction: *"Read the surface yourself with `cmux read-screen --workspace <ws-id> --surface <surface-id> --scrollback --lines 200` (and `cmux sidebar-state --workspace <ws-id>` for a workspace). Return ONLY the final name — 2–5 words, no quotes, no commentary."*
+- The subagent reads the scrollback, so it never enters your context — only the short name comes back. The main agent applies the rename by UUID (Step 4).
+
+Fan these out in parallel for batch mode — one Haiku subagent per target (see Batch mode below).
+
+**Fallback:** if you're not on Claude Code (no Haiku subagent available), do the read-and-distill inline — the evidence steps below are exactly what the subagent does.
+
+The read-and-distill itself (whether delegated or inline):
 
 ```bash
 cmux read-screen --workspace <ws-id> --surface <surface-id> --scrollback --lines 200
@@ -100,11 +115,13 @@ Confirm the new title actually appears. Then tell the user what each thing was n
 
 ## Batch mode ("name all my workspaces")
 
-1. `cmux tree --all --json --id-format both` → list workspaces with their UUIDs (and surfaces/titles). Collect the `.id` of every workspace/tab you'll rename in this one snapshot, then rename by UUID — refs renumber as you go, UUIDs don't.
-2. Per workspace: `sidebar-state` + `read-screen` on the selected/likeliest surface; skip ones already well-named unless asked to redo everything.
-3. Rename, then one final `cmux tree --all` to show the result.
+This is where Haiku delegation pays off most — many surfaces, each needing an independent read-and-distill.
 
-For many workspaces, keep reads shallow (`--lines 60` first, deeper only when inconclusive).
+1. `cmux tree --all --json --id-format both` → list workspaces with their UUIDs (and surfaces/titles). Collect the `.id` of every workspace/tab you'll rename in this one snapshot, then rename by UUID — refs renumber as you go, UUIDs don't. Skip ones already well-named unless asked to redo everything.
+2. **Fan out: spawn one Haiku subagent per target**, in parallel (multiple `Agent` calls in a single message), each with `model: "haiku"` and a self-contained prompt (target UUIDs + evidence guidance + Step 3 rules + "return only the name") as described in Step 2. Each returns just its name string — the scrollback stays in the subagents, never in your context.
+3. Apply every rename by UUID, then one final `cmux tree --all` to show the result.
+
+The main agent's own tab/workspace, if in the set, is named from your live context (not delegated). Tell each Haiku subagent to keep reads shallow (`--lines 60` first, deeper only when inconclusive).
 
 ## Common mistakes
 
