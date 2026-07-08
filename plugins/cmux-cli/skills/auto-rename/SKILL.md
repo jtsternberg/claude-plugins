@@ -1,6 +1,6 @@
 ---
 name: auto-rename
-description: "Use when the user wants a cmux tab or workspace renamed to something meaningful without dictating the name — 'rename this tab', 'auto-rename', 'name this workspace something useful', 'fix these tab names', 'name my workspaces', or when tabs/workspaces have default/stale names (zsh, Terminal, bash, node) that should reflect what's actually running there."
+description: "Use when the user wants a cmux tab or workspace renamed to something meaningful without dictating the name — 'rename this tab', 'auto-rename', 'name this workspace something useful', 'fix these tab names', 'rename all tabs in this workspace', or when tabs/workspaces have default/stale names (zsh, Terminal, bash, node) that should reflect what's actually running there."
 argument-hint: "[tab | workspace | both | all] [optional target hints]"
 allowed-tools:
   - "Bash(cmux *)"
@@ -35,7 +35,9 @@ cmux identify --json --id-format both 2>/dev/null || echo '{"error":"cmux identi
 | "rename both" / bare "auto-rename" | caller tab **and** caller workspace |
 | "the tab/workspace I'm looking at" | `focused.*` |
 | "the tab running the build" / a named workspace | find it: `cmux tree --all --json` + `jq`, or the using-cmux-cli `find-surface.sh` helper |
-| "all my workspaces" / "fix all the tab names" | batch mode — iterate `cmux tree --all --json` |
+| "rename everything here" / "all tabs in this workspace" / "fix all the tab names" / bare "all" | scoped batch — every tab under `caller.workspace_id`, **plus** the workspace itself (see Batch mode) |
+
+**Scope is always the current workspace, never all of them.** There is deliberately no "rename every workspace" mode — a mass rename across many workspaces is disruptive and unwanted. "all" means "everything in *this* workspace."
 
 **Gotcha (verified):** `cmux tree --workspace <ref> --json` ignores the workspace filter and returns the whole tree — grabbing the first surface from it targets the wrong workspace and `rename-tab` fails with `not_found: Tab not found`. Either use the plain-text `cmux tree --workspace <ref>` (which *is* scoped) or filter the JSON yourself by UUID: `cmux tree --all --json --id-format both | jq --arg w "<ws-uuid>" '.. | objects | select(.id==$w)'`.
 
@@ -113,15 +115,16 @@ cmux tree --workspace <ws-id>
 
 Confirm the new title actually appears. Then tell the user what each thing was named and (briefly) why.
 
-## Batch mode ("name all my workspaces")
+## Batch mode — this workspace (all tabs + the workspace)
 
-This is where Haiku delegation pays off most — many surfaces, each needing an independent read-and-distill.
+Triggered by "all", "rename everything here", "fix all the tab names". Scope is **the current workspace only** (`caller.workspace_id`) — its tabs and itself. Never fan out across other workspaces.
 
-1. `cmux tree --all --json --id-format both` → list workspaces with their UUIDs (and surfaces/titles). Collect the `.id` of every workspace/tab you'll rename in this one snapshot, then rename by UUID — refs renumber as you go, UUIDs don't. Skip ones already well-named unless asked to redo everything.
-2. **Fan out: spawn one Haiku subagent per target**, in parallel (multiple `Agent` calls in a single message), each with `model: "haiku"` and a self-contained prompt (target UUIDs + evidence guidance + Step 3 rules + "return only the name") as described in Step 2. Each returns just its name string — the scrollback stays in the subagents, never in your context.
-3. Apply every rename by UUID, then one final `cmux tree --all` to show the result.
+This is where Haiku delegation pays off most — several tabs, each needing an independent read-and-distill.
 
-The main agent's own tab/workspace, if in the set, is named from your live context (not delegated). Tell each Haiku subagent to keep reads shallow (`--lines 60` first, deeper only when inconclusive).
+1. **Enumerate this workspace's tabs.** `cmux tree --all --json --id-format both`, filter to `caller.workspace_id`, and collect the `.id` (UUID) of every surface under its panes — each surface is one tab. Skip tabs already well-named unless asked to redo everything.
+2. **Fan out: one Haiku subagent per tab**, in parallel (multiple `Agent` calls in a single message), each `model: "haiku"` with a self-contained prompt (target UUIDs + evidence guidance + Step 3 rules + "return only the name") as in Step 2. Each returns just its name. Tell each to keep reads shallow (`--lines 60` first, deeper only if inconclusive). **Exception:** the agent's own tab (`caller.surface_id`) is named from your live context, not delegated.
+3. **Name the workspace itself** from the collective picture — its cwd/branch (`cmux sidebar-state --workspace <ws-id>`) plus the tab names that just came back tell you the project/mission. This is synthesis you do on the main model; no separate subagent needed.
+4. **Apply every rename by UUID** (`rename-tab` per tab, `rename-workspace` once), then one `cmux tree --workspace <ws-id>` to confirm. Per Step 3's no-duplicate rule: the workspace name carries the project, the tab names carry each activity.
 
 ## Common mistakes
 
