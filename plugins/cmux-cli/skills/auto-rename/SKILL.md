@@ -6,7 +6,6 @@ allowed-tools:
   - "Bash(cmux *)"
   - "Bash(which cmux)"
   - "Bash(jq *)"
-  - "Task"
 ---
 
 # Auto-rename cmux tabs & workspaces
@@ -43,26 +42,14 @@ cmux identify --json --id-format both 2>/dev/null || echo '{"error":"cmux identi
 
 ## Step 2 — Gather evidence for the name
 
-**If the target is this agent's own tab/workspace, you already know the task from the conversation — skip read-screen and name it from what you're actually working on, using your own (main) model.** Your live context is the best evidence there is; don't delegate it.
+**If the target is this agent's own tab/workspace, name it from what you're actually working on — skip read-screen.** Your live conversation is the best evidence there is.
 
-**For any surface that is _not_ your own tab, delegate the read-and-distill to Haiku.** Pulling a few hundred lines of someone else's scrollback into your context just to produce a 2–5 word label is wasteful — hand it to a cheap model. Spawn a subagent pinned to Haiku and have it return only the name:
+**For any other surface, read it and distill the name yourself, on the main model — do not delegate to a subagent.** Naming well is a judgment task (recognize what a surface *is*, ignore transient noise, dedupe similar ones); a small distiller model reliably gets this wrong — it pattern-matches the most prominent text on screen instead of understanding purpose (e.g. it named a lazygit TUI showing a fetch error `git fetch temp` instead of `lazygit`). Reading a few hundred lines to produce a label is cheap enough to do inline, and the quality and speed are both better than fanning out subagents.
 
-- **Tool:** `Agent` with `model: "haiku"`, `subagent_type: "general-purpose"` (it needs `Bash` to run `cmux read-screen` / `sidebar-state`).
-- **Prompt — make it self-contained** (the subagent gets a fresh context and can't see this file). Include:
-  1. the target's `workspace_id` and `surface_id` (UUIDs);
-  2. the evidence guidance below (agent-session vs non-agent, **and the ghost-autosuggest warning**);
-  3. the Step 3 naming rules;
-  4. the instruction: *"Read the surface yourself with `cmux read-screen --workspace <ws-id> --surface <surface-id> --scrollback --lines 200` (and `cmux sidebar-state --workspace <ws-id>` for a workspace). Return ONLY the final name — 2–5 words, no quotes, no commentary."*
-- The subagent reads the scrollback, so it never enters your context — only the short name comes back. The main agent applies the rename by UUID (Step 4).
-
-Fan these out in parallel for batch mode — one Haiku subagent per target (see Batch mode below).
-
-**Fallback:** if you're not on Claude Code (no Haiku subagent available), do the read-and-distill inline — the evidence steps below are exactly what the subagent does.
-
-The read-and-distill itself (whether delegated or inline):
+Read shallow first, go deeper only if inconclusive:
 
 ```bash
-cmux read-screen --workspace <ws-id> --surface <surface-id> --scrollback --lines 200
+cmux read-screen --workspace <ws-id> --surface <surface-id> --scrollback --lines 60
 ```
 
 Supplement for workspaces (cwd, git branch, ports, status pills tell you the project even when screens are quiet):
@@ -71,6 +58,8 @@ Supplement for workspaces (cwd, git branch, ports, status pills tell you the pro
 cmux sidebar-state --workspace <ws-id>
 cmux tree --workspace <ws-id>   # existing tab titles are evidence too
 ```
+
+**Name the surface's _purpose_, not the most prominent text on screen.** A TUI showing a transient error is still what it is (a git TUI showing a failed fetch is `lazygit`, not `git fetch temp`). A command that just scrolled past isn't the surface's job if a long-running process owns it. Understand the surface, then label it.
 
 ### Agent sessions (claude / codex / opencode / etc.)
 
@@ -83,7 +72,7 @@ If the scrollback shows an agent REPL, name it after the **task the session is d
 
 ### Non-agent terminals
 
-Evidence, in order of usefulness: the running foreground command (dev server, tail, ssh host, tests), recent commands + output in scrollback, then cwd/branch from `sidebar-state`. A browser surface names itself after the page/site.
+Evidence, in order of usefulness: the running foreground command (dev server, tail, ssh host, tests), recent commands + output in scrollback, then cwd/branch from `sidebar-state`. A browser surface names itself after the page/site. A dedicated TUI (lazygit, htop, k9s, …) is named for what it is — the tool name here *is* the activity.
 
 ## Step 3 — Generate the name
 
@@ -119,12 +108,12 @@ Confirm the new title actually appears. Then tell the user what each thing was n
 
 Triggered by "all", "rename everything here", "fix all the tab names". Scope is **the current workspace only** (`caller.workspace_id`) — its tabs and itself. Never fan out across other workspaces.
 
-This is where Haiku delegation pays off most — several tabs, each needing an independent read-and-distill.
-
 1. **Enumerate this workspace's tabs.** `cmux tree --all --json --id-format both`, filter to `caller.workspace_id`, and collect the `.id` (UUID) of every surface under its panes — each surface is one tab. Skip tabs already well-named unless asked to redo everything.
-2. **Fan out: one Haiku subagent per tab**, in parallel (multiple `Agent` calls in a single message), each `model: "haiku"` with a self-contained prompt (target UUIDs + evidence guidance + Step 3 rules + "return only the name") as in Step 2. Each returns just its name. Tell each to keep reads shallow (`--lines 60` first, deeper only if inconclusive). **Exception:** the agent's own tab (`caller.surface_id`) is named from your live context, not delegated.
-3. **Name the workspace itself** from the collective picture — its cwd/branch (`cmux sidebar-state --workspace <ws-id>`) plus the tab names that just came back tell you the project/mission. This is synthesis you do on the main model; no separate subagent needed.
+2. **Read and name each yourself, on the main model** (Step 2) — no subagents. Read each surface shallow first (`--lines 60`), distill by purpose. Your own tab (`caller.surface_id`) is named from live context. This is fast (no spawn overhead) and gives better names than a distiller model, which is the whole reason batch naming is done inline.
+3. **Name the workspace itself** from the collective picture — its cwd/branch (`cmux sidebar-state --workspace <ws-id>`) plus the tab purposes you just gathered tell you the project/mission.
 4. **Apply every rename by UUID** (`rename-tab` per tab, `rename-workspace` once), then one `cmux tree --workspace <ws-id>` to confirm. Per Step 3's no-duplicate rule: the workspace name carries the project, the tab names carry each activity.
+
+For a workspace with an unusually large number of tabs, read shallow and name in a single pass rather than exhaustively — a good-enough name beats a slow perfect one.
 
 ## Common mistakes
 
