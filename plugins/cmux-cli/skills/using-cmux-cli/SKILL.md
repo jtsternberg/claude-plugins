@@ -58,15 +58,30 @@ cmux capabilities
 
 ## Handle conventions (read before passing IDs)
 
-cmux accepts three handle formats anywhere a `window`, `workspace`, `pane`, or `surface` flag appears:
+**Target by UUID. Always resolve a handle to its UUID and pass that UUID to any command that acts on it.** UUIDs are permanent identities for a window/workspace/pane/surface — they name the same object for the life of that object, across every command and every session.
 
-- **UUIDs** — full identifiers, stable across sessions
-- **Short refs** — `window:1`, `workspace:2`, `pane:3`, `surface:4` (index within scope)
-- **Bare indexes** — where accepted; prefer short refs for clarity
+cmux accepts three handle formats anywhere a `window`, `workspace`, `pane`, or `surface` flag appears. Understand all three, and reach for the first:
 
-`tab-action` additionally accepts `tab:<n>`.
+- **UUIDs** — full identifiers, stable for the object's lifetime. **This is what you pass to commands.**
+- **Short refs** — `window:1`, `workspace:2`, `pane:3`, `surface:4`. These are *positional display labels*: an index within scope that cmux reassigns as objects open and close. A ref like `surface:318` names whatever currently sits in that slot, which may be a different object a moment later. Treat refs as human-readable output to show the user, and as throwaway input only within a single read that you immediately act on — resolve to a UUID first whenever the handle outlives one command.
+- **Bare indexes** — same positional, reassignable nature as short refs.
 
-Output defaults to refs. Pass `--id-format uuids` or `--id-format both` when you need stable IDs (e.g., saving a handle for a later session).
+`tab-action` additionally accepts `tab:<n>` (also positional).
+
+**Get UUIDs like this:**
+- Your own location: the `CMUX_*_ID` env vars are already UUIDs (`CMUX_SURFACE_ID`, `CMUX_WORKSPACE_ID`, `CMUX_TAB_ID`), and `cmux identify --json` returns your caller/focused UUIDs.
+- Anything else: `cmux tree --all --json --id-format uuids` (or `--id-format both` to see refs alongside for a human). Snapshot once, read the UUIDs you need, then target by those.
+
+### Destructive and bulk operations: resolve UUIDs up front
+
+For anything that mutates or removes state — `close-surface`, `close-workspace`, `close-window`, `swap-pane`, `move-surface`, or any loop over several targets — **collect every target UUID in one `tree --json --id-format uuids` snapshot first, then act by UUID.** This is the affirmative rule that keeps bulk operations correct:
+
+1. `cmux identify --json` → note your **own** surface/pane UUID, so you can keep it out of the target set (closing the surface your agent runs in kills the agent's tty — the process goes down with the pane).
+2. `cmux tree --all --json --id-format uuids` → collect the target UUIDs.
+3. Exclude your own UUID from step 1.
+4. Act on each **by UUID**.
+
+Because UUIDs are permanent, acting on one never changes what the others refer to — so a close-loop stays aimed at exactly the objects you chose. (Positional refs renumber as each object closes, so a ref captured before the loop can point somewhere new mid-loop — including your own pane. UUIDs are immune to that.)
 
 ### `--json` is per-command, not global
 
@@ -113,15 +128,15 @@ The one-call recipe:
 #    handles both the focus-pane attach step and a round-trip probe; on
 #    timeout it exits 3 with a diagnostic instead of returning a non-ready
 #    surface ref.
-REF=$(${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh --wait-ready --json | jq -r '.surface_ref')
+SID=$(${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh --wait-ready --json | jq -r '.surface_id')
 
-# 2. Send the work into it. Append \n so the command actually runs.
-cmux send --surface "$REF" "ssh user@host\n"
-# or: cmux send --surface "$REF" "npm run dev\n"
-# or: cmux send --surface "$REF" "cargo watch -x test\n"
+# 2. Send the work into it, targeting the surface's UUID. Append \n so it runs.
+cmux send --surface "$SID" "ssh user@host\n"
+# or: cmux send --surface "$SID" "npm run dev\n"
+# or: cmux send --surface "$SID" "cargo watch -x test\n"
 
 # 3. Verify it actually executed — see "Send keystrokes" below for why.
-cmux read-screen --surface "$REF" --lines 20
+cmux read-screen --surface "$SID" --lines 20
 ```
 
 > **Manual fallback** (historical — most callers should use `--wait-ready`):
@@ -282,7 +297,7 @@ Key options (run `--help` for the full list):
 - `--focused` — open next to the pane the **user** is currently looking at. Use when the user says *"next to what I'm looking at"*. `caller` and `focused` usually coincide but diverge when the user is viewing a different tab than the one the agent lives in.
 - `--type terminal|browser` (default terminal).
 - `--url <url>` — for browser surfaces.
-- `--json` — emit `{surface_ref, pane_ref, workspace_ref, mode, subject, surface_type, url, ready}` for chaining.
+- `--json` — emit `{surface_ref, surface_id, pane_ref, pane_id, workspace_ref, workspace_id, mode, subject, surface_type, url, ready}` for chaining. Chain on the `*_id` UUIDs (`surface_id`, `workspace_id`), not the `*_ref` positional labels.
 - `--wait-ready` — for terminal surfaces, block until the PTY is attached *and* the shell is actually executing input (forces `focus-pane`, then round-trips an `echo <marker>` probe). Without this you have to hand-roll a readiness loop and dodge the "Terminal surface not found" race. No-op for browser surfaces.
 - `--wait-ready-timeout <seconds>` — override the wait-ready budget (default 5).
 
@@ -332,10 +347,10 @@ Key options (run `--help` for the full list):
 - `-c, --content <pattern>` — match surfaces whose on-screen text contains the pattern. Case-insensitive substring by default, `-r` for regex.
 - `-t, --title <pattern>` — match by surface title (the thing shown on the tab).
 - `-s, --scrollback` / `-l <n>` — include scrollback history, not just the visible viewport.
-- `--json` — machine-readable output (array of `{workspace_ref, workspace_name, surface_ref, surface_type, surface_title, tty, pane_ref, window_ref, matched_on, snippet}`).
+- `--json` — machine-readable output (array of `{workspace_ref, workspace_id, workspace_name, surface_ref, surface_id, surface_type, surface_title, tty, pane_ref, pane_id, window_ref, window_id, matched_on, snippet}`). Target by the `*_id` UUIDs.
 - `--include-self` — by default the calling surface is excluded from results (so the agent doesn't match its own transcript when searching for text). Pass this flag if the user actually wants to see the calling surface.
 
-Pipe `--json` through `jq` for any further filtering — e.g. `find-surface.sh -w cmux --json | jq -r '.[] | select(.surface_type=="terminal") | .surface_ref'`.
+Pipe `--json` through `jq` for any further filtering — e.g. `find-surface.sh -w cmux --json | jq -r '.[] | select(.surface_type=="terminal") | .surface_id'` (select the UUID to act on).
 
 The user often tells you the workspace by name — "find the surface in my 'debug lindy' workspace that's hitting the 500 error" — so lean on `-w` for the cheapest narrowing, then `-c` / `-t` inside it.
 
@@ -343,32 +358,36 @@ Under the hood, the script uses `cmux tree --all --json` for discovery. If you n
 
 ### Step 2 — Read it
 
-Once you have a `surface:<n>` handle:
+Grab the target's UUIDs from the finder's JSON and target by those:
 
 ```bash
-cmux read-screen --workspace <ws-ref> --surface <surface-ref> --scrollback --lines 500
+match=$(${CLAUDE_SKILL_DIR}/scripts/find-surface.sh -w cmux -c "500 error" --json | jq -r '.[0]')
+WS_ID=$(jq -r '.workspace_id' <<<"$match")
+SURF_ID=$(jq -r '.surface_id' <<<"$match")
+
+cmux read-screen --workspace "$WS_ID" --surface "$SURF_ID" --scrollback --lines 500
 ```
 
-**Both `--workspace` and `--surface` must be passed explicitly** when targeting somewhere other than your own surface — the `CMUX_WORKSPACE_ID` / `CMUX_SURFACE_ID` defaults point at *your* location, not the target.
+**Both `--workspace` and `--surface` must be passed explicitly** when targeting somewhere other than your own surface — the `CMUX_WORKSPACE_ID` / `CMUX_SURFACE_ID` defaults point at *your* location, not the target. Use the `*_id` UUIDs (not `*_ref`): the target may open or close sibling surfaces between your calls, which renumbers refs but never touches UUIDs.
 
 ### Step 3 — Interact (optional)
 
-To type into the target:
+To type into the target (same UUIDs):
 
 ```bash
-cmux send --workspace <ws-ref> --surface <surface-ref> "command here\n"
-cmux send-key --workspace <ws-ref> --surface <surface-ref> C-c
+cmux send --workspace "$WS_ID" --surface "$SURF_ID" "command here\n"
+cmux send-key --workspace "$WS_ID" --surface "$SURF_ID" C-c
 ```
 
 Append `\n` on `send` if the command should actually execute. Use `send-key` for modifiers, arrows, ctrl-combos.
 
 ### Step 4 — Verify
 
-After sending, re-read with `cmux read-screen --surface <ref> --scrollback --lines 50` to confirm the effect landed. Don't trust exit codes — cmux's `send` succeeds whether or not the remote process did anything useful with the input.
+After sending, re-read with `cmux read-screen --surface "$SURF_ID" --scrollback --lines 50` to confirm the effect landed. Don't trust exit codes — cmux's `send` succeeds whether or not the remote process did anything useful with the input.
 
 ### Gotcha: which workspace does a given surface live in?
 
-`find-surface.sh` already pairs each surface with its workspace ref — that's why the next `read-screen` call has the right `--workspace` value. Hand-parsing `cmux list-pane-surfaces` loses this pairing; prefer the script.
+`find-surface.sh` already pairs each surface with its workspace — use the `workspace_id` it returns as the `--workspace` value for the follow-up `read-screen`/`send`. Hand-parsing `cmux list-pane-surfaces` loses this pairing; prefer the script.
 
 ---
 
@@ -392,7 +411,7 @@ Vocabulary for less-frequent commands — just enough so you know what exists. S
 
 When the user describes an action informally, map it to cmux vocabulary:
 
-**Note on `<ref>` placeholders below**: replace with a real handle from the `identify` block above (e.g., `caller.surface_ref`), `cmux tree`, or `find-surface.sh` output. These look like `surface:3` / `workspace:2` / `pane:1`. **Don't paste `$CMUX_*` env vars verbatim** — those are UUIDs, and while most commands accept them, mixing UUIDs and refs in troubleshooting output makes it harder to read what's what.
+**Note on `<handle>` placeholders below**: replace with a UUID resolved from `cmux identify --json --id-format both` (e.g. `.caller.surface_id`), `cmux tree --all --json --id-format both` (each node's `.id`), `find-surface.sh --json` (`.surface_id` / `.workspace_id`), or the `$CMUX_*_ID` env vars — all of which are UUIDs. The `surface:3` / `workspace:2` style refs in the examples are placeholders for readability; pass the UUID in real calls so a renumbered ref can't retarget the command. `$CMUX_SURFACE_ID` / `$CMUX_WORKSPACE_ID` are your own UUIDs and are exactly what to paste.
 
 | User says | cmux command | Notes |
 |-----------|--------------|-------|

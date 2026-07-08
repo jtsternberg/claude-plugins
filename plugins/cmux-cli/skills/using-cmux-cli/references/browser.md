@@ -34,11 +34,11 @@ Grouped for navigation (run `cmux browser <subcommand> --help` for flags):
 
 ## Addressing a browser surface
 
-Most subcommands need a target surface. Two equivalent forms:
+Most subcommands need a target surface. Two equivalent forms (pass the surface's UUID — `.surface_id` from `cmux browser identify`/`cmux tree --id-format both` — so a renumbered ref can't retarget the call):
 
 ```
-cmux browser --surface <ref> <subcommand> ...
-cmux browser <surface-ref> <subcommand> ...
+cmux browser --surface <surface-id> <subcommand> ...
+cmux browser <surface-id> <subcommand> ...
 ```
 
 `open` / `open-split` / `new` / `identify` work without an explicit surface — they create or introspect one.

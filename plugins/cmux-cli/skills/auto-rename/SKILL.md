@@ -17,8 +17,10 @@ Summarize what a cmux tab (surface) or workspace is actually doing, generate a c
 ## Current context (resolved at skill load)
 
 ```!
-cmux identify --json 2>/dev/null || echo '{"error":"cmux identify failed — outside cmux or socket unreachable"}'
+cmux identify --json --id-format both 2>/dev/null || echo '{"error":"cmux identify failed — outside cmux or socket unreachable"}'
 ```
+
+`--id-format both` gives each entry its stable UUID (`*_id`) alongside its positional `*_ref`. Target by the UUID.
 
 - `caller.*` — where this agent runs. Default target for "rename **this** tab/workspace".
 - `focused.*` — where the user is looking. Target this when they say "the tab I'm looking at".
@@ -27,14 +29,14 @@ cmux identify --json 2>/dev/null || echo '{"error":"cmux identify failed — out
 
 | User says | Target |
 |-----------|--------|
-| "rename this tab" / "auto-name my tab" | `caller.surface_ref` (tab) |
-| "rename this workspace" | `caller.workspace_ref` |
+| "rename this tab" / "auto-name my tab" | `caller.tab_id` (UUID) |
+| "rename this workspace" | `caller.workspace_id` (UUID) |
 | "rename both" / bare "auto-rename" | caller tab **and** caller workspace |
 | "the tab/workspace I'm looking at" | `focused.*` |
 | "the tab running the build" / a named workspace | find it: `cmux tree --all --json` + `jq`, or the using-cmux-cli `find-surface.sh` helper |
 | "all my workspaces" / "fix all the tab names" | batch mode — iterate `cmux tree --all --json` |
 
-**Gotcha (verified):** `cmux tree --workspace <ref> --json` ignores the workspace filter and returns the whole tree — grabbing the first `surface_ref` from it targets the wrong workspace and `rename-tab` fails with `not_found: Tab not found`. Either use the plain-text `cmux tree --workspace <ref>` (which *is* scoped) or filter the JSON yourself: `cmux tree --all --json | jq '.. | objects | select(.workspace_ref=="workspace:N")'`.
+**Gotcha (verified):** `cmux tree --workspace <ref> --json` ignores the workspace filter and returns the whole tree — grabbing the first surface from it targets the wrong workspace and `rename-tab` fails with `not_found: Tab not found`. Either use the plain-text `cmux tree --workspace <ref>` (which *is* scoped) or filter the JSON yourself by UUID: `cmux tree --all --json --id-format both | jq --arg w "<ws-uuid>" '.. | objects | select(.id==$w)'`.
 
 ## Step 2 — Gather evidence for the name
 
@@ -43,14 +45,14 @@ cmux identify --json 2>/dev/null || echo '{"error":"cmux identify failed — out
 Otherwise, read what's happening there:
 
 ```bash
-cmux read-screen --workspace <ws-ref> --surface <surface-ref> --scrollback --lines 200
+cmux read-screen --workspace <ws-id> --surface <surface-id> --scrollback --lines 200
 ```
 
 Supplement for workspaces (cwd, git branch, ports, status pills tell you the project even when screens are quiet):
 
 ```bash
-cmux sidebar-state --workspace <ws-ref>
-cmux tree --workspace <ws-ref>   # existing tab titles are evidence too
+cmux sidebar-state --workspace <ws-id>
+cmux tree --workspace <ws-id>   # existing tab titles are evidence too
 ```
 
 ### Agent sessions (claude / codex / opencode / etc.)
@@ -80,25 +82,25 @@ Rules:
 ## Step 4 — Apply
 
 ```bash
-cmux rename-tab --workspace <ws-ref> --tab <surface-ref> "name here"
-cmux rename-workspace --workspace <ws-ref> "name here"
+cmux rename-tab --workspace <ws-id> --tab <tab-id> "name here"
+cmux rename-workspace --workspace <ws-id> "name here"
 ```
 
-**Always pass explicit `--workspace`/`--tab` handles from `identify`/`tree` — even when renaming your own tab.** The env-var defaults (`$CMUX_TAB_ID`/`$CMUX_SURFACE_ID`) are UUIDs captured at surface spawn and can fail to resolve: a bare `cmux rename-tab "name"` run from inside the very tab being renamed has returned `Error: not_found: Tab not found` in practice (observed on a live session), while the same rename with explicit `--workspace workspace:N --tab surface:N` refs succeeded. Use `caller.workspace_ref` + `caller.surface_ref` from `cmux identify --json` for "rename this".
+**Pass explicit handles you resolved *this run* from `cmux identify --json --id-format both` — even when renaming your own tab.** Use `caller.workspace_id` + `caller.tab_id` (UUIDs). A freshly-resolved UUID is verified to work here (`rename-tab --workspace <ws-id> --tab <tab-id>` applies correctly). The failure mode to avoid is the **stale env-var default**: a bare `cmux rename-tab "name"` (no explicit handle) run from inside the tab being renamed has returned `Error: not_found: Tab not found` in practice — because `$CMUX_TAB_ID`/`$CMUX_SURFACE_ID` were captured at spawn and can go stale, not because UUIDs don't work. Resolve fresh, pass the UUID.
 
-To clear a tab name back to automatic: `cmux tab-action --action clear-name --tab <ref>`.
+To clear a tab name back to automatic: `cmux tab-action --action clear-name --tab <tab-id>`.
 
 ## Step 5 — Verify
 
 ```bash
-cmux tree --workspace <ws-ref>
+cmux tree --workspace <ws-id>
 ```
 
 Confirm the new title actually appears. Then tell the user what each thing was named and (briefly) why.
 
 ## Batch mode ("name all my workspaces")
 
-1. `cmux tree --all --json` → list workspaces (and their surfaces/titles).
+1. `cmux tree --all --json --id-format both` → list workspaces with their UUIDs (and surfaces/titles). Collect the `.id` of every workspace/tab you'll rename in this one snapshot, then rename by UUID — refs renumber as you go, UUIDs don't.
 2. Per workspace: `sidebar-state` + `read-screen` on the selected/likeliest surface; skip ones already well-named unless asked to redo everything.
 3. Rename, then one final `cmux tree --all` to show the result.
 
@@ -110,6 +112,6 @@ For many workspaces, keep reads shallow (`--lines 60` first, deeper only when in
 |---------|-----|
 | Naming after the tool ("claude", "zsh") | Name the task/subject the tool is working on |
 | Trusting the ghost autosuggest as the session's task | Only use prompts that have output beneath them |
-| Omitting `--workspace`/`--tab` and hitting `not_found: Tab not found` | Env-var defaults can fail to resolve even for your own tab; always pass explicit refs from `identify` |
+| Omitting `--workspace`/`--tab` and hitting `not_found: Tab not found` | The stale env-var default is the culprit, not the UUID format; resolve a fresh `caller.workspace_id`/`caller.tab_id` from `identify --id-format both` and pass those |
 | Long sentence names | 2–5 words; tab bars truncate |
 | Inventing a name for an idle shell | Fall back to cwd/branch, or say there's nothing to name it from |

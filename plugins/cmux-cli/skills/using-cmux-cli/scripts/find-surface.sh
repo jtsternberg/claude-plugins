@@ -57,16 +57,18 @@ Examples:
   find-surface -c "npm test"                # surfaces whose screen shows "npm test"
   find-surface -c "error" -s -l 1000        # include 1000 lines of scrollback
   find-surface -w debug -c "PANIC" --json   # scoped + machine-readable
-  find-surface --json | jq -r '.[].surface_ref'
+  find-surface --json | jq -r '.[].surface_id'   # UUIDs to target by
 
 Output (text):
   workspace:9 "cmux-cli skill" -> surface:17 [terminal] "Debug session..." [matched: content]
+    surface_id: F73756CC-...  workspace_id: DE8FA1E0-...
     snippet: <first matching line>
 
-Output (--json):
-  [{"workspace_ref":"workspace:9","workspace_name":"cmux-cli skill",
-    "surface_ref":"surface:17","surface_type":"terminal","surface_title":"...",
-    "tty":"ttys208","pane_ref":"pane:11","window_ref":"window:1",
+Output (--json): each result carries both the stable UUID (*_id — pass these to
+commands) and the positional ref (*_ref — display only):
+  [{"workspace_ref":"workspace:9","workspace_id":"DE8FA1E0-...","workspace_name":"cmux-cli skill",
+    "surface_ref":"surface:17","surface_id":"F73756CC-...","surface_type":"terminal","surface_title":"...",
+    "tty":"ttys208","pane_ref":"pane:11","pane_id":"...","window_ref":"window:1","window_id":"...",
     "matched_on":["content"],"snippet":"..."}, ...]
 
 Exit codes:
@@ -98,13 +100,15 @@ command -v cmux >/dev/null 2>&1 || { echo "find-surface: cmux not on PATH" >&2; 
 command -v jq   >/dev/null 2>&1 || { echo "find-surface: jq required (brew install jq)" >&2; exit 2; }
 
 # --- Discover caller's own surface so we can exclude it by default ---
-# `cmux identify --json` returns caller.surface_ref when invoked from inside a
-# cmux terminal. Outside cmux (or if the socket is down) we silently skip the
-# exclusion — there's nothing to exclude.
-SELF_SURFACE_REF=""
+# Match on the caller's stable UUID, not its positional ref: `--id-format both`
+# gives us caller.surface_id (the UUID). $CMUX_SURFACE_ID is the same UUID and is
+# our fallback when identify is unavailable. Outside cmux (or if the socket is
+# down) we silently skip the exclusion — there's nothing to exclude.
+SELF_SURFACE_ID="${CMUX_SURFACE_ID:-}"
 if [[ $INCLUDE_SELF -eq 0 ]]; then
-  if identify_json=$(cmux identify --json 2>/dev/null); then
-    SELF_SURFACE_REF=$(printf '%s' "$identify_json" | jq -r '.caller.surface_ref // empty' 2>/dev/null || true)
+  if identify_json=$(cmux identify --json --id-format both 2>/dev/null); then
+    id_from_identify=$(printf '%s' "$identify_json" | jq -r '.caller.surface_id // empty' 2>/dev/null || true)
+    [[ -n "$id_from_identify" ]] && SELF_SURFACE_ID="$id_from_identify"
   fi
 fi
 
@@ -124,10 +128,14 @@ matches() {
   fi
 }
 
-# --- Flatten `cmux tree --all --json` into TSV rows via jq ---
-# Columns: ws_ref \t ws_name \t surf_ref \t surf_type \t surf_title \t tty \t pane_ref \t window_ref
+# --- Flatten `cmux tree --all --json --id-format both` into TSV rows via jq ---
+# We request `--id-format both` so every node carries its stable UUID (the `.id`
+# field) alongside its positional `.ref`. Callers should target by UUID; refs are
+# included only for human-readable display. Column order:
+#   ws_ref \t ws_id \t ws_name \t surf_ref \t surf_id \t surf_type \t surf_title
+#   \t tty \t pane_ref \t pane_id \t window_ref \t window_id
 flatten_tree() {
-  cmux tree --all --json | jq -r --arg wsf "$WORKSPACE_FILTER" '
+  cmux tree --all --json --id-format both | jq -r --arg wsf "$WORKSPACE_FILTER" '
     def ws_match(f):
       if f == "" then true
       elif (f | startswith("workspace:")) then .ref == f
@@ -140,9 +148,9 @@ flatten_tree() {
     | .panes[] as $pane
     | $pane.surfaces[]
     | [
-        $ws.ref, ($ws.title // ""),
-        .ref, (.type // ""), (.title // ""),
-        (.tty // ""), $pane.ref, $win.ref
+        $ws.ref, ($ws.id // ""), ($ws.title // ""),
+        .ref, (.id // ""), (.type // ""), (.title // ""),
+        (.tty // ""), $pane.ref, ($pane.id // ""), $win.ref, ($win.id // "")
       ]
     | @tsv
   '
@@ -152,10 +160,10 @@ flatten_tree() {
 results_file=$(mktemp)
 trap 'rm -f "$results_file"' EXIT
 
-while IFS=$'\t' read -r ws_ref ws_name s_ref s_type s_title tty pane_ref win_ref; do
-  # Skip the calling surface unless --include-self was passed. Without this,
-  # an agent searching for text in "the other tab" matches its own transcript.
-  if [[ -n "$SELF_SURFACE_REF" && "$s_ref" == "$SELF_SURFACE_REF" ]]; then
+while IFS=$'\t' read -r ws_ref ws_id ws_name s_ref s_id s_type s_title tty pane_ref pane_id win_ref win_id; do
+  # Skip the calling surface unless --include-self was passed. Match by UUID so
+  # a renumbered ref can't accidentally include (or miss) our own surface.
+  if [[ -n "$SELF_SURFACE_ID" && "$s_id" == "$SELF_SURFACE_ID" ]]; then
     continue
   fi
 
@@ -175,7 +183,7 @@ while IFS=$'\t' read -r ws_ref ws_name s_ref s_type s_title tty pane_ref win_ref
     if [[ "$s_type" != "terminal" ]]; then
       continue
     fi
-    screen_args=(--workspace "$ws_ref" --surface "$s_ref")
+    screen_args=(--workspace "$ws_id" --surface "$s_id")
     if [[ $SCROLLBACK -eq 1 ]]; then
       screen_args+=(--scrollback --lines "$LINES")
     fi
@@ -199,9 +207,9 @@ while IFS=$'\t' read -r ws_ref ws_name s_ref s_type s_title tty pane_ref win_ref
 
   # Snippets may contain tabs/newlines that would break our TSV — collapse them.
   safe_snippet=$(printf '%s' "$snippet" | tr '\t\n' '  ')
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$ws_ref" "$ws_name" "$s_ref" "$s_type" "$s_title" \
-    "$tty" "$pane_ref" "$win_ref" "$matched" "$safe_snippet" \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$ws_ref" "$ws_id" "$ws_name" "$s_ref" "$s_id" "$s_type" "$s_title" \
+    "$tty" "$pane_ref" "$pane_id" "$win_ref" "$win_id" "$matched" "$safe_snippet" \
     >> "$results_file"
 done < <(flatten_tree)
 
@@ -216,34 +224,44 @@ if [[ ! -s "$results_file" ]]; then
 fi
 
 if [[ $OUTPUT_JSON -eq 1 ]]; then
+  # surface_id / workspace_id / pane_id / window_id are the stable UUIDs — pass
+  # these to any follow-up command (read-screen, send, close-surface, ...). The
+  # *_ref fields are positional labels for display only.
   jq -R -s '
     split("\n")
     | map(select(length > 0))
     | map(split("\t"))
     | map({
         workspace_ref:  .[0],
-        workspace_name: .[1],
-        surface_ref:    .[2],
-        surface_type:   .[3],
-        surface_title:  .[4],
-        tty:            .[5],
-        pane_ref:       .[6],
-        window_ref:     .[7],
-        matched_on:    (if ((.[8] // "") == "") then ["listed"] else (.[8] | split(",")) end),
-        snippet:       (.[9] // "")
+        workspace_id:   .[1],
+        workspace_name: .[2],
+        surface_ref:    .[3],
+        surface_id:     .[4],
+        surface_type:   .[5],
+        surface_title:  .[6],
+        tty:            .[7],
+        pane_ref:       .[8],
+        pane_id:        .[9],
+        window_ref:     .[10],
+        window_id:      .[11],
+        matched_on:    (if ((.[12] // "") == "") then ["listed"] else (.[12] | split(",")) end),
+        snippet:       (.[13] // "")
       })
   ' < "$results_file"
 else
   # 2>/dev/null + `|| exit 0` keeps output clean when the consumer closes
   # the pipe early (e.g. `| head -n`). Without it, bash's printf emits
   # "write error: Broken pipe" before our PIPE trap fires.
-  while IFS=$'\t' read -r ws_ref ws_name s_ref s_type s_title tty pane_ref win_ref matched snippet; do
+  while IFS=$'\t' read -r ws_ref ws_id ws_name s_ref s_id s_type s_title tty pane_ref pane_id win_ref win_id matched snippet; do
     type_tag="[${s_type}]"
+    # Lead with the ref for human orientation; print the surface UUID as the
+    # handle to actually pass to commands.
     if [[ "$matched" == "listed" ]]; then
       printf '%s "%s" -> %s %s "%s"\n' "$ws_ref" "$ws_name" "$s_ref" "$type_tag" "$s_title" 2>/dev/null || exit 0
     else
       printf '%s "%s" -> %s %s "%s" [matched: %s]\n' "$ws_ref" "$ws_name" "$s_ref" "$type_tag" "$s_title" "$matched" 2>/dev/null || exit 0
     fi
+    printf '    surface_id: %s  workspace_id: %s\n' "$s_id" "$ws_id" 2>/dev/null || exit 0
     if [[ -n "$snippet" ]]; then
       printf '    snippet: %s\n' "$snippet" 2>/dev/null || exit 0
     fi

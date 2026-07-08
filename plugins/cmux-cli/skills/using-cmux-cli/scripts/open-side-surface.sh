@@ -57,10 +57,13 @@ subject's workspace has only one pane) and `cmux new-surface --pane <adj>`
 
 Output (text):
   OK surface:34 pane:12 workspace:9 (via new-surface)
+  surface_id: F73756CC-...        # the UUID to target by
 
-Output (--json):
-  {"surface_ref":"surface:34","pane_ref":"pane:12","workspace_ref":"workspace:9",
-   "mode":"new-surface","subject":"caller"}
+Output (--json): carries both the stable UUID (*_id — pass these to commands)
+and the positional ref (*_ref — display only):
+  {"surface_ref":"surface:34","surface_id":"F73756CC-...",
+   "pane_ref":"pane:12","pane_id":"...","workspace_ref":"workspace:9","workspace_id":"...",
+   "mode":"new-surface","subject":"caller","surface_type":"terminal","url":null,"ready":"ready"}
 
 Requires: cmux, jq.
 
@@ -197,6 +200,27 @@ if [[ -z "$new_surface" ]]; then
   exit 1
 fi
 
+# --- Resolve stable UUIDs for the new surface ---
+# The `OK ...` line only gives positional refs, which renumber as surfaces open
+# and close. Look the new surface up in a fresh `--id-format both` tree so we can
+# hand callers UUIDs (the `.id` fields) to target by — and use them ourselves for
+# the readiness probes below. If lookup fails, we fall back to refs so behavior
+# is never worse than before.
+new_surface_id=""; new_pane_id=""; new_ws_id=""
+tree_both=$(cmux tree --all --json --id-format both 2>/dev/null || true)
+if [[ -n "$tree_both" ]]; then
+  read -r new_surface_id new_pane_id new_ws_id < <(
+    printf '%s' "$tree_both" | jq -r --arg s "$new_surface" '
+      .windows[].workspaces[] as $ws
+      | $ws.panes[].surfaces[]
+      | select(.ref == $s)
+      | "\(.id // "") \(.pane_id // "") \($ws.id // "")"' 2>/dev/null | head -1
+  )
+fi
+# Prefer UUIDs; fall back to the parsed refs when resolution came up empty.
+surface_handle="${new_surface_id:-$new_surface}"
+pane_handle="${new_pane_id:-$new_pane}"
+
 # --- Optional: wait for PTY readiness ---
 #
 # Solves two known footguns on freshly-spawned terminal surfaces:
@@ -214,7 +238,7 @@ if [[ $WAIT_READY -eq 1 ]]; then
     ready_status="n/a"
   else
     # Force the PTY backend to attach so read-screen / send actually work.
-    cmux focus-pane --pane "$new_pane" >/dev/null 2>&1 || true
+    cmux focus-pane --pane "$pane_handle" >/dev/null 2>&1 || true
 
     nonce="$(date +%s)$$${RANDOM:-0}"
     marker="__CMUX_PTYREADY_${nonce}__"
@@ -231,14 +255,14 @@ if [[ $WAIT_READY -eq 1 ]]; then
 
       # (Re)send the probe every ~1s in case earlier sends were swallowed.
       if (( attempt % 5 == 0 )); then
-        cmux send --surface "$new_surface" "echo ${marker}\n" >/dev/null 2>&1 || true
+        cmux send --surface "$surface_handle" "echo ${marker}\n" >/dev/null 2>&1 || true
       fi
       attempt=$((attempt + 1))
       sleep 0.2
 
       # The typed `echo MARKER` echoes back as input (1 hit); shell execution
       # adds the output line (2nd hit). >=2 hits => the shell actually ran it.
-      hits=$(cmux read-screen --surface "$new_surface" --scrollback --lines 200 2>/dev/null \
+      hits=$(cmux read-screen --surface "$surface_handle" --scrollback --lines 200 2>/dev/null \
              | grep -Fc "${marker}" || true)
       if [[ "${hits:-0}" -ge 2 ]]; then
         ready_status="ready"
@@ -250,7 +274,7 @@ if [[ $WAIT_READY -eq 1 ]]; then
       {
         echo "open-side-surface: --wait-ready timed out after ${WAIT_READY_TIMEOUT}s for $new_surface ($new_pane)."
         echo "  Possible causes:"
-        echo "    • PTY backend never attached (try: cmux focus-pane --pane $new_pane)"
+        echo "    • PTY backend never attached (try: cmux focus-pane --pane $pane_handle)"
         echo "    • Shell still initializing (slow rc files, network mounts, login banner)"
         echo "    • Surface running a non-shell program that doesn't echo input"
       } >&2
@@ -261,20 +285,29 @@ fi
 
 # --- Output ---
 if [[ $OUTPUT_JSON -eq 1 ]]; then
+  # *_id are the stable UUIDs — pass these to follow-up commands (send,
+  # read-screen, close-surface, ...). *_ref are positional labels for display.
   jq -n \
-    --arg surface "$new_surface" \
-    --arg pane    "$new_pane" \
-    --arg ws      "$new_ws" \
-    --arg mode    "$mode" \
-    --arg subject "$SUBJECT" \
-    --arg type    "$SURFACE_TYPE" \
-    --arg url     "$URL" \
-    --arg ready   "$ready_status" \
-    '{surface_ref: $surface, pane_ref: $pane, workspace_ref: $ws,
+    --arg surface    "$new_surface" \
+    --arg surface_id "$new_surface_id" \
+    --arg pane       "$new_pane" \
+    --arg pane_id    "$new_pane_id" \
+    --arg ws         "$new_ws" \
+    --arg ws_id      "$new_ws_id" \
+    --arg mode       "$mode" \
+    --arg subject    "$SUBJECT" \
+    --arg type       "$SURFACE_TYPE" \
+    --arg url        "$URL" \
+    --arg ready      "$ready_status" \
+    '{surface_ref: $surface, surface_id: (if $surface_id == "" then null else $surface_id end),
+      pane_ref: $pane, pane_id: (if $pane_id == "" then null else $pane_id end),
+      workspace_ref: $ws, workspace_id: (if $ws_id == "" then null else $ws_id end),
       mode: $mode, subject: $subject, surface_type: $type,
       url: (if $url == "" then null else $url end),
       ready: $ready}'
 else
   printf 'OK %s %s %s (via %s, next to %s %s)\n' \
     "$new_surface" "$new_pane" "$new_ws" "$mode" "$SUBJECT" "$subject_pane"
+  # Print the UUID to target by (falls back to the ref if lookup came up empty).
+  printf 'surface_id: %s\n' "$surface_handle"
 fi
