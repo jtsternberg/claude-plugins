@@ -32,9 +32,17 @@ TARGET=$(cat "$CALL_DIR/cwd.txt")
 MODE=$(cat "$CALL_DIR/mode.txt")
 CALLER_SESSION=$(cat "$CALL_DIR/caller_session.txt")
 
+# surface_ref is optional — present only for visible surface placements
+# (side-by-side / --window), absent for headless / detached calls. When present,
+# record it so a follow-up can reuse the surface the session already lives in.
+SURFACE_ARGS=()
+if [[ -s "$CALL_DIR/surface_ref.txt" ]]; then
+  SURFACE_ARGS=(--surface "$(cat "$CALL_DIR/surface_ref.txt")")
+fi
+
 bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
   --caller-session "$CALLER_SESSION" \
   --session "$SESSION_ID" \
-  --mode "$MODE" >/dev/null 2>&1 || debug "session-cache.sh set failed"
+  --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
 
 exit 0

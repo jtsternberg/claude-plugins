@@ -185,7 +185,13 @@ See if there's already an active session with this workspace:
 bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
 ```
 
-- **Exit 0**: Active session found. Parse the JSON for `session_id` and `mode`. Reuse it. **Don't fork** — this is our own session from a prior hotline call, and we want context continuity.
+- **Exit 0**: Active session found. Parse the JSON for `session_id`, `mode`, and `surface_ref` (present only when the session lives in a visible cmux surface). Set `REMOTE_SESSION_ID` and `SURFACE_REF` from it for the Follow-Up step:
+  ```bash
+  CACHED=$(bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID")
+  REMOTE_SESSION_ID=$(echo "$CACHED" | jq -r '.session_id')
+  SURFACE_REF=$(echo "$CACHED" | jq -r '.surface_ref // empty')
+  ```
+  Reuse the session. **Don't fork** — this is our own session from a prior hotline call, and we want context continuity.
 - **Exit 1**: No existing session. Will create one in Step 5.
 
 **Fork behavior when the user provided a session ID directly** (not from our cache):
@@ -332,22 +338,50 @@ Clean up: `rm -rf "$CALL_DIR"`
 
 #### Follow-Up (Existing Session from Our Cache)
 
-Use the `mode` field you parsed from Step 4's session-cache.sh JSON (it's one of `quick_call`, `work_order`, or `conference_call`). Then apply the same transport logic as Step 3 — check cmux first:
+Use the `mode` field you parsed from Step 4's session-cache.sh JSON (it's one of `quick_call`, `work_order`, or `conference_call`). Also parse **`surface_ref`** from that same JSON — it's present when the session already lives in a visible cmux surface, and it's the key to reusing that surface instead of stacking a new one.
+
+**Important: follow-ups never re-wrap with `/hotline-ringing`.** The remote session already invoked that slash command on first contact — the ringing skill is in its context, including the STATUS protocol. Sending raw `$YOUR_MESSAGE` keeps the conversation going naturally; re-invoking `/hotline-ringing` would re-trigger the skill's first-contact setup and confuse the receiver. Every transport below passes `$YOUR_MESSAGE` raw, matching what `headless-call.sh` already does.
+
+Check cmux first:
 
 ```bash
 bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 ```
 
-- **Exit 0 + `mode` is `quick_call` or `work_order`**: use `cmux-call-async.sh` with `--resume`
-- **Exit 0 + `mode` is `conference_call`**: use `cmux-call.sh` with `--resume`
-- **Exit 1**: fall back to `headless-call.sh`
+##### Reuse the existing surface (preferred, cmux only)
 
-**Important: follow-ups never re-wrap with `/hotline-ringing`.** The remote session already invoked that slash command on first contact — the ringing skill is in its context, including the STATUS protocol. Sending raw `$YOUR_MESSAGE` keeps the conversation going naturally; re-invoking `/hotline-ringing` would re-trigger the skill's first-contact setup and confuse the receiver. All three transports below pass `$YOUR_MESSAGE` raw, matching what `headless-call.sh` already does.
+If cmux is up (`check-cmux.sh` exit 0) **and** you parsed a non-empty `surface_ref` **and** `$YOUR_MESSAGE` is a single logical line, route this message INTO the surface the session already occupies — don't open a new one. The surface holds a live, idle claude REPL for that exact session, so we just type the next message into it. (For a multi-line message, skip straight to the fresh-surface path below — its launch script handles newlines; typing them into a live REPL would submit early.)
 
 ```bash
-# CMUX transport (quick call / work order):
-# Follow-ups honor the same $PLACEMENT_FLAG — a resumed cmux call opens a fresh
-# surface (or workspace, if --detached) and resumes the session into it.
+# $REMOTE_SESSION_ID and $SURFACE_REF come from Step 4's session-cache.sh get JSON.
+REUSE=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-reuse-surface.sh" \
+  --surface "$SURFACE_REF" --session "$REMOTE_SESSION_ID" --prompt "$YOUR_MESSAGE")
+CALL_DIR=$(echo "$REUSE" | jq -r '.call_dir // empty')
+if [[ -n "$CALL_DIR" ]]; then
+  # Reused — the message went into the existing surface. The session ID is
+  # already known, so SKIP wait-for-session and go straight to wait-for-response
+  # (its fresh call_id nonce ignores the prior turn's STATUS lines in scrollback).
+  :
+else
+  # {"fallback":"fresh"} — the surface was closed/gone. Fall through to the
+  # open-a-new-surface path below.
+  :
+fi
+```
+
+Keep follow-up messages to a single logical line when reusing — the message is typed into a live REPL, so an embedded newline would submit early. Multi-line follow-ups should take the fresh-surface path (it uses a launch script that handles multi-line prompts).
+
+##### Open a new surface / session (fallback)
+
+Use this when there's **no** `surface_ref` (the prior call was headless or detached), when cmux reuse returned `{"fallback":"fresh"}`, or when cmux is down. It resumes the session into a fresh surface — the pre-reuse behavior.
+
+- **Exit 0 + `mode` is `quick_call` or `work_order`**: `cmux-call-async.sh` with `--resume`
+- **Exit 0 + `mode` is `conference_call`**: `cmux-call.sh` with `--resume`
+- **Exit 1**: `headless-call.sh`
+
+```bash
+# CMUX transport (quick call / work order): honors the same $PLACEMENT_FLAG —
+# opens a fresh surface (or workspace, if --detached) and resumes into it.
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
   $PLACEMENT_FLAG --resume "$REMOTE_SESSION_ID" \
   --prompt "$YOUR_MESSAGE")
@@ -363,11 +397,16 @@ bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
   --prompt "$YOUR_MESSAGE" --resume "$REMOTE_SESSION_ID"
 ```
 
-Update the cache timestamp:
+Update the cache timestamp. If this follow-up opened a **new** surface (the fresh-surface fallback, not reuse), refresh `surface_ref` so the next follow-up reuses the new surface instead of the dead one — read it from the fallback's `CALL_DIR`:
 
 ```bash
-bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
+NEW_SURFACE=""
+[[ -n "${CALL_DIR:-}" && -s "$CALL_DIR/surface_ref.txt" ]] && NEW_SURFACE=$(cat "$CALL_DIR/surface_ref.txt")
+bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-session "$MY_SESSION_ID" \
+  ${NEW_SURFACE:+--surface "$NEW_SURFACE"}
 ```
+
+(On the reuse path the surface is unchanged, so `surface_ref.txt` holds the same ref — refreshing it is a harmless no-op.)
 
 #### CMUX (Conference Call)
 

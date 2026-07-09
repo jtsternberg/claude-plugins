@@ -127,6 +127,8 @@ Two opt-outs, passed as flags on the dial command:
 
 Both flags affect only the `cmux` transport; they're ignored on the headless path.
 
+**Follow-ups reuse the existing surface.** The first call to a workspace opens a surface and leaves it open, holding a live session. A follow-up dial to that same session routes its message *into* that existing surface instead of opening a new one — so an N-turn conversation stays in one surface rather than stacking N. If you've since closed the surface, the follow-up transparently falls back to opening a fresh one.
+
 ---
 
 ## Configuration
@@ -243,10 +245,12 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
                    [CALLER: ...] [SESSION: ...] \
                    <the actual prompt>"
 
-              Follow-up (--resume <session-id>):
-                <launch script> --prompt "$YOUR_MESSAGE"
-                  (raw message — ringing skill is already
-                   loaded in the remote session's context)
+              Follow-up (existing session):
+                type "$YOUR_MESSAGE" straight into the live
+                surface the session already lives in (raw
+                message — ringing skill is already loaded in
+                the remote session's context). Only if that
+                surface was closed do we --resume into a new one.
                                 │
 ┌──────────────────────────┼──────────────────────────────────────────┐
 │  WORKSPACE B (Receiver)  ▼                                          │
