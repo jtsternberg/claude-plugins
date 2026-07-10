@@ -251,11 +251,14 @@ fail_async() {
   exit 0
 }
 
-if [[ "$PLACEMENT" == "detached" ]]; then
-  # ---- Detached: original placement — a new workspace tab. ------------------
-  # --focus true is REQUIRED: without it cmux does not spawn a real tty for the
-  # workspace's terminal surface, and subsequent `cmux send` / `cmux read-screen`
-  # calls fail with "Terminal surface not found". Discovered via live testing.
+# ---- Detached placement — a new workspace tab. ------------------------------
+# --focus true is REQUIRED: without it cmux does not spawn a real tty for the
+# workspace's terminal surface, and subsequent `cmux send` / `cmux read-screen`
+# calls fail with "Terminal surface not found". Discovered via live testing.
+# Factored into a function so the side-by-side path can fall back to it when the
+# caller's own surface context can't be resolved (see below). Sets SEND_TARGET.
+do_detached() {
+  local WS_NAME WS_OUTPUT WS_REF
   WS_NAME="${SESSION_NAME:-hotline}"
   if ! WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --name "$WS_NAME" --focus true 2>&1); then
     fail_async "cmux new-workspace failed: $WS_OUTPUT"
@@ -267,12 +270,17 @@ if [[ "$PLACEMENT" == "detached" ]]; then
 
   # Wait for the workspace shell to be ready before firing the launch script.
   # Poll until the screen is non-empty (up to 5s) rather than a fixed sleep.
+  local _
   for _ in $(seq 1 10); do
     INIT_SCREEN=$(cmux read-screen --workspace "$WS_REF" --scrollback --lines 9999 \
       2>/dev/null || true)
     [[ -n "$INIT_SCREEN" ]] && break
     sleep 0.5
   done
+}
+
+if [[ "$PLACEMENT" == "detached" ]]; then
+  do_detached
 else
   # ---- Surface placements: side-by-side (default) or a specific window. -----
   # Both open a VISIBLE terminal surface and wait until its PTY is attached and
@@ -312,25 +320,41 @@ else
       rc=$?
       ORPHAN=$(grep -oE 'surface:[0-9]+' "$CALL_DIR/surface_err.txt" 2>/dev/null | head -1 || true)
       [[ -n "$ORPHAN" ]] && cmux close-surface --surface "$ORPHAN" >/dev/null 2>&1 || true
+      SURF_ERR="$(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
       if [[ "$rc" -eq 3 ]]; then
         fail_async "side-by-side surface PTY never became ready (see surface_err.txt)"
+      elif [[ "$rc" -eq 2 && "$SURF_ERR" == *"could not resolve"*"from identify"* ]]; then
+        # The caller's own surface context couldn't be resolved (open-side-surface
+        # already retried `cmux identify` 5×). This happens when the caller pane was
+        # freshly spawned or moved between workspaces and cmux hasn't re-registered
+        # it. Side-by-side needs that context; detached does not (it opens its own
+        # new workspace). Rather than fail the whole call, degrade to detached so the
+        # dial still completes — the callee just lands in its own tab instead of a
+        # sibling pane. surface_err.txt is preserved for diagnosis.
+        PLACEMENT="detached"
+        do_detached
       else
-        fail_async "open-side-surface.sh failed (rc=$rc): $(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
+        fail_async "open-side-surface.sh failed (rc=$rc): $SURF_ERR"
       fi
     fi
   fi
 
-  # surface_ref.txt is the cmux-SURFACE-mode signal to the wait-for-* scripts
-  # (mirrors how workspace_ref.txt signals workspace mode). pane_ref.txt lets
-  # them re-attach the PTY if a read-screen ever races.
-  echo "$SURF_REF" > "$CALL_DIR/surface_ref.txt"
-  [[ -n "$SURF_PANE" ]] && echo "$SURF_PANE" > "$CALL_DIR/pane_ref.txt"
-  SEND_TARGET=(--surface "$SURF_REF")
-  # Surface placements live in the caller's own window — keep them visible after
-  # the call instead of auto-closing (the whole point is to SEE the call). The
-  # caller closes the surface when done.
-  KEEP_WORKSPACE=true
-  echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
+  # If the side-by-side path fell back to detached above, do_detached already set
+  # SEND_TARGET / workspace_ref.txt — skip the surface-mode bookkeeping (it would
+  # clobber SEND_TARGET with an empty --surface ref).
+  if [[ "$PLACEMENT" != "detached" ]]; then
+    # surface_ref.txt is the cmux-SURFACE-mode signal to the wait-for-* scripts
+    # (mirrors how workspace_ref.txt signals workspace mode). pane_ref.txt lets
+    # them re-attach the PTY if a read-screen ever races.
+    echo "$SURF_REF" > "$CALL_DIR/surface_ref.txt"
+    [[ -n "$SURF_PANE" ]] && echo "$SURF_PANE" > "$CALL_DIR/pane_ref.txt"
+    SEND_TARGET=(--surface "$SURF_REF")
+    # Surface placements live in the caller's own window — keep them visible after
+    # the call instead of auto-closing (the whole point is to SEE the call). The
+    # caller closes the surface when done.
+    KEEP_WORKSPACE=true
+    echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
+  fi
 fi
 
 # Fire the claude session into whichever surface/workspace we landed on.

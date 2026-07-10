@@ -101,18 +101,32 @@ command -v cmux >/dev/null 2>&1 || { echo "open-side-surface: cmux not on PATH" 
 command -v jq   >/dev/null 2>&1 || { echo "open-side-surface: jq required (brew install jq)" >&2; exit 2; }
 
 # --- Resolve subject ---
-if ! identify_json=$(cmux identify --json 2>/dev/null); then
+# A freshly-spawned or just-moved caller surface can be momentarily unqueryable
+# by `cmux identify` (it returns empty pane_ref/workspace_ref for the subject
+# before cmux has registered the surface's current placement). That's a race,
+# not a hard error, so retry a few times before giving up. `cmux identify`
+# already derives workspace_ref from the live surface — the inherited
+# CMUX_WORKSPACE_ID env var going stale after a move does NOT affect it — so a
+# short retry is sufficient to ride out the registration lag.
+subject_pane=""; subject_ws=""; subject_win=""; subject_surf=""
+for attempt in 1 2 3 4 5; do
+  if identify_json=$(cmux identify --json 2>/dev/null); then
+    subject_pane=$(printf '%s' "$identify_json" | jq -r --arg s "$SUBJECT" '.[$s].pane_ref // empty')
+    subject_ws=$(printf  '%s' "$identify_json" | jq -r --arg s "$SUBJECT" '.[$s].workspace_ref // empty')
+    subject_win=$(printf '%s' "$identify_json" | jq -r --arg s "$SUBJECT" '.[$s].window_ref // empty')
+    subject_surf=$(printf '%s' "$identify_json" | jq -r --arg s "$SUBJECT" '.[$s].surface_ref // empty')
+    [[ -n "$subject_pane" && -n "$subject_ws" ]] && break
+  fi
+  [[ $attempt -lt 5 ]] && sleep 0.4
+done
+
+if [[ -z "${identify_json:-}" ]]; then
   echo "open-side-surface: 'cmux identify' failed — are you inside cmux? is the socket reachable?" >&2
   exit 2
 fi
 
-subject_pane=$(printf '%s' "$identify_json" | jq -r --arg s "$SUBJECT" '.[$s].pane_ref // empty')
-subject_ws=$(printf  '%s' "$identify_json" | jq -r --arg s "$SUBJECT" '.[$s].workspace_ref // empty')
-subject_win=$(printf '%s' "$identify_json" | jq -r --arg s "$SUBJECT" '.[$s].window_ref // empty')
-subject_surf=$(printf '%s' "$identify_json" | jq -r --arg s "$SUBJECT" '.[$s].surface_ref // empty')
-
 if [[ -z "$subject_pane" || -z "$subject_ws" ]]; then
-  echo "open-side-surface: could not resolve $SUBJECT.pane_ref / workspace_ref from identify" >&2
+  echo "open-side-surface: could not resolve $SUBJECT.pane_ref / workspace_ref from identify (retried 5×; caller surface not registered?)" >&2
   exit 2
 fi
 

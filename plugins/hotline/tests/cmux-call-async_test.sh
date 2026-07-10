@@ -461,6 +461,64 @@ fi
   fail "side-by-side readiness timeout does NOT signal surface-mode to the wait scripts"
 rm -rf "$tmp" "$call_dir"
 
+# Caller-context resolution failure: cmux-cli's opener exits 2 because it can't
+# resolve the CALLER's own pane/workspace from `cmux identify` (freshly moved or
+# spawned caller surface, not yet re-registered). The launcher must NOT fail the
+# whole call — it degrades to detached placement so the dial still completes.
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/cwd"
+# Fake cmux that supports the detached path (new-workspace + read-screen + send).
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+ST="${CMUX_FAKE_STATE:?}"
+case "$1" in
+  new-workspace) echo "OK workspace:456" ;;
+  read-screen)   echo "$ " ;;
+  send)          echo "$*" >> "$ST/send_calls" ;;
+  close-surface) echo "$*" >> "$ST/close_calls" ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/bin/cmux"
+# Opener stub mimicking open-side-surface's caller-resolution failure: exit 2
+# with the identify diagnostic on stderr, NO JSON on stdout.
+cat > "$tmp/open-side.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "open-side-surface: could not resolve caller.pane_ref / workspace_ref from identify (retried 5×; caller surface not registered?)" >&2
+exit 2
+EOF
+chmod +x "$tmp/open-side.sh"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" 2>"$tmp/stderr.txt")
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+if [[ -n "$call_dir" && ! -f "$call_dir/error.txt" ]]; then
+  pass "caller-resolution failure does NOT fail the call (degrades to detached)"
+else
+  fail "caller-resolution failure does NOT fail the call" \
+       "call_dir=$call_dir error=$(cat "$call_dir/error.txt" 2>/dev/null) stderr=$(cat "$tmp/stderr.txt")"
+fi
+if [[ -n "$call_dir" && "$(cat "$call_dir/workspace_ref.txt" 2>/dev/null)" == "workspace:456" ]]; then
+  pass "caller-resolution fallback lands in detached workspace (workspace_ref.txt)"
+else
+  fail "caller-resolution fallback lands in detached workspace" \
+       "got: $(cat "$call_dir/workspace_ref.txt" 2>/dev/null)"
+fi
+if [[ -n "$call_dir" && ! -f "$call_dir/surface_ref.txt" ]]; then
+  pass "caller-resolution fallback does NOT write surface_ref.txt"
+else
+  fail "caller-resolution fallback does NOT write surface_ref.txt"
+fi
+if grep -q "send --workspace workspace:456 bash /tmp/hotline-launch" "$tmp/send_calls" 2>/dev/null; then
+  pass "caller-resolution fallback sends launch script to the detached workspace"
+else
+  fail "caller-resolution fallback sends launch script to the detached workspace" \
+       "send_calls=$(cat "$tmp/send_calls" 2>/dev/null)"
+fi
+[[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
 # --fork-session without --resume must hard-error (forking with no resume target
 # silently creates an empty session — the bug this guard prevents).
 fork_out=$(bash "$SCRIPT_UNDER_TEST" --cwd /tmp --prompt "hello" --fork-session 2>&1)
