@@ -87,6 +87,15 @@ class TestDeescape(unittest.TestCase):
         )
         self.assertEqual(deescape_markdown(src), expected)
 
+    def test_equals_and_other_commonmark_punctuation(self):
+        # \= observed live in a real connector export (2026-07-14, "commits
+        # with ≤1 parent \= non-merge") — the connector escapes beyond the
+        # originally-observed set, so we cover CommonMark's full set.
+        self.assertEqual(
+            deescape_markdown(r"parent \= non-merge; a\=b \& c\; \:x \"q\" \@u \$5 \%p \^v \?y \,z \/w \'s"),
+            'parent = non-merge; a=b & c; :x "q" @u $5 %p ^v ?y ,z /w \'s',
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

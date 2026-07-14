@@ -10,10 +10,11 @@ Usage:
 import re
 import sys
 
-# CommonMark's full escapable-punctuation set. The connector has been observed
-# escaping a subset of these (#, *, [, ], ~, _, <, >, -) but we unescape the
-# whole set since a generic HTML->MD converter commonly escapes all of it.
-ESCAPABLE = r"\\`*_{}\[\]()#+\-.!<>|~"
+# CommonMark's full escapable-punctuation set (all ASCII punctuation). The
+# connector has been observed escaping a subset of these (#, *, [, ], ~, _,
+# <, >, -, =) but we unescape the whole set since a generic HTML->MD
+# converter commonly escapes all of it.
+ESCAPABLE = r"\\`*_{}\[\]()#+\-.!<>|~=\"$%&',/:;?@^"
 ESCAPE_RE = re.compile(r"\\([" + ESCAPABLE + r"])")
 
 FENCE_RE = re.compile(r"^(```|~~~)")
