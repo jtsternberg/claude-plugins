@@ -200,6 +200,38 @@ When in doubt, don't infer intent from a single `read-screen` snapshot of a clau
 
 Same caveat applies to other agent REPLs that render input autosuggestions (opencode, omc/omx, etc.). The pattern — text inside the input prompt with no downstream activity — is the tell, regardless of vendor.
 
+#### Gotcha: `read-screen` returns the *scrolled* viewport, not the live bottom
+
+`read-screen` (with or without `--scrollback --lines <n>`) captures whatever the surface is currently showing. If the **user has scrolled the surface up** (mouse wheel / trackpad in the cmux GUI), you get stale content from higher in the buffer — and `--scrollback --lines <n>` counts backward from the *scrolled* position, not the live tail, so it doesn't rescue you. The only tell in the captured text is a marker line:
+
+```
+Jump to bottom (click) ↓
+```
+
+**Real failure this caused:** an agent sent a message (`cmux send` + `send-key enter`), then `read-screen` showed no trace of it and an empty prompt, so the agent concluded the send failed and re-sent — double-queuing the message. The message *had* landed; the viewport was just scrolled up.
+
+Second tell it missed: a line reading
+
+```
+Press up to edit queued messages
+```
+
+means messages were **queued** while the REPL was busy — i.e. your send *did* land and is waiting to be processed. Seeing it is confirmation of success, not failure.
+
+**Detection — before concluding a send failed, grep the `read-screen` output for both markers:**
+
+```bash
+out=$(cmux read-screen --surface "$SID" --scrollback --lines 80)
+printf '%s\n' "$out" | grep -qF 'Jump to bottom'            && echo "SCROLLED — view is stale, NOT a failed send"
+printf '%s\n' "$out" | grep -qF 'Press up to edit queued'   && echo "QUEUED — your send landed and is waiting"
+```
+
+**Remedy.** Treat `Jump to bottom` as "I'm looking at a scrolled-up view," never as evidence the send failed — do **not** re-send. cmux has **no CLI primitive that snaps a scrolled terminal viewport to the bottom** (verified against `cmux --help`, `cmux capabilities`, and the upstream `cli-contract.md`: the only scrollback verb is `clear-history`, which *clears* history and is destructive; `browser scroll*` is for the embedded browser only, not terminals). `send-key` accepts `page_up`/`page_down`/`home`/`end` but those go to the shell/PTY, not to Ghostty's scroll region, so they won't move a GUI-scrolled viewport. What actually works:
+
+- **Re-read after fresh output.** New output normally lands at the live bottom and pulls the viewport down with it. Wait for the REPL to emit something (or for a busy REPL to drain its queue), then `read-screen` again — the markers disappear once the view is at the live tail.
+- **Corroborate with a non-viewport signal** instead of the screen text: process state (`cmux top`/`tree` shows the REPL spinning), or `wait-for` on a signal, rather than inferring from a possibly-stale capture.
+- **Last resort:** the user can click the `Jump to bottom` marker in the GUI. `clear-history` would drop scrollback so future reads reflect only the live region, but it destroys history — avoid unless you own the surface.
+
 ### Send keystrokes
 
 ```!
@@ -208,7 +240,7 @@ cmux send --help
 
 Escape sequences matter: `\n` and `\r` send Enter; `\t` sends Tab. If a command should actually execute, append `\n` — otherwise you're just typing into the prompt.
 
-**Always `read-screen` after `send` to confirm execution started — not just that the send succeeded.** `cmux send` returns success when bytes are delivered to the PTY; it has no opinion about whether the remote shell did anything with them. Concrete failure mode: if you `send` into a freshly-created surface before its shell has finished initializing, the trailing `\n` gets swallowed by the shell's startup output and the command sits at the prompt unexecuted. Exit code 0, nothing happened. The only way to know is to read the screen back and look for evidence the command ran (output, new prompt line, process spinning). See the [default recipe](#default-principle-make-new-work-visible-to-the-user) for the wait-for-PTY pattern, and Troubleshooting for the `Terminal surface not found` variant.
+**Always `read-screen` after `send` to confirm execution started — not just that the send succeeded.** `cmux send` returns success when bytes are delivered to the PTY; it has no opinion about whether the remote shell did anything with them. Concrete failure mode: if you `send` into a freshly-created surface before its shell has finished initializing, the trailing `\n` gets swallowed by the shell's startup output and the command sits at the prompt unexecuted. Exit code 0, nothing happened. The only way to know is to read the screen back and look for evidence the command ran (output, new prompt line, process spinning). See the [default recipe](#default-principle-make-new-work-visible-to-the-user) for the wait-for-PTY pattern, and Troubleshooting for the `Terminal surface not found` variant. **Caveat:** the read-back only proves anything if it reflects the *live* bottom — if the user has scrolled the surface up, your capture is stale (see [read-screen returns the scrolled viewport](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom) before concluding nothing happened).
 
 ### Send a single key (modifiers, arrows, ctrl-combos)
 
@@ -383,7 +415,7 @@ Append `\n` on `send` if the command should actually execute. Use `send-key` for
 
 ### Step 4 — Verify
 
-After sending, re-read with `cmux read-screen --surface "$SURF_ID" --scrollback --lines 50` to confirm the effect landed. Don't trust exit codes — cmux's `send` succeeds whether or not the remote process did anything useful with the input.
+After sending, re-read with `cmux read-screen --surface "$SURF_ID" --scrollback --lines 50` to confirm the effect landed. Don't trust exit codes — cmux's `send` succeeds whether or not the remote process did anything useful with the input. If the re-read shows a `Jump to bottom` / `Press up to edit queued messages` marker, the view is scrolled and your capture is stale — don't read that as a failed send ([details](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom)).
 
 ### Gotcha: which workspace does a given surface live in?
 
@@ -436,7 +468,7 @@ When the user describes an action informally, map it to cmux vocabulary:
 cmux prints what it did (new surface ref, new workspace ID, applied title, etc.). **Read the output** — don't assume success from exit code alone.
 
 - After `new-split`, confirm the new surface ref appears in the output.
-- After `send`, if a command was supposed to run, verify with `read-screen` rather than trusting it landed.
+- After `send`, if a command was supposed to run, verify with `read-screen` rather than trusting it landed — but a `Jump to bottom` marker in the output means the view is scrolled and stale, not that the send failed ([details](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom)).
 - After `workspace-action` or `tab-action`, re-list (`list-workspaces` / `tree`) to confirm state.
 - If output is quieter than expected, append `--id-format both` to force UUIDs + refs so there's something concrete to verify against.
 
