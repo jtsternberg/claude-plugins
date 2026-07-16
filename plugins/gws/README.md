@@ -77,12 +77,76 @@ bash plugins/gws/scripts/calendar-create-event.sh \
 
 Date specs: `today` | `tomorrow` | `yesterday` | `YYYY-MM-DD` | `+Nd` | `+Nw`. All scripts accept `--json` for programmatic output.
 
+### gmail-read
+
+Search Gmail and read messages for the active account. Runs a Gmail search
+query and returns structured results (id, subject, from, date, snippet), and
+optionally full message bodies with HTML stripped to plain text.
+
+```bash
+bash plugins/gws/skills/gmail-read/scripts/read.sh "from:boss@example.com newer_than:7d"
+```
+
+### gmail-draft-from-markdown
+
+Convert a local markdown file into a Gmail **draft** (never sends). Markdown is
+converted to HTML and saved as a draft; you review and send from Gmail's UI.
+
+```bash
+bash plugins/gws/skills/gmail-draft-from-markdown/scripts/draft.sh ./reply.md \
+  someone@example.com --subject "Follow-up"
+```
+
+### youtube
+
+Manage YouTube playlists for the active account: list playlists, list items,
+add/remove items, cleanup. See `skills/youtube/SKILL.md` for the full command
+set. YouTube uses its own OAuth login (`youtube-login.sh`) separate from the
+core Google Workspace scopes.
+
 ## Prerequisites
 
 - `gws` CLI installed and on `$PATH`
-- Authenticated: `gws auth login`
+- An OAuth client (`client_secret.json`) in place and an authenticated account (see **Accounts & Authentication** below)
 
 Check auth status with `gws auth status`.
+
+## Accounts & Authentication
+
+`gws` authenticates with a Google OAuth **"installed app"** client
+(`client_secret.json`) that you supply — created in a Google Cloud project that
+has the Workspace APIs you need enabled (Drive, Docs, Sheets, Gmail, Calendar,
+Slides, Tasks). The same client can authenticate any account allowed by its
+OAuth consent screen.
+
+**Single account (default).** Put the client at `~/.config/gws/client_secret.json`,
+then `gws auth login` and pick the account in the browser. All state (encrypted
+credentials, token cache) lives in `~/.config/gws/`.
+
+**Multiple accounts.** The `gws-account` skill manages additional accounts, each
+in its own config directory under `~/.config/gws-accounts/<label>/` with its own
+`client_secret.json`, credentials, and token. Switching writes the chosen label
+to `~/.config/gws-accounts/.active`, which every account-aware script respects
+across shell sessions and agent invocations.
+
+```bash
+/gws-account add work        # browser OAuth into a new labeled account
+/gws-account switch work     # make 'work' the active account
+/gws-account switch default  # back to ~/.config/gws
+/gws-account current         # show the active account
+```
+
+> Different accounts can use different OAuth clients. `gws-account add` copies
+> the **default** client into the new account dir; if a given account needs a
+> *different* client (e.g. an org-internal OAuth app for a managed Workspace
+> domain), place that account's `client_secret.json` into its
+> `~/.config/gws-accounts/<label>/` dir **before** logging in, rather than using
+> `add` (which would overwrite it with the default client). Then log in with
+> `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws-accounts/<label> gws auth login`.
+
+**Re-authenticating.** If a token expires (`invalid_grant` / `invalid_rapt` /
+"Authentication expired"), re-run `gws auth login` for the affected account
+(prefix with `GOOGLE_WORKSPACE_CLI_CONFIG_DIR=…` for a labeled account).
 
 ## Install
 
@@ -111,3 +175,12 @@ claude plugins add /path/to/claude-plugins/plugins/gws
 | `scripts/calendar-links.sh` | Extract Meet/Zoom links for events |
 | `scripts/calendar-list-calendars.sh` | List accessible calendars |
 | `scripts/calendar-create-event.sh` | Create a calendar event (optional Meet link) |
+
+## Disclaimer
+
+This plugin wraps the third-party open-source [`gws`](https://github.com/googleworkspace/cli)
+CLI (Apache-2.0). Per its own README:
+
+> ⚠️ This is **not** an officially supported Google product.
+
+It's provided as-is, with no warranty.
