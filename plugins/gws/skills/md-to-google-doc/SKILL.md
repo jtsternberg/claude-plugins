@@ -1,23 +1,107 @@
 ---
 name: md-to-google-doc
-description: "Upload markdown to Google Drive as a Google Doc via gws CLI. Strips frontmatter and Obsidian callouts. Tab-aware: can publish into a single native Doc tab and manage tabs (list/add/rename/delete). Triggers on \"upload to google docs\", \"push to drive\", \"sync to gdoc\", \"create a google doc\", \"gws upload\"."
+description: "Upload markdown to Google Drive as a Google Doc. Three source rungs: gws CLI (full create/update/tab support), gcloud ADC (create + update-in-place via a state file, for accounts gws can't reach), or the claude.ai Google Drive connector (zero setup, create-only, no update/no pageless/no table-cell emphasis). Strips frontmatter and Obsidian callouts. Triggers on \"upload to google docs\", \"push to drive\", \"sync to gdoc\", \"create a google doc\", \"gws upload\", or requests to push markdown to a work/other Google account."
 disable-model-invocation: true
 argument-hint: '[file.md] [folder-id-or-url | --folder <id-or-url> | doc-id-or-url] [--title "Title"]'
-allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *)'
+allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) mcp__claude_ai_Google_Drive__create_file'
 ---
 
 # Markdown to Google Doc
 
-Upload local markdown files to Google Drive as formatted Google Docs using
-the `gws` CLI.
+Upload local markdown files to Google Drive as formatted Google Docs. The
+best available path depends on **which account can authenticate** and how
+much fidelity the target doc needs.
 
-## Prerequisites
+## Source routing
+
+`gws` only authenticates your personal Google account. If the target doc's
+account isn't reachable by `gws`, route through the next rung — try in
+order, and only read/run the next rung's setup on fallthrough.
+
+### Rung 1 — gws (default, unchanged)
+
+Use the existing workflow below: full create, update-in-place, tab
+management, section linking. This is the primary path whenever `gws` can
+authenticate to the target account.
+
+Fall through to rung 2 if `gws auth status` fails or the target account
+can't reach the destination folder/doc (403/404 for that account, not an
+expired-token case).
+
+### Rung 2 — gcloud ADC (create + update-in-place, for accounts gws can't reach)
+
+Direct Drive/Docs API access via ADC. Supports create (`files.create` with
+a markdown upload — same server-side importer `gws` uses) and
+**update-in-place**: a state file
+(`~/.config/gws-md-to-gdoc/rendered.json`) remembers which source file
+produced which doc ID, so reruns update instead of duplicating. Sets
+PAGELESS via a `batchUpdate` after create, same as `gws`.
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/adc-check.sh   # fast preflight; exit 0 = configured
+bash ${CLAUDE_SKILL_DIR}/scripts/adc-create.sh <file.md> [folder-id-or-url] [--title "Title"] [--new]
+```
+
+`--new` forces a fresh doc even if the state file has a prior entry for this
+source file. If `adc-check.sh` fails, it prints an actionable one-line
+reason — only then read
+[references/adc-setup.md](references/adc-setup.md) for the full gcloud
+setup steps. If ADC isn't configured and setting it up isn't worth it right
+now, fall through to rung 3.
+
+Not supported on this rung yet: tab-scoped publishing, section linking (both
+gws-only for now).
+
+### Rung 3 — claude.ai Google Drive connector (zero setup, create-only)
+
+Use when neither `gws` nor ADC can reach the target account, and the
+`mcp__claude_ai_Google_Drive__*` tools are available in this session.
+Verified live (2026-07-14): `create_file` with `contentMimeType:
+"text/markdown"` produces a real formatted Google Doc (headings, bold,
+links, lists, tables) — no de-escaping needed on this direction, this is
+the connector's write path, not its read path.
+
+1. Clean the markdown (same as rung 1/2):
+   ```bash
+   bash ${CLAUDE_SKILL_DIR}/scripts/clean.sh <file.md> /tmp/cleaned-$$.md
+   ```
+2. Derive the title if `--title` wasn't given (H1 heading, else filename).
+3. Call `mcp__claude_ai_Google_Drive__create_file`:
+   - `title`: derived/given title
+   - `textContent`: the cleaned markdown content
+   - `contentMimeType`: `"text/markdown"`
+   - `parentId`: target folder ID if `--folder` was given (strip a full
+     `.../folders/FOLDER_ID` URL the same way as folder-ID extraction
+     elsewhere in this skill)
+   - leave `disableConversionToGoogleType` unset — default conversion is
+     what formats the Doc.
+4. Report the URL: `https://docs.google.com/document/d/<id>/edit` (the `id`
+   field `create_file` returns).
+5. Clean up the temp file.
+
+**Refuse update requests on this rung.** The connector's `update_file` tool
+only renames/moves — it cannot replace content, and `trash_file` fails with
+a permission error (confirmed live — no delete means no throwaway-temp-doc
+tricks either). If asked to update an existing doc and only this rung is
+available, say so and point at rung 2 (ADC update-in-place) instead of
+silently creating a duplicate doc.
+
+**Known limits** (confirmed live): no bold/italic/inline emphasis inside
+table cells (stays literal `**text**`); no way to set PAGELESS mode (new
+docs land in Drive's default paged mode); same unsupported set as gws
+(images, footnotes, smart chips) presumed but not individually verified on
+this rung.
+
+If none of the three rungs can reach the destination, fail with a clear
+message naming which rungs were tried and why each failed.
+
+## Prerequisites (rung 1)
 
 ```!
 gws auth status 2>&1 || echo "NOT AUTHENTICATED — run: gws auth login"
 ```
 
-## Task
+## Task (rung 1)
 
 Run the entrypoint script, passing all arguments through. It auto-detects
 create vs update based on whether the destination looks like a doc URL/ID
