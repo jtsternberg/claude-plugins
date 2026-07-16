@@ -1,8 +1,6 @@
 {
   "database": "dolt",
   "backend": "dolt",
-  "dolt_mode": "server",
-  "dolt_server_host": "127.0.0.1",
-  "dolt_database": "beads_claude-plugins",
-  "project_id": "1583d738-01f9-4a12-b7cb-2b5e84075f00"
+  "dolt_mode": "embedded",
+  "dolt_database": "claude_plugins"
 }
