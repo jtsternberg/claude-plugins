@@ -134,6 +134,9 @@ def main(argv):
     if existing and doc_exists(drive, existing["doc_id"]):
         update_doc(drive, existing["doc_id"], args.md_path, args.title)
         doc_id = existing["doc_id"]
+        # The media re-import resets the doc to PAGES mode (verified live
+        # 2026-07-16) — re-apply pageless after every update.
+        _set_pageless(docs, doc_id)
         print(f"https://docs.google.com/document/d/{doc_id}/edit (updated in place)")
     else:
         doc_id = create_doc(drive, docs, args.md_path, args.title, folder_id)
