@@ -47,6 +47,15 @@ read [references/adc-setup.md](references/adc-setup.md) for the full gcloud
 setup steps — don't load it up front. If ADC isn't configured and setting
 it up isn't worth it right now, fall through to rung 3.
 
+> **Escaping note (all rungs):** Drive's native exporter also
+> backslash-escapes markdown-significant punctuation that appears as
+> literal text in the doc (`Catch up\!`, `\#123`, `(Q2 2026\)`) — verified
+> live 2026-07-16 on a real doc. It's valid CommonMark, but if the raw
+> markdown is for human editing, the same de-escaper works on any rung's
+> output: `python3 ${CLAUDE_SKILL_DIR}/scripts/deescape.py in.md out.md`.
+> Docs that round-tripped from markdown import export clean; docs with
+> hand-typed punctuation don't. The connector rung *always* needs it.
+
 ### Rung 3 — claude.ai Google Drive connector (zero setup, needs de-escaping)
 
 Use when neither `gws` nor ADC can reach the doc's account, and the
