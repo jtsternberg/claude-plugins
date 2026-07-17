@@ -365,13 +365,18 @@ One of the most common agent tasks: the user says *"read what's happening in the
 
 ### Step 1 — Find the surface
 
-**Pick the flag from how the user referred to the surface — don't default to scanning everything.** Matching the user's phrasing to the right flag is what turns "took a chunk of effort" into "oh, it's right there":
+**When the user names a surface, just pass the name as a bare query — don't reach for `read-screen` or list everything.** The script picks the strategy:
 
-- **User quoted or named a title** — backticks, quotes, or an obvious tab label like `` `✳ hotline: claude-plugins → Automating (quick_call)` `` → **`-t` with a distinctive substring.** This is the fast path: one `cmux tree` call, **no `read-screen`**. Strip the volatile decoration first — the leading status glyph (`✳`, `◐`, `✳️`, spinner chars) and any trailing bit likely to change — and pass the stable middle, e.g. `-t "hotline: claude-plugins → Automating"`. A single result is your answer; act on it immediately. Don't fall back to content search or listing unless `-t` genuinely comes up empty.
-- **User named a workspace** ("in my 'debug lindy' workspace") → **`-w`** substring.
-- **User described on-screen text or behavior, not a title** ("the tab hitting the 500 error") → **`-c`.** This is the *only* mode that reads screens per candidate, so it's the slowest — scope it with `-w` when you can.
+```bash
+${CLAUDE_SKILL_DIR}/scripts/find-surface.sh "✳ hotline: claude-plugins → Automating (quick_call)" --json
+```
 
-When more than one signal is present, prefer the cheapest that uniquely identifies the target: a named title (`-t`) beats a content sweep (`-c`) every time.
+A bare query (no flag) matches by **title first** — one `cmux tree` call, no screen reads — and only falls back to a content scan if the title pass is dry. Paste the tab label **verbatim**: leading status glyphs (`✳`, spinners) and surrounding whitespace are stripped from both sides before comparing, so the match holds even if the glyph has since changed. A unique hit is your answer; act on it immediately.
+
+Reach for an explicit flag only when the bare query isn't the right shape:
+- **`-w <name>`** — user pointed at a *workspace* ("in my 'debug lindy' workspace"); narrows before searching.
+- **`-c <text>`** — user described *on-screen text*, not a title ("the tab hitting the 500 error"). This is the only mode that reads screens per candidate (the slow path) — scope it with `-w` when you can.
+- **`-t <title>`** — same title-matching as the bare query, when you want to force title-only with no content fallback.
 
 Use the bundled helper rather than hand-parsing `cmux tree --all`:
 

@@ -18,6 +18,7 @@ trap 'exit 130' INT
 WORKSPACE_FILTER=""
 CONTENT_PATTERN=""
 TITLE_PATTERN=""
+AUTO_QUERY=""
 USE_REGEX=0
 SCROLLBACK=0
 LINES=500
@@ -28,13 +29,23 @@ usage() {
   cat <<'EOF'
 find-surface — search cmux surfaces by workspace, title, or screen content.
 
-Usage: find-surface [OPTIONS]
+Usage: find-surface [QUERY] [OPTIONS]
+
+A bare QUERY (no flag) is the "just find it" path: matches by title first
+(cheap — one tree call, no screen reads), and only if nothing matches does it
+fall back to a content scan. Use it when the user names a surface, e.g.:
+  find-surface "hotline: claude-plugins -> Automating"
+
+Title matching (-t and the QUERY title pass) is decoration-tolerant: leading
+status glyphs (the busy/idle star, spinners) and surrounding whitespace are
+stripped from BOTH sides before comparing, so pasting a tab label verbatim —
+glyph and all — still matches even after the glyph has changed.
 
 Options:
   -w, --workspace <name|ref>   Narrow to workspace. "workspace:N" = exact ref;
                                 anything else = case-insensitive substring on title.
   -c, --content <pattern>      Match surface screen content.
-  -t, --title <pattern>        Match surface title.
+  -t, --title <pattern>        Match surface title (decoration-tolerant; see above).
   -r, --regex                  Treat --content and --title as extended regex (ERE).
                                 Default: case-insensitive substring.
   -s, --scrollback             Search scrollback in addition to visible viewport.
@@ -50,6 +61,7 @@ With no filters, lists every surface in every workspace (excluding the caller).
 Requires: cmux, jq.
 
 Examples:
+  find-surface "hotline: … Automating"      # bare query: title-first, content fallback
   find-surface                              # list every surface
   find-surface -w "cmux-cli skill"          # surfaces inside that workspace
   find-surface -w cmux                      # fuzzy: matches "cmux-cli skill"
@@ -91,7 +103,12 @@ while [[ $# -gt 0 ]]; do
     --json)          OUTPUT_JSON=1; shift ;;
     --include-self)  INCLUDE_SELF=1; shift ;;
     -h|--help)       usage; exit 0 ;;
-    *)               echo "find-surface: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    --)              shift; [[ $# -gt 0 ]] && { AUTO_QUERY="$1"; shift; } ;;
+    -*)              echo "find-surface: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *)               if [[ -n "$AUTO_QUERY" ]]; then
+                       echo "find-surface: multiple bare queries given ('$AUTO_QUERY', '$1'); pass one, or use -t/-c" >&2; exit 2
+                     fi
+                     AUTO_QUERY="$1"; shift ;;
   esac
 done
 
@@ -128,6 +145,27 @@ matches() {
   fi
 }
 
+# Strip leading decoration (status glyphs, spinners, whitespace) and trailing
+# whitespace from a surface title, so a title copied off a tab — where the
+# leading glyph reflects transient busy/idle state — still matches after the
+# glyph has changed or vanished. `[^[:alnum:]]` runs consume the multibyte
+# glyph bytes; we stop at the first alphanumeric character.
+normalize_title() { printf '%s' "$1" | sed 's/^[^[:alnum:]]*//; s/[[:space:]]*$//'; }
+
+title_matches() {
+  # title_matches <surface_title> <needle>
+  local haystack="$1" needle="$2"
+  if [[ $USE_REGEX -eq 1 ]]; then
+    # Regex mode: caller is explicit — match the raw title, no normalization.
+    [[ "$haystack" =~ $needle ]]
+  else
+    local h n
+    h=$(to_lower "$(normalize_title "$haystack")")
+    n=$(to_lower "$(normalize_title "$needle")")
+    [[ "$h" == *"$n"* ]]
+  fi
+}
+
 # --- Flatten `cmux tree --all --json --id-format both` into TSV rows via jq ---
 # We request `--id-format both` so every node carries its stable UUID (the `.id`
 # field) alongside its positional `.ref`. Callers should target by UUID; refs are
@@ -160,6 +198,11 @@ flatten_tree() {
 results_file=$(mktemp)
 trap 'rm -f "$results_file"' EXIT
 
+# Populate $results_file from the current TITLE_PATTERN / CONTENT_PATTERN /
+# WORKSPACE_FILTER. Truncates first, so it is safe to call more than once
+# (auto-mode runs it for a title pass, then a content pass).
+collect_results() {
+  : > "$results_file"
 while IFS=$'\t' read -r ws_ref ws_id ws_name s_ref s_id s_type s_title tty pane_ref pane_id win_ref win_id; do
   # Skip the calling surface unless --include-self was passed. Match by UUID so
   # a renumbered ref can't accidentally include (or miss) our own surface.
@@ -171,7 +214,7 @@ while IFS=$'\t' read -r ws_ref ws_id ws_name s_ref s_id s_type s_title tty pane_
   snippet=""
 
   if [[ -n "$TITLE_PATTERN" ]]; then
-    if matches "$s_title" "$TITLE_PATTERN"; then
+    if title_matches "$s_title" "$TITLE_PATTERN"; then
       matched="title"
     else
       continue
@@ -212,6 +255,23 @@ while IFS=$'\t' read -r ws_ref ws_id ws_name s_ref s_id s_type s_title tty pane_
     "$tty" "$pane_ref" "$pane_id" "$win_ref" "$win_id" "$matched" "$safe_snippet" \
     >> "$results_file"
 done < <(flatten_tree)
+}
+
+# --- Run the search ---
+# Auto mode: a bare QUERY with no explicit -t/-c tries a title pass first (cheap,
+# no read-screen) and only falls back to a content scan if the title pass is dry.
+# Explicit -t/-c always win over a stray positional.
+if [[ -n "$AUTO_QUERY" && -z "$TITLE_PATTERN" && -z "$CONTENT_PATTERN" ]]; then
+  TITLE_PATTERN="$AUTO_QUERY"
+  collect_results
+  if [[ ! -s "$results_file" ]]; then
+    TITLE_PATTERN=""
+    CONTENT_PATTERN="$AUTO_QUERY"
+    collect_results
+  fi
+else
+  collect_results
+fi
 
 # --- Output ---
 if [[ ! -s "$results_file" ]]; then
