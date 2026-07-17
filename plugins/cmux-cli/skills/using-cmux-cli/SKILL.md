@@ -365,6 +365,14 @@ One of the most common agent tasks: the user says *"read what's happening in the
 
 ### Step 1 — Find the surface
 
+**Pick the flag from how the user referred to the surface — don't default to scanning everything.** Matching the user's phrasing to the right flag is what turns "took a chunk of effort" into "oh, it's right there":
+
+- **User quoted or named a title** — backticks, quotes, or an obvious tab label like `` `✳ hotline: claude-plugins → Automating (quick_call)` `` → **`-t` with a distinctive substring.** This is the fast path: one `cmux tree` call, **no `read-screen`**. Strip the volatile decoration first — the leading status glyph (`✳`, `◐`, `✳️`, spinner chars) and any trailing bit likely to change — and pass the stable middle, e.g. `-t "hotline: claude-plugins → Automating"`. A single result is your answer; act on it immediately. Don't fall back to content search or listing unless `-t` genuinely comes up empty.
+- **User named a workspace** ("in my 'debug lindy' workspace") → **`-w`** substring.
+- **User described on-screen text or behavior, not a title** ("the tab hitting the 500 error") → **`-c`.** This is the *only* mode that reads screens per candidate, so it's the slowest — scope it with `-w` when you can.
+
+When more than one signal is present, prefer the cheapest that uniquely identifies the target: a named title (`-t`) beats a content sweep (`-c`) every time.
+
 Use the bundled helper rather than hand-parsing `cmux tree --all`:
 
 ```bash
@@ -384,7 +392,7 @@ Key options (run `--help` for the full list):
 
 Pipe `--json` through `jq` for any further filtering — e.g. `find-surface.sh -w cmux --json | jq -r '.[] | select(.surface_type=="terminal") | .surface_id'` (select the UUID to act on).
 
-The user often tells you the workspace by name — "find the surface in my 'debug lindy' workspace that's hitting the 500 error" — so lean on `-w` for the cheapest narrowing, then `-c` / `-t` inside it.
+When the user describes on-screen behavior *and* a location — "find the surface in my 'debug lindy' workspace that's hitting the 500 error" — combine `-w` (cheap narrowing) with `-c` (the read-screen scan) so you only read screens inside that one workspace. But if the user just names a title, `-t` alone is enough — don't add a content scan it doesn't need (see the flag-picking rule at the top of this step).
 
 Under the hood, the script uses `cmux tree --all --json` for discovery. If you need more fields than the script exposes (panes, selected/focused flags, index ordering), call `cmux tree --all --json | jq ...` directly.
 
