@@ -4,7 +4,9 @@
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"
   },
-  "description": "Custom Claude Code plugins — skills, commands, hooks, and automation",
+  "metadata": {
+    "description": "Custom Claude Code plugins: skills, commands, hooks, and automation"
+  },
   "plugins": [
     { "name": "git-tree", "source": "./plugins/git-tree" },
     { "name": "headline-refiner", "source": "./plugins/headline-refiner" },
@@ -30,6 +32,7 @@
     { "name": "research-tools", "source": "./plugins/research-tools" },
     { "name": "cmux-cli", "source": "./plugins/cmux-cli" },
     { "name": "mac-caffeinate", "source": "./plugins/mac-caffeinate" },
-    { "name": "collab-tools", "source": "./plugins/collab-tools" }
+    { "name": "collab-tools", "source": "./plugins/collab-tools" },
+    { "name": "x-twitter-scraper", "source": "./plugins/x-twitter-scraper" }
   ]
 }
