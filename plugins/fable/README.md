@@ -5,7 +5,7 @@ Skills for working with — and like — the Fable model (`claude-fable-5`).
 Both skills can install themselves as durable rules in your `~/.claude/CLAUDE.md` (with your approval) via the shared `scripts/install-claude-md-rule.sh` — a managed, idempotent block per rule, with a timestamped backup before any write:
 
 ```bash
-bash plugins/fable/scripts/install-claude-md-rule.sh <think-like-fable|fable-delegate> [--target <path>] [--check] [--remove]
+bash plugins/fable/scripts/install-claude-md-rule.sh <fable-mode|fable-delegate> [--target <path>] [--check] [--remove]
 ```
 
 ## Skills
@@ -23,7 +23,7 @@ Delegate via the Agent tool with an explicit model override — `model: "opus"` 
 
 **Triggers** at the start of a Fable session and whenever substantive work is about to begin — especially when the Fable main agent is about to edit files, run searches, run tests, or perform mechanical multi-step execution itself.
 
-### `think-like-fable`
+### `fable-mode`
 
 The operating stance that makes an agent's judgment trustworthy — for sessions running on Opus-level models doing substantive work. (Deliberately not for smaller models: the stance grants autonomy, which is only as safe as the judgment exercising it.) What users experience with Fable as "wisdom" (less back-and-forth, first answers closer to intent, pushback with substance, thinking steps ahead) is the output of a stance, not a list of behaviors — so the skill teaches the generator, then shows its manifestations:
 

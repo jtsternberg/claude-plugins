@@ -3,13 +3,13 @@
 # install-claude-md-rule.sh — install (or refresh) a fable-plugin rule in the
 # user's CLAUDE.md as a managed, idempotent block.
 #
-# Shared by the fable plugin's skills (think-like-fable, fable-delegate).
+# Shared by the fable plugin's skills (fable-mode, fable-delegate).
 # Each rule is wrapped in marker comments; re-running replaces the block in
 # place instead of duplicating it. A timestamped .bak backup is written
 # before any modification.
 #
 # Usage:
-#   install-claude-md-rule.sh <think-like-fable|fable-delegate> [--target <path>] [--check] [--remove]
+#   install-claude-md-rule.sh <fable-mode|fable-delegate> [--target <path>] [--check] [--remove]
 #
 #   --target <path>  CLAUDE.md to edit (default: ~/.claude/CLAUDE.md)
 #   --check          Exit 0 if the rule is already installed, 1 if not. No writes.

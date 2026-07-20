@@ -1,6 +1,6 @@
 {
   "name": "fable",
-  "description": "Skills for working with — and like — the Fable model (claude-fable-5). Ships fable-delegate, which keeps a Fable main agent in the thinker/boss role and routes execution to Opus/Sonnet subagents, and think-like-fable, which codifies the operating stance behind Fable's judgment for agents on other models.",
+  "description": "Skills for working with — and like — the Fable model (claude-fable-5). Ships fable-delegate, which keeps a Fable main agent in the thinker/boss role and routes execution to Opus/Sonnet subagents, and fable-mode, which codifies the operating stance behind Fable's judgment for agents on other models.",
   "version": "0.1.0",
   "author": {
     "name": "Justin Sternberg",
