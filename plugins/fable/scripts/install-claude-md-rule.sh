@@ -36,21 +36,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-skill_path() { echo "$PLUGIN_ROOT/skills/$1/SKILL.md"; }
-
-case "$RULE_ID" in
-  think-like-fable)
-    RULE_TEXT="## Not on Fable? Think Like Fable
-
-If you are the MAIN agent and running on a non-Fable Claude model (Opus, Sonnet): before starting substantive work (debugging, investigation, refactoring, anything with judgment calls about scope or autonomy), read $(skill_path think-like-fable) and adopt its stance: own the outcome, not the response."
-    ;;
-  fable-delegate)
-    RULE_TEXT="## Running on Fable? Delegate the Doing
-
-If you are the MAIN agent and running on the Fable model (claude-fable-5): read $(skill_path fable-delegate). You are the thinker/boss, not the doer — delegate execution (edits, searches, test runs, mechanical multi-step work) to Opus/Sonnet subagents via the Agent tool's model param, and keep Fable cycles for planning, judgment, review, and talking to the user."
-    ;;
-  *) echo "Unknown or missing rule id: '$RULE_ID'" >&2; usage >&2; exit 2 ;;
-esac
+# Rule text lives with its skill (skills/<id>/references/claude-md-rule.md);
+# {{SKILL_PATH}} is resolved to the installed SKILL.md's absolute path here.
+RULE_FILE="$PLUGIN_ROOT/skills/$RULE_ID/references/claude-md-rule.md"
+if [ -z "$RULE_ID" ] || [ ! -f "$RULE_FILE" ]; then
+  echo "Unknown or missing rule id: '$RULE_ID' (no $RULE_FILE)" >&2; usage >&2; exit 2
+fi
+SKILL_PATH="$PLUGIN_ROOT/skills/$RULE_ID/SKILL.md"
+RULE_TEXT="$(sed "s|{{SKILL_PATH}}|$SKILL_PATH|g" "$RULE_FILE")"
 
 BEGIN_MARK="<!-- BEGIN fable-plugin:$RULE_ID (managed by install-claude-md-rule.sh — edits inside will be overwritten) -->"
 END_MARK="<!-- END fable-plugin:$RULE_ID -->"
