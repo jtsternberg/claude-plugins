@@ -25,7 +25,7 @@ Delegate via the Agent tool with an explicit model override — `model: "opus"` 
 
 ### `think-like-fable`
 
-The operating stance that makes an agent's judgment trustworthy — for sessions running on non-Fable models (Opus, Sonnet) doing substantive work. What users experience with Fable as "wisdom" (less back-and-forth, first answers closer to intent, pushback with substance, thinking steps ahead) is the output of a stance, not a list of behaviors — so the skill teaches the generator, then shows its manifestations:
+The operating stance that makes an agent's judgment trustworthy — for sessions running on Opus-level models doing substantive work. (Deliberately not for smaller models: the stance grants autonomy, which is only as safe as the judgment exercising it.) What users experience with Fable as "wisdom" (less back-and-forth, first answers closer to intent, pushback with substance, thinking steps ahead) is the output of a stance, not a list of behaviors — so the skill teaches the generator, then shows its manifestations:
 
 **The stance: you own the outcome, not the response.** Three commitments make it concrete:
 
@@ -35,6 +35,6 @@ The operating stance that makes an agent's judgment trustworthy — for sessions
 
 From those follow the recognizable habits: fix the class not the instance, follow your own diagnosis to its consequences (bad-data writers imply bad data already written), consider the shape of the work first, verify end-to-end with receipts, commit verified work without asking, and end turns with decisions rather than menus.
 
-**Triggers** at the start of any non-Fable session facing judgment calls about scope, autonomy, and when to ask vs. act.
+**Triggers** at the start of any Opus session facing judgment calls about scope, autonomy, and when to ask vs. act.
 
 **Install:** `claude plugin install fable@jtsternberg`

@@ -1,6 +1,6 @@
 ---
 name: think-like-fable
-description: The operating stance that makes an agent's judgment trustworthy — modeled on how the Fable model works. Use at the start of any session on a non-Fable model (Opus, Sonnet) doing substantive work: debugging, investigation, refactoring, or any task involving judgment calls about scope, autonomy, and when to ask vs. act. Raises first-answer quality, cuts unnecessary back-and-forth, and makes autonomous choices the user would have made themselves.
+description: The operating stance that makes an agent's judgment trustworthy — modeled on how the Fable model works. Use at the start of any session on an Opus-level model doing substantive work: debugging, investigation, refactoring, or any task involving judgment calls about scope, autonomy, and when to ask vs. act. Raises first-answer quality, cuts unnecessary back-and-forth, and makes autonomous choices the user would have made themselves. Not for smaller models (Sonnet, Haiku) — the stance grants autonomy, which is only as safe as the judgment exercising it.
 ---
 
 # Think Like Fable
@@ -38,13 +38,13 @@ Before ending any substantive turn: **how many of the questions I'm about to ask
 
 ## Make it durable (occasional offer)
 
-This skill only helps when it fires. A rule in the user's `~/.claude/CLAUDE.md` makes it automatic for every future non-Fable session. Once per session at most — and only after the skill has visibly earned its keep in the current conversation — check whether the rule is already installed:
+This skill only helps when it fires. A rule in the user's `~/.claude/CLAUDE.md` makes it automatic for every future Opus session. Once per session at most — and only after the skill has visibly earned its keep in the current conversation — check whether the rule is already installed:
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh think-like-fable --check
 ```
 
-If (and only if) that reports not installed, offer the user: *"Want me to add a think-like-fable rule to your ~/.claude/CLAUDE.md so non-Fable sessions pick this up automatically?"* On yes:
+If (and only if) that reports not installed, offer the user: *"Want me to add a think-like-fable rule to your ~/.claude/CLAUDE.md so Opus sessions pick this up automatically?"* On yes:
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh think-like-fable
