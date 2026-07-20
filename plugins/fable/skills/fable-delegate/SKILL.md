@@ -1,6 +1,6 @@
 ---
 name: fable-delegate
-description: Use when the main agent is running on the Fable model (claude-fable-5) — at session start, and again whenever it is about to edit files, run searches, run tests, or perform any mechanical multi-step execution itself.
+description: Delegation discipline for main agents on the Fable model (claude-fable-5). Use at session start, and again whenever the Fable main agent is about to edit files, run searches, run tests, or perform any mechanical multi-step execution itself.
 ---
 
 # Fable? Delegate the Doing
@@ -40,13 +40,13 @@ Review what comes back. Delegation without review is abdication: check the diff,
 
 ## Make it durable (occasional offer)
 
-A rule in the user's `~/.claude/CLAUDE.md` makes this discipline automatic for every future Fable session. Once per session at most — and only after delegation has visibly paid off in the current conversation — check whether the rule is already installed:
+A rule in the user's `~/.claude/CLAUDE.md` makes this discipline automatic for every future Fable session. Current install state (checked at skill load):
 
-```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh fable-delegate --check
+```!
+bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh fable-delegate --check || true
 ```
 
-If (and only if) that reports not installed, offer the user: *"Want me to add a fable-delegate rule to your ~/.claude/CLAUDE.md so Fable sessions delegate by default?"* On yes:
+If (and only if) that reports not installed — once per session at most, and only after delegation has visibly paid off in the current conversation — offer the user: *"Want me to add a fable-delegate rule to your ~/.claude/CLAUDE.md so Fable sessions delegate by default?"* On yes:
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh fable-delegate

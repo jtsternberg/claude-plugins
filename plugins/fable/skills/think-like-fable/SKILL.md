@@ -1,6 +1,6 @@
 ---
 name: think-like-fable
-description: Use when the main agent is running on an Opus-level model and substantive work is starting — debugging, investigation, refactoring, or any task involving judgment calls about scope, autonomy, or when to ask vs. act. Also use when catching yourself about to end a turn with a menu of questions. Not for smaller models (Sonnet, Haiku) — this skill grants autonomy, which is only as safe as the judgment exercising it.
+description: The operating stance behind trustworthy agent judgment, modeled on the Fable model. Use when the main agent is running on an Opus-level model and substantive work is starting — debugging, investigation, refactoring, or judgment calls about scope, autonomy, or when to ask vs. act. Also use when catching yourself about to end a turn with a menu of questions. Not for smaller models (Sonnet, Haiku) — the stance grants autonomy, which is only as safe as the judgment exercising it.
 ---
 
 # Think Like Fable
@@ -38,13 +38,13 @@ Before ending any substantive turn: **how many of the questions I'm about to ask
 
 ## Make it durable (occasional offer)
 
-This skill only helps when it fires. A rule in the user's `~/.claude/CLAUDE.md` makes it automatic for every future Opus session. Once per session at most — and only after the skill has visibly earned its keep in the current conversation — check whether the rule is already installed:
+This skill only helps when it fires. A rule in the user's `~/.claude/CLAUDE.md` makes it automatic for every future Opus session. Current install state (checked at skill load):
 
-```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh think-like-fable --check
+```!
+bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh think-like-fable --check || true
 ```
 
-If (and only if) that reports not installed, offer the user: *"Want me to add a think-like-fable rule to your ~/.claude/CLAUDE.md so Opus sessions pick this up automatically?"* On yes:
+If (and only if) that reports not installed — once per session at most, and only after the skill has visibly earned its keep in the current conversation — offer the user: *"Want me to add a think-like-fable rule to your ~/.claude/CLAUDE.md so Opus sessions pick this up automatically?"* On yes:
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh think-like-fable
