@@ -36,13 +36,21 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Rule text lives with its skill (skills/<id>/references/claude-md-rule.md);
-# {{SKILL_PATH}} is resolved to the installed SKILL.md's absolute path here.
-RULE_FILE="$PLUGIN_ROOT/skills/$RULE_ID/references/claude-md-rule.md"
+# Rule text lives with its skill (references/claude-md-rule.md beside its
+# SKILL.md); {{SKILL_PATH}} resolves to the installed SKILL.md's absolute path.
+# Two layouts are supported: plugin-shared (script at <plugin>/scripts/, skills
+# under <plugin>/skills/<id>/) and standalone (script bundled at
+# <skill>/scripts/, e.g. an AM Skills install of a single skill).
+if [ -d "$PLUGIN_ROOT/skills" ]; then
+  SKILL_DIR="$PLUGIN_ROOT/skills/$RULE_ID"
+else
+  SKILL_DIR="$PLUGIN_ROOT"
+fi
+RULE_FILE="$SKILL_DIR/references/claude-md-rule.md"
 if [ -z "$RULE_ID" ] || [ ! -f "$RULE_FILE" ]; then
   echo "Unknown or missing rule id: '$RULE_ID' (no $RULE_FILE)" >&2; usage >&2; exit 2
 fi
-SKILL_PATH="$PLUGIN_ROOT/skills/$RULE_ID/SKILL.md"
+SKILL_PATH="$SKILL_DIR/SKILL.md"
 RULE_TEXT="$(sed "s|{{SKILL_PATH}}|$SKILL_PATH|g" "$RULE_FILE")"
 
 BEGIN_MARK="<!-- BEGIN fable-plugin:$RULE_ID (managed by install-claude-md-rule.sh — edits inside will be overwritten) -->"
