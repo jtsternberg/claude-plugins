@@ -31,6 +31,7 @@
     { "name": "cmux-cli", "source": "./plugins/cmux-cli" },
     { "name": "mac-caffeinate", "source": "./plugins/mac-caffeinate" },
     { "name": "collab-tools", "source": "./plugins/collab-tools" },
-    { "name": "slack", "source": "./plugins/slack" }
+    { "name": "slack", "source": "./plugins/slack" },
+    { "name": "fable", "source": "./plugins/fable" }
   ]
 }

@@ -103,6 +103,11 @@ Control [cmux](https://cmux.sh) (macOS terminal multiplexer / workspace manager)
 
 **Install:** `claude plugin install cmux-cli@jtsternberg`
 
+#### 📖 [fable](plugins/fable)
+Skills for working with — and like — the Fable model (`claude-fable-5`). Ships `fable-delegate`: delegation discipline that keeps a Fable main agent in the thinker/boss role — planning, judgment, and reviewing output — while routing file edits, searches, tests, and other mechanical execution to Opus/Sonnet subagents.
+
+**Install:** `claude plugin install fable@jtsternberg`
+
 ### Commands
 
 #### 💬 [git-commits](plugins/git-commits)
