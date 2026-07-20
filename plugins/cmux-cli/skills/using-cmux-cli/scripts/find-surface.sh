@@ -166,6 +166,21 @@ title_matches() {
   fi
 }
 
+# Exact-match tiebreak: a title whose normalized form equals the normalized
+# needle exactly. Used to disambiguate when one surface's title contains
+# another's as a substring (e.g. query "lindris-monorepo" matching both a
+# hotline tab and the "~/Sites/lindris-monorepo" workspace). Never applies in
+# regex mode (caller is explicit there).
+title_exact_matches() {
+  # title_exact_matches <surface_title> <needle>
+  local haystack="$1" needle="$2"
+  [[ $USE_REGEX -eq 1 ]] && return 1
+  local h n
+  h=$(to_lower "$(normalize_title "$haystack")")
+  n=$(to_lower "$(normalize_title "$needle")")
+  [[ "$h" == "$n" ]]
+}
+
 # --- Flatten `cmux tree --all --json --id-format both` into TSV rows via jq ---
 # We request `--id-format both` so every node carries its stable UUID (the `.id`
 # field) alongside its positional `.ref`. Callers should target by UUID; refs are
@@ -203,6 +218,10 @@ trap 'rm -f "$results_file"' EXIT
 # (auto-mode runs it for a title pass, then a content pass).
 collect_results() {
   : > "$results_file"
+  # Track surfaces whose (normalized) title equals the query exactly, so an
+  # exact match can win over surfaces that merely contain the query. Only
+  # meaningful for the substring title pass; empty otherwise.
+  local exact_ids=""
 while IFS=$'\t' read -r ws_ref ws_id ws_name s_ref s_id s_type s_title tty pane_ref pane_id win_ref win_id; do
   # Skip the calling surface unless --include-self was passed. Match by UUID so
   # a renumbered ref can't accidentally include (or miss) our own surface.
@@ -216,6 +235,10 @@ while IFS=$'\t' read -r ws_ref ws_id ws_name s_ref s_id s_type s_title tty pane_
   if [[ -n "$TITLE_PATTERN" ]]; then
     if title_matches "$s_title" "$TITLE_PATTERN"; then
       matched="title"
+      # Note exact (normalized-equal) matches for the tiebreak below.
+      if title_exact_matches "$s_title" "$TITLE_PATTERN"; then
+        exact_ids="${exact_ids}${s_id}"$'\n'
+      fi
     else
       continue
     fi
@@ -255,6 +278,19 @@ while IFS=$'\t' read -r ws_ref ws_id ws_name s_ref s_id s_type s_title tty pane_
     "$tty" "$pane_ref" "$pane_id" "$win_ref" "$win_id" "$matched" "$safe_snippet" \
     >> "$results_file"
 done < <(flatten_tree)
+
+  # Exact-match tiebreak: if exactly one surface's normalized title equals the
+  # query, keep only that surface. Zero or 2+ exact matches leave the substring
+  # results untouched. Surface UUIDs are field 5 of the TSV.
+  local exact_count
+  exact_count=$(printf '%s' "$exact_ids" | grep -c . || true)
+  if [[ "$exact_count" -eq 1 ]]; then
+    local winner
+    winner=$(printf '%s' "$exact_ids" | grep . | head -n1)
+    local filtered
+    filtered=$(awk -F'\t' -v id="$winner" '$5 == id' "$results_file")
+    printf '%s\n' "$filtered" > "$results_file"
+  fi
 }
 
 # --- Run the search ---

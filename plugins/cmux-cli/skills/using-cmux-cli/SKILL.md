@@ -371,7 +371,7 @@ One of the most common agent tasks: the user says *"read what's happening in the
 ${CLAUDE_SKILL_DIR}/scripts/find-surface.sh "✳ hotline: claude-plugins → Automating (quick_call)" --json
 ```
 
-A bare query (no flag) matches by **title first** — one `cmux tree` call, no screen reads — and only falls back to a content scan if the title pass is dry. Paste the tab label **verbatim**: leading status glyphs (`✳`, spinners) and surrounding whitespace are stripped from both sides before comparing, so the match holds even if the glyph has since changed. A unique hit is your answer; act on it immediately.
+A bare query (no flag) matches by **title first** — one `cmux tree` call, no screen reads — and only falls back to a content scan if the title pass is dry. Paste the tab label **verbatim**: leading status glyphs (`✳`, spinners) and surrounding whitespace are stripped from both sides before comparing, so the match holds even if the glyph has since changed. An **exact** (normalized) title match wins over substring matches — if exactly one surface's title equals the query, only that one is returned, so a query like `lindris-monorepo` resolves to the workspace tab named exactly that rather than also matching a hotline tab that merely contains it. A unique hit is your answer; act on it immediately.
 
 Reach for an explicit flag only when the bare query isn't the right shape:
 - **`-w <name>`** — user pointed at a *workspace* ("in my 'debug lindy' workspace"); narrows before searching.
