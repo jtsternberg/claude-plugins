@@ -169,8 +169,11 @@ title_matches() {
 # Exact-match tiebreak: a title whose normalized form equals the normalized
 # needle exactly. Used to disambiguate when one surface's title contains
 # another's as a substring (e.g. query "lindris-monorepo" matching both a
-# hotline tab and the "~/Sites/lindris-monorepo" workspace). Never applies in
-# regex mode (caller is explicit there).
+# hotline tab and the "~/Sites/lindris-monorepo" workspace). A path-shaped
+# title (contains "/") ALSO exact-matches when its basename (final path
+# segment) equals the query — so "lindris-monorepo" resolves the
+# "~/Sites/lindris-monorepo" workspace tab, while a full-path query still
+# matches the whole title. Never applies in regex mode (caller is explicit).
 title_exact_matches() {
   # title_exact_matches <surface_title> <needle>
   local haystack="$1" needle="$2"
@@ -178,7 +181,13 @@ title_exact_matches() {
   local h n
   h=$(to_lower "$(normalize_title "$haystack")")
   n=$(to_lower "$(normalize_title "$needle")")
-  [[ "$h" == "$n" ]]
+  [[ "$h" == "$n" ]] && return 0
+  # Path-shaped title: also compare its basename (final "/" segment).
+  if [[ "$h" == */* ]]; then
+    [[ "${h##*/}" == "$n" ]]
+  else
+    return 1
+  fi
 }
 
 # --- Flatten `cmux tree --all --json --id-format both` into TSV rows via jq ---
@@ -279,9 +288,10 @@ while IFS=$'\t' read -r ws_ref ws_id ws_name s_ref s_id s_type s_title tty pane_
     >> "$results_file"
 done < <(flatten_tree)
 
-  # Exact-match tiebreak: if exactly one surface's normalized title equals the
-  # query, keep only that surface. Zero or 2+ exact matches leave the substring
-  # results untouched. Surface UUIDs are field 5 of the TSV.
+  # Exact-match tiebreak: if exactly one surface's title exact-matches the query
+  # (full normalized title OR, for path-shaped titles, its basename), keep only
+  # that surface. Zero or 2+ exact matches leave the substring results
+  # untouched. Surface UUIDs are field 5 of the TSV.
   local exact_count
   exact_count=$(printf '%s' "$exact_ids" | grep -c . || true)
   if [[ "$exact_count" -eq 1 ]]; then
