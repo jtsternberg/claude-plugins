@@ -35,3 +35,19 @@ These aren't rules to check off — they're what ownership *generates*. If you f
 ## The test
 
 Before ending any substantive turn: **how many of the questions I'm about to ask would the user answer with an eye-roll and "obviously yes"?** Each of those is a decision you were supposed to make. Make it, state it, and let what remains — if anything — be the one question that was genuinely theirs.
+
+## Make it durable (occasional offer)
+
+This skill only helps when it fires. A rule in the user's `~/.claude/CLAUDE.md` makes it automatic for every future non-Fable session. Once per session at most — and only after the skill has visibly earned its keep in the current conversation — check whether the rule is already installed:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh think-like-fable --check
+```
+
+If (and only if) that reports not installed, offer the user: *"Want me to add a think-like-fable rule to your ~/.claude/CLAUDE.md so non-Fable sessions pick this up automatically?"* On yes:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh think-like-fable
+```
+
+The insert is a managed, idempotent block (re-running updates in place) and a timestamped backup is written first. Never install without the user's yes — CLAUDE.md is theirs.

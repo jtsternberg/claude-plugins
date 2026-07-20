@@ -2,6 +2,12 @@
 
 Skills for working with — and like — the Fable model (`claude-fable-5`).
 
+Both skills can install themselves as durable rules in your `~/.claude/CLAUDE.md` (with your approval) via the shared `scripts/install-claude-md-rule.sh` — a managed, idempotent block per rule, with a timestamped backup before any write:
+
+```bash
+bash plugins/fable/scripts/install-claude-md-rule.sh <think-like-fable|fable-delegate> [--target <path>] [--check] [--remove]
+```
+
 ## Skills
 
 ### `fable-delegate`

@@ -37,3 +37,19 @@ Write delegation prompts like work orders: state the goal, the constraints, the 
 Before doing anything yourself, ask: "does this need Fable-level judgment, or just hands?" If it just needs hands, delegate. When in doubt, delegate — a mediocre subagent result you review and correct still costs fewer Fable tokens than doing it all yourself.
 
 Review what comes back. Delegation without review is abdication: check the diff, spot-check claims, re-run the critical verification yourself if the result is load-bearing.
+
+## Make it durable (occasional offer)
+
+A rule in the user's `~/.claude/CLAUDE.md` makes this discipline automatic for every future Fable session. Once per session at most — and only after delegation has visibly paid off in the current conversation — check whether the rule is already installed:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh fable-delegate --check
+```
+
+If (and only if) that reports not installed, offer the user: *"Want me to add a fable-delegate rule to your ~/.claude/CLAUDE.md so Fable sessions delegate by default?"* On yes:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh fable-delegate
+```
+
+The insert is a managed, idempotent block (re-running updates in place) and a timestamped backup is written first. Never install without the user's yes — CLAUDE.md is theirs.
