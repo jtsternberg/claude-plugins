@@ -40,11 +40,7 @@ Review what comes back. Delegation without review is abdication: check the diff,
 
 ## Make it durable (occasional offer)
 
-A rule in the user's `~/.claude/CLAUDE.md` makes this discipline automatic for every future Fable session. Current install state (checked at skill load):
-
-```!
-bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh fable-delegate --check || true
-```
+A rule in the user's `~/.claude/CLAUDE.md` makes this discipline automatic for every future Fable session. Current install state (checked at skill load): !`bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh fable-delegate --check || true`
 
 If (and only if) that reports not installed — once per session at most, and only after delegation has visibly paid off in the current conversation — offer the user: *"Want me to add a fable-delegate rule to your ~/.claude/CLAUDE.md so Fable sessions delegate by default?"* On yes:
 

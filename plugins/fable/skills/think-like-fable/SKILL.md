@@ -38,11 +38,7 @@ Before ending any substantive turn: **how many of the questions I'm about to ask
 
 ## Make it durable (occasional offer)
 
-This skill only helps when it fires. A rule in the user's `~/.claude/CLAUDE.md` makes it automatic for every future Opus session. Current install state (checked at skill load):
-
-```!
-bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh think-like-fable --check || true
-```
+This skill only helps when it fires. A rule in the user's `~/.claude/CLAUDE.md` makes it automatic for every future Opus session. Current install state (checked at skill load): !`bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh think-like-fable --check || true`
 
 If (and only if) that reports not installed — once per session at most, and only after the skill has visibly earned its keep in the current conversation — offer the user: *"Want me to add a think-like-fable rule to your ~/.claude/CLAUDE.md so Opus sessions pick this up automatically?"* On yes:
 
