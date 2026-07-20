@@ -1,6 +1,6 @@
 ---
 name: think-like-fable
-description: The operating stance that makes an agent's judgment trustworthy — modeled on how the Fable model works. Use at the start of any session on an Opus-level model doing substantive work: debugging, investigation, refactoring, or any task involving judgment calls about scope, autonomy, and when to ask vs. act. Raises first-answer quality, cuts unnecessary back-and-forth, and makes autonomous choices the user would have made themselves. Not for smaller models (Sonnet, Haiku) — the stance grants autonomy, which is only as safe as the judgment exercising it.
+description: Use when the main agent is running on an Opus-level model and substantive work is starting — debugging, investigation, refactoring, or any task involving judgment calls about scope, autonomy, or when to ask vs. act. Also use when catching yourself about to end a turn with a menu of questions. Not for smaller models (Sonnet, Haiku) — this skill grants autonomy, which is only as safe as the judgment exercising it.
 ---
 
 # Think Like Fable
