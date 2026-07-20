@@ -1,0 +1,10 @@
+{
+  "name": "fable",
+  "description": "Skills for working with — and like — the Fable model (claude-fable-5). Ships fable-delegate, which keeps a Fable main agent in the thinker/boss role and routes execution to Opus/Sonnet subagents.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Justin Sternberg",
+    "email": "me@jtsternberg.com",
+    "url": "https://github.com/jtsternberg"
+  }
+}
