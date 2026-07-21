@@ -11,6 +11,7 @@ Exposes cmux's surface area to Claude:
 - **Terminal I/O** — `send` keystrokes, `read-screen`, `send-key`
 - **Notifications** — post toasts into a workspace
 - **Sidebar metadata** — status pills, progress bars, and log entries in the workspace sidebar (great for long-running agent work the user might look away from)
+- **Layouts** — save, inspect, and reproduce full split geometry (`layout save/get/open`); rebuild a whole split tree with `new-workspace --layout '<json>'`. The layout API is the only source of split orientation, divider ratios, and nesting — `tree` flattens all of that away.
 - **Browser automation** — drive cmux's embedded browser (navigate, click, type, screenshot, eval, snapshot, cookies, storage, …)
 - **tmux-compat commands** — `capture-pane`, `resize-pane`, `wait-for`, `swap-pane`, and more
 

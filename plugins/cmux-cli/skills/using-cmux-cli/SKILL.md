@@ -1,6 +1,6 @@
 ---
 name: using-cmux-cli
-description: "Drives cmux (macOS terminal multiplexer / workspace manager) via the `cmux` CLI — windows, workspaces, panes, surfaces, tabs, terminal I/O, the embedded browser, notifications, and sidebar progress."
+description: "Drives cmux (macOS terminal multiplexer / workspace manager) via the `cmux` CLI — windows, workspaces, panes, surfaces, tabs, terminal I/O, the embedded browser, notifications, sidebar progress, and named layouts."
 when_to_use: "Use when the user mentions cmux, workspaces, panes, surfaces, tabs, or splits; asks to send keystrokes to or read output from a terminal; wants to drive cmux's embedded browser; wants to post a notification into a workspace; or runs tmux-style commands (capture-pane, wait-for, swap-pane) where cmux is the multiplexer in play."
 argument-hint: "[describe what you want to do]"
 allowed-tools:
@@ -107,6 +107,7 @@ Two subsystems live in separate files to keep this skill lean. Read them only wh
 
 - [references/browser.md](references/browser.md) — embedded browser automation (navigate, click, type, snapshot/screenshot, cookies, storage, eval, waits, locators).
 - [references/ssh.md](references/ssh.md) — `cmux ssh` remote workspaces (browser traffic routing, drag-drop upload, remote agents, reconnect, daemon troubleshooting).
+- [references/layouts.md](references/layouts.md) — the `cmux layout` geometry API (the split-tree JSON, save/get/open/delete, and rebuilding a whole workspace with `new-workspace --layout`). Read it whenever you need split orientation, divider ratios, nesting, or exact layout reproduction — `tree` cannot give you any of those.
 
 ---
 
@@ -272,7 +273,28 @@ cmux new-workspace --help
 cmux tree --help
 ```
 
-`tree --all` is the one-call answer to "what exists in cmux right now?"
+`tree --all` is the one-call answer to "what exists in cmux right now?" — but note it **flattens** geometry (see the next section).
+
+### Layouts (the geometry API)
+
+```!
+cmux layout --help
+```
+
+`cmux layout` is the **only** way to get or reproduce full split geometry — `direction` (horizontal/vertical), the divider `split` ratio, and nesting. `tree --json` returns a flat `panes[]` list with none of those, so a left/right split and a top/bottom split are byte-identical in `tree` output. When the user needs orientation, divider position, or exact layout reproduction, use `layout`.
+
+- `layout save <name> [--workspace <ref>] [--overwrite] [--description <text>]` — snapshot a **live** workspace into cmux's own store (persists across app/daemon restarts).
+- `layout get <name>` — print the layout as a recursive binary split-tree JSON carrying complete geometry. This is the export; there is no separate `export` subcommand.
+- `layout open <name> [--cwd <dir>] [--focus <true|false>]` — rebuild a saved layout as a new workspace; `--cwd` relocates every surface's working dir.
+- `layout list [--json]` / `layout delete <name>`.
+
+`cmux new-workspace --layout '<json>'` accepts the same split-tree JSON inline and rebuilds an entire split structure — seeding each surface's startup `command` — in one call:
+
+```bash
+cmux new-workspace --name Dev --layout '{"direction":"horizontal","split":0.5,"children":[{"pane":{"surfaces":[{"type":"terminal","command":"vim"}]}},{"pane":{"surfaces":[{"type":"terminal","command":"npm run start"}]}}]}'
+```
+
+The tree shape, surface fields (`type`/`cwd`/`focus`/`url`/`command`), the tree↔`tree` DFS ordering guarantee, and worked workflows all live in [references/layouts.md](references/layouts.md).
 
 ### Tab actions
 
@@ -351,7 +373,7 @@ Creating a new pane column when an adjacent one already exists shoves your surfa
 
 ### Caveat: mixed horizontal/vertical layouts
 
-`tree`'s pane index order tracks visual left-to-right for horizontal splits. For workspaces with mixed horizontal + vertical splits the ordering may not match visual adjacency cleanly. If the user's layout looks non-trivial, verify with `cmux tree --workspace $CMUX_WORKSPACE_ID` after the call. If you specifically need a fresh pane column instead of a tab inside an existing pane, bypass the script and call `cmux new-pane --direction right --type <terminal|browser>` directly — the script's branching is pane-count-only and won't force a new column when other panes exist.
+`tree`'s pane index order tracks visual left-to-right for horizontal splits. For workspaces with mixed horizontal + vertical splits the ordering may not match visual adjacency cleanly — and `tree` **cannot tell you the split orientation or divider ratio at all** (it flattens to a `panes[]` list with no `direction` and no nesting). When you genuinely need to know *how* a workspace is split, `cmux layout get <name>` is the only source of that geometry — see [references/layouts.md](references/layouts.md). If the user's layout looks non-trivial, verify with `cmux tree --workspace $CMUX_WORKSPACE_ID` after the call. If you specifically need a fresh pane column instead of a tab inside an existing pane, bypass the script and call `cmux new-pane --direction right --type <terminal|browser>` directly — the script's branching is pane-count-only and won't force a new column when other panes exist.
 
 ### Verify
 
@@ -443,6 +465,7 @@ Vocabulary for less-frequent commands — just enough so you know what exists. S
 - **Windows**: `list-windows`, `current-window`, `new-window`, `focus-window`, `close-window`, `move-workspace-to-window`
 - **Workspaces** (beyond the inlined set): `select-workspace`, `close-workspace`, `rename-workspace`, `reorder-workspace`, `workspace-action`, `ssh <destination>` (full SSH subsystem: [references/ssh.md](references/ssh.md))
 - **Panes & surfaces** (beyond `new-split`): `new-pane`, `new-surface`, `focus-pane`, `move-surface`, `reorder-surface`, `close-surface`, `list-panes`, `list-pane-surfaces`, `drag-surface-to-split`. **Use `new-pane --type browser` for browser panes — `new-split` is terminal-only.**
+- **Layouts** (geometry API — the only source of split orientation/ratio/nesting): `layout save`, `layout list`, `layout get`, `layout open`, `layout delete`; `new-workspace --layout '<json>'` rebuilds a whole split tree inline. Full detail in [references/layouts.md](references/layouts.md).
 - **Panel I/O** (surfaces ≠ panels): `send-panel --panel <ref>`, `send-key-panel --panel <ref>`
 - **Notification mgmt**: `list-notifications`, `clear-notifications`
 - **Embedded browser**: full subsystem in [references/browser.md](references/browser.md). Master index: `cmux browser --help`. Default to `browser snapshot` over `screenshot` unless producing a PNG for a human.
@@ -474,7 +497,9 @@ When the user describes an action informally, map it to cmux vocabulary:
 | "notify me when the build finishes" | `cmux notify --title "Build done" --body "…"` | call *after* the long-running command returns |
 | anything involving the embedded browser (open URL, click, type, snapshot, screenshot, waits, cookies, eval, …) | see [references/browser.md](references/browser.md) | loaded on demand; `cmux browser --help` is the live master index |
 | remote host work (SSH workspace, drag-drop to remote, running agents on remote box, browser hitting remote `localhost`) | see [references/ssh.md](references/ssh.md) | `cmux ssh <host>` creates the workspace; reference covers the whole subsystem |
-| "list everything" (workspaces/panes/surfaces) | `cmux tree --all` | one call, full hierarchy |
+| "list everything" (workspaces/panes/surfaces) | `cmux tree --all` | one call, full hierarchy — but flat, no split geometry |
+| "save this layout" / "how is this workspace split?" / "recreate this layout in /foo" | `cmux layout save <name>` / `cmux layout get <name>` / `cmux layout open <name> --cwd /foo` | `layout` is the only API with split direction, divider ratio, and nesting. See [references/layouts.md](references/layouts.md). |
+| "open a workspace laid out like X with these commands running" | `cmux new-workspace --layout '<split-tree json>'` | rebuilds the whole split tree and seeds each surface's `command` in one call |
 
 ## Post-mutation verification
 
