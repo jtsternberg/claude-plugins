@@ -16,14 +16,17 @@ claude plugin install handoff@jtsternberg
 
 Generates comprehensive handoff documents that capture the current state of your work, making it easy to resume in a new Claude Code session without losing context.
 
-## Commands
+## Skills
 
-### `/handoff`
+Both are skills, so each can be invoked explicitly by slash command **or**
+triggered automatically by Claude when the conversation calls for it.
 
-Create a handoff document for the current session.
+### `/handoff:handoff`
+
+Create or update a handoff document for the current session.
 
 ```
-/handoff
+/handoff:handoff
 ```
 
 **What It Captures:**
@@ -34,17 +37,17 @@ Create a handoff document for the current session.
 - File locations and key information
 
 **Output:**
-- Creates a markdown file with timestamp
-- Saves to project root or specified location
+- Creates a markdown file named for the work (branch-based by default)
+- Saves to the current working directory
 - Ready to share with the next Claude Code session
-- Opens with a pickup banner telling the next agent to run `/pickup-handoff`
+- Opens with a pickup banner telling the next agent to run `/handoff:pickup-handoff`
 
-### `/pickup-handoff`
+### `/handoff:pickup-handoff`
 
 Resume work from a handoff document in a fresh session.
 
 ```
-/pickup-handoff
+/handoff:pickup-handoff
 ```
 
 Finds the branch's handoff file, reconciles it against the actual repo state,
@@ -55,7 +58,7 @@ stand and the concrete plan before continuing.
 
 ```bash
 # At the end of a work session
-/handoff
+/handoff:handoff
 ```
 
 ## Use Cases
@@ -75,5 +78,5 @@ stand and the concrete plan before continuing.
 
 ## Additional Documentation
 
-- [commands/handoff.md](commands/handoff.md) - Complete command documentation
-- [commands/pickup-handoff.md](commands/pickup-handoff.md) - Pickup command documentation
+- [skills/handoff/SKILL.md](skills/handoff/SKILL.md) - Handoff skill definition
+- [skills/pickup-handoff/SKILL.md](skills/pickup-handoff/SKILL.md) - Pickup skill definition

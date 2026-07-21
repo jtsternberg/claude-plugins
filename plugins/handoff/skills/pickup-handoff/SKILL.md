@@ -1,9 +1,10 @@
 ---
-description: Pick up where a previous agent left off from a handoff document
+name: pickup-handoff
+description: Resume work from a handoff document written by a previous agent. Use when the user points you at a HANDOFF file, says "pick up where we left off", "continue this handoff", "resume from the handoff doc", or hands you a HANDOFF-*.md and expects you to get up to speed and brief them. Pairs with the handoff skill.
 allowed-tools: Bash, Read, Glob
 ---
 
-Resume work from a handoff document written by a previous agent (see `/handoff`).
+Resume work from a handoff document written by a previous agent (see the `handoff` skill).
 
 **Assume the user kicking you off has NOT read the handoff document.** They are handing you a file and expecting you to get up to speed and tell *them* what's going on. So don't just silently continue — surface your understanding and plan first.
 

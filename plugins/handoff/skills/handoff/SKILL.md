@@ -1,5 +1,6 @@
 ---
-description: Hand off to the next agent with fresh context
+name: handoff
+description: Write or update a handoff document so a next agent with fresh context can continue the current work. Use when the user asks to "hand off", "write a handoff", "wrap up for the next agent", "save context for later", or is ending a work session and wants continuity. Not for routine note-taking mid-task.
 allowed-tools: Bash, Read, Write
 ---
 
@@ -16,7 +17,7 @@ Steps:
 4. Create or update the document. Start it with a pickup banner at the very top (before the Goal), so the next agent knows how to resume:
 
    ```
-   > **Resuming this work?** Run `/pickup-handoff` (or paste: `Read <absolute path to this file> and continue where we left off`).
+   > **Resuming this work?** Run `/handoff:pickup-handoff` (or paste: `Read <absolute path to this file> and continue where we left off`).
    ```
 
    Then include:
