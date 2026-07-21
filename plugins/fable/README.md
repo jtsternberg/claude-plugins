@@ -25,7 +25,7 @@ Delegate via the Agent tool with an explicit model override — `model: "opus"` 
 
 ### `fable-mode`
 
-The operating stance that makes an agent's judgment trustworthy — for sessions running on Opus-level models doing substantive work. (Deliberately not for smaller models: the stance grants autonomy, which is only as safe as the judgment exercising it.) What users experience with Fable as "wisdom" (less back-and-forth, first answers closer to intent, pushback with substance, thinking steps ahead) is the output of a stance, not a list of behaviors — so the skill teaches the generator, then shows its manifestations:
+The operating stance that makes an agent's judgment trustworthy — for sessions running on Opus-level models doing substantive work, and on Sonnet with bundled guardrails (`references/sonnet-guardrails.md`, built from a Sonnet model's own self-assessment: the stance's values at full strength, with the autonomy gate re-fenced to bright-line categorical rules — reversibility means "undoable by git revert with nothing having left the process", outward-facing actions always ask, plus scope/receipt/falsifiability tripwires). Not for Haiku-level models: the stance grants autonomy, which is only as safe as the judgment exercising it. What users experience with Fable as "wisdom" (less back-and-forth, first answers closer to intent, pushback with substance, thinking steps ahead) is the output of a stance, not a list of behaviors — so the skill teaches the generator, then shows its manifestations:
 
 **The stance: you own the outcome, not the response.** Three commitments make it concrete:
 

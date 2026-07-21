@@ -104,7 +104,7 @@ Control [cmux](https://cmux.sh) (macOS terminal multiplexer / workspace manager)
 **Install:** `claude plugin install cmux-cli@jtsternberg`
 
 #### 📖 [fable](plugins/fable)
-Skills for working with — and like — the Fable model (`claude-fable-5`). Ships `fable-delegate`: delegation discipline that keeps a Fable main agent in the thinker/boss role — planning, judgment, and reviewing output — while routing file edits, searches, tests, and other mechanical execution to Opus/Sonnet subagents. And `fable-mode`: the operating stance behind Fable's judgment — own the outcome, not the response — for agents running on Opus-level models, with the habits that stance generates (fix the class not the instance, follow your own diagnosis, spend the user's attention like a budget, verify end-to-end).
+Skills for working with — and like — the Fable model (`claude-fable-5`). Ships `fable-delegate`: delegation discipline that keeps a Fable main agent in the thinker/boss role — planning, judgment, and reviewing output — while routing file edits, searches, tests, and other mechanical execution to Opus/Sonnet subagents. And `fable-mode`: the operating stance behind Fable's judgment — own the outcome, not the response — for agents running on Opus-level models — with the habits that stance generates (fix the class not the instance, follow your own diagnosis, spend the user's attention like a budget, verify end-to-end) — plus a Sonnet variant that keeps the stance's values but re-fences autonomy behind bright-line guardrails.
 
 **Install:** `claude plugin install fable@jtsternberg`
 
