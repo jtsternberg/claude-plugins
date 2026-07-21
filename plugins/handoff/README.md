@@ -16,7 +16,7 @@ claude plugin install handoff@jtsternberg
 
 Generates comprehensive handoff documents that capture the current state of your work, making it easy to resume in a new Claude Code session without losing context.
 
-## Command
+## Commands
 
 ### `/handoff`
 
@@ -37,6 +37,19 @@ Create a handoff document for the current session.
 - Creates a markdown file with timestamp
 - Saves to project root or specified location
 - Ready to share with the next Claude Code session
+- Opens with a pickup banner telling the next agent to run `/pickup-handoff`
+
+### `/pickup-handoff`
+
+Resume work from a handoff document in a fresh session.
+
+```
+/pickup-handoff
+```
+
+Finds the branch's handoff file, reconciles it against the actual repo state,
+and — assuming the user hasn't read the doc — plainly reports where things
+stand and the concrete plan before continuing.
 
 ## Example Usage
 
@@ -63,3 +76,4 @@ Create a handoff document for the current session.
 ## Additional Documentation
 
 - [commands/handoff.md](commands/handoff.md) - Complete command documentation
+- [commands/pickup-handoff.md](commands/pickup-handoff.md) - Pickup command documentation

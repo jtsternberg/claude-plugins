@@ -9,7 +9,13 @@ Steps:
 1. Get the current git branch name via `git branch --show-current` to use as the filename suffix (e.g., branch `fix-auth` → `HANDOFF-fix-auth.md`). If not in a git repo or on a detached HEAD, omit the suffix and use `HANDOFF.md`.
 2. Check if the handoff file already exists in the current working directory
 3. If it exists, read it first to understand prior context before updating
-4. Create or update the document with:
+4. Create or update the document. Start it with a pickup banner at the very top (before the Goal), so the next agent knows how to resume:
+
+   ```
+   > **Resuming this work?** Run `/pickup-handoff` (or paste: `Read <absolute path to this file> and continue where we left off`).
+   ```
+
+   Then include:
    - **Goal**: What we're trying to accomplish. If the goal evolved from the original ask, note how and why.
    - **Current Progress**: What's been done so far
    - **Files Changed**: List of files modified, created, or deleted this session
