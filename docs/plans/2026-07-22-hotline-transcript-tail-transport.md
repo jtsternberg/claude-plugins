@@ -1,6 +1,6 @@
 # Hotline cmux transport: transcript-tail instead of screen-scraping
 
-**Status:** design accepted, not yet implemented
+**Status:** implemented + verified live (warm-reuse ×2, cold-start ×1); screen-scrape retained as fallback tier
 **bd:** claude-plugins-0pwc (transport rework) · claude-plugins-5zhp (send/submit bug — fixed, shipped in the two-step `send` + `send-key Enter` change)
 **Date:** 2026-07-22
 

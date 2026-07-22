@@ -267,6 +267,66 @@ else
   echo "  - zsh not found; skipping zsh-specific caller cases"
 fi
 
+# ---- CMUX transcript mode (claude-plugins-0pwc) ----------------------------
+# wait-for-response.sh should prefer the callee's JSONL transcript over screen-
+# scraping. We sandbox HOME so the derived ~/.claude/projects path lands in a
+# temp tree, and stub `cmux` to a no-op (transcript success path makes no cmux
+# calls when keep_workspace=true, but CMUX mode still resolves the surface ref).
+echo ""
+echo "CMUX transcript mode:"
+
+TNONCE="testnonce0pwc01"
+setup_transcript_call() {  # $1 = transcript body (JSONL); echoes "HOME|CALL_DIR|STUBDIR"
+  local body="$1"
+  local h cd sd cwd enc
+  h=$(mktemp -d); cd=$(mktemp -d /tmp/hotline-tcm-XXXXX); sd=$(mktemp -d)
+  cwd="/fake/callee/ws"
+  enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
+  mkdir -p "$h/.claude/projects/$enc"
+  printf '%s\n' "$body" > "$h/.claude/projects/$enc/sess-tcm.jsonl"
+  echo "$cwd"      > "$cd/cwd.txt"
+  echo "sess-tcm"  > "$cd/session_id.txt"
+  echo "$TNONCE"   > "$cd/call_id.txt"
+  echo "w1:s1"     > "$cd/surface_ref.txt"
+  echo "true"      > "$cd/keep_workspace.txt"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$sd/cmux"; chmod +x "$sd/cmux"
+  echo "$h|$cd|$sd"
+}
+
+# Complete turn in the transcript → transcript mode returns the response.
+CT=$(setup_transcript_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] hi"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\ntranscript-sourced answer\nSTATUS: DONE call_id='"$TNONCE"'"}]}}')
+H1=${CT%%|*}; rest=${CT#*|}; CD1=${rest%%|*}; SD1=${rest#*|}
+set +e
+OUT1=$(HOME="$H1" PATH="$SD1:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD1" --timeout 20 --submit-deadline 6 2>/dev/null)
+RC1=$?
+set -e
+if [[ $RC1 -eq 0 ]] && [[ "$(printf '%s' "$OUT1" | jq -r .response 2>/dev/null)" == *"transcript-sourced answer"* ]]; then
+  pass "reads response from the JSONL transcript (no screen scrape)"
+else
+  fail "reads response from the JSONL transcript" "rc=$RC1 out=$OUT1"
+fi
+rm -rf "$H1" "$CD1" "$SD1"
+
+# Transcript exists but no user event carries the nonce → fast-fail as
+# never-submitted within the submit deadline (well under --timeout).
+CT2=$(setup_transcript_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unrelated chatter"}}')
+H2=${CT2%%|*}; rest2=${CT2#*|}; CD2=${rest2%%|*}; SD2=${rest2#*|}
+START=$SECONDS
+set +e
+ERR2=$(HOME="$H2" PATH="$SD2:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD2" --timeout 60 --submit-deadline 4 2>&1 >/dev/null)
+RC2=$?
+set -e
+EL2=$((SECONDS - START))
+if [[ $RC2 -ne 0 && $EL2 -lt 30 ]] && printf '%s' "$ERR2" | grep -q "never submitted"; then
+  pass "fast-fails as never-submitted when no nonce user event appears (${EL2}s)"
+else
+  fail "fast-fails as never-submitted" "rc=$RC2 elapsed=${EL2}s err=$ERR2"
+fi
+rm -rf "$H2" "$CD2" "$SD2"
+
 # ---- summary ---------------------------------------------------------------
 
 echo ""

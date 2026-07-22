@@ -24,9 +24,14 @@
 #
 # Usage:
 #   cmux-reuse-surface.sh --surface <ref> --session <id> --prompt <text>
-#                         [--keep-workspace]
+#                         [--cwd <path>] [--keep-workspace]
 #   # → {"call_dir": "/tmp/hotline-call-XXXXX"}   (reused)
 #   # → {"fallback": "fresh", "reason": "..."}     (surface gone / send failed)
+#
+# --cwd is the CALLEE session's working directory. It lets wait-for-response.sh
+# derive the callee's JSONL transcript path and read the response from structured
+# data instead of scraping the screen (its preferred path). Omitting it still
+# works — wait-for-response falls back to screen-scraping.
 #
 # NOTE: the message is typed into a live claude REPL, which reads via bracketed
 # paste. So the text and the submit are sent as two steps — `cmux send` for the
@@ -46,6 +51,7 @@ fi
 SURFACE_REF=""
 SESSION_ID=""
 PROMPT=""
+CWD=""
 KEEP_WORKSPACE=true
 
 while [[ $# -gt 0 ]]; do
@@ -53,6 +59,7 @@ while [[ $# -gt 0 ]]; do
     --surface)        SURFACE_REF="$2";   shift 2 ;;
     --session)        SESSION_ID="$2";    shift 2 ;;
     --prompt)         PROMPT="$2";        shift 2 ;;
+    --cwd)            CWD="$2";           shift 2 ;;
     --keep-workspace) KEEP_WORKSPACE=true; shift  ;;
     *)                shift ;;
   esac
@@ -80,6 +87,10 @@ echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
   echo "$SESSION_ID" > "$CALL_DIR/session_id.txt"
   echo "$SESSION_ID" > "$CALL_DIR/session_id_preset.txt"
 }
+# Persist the callee's cwd so wait-for-response.sh can derive the transcript path
+# (~/.claude/projects/<encoded-cwd>/<session-id>.jsonl) and read the response
+# from structured JSONL rather than the rendered screen.
+[[ -n "$CWD" ]] && echo "$CWD" > "$CALL_DIR/cwd.txt"
 
 # Fresh per-call nonce so wait-for-response.sh distinguishes THIS turn's STATUS
 # from the prior exchange's markers still in the surface's scrollback. Same

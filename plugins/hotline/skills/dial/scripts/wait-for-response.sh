@@ -7,13 +7,21 @@
 #   Headless mode (no workspace_ref.txt): poll call_dir/done at 2s intervals.
 #   headless-call-async.sh's own poller writes response.json + done.
 #
-#   CMUX mode (workspace_ref.txt present): cmux-call-async.sh doesn't run a
-#   background poller (under cmux access_mode=cmuxOnly, an orphaned subshell
-#   gets "Broken pipe" on every cmux call). This script (a child of the
-#   caller's cmux-spawned bash, so cmux access works) does the polling
-#   itself: reads the cmux screen, finds the latest STATUS line, extracts
-#   the response body, writes response.json + done, and closes the workspace
-#   unless keep_workspace.txt said otherwise.
+#   CMUX mode (surface_ref.txt / workspace_ref.txt present): cmux-call-async.sh
+#   doesn't run a background poller (under cmux access_mode=cmuxOnly, an orphaned
+#   subshell gets "Broken pipe" on every cmux call). This script (a child of the
+#   caller's cmux-spawned bash, so cmux access works) does the polling itself,
+#   via two tiers:
+#     PRIMARY — read the callee's Claude Code JSONL transcript (structured source
+#       of truth; correlate on the CALL_ID nonce in event data, not scraped
+#       pixels). transcript-extract.sh does the read; this is rendering-
+#       independent and separates "never submitted" from "submitted, working".
+#       Used whenever the transcript path is derivable (cwd.txt + session id).
+#     FALLBACK — the legacy screen scrape (cmux read-screen + STATUS regex +
+#       chrome stripping). Used for old call_dirs, a missing cwd/session, or if
+#       the transcript file never appears. (claude-plugins-0pwc)
+#   Either tier writes response.json + done and closes the workspace unless
+#   keep_workspace.txt said otherwise.
 #
 # Output (stdout, both modes):
 #   {"session_id":"...","response":"..."}
@@ -29,17 +37,27 @@
 #
 # Exit codes:
 #   0 — response received (valid JSON on stdout)
-#   1 — error (timeout, remote failure, or unparseable response.json;
-#       message on stderr)
+#   1 — error (timeout, remote failure, unparseable response.json, or — in
+#       transcript mode — no user event carrying the nonce within
+#       --submit-deadline, i.e. the message never submitted; message on stderr)
 #
 # Usage:
-#   wait-for-response.sh <call_dir> [--timeout <seconds>]
+#   wait-for-response.sh <call_dir> [--timeout <seconds>] [--submit-deadline <seconds>]
 # =============================================================================
 set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TRANSCRIPT_EXTRACT="$SELF_DIR/transcript-extract.sh"
+TRANSCRIPT_PATH_SH="$SELF_DIR/../../../scripts/transcript-path.sh"
 
 CALL_DIR="${1:-}"
 TIMEOUT=""
 POLL_INTERVAL=2
+# Transcript mode: how long to wait for a `user` event carrying the nonce before
+# concluding the message never submitted. The event appears within ~1-2s of a
+# real submit, so this is deliberately short — it separates "never submitted"
+# (fast-fail) from "submitted, model working" (patient until --timeout).
+SUBMIT_DEADLINE=15
 
 if [[ -z "$CALL_DIR" || ! -d "$CALL_DIR" ]]; then
   echo "Call directory not provided or does not exist" >&2
@@ -49,7 +67,8 @@ fi
 shift
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --timeout) TIMEOUT="$2"; shift 2 ;;
+    --timeout)         TIMEOUT="$2";         shift 2 ;;
+    --submit-deadline) SUBMIT_DEADLINE="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -136,6 +155,72 @@ if $CMUX_MODE; then
     exit 1
   fi
 
+  # === PRIMARY PATH: read the callee's structured JSONL transcript ===========
+  # Rendering-independent submit-confirmation + response-capture. The transcript
+  # is the source of truth (Claude Code flushes one JSON event per line in real
+  # time); we correlate on the nonce in DATA, not on scraped pixels, so REPL
+  # chrome changes can't break it. Falls through to the screen-scrape loop below
+  # only when the path can't be derived or the file never appears — old
+  # call_dirs, missing cwd.txt/session, or a mis-derived path. (claude-plugins-0pwc)
+  TRANSCRIPT_PATH=""
+  if [[ -n "$SESSION_ID" && -n "$CALL_ID" && -f "$CALL_DIR/cwd.txt" && -x "$TRANSCRIPT_PATH_SH" ]]; then
+    RECV_CWD=$(cat "$CALL_DIR/cwd.txt")
+    TRANSCRIPT_PATH=$(bash "$TRANSCRIPT_PATH_SH" --cwd "$RECV_CWD" --session "$SESSION_ID" 2>/dev/null || true)
+  fi
+
+  if [[ -n "$TRANSCRIPT_PATH" ]]; then
+    T_ELAPSED=0
+    T_SUBMITTED=false
+    FELL_BACK=false
+    FILE_GRACE=10   # transcript appears ~instantly for a live session; else fall back
+    while [[ $T_ELAPSED -lt $TIMEOUT ]]; do
+      if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
+        # No transcript file yet — brief grace, then fall back to scraping
+        # rather than hard-fail (guards against a mis-derived path).
+        [[ $T_ELAPSED -ge $FILE_GRACE ]] && { FELL_BACK=true; break; }
+        sleep "$POLL_INTERVAL"; T_ELAPSED=$((T_ELAPSED + POLL_INTERVAL)); continue
+      fi
+
+      set +e
+      T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$TRANSCRIPT_PATH" "$CALL_ID" 2>/dev/null)
+      T_RC=$?
+      set -e
+      case $T_RC in
+        0)  # turn complete — T_OUT is {"session_id":..,"response":..}
+          printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
+          touch "$CALL_DIR/done"
+          cleanup_workspace_and_script
+          emit_response_json
+          exit 0
+          ;;
+        10) T_SUBMITTED=true ;;   # submitted, model working — be patient
+        11)                       # not submitted yet
+          if ! $T_SUBMITTED && [[ $T_ELAPSED -ge $SUBMIT_DEADLINE ]]; then
+            echo "No user event carrying call_id=$CALL_ID in the callee's transcript within ${SUBMIT_DEADLINE}s ($TRANSCRIPT_PATH) — the message never submitted into the REPL. Re-dial via a fresh surface. (claude-plugins-0pwc)" >&2
+            touch "$CALL_DIR/done" 2>/dev/null || true
+            cleanup_workspace_and_script
+            exit 1
+          fi
+          ;;
+        *)  FELL_BACK=true; break ;;   # extractor usage/read error → fall back
+      esac
+      sleep "$POLL_INTERVAL"
+      T_ELAPSED=$((T_ELAPSED + POLL_INTERVAL))
+    done
+    if ! $FELL_BACK; then
+      # Ran the full TIMEOUT in transcript mode while merely working → a genuine
+      # timeout, not a reason to re-scrape. Report it and stop.
+      echo "Timed out waiting for the callee to finish (transcript mode, ${TIMEOUT}s) — $TRANSCRIPT_PATH" \
+        > "$CALL_DIR/error.txt"
+      touch "$CALL_DIR/done"
+      cleanup_workspace_and_script
+      cat "$CALL_DIR/error.txt" >&2
+      exit 1
+    fi
+    # else: fall through to the screen-scrape backstop below.
+  fi
+
+  # === FALLBACK PATH: scrape the rendered cmux screen ========================
   while [[ $ELAPSED -lt $TIMEOUT ]]; do
     sleep "$POLL_INTERVAL"
     ELAPSED=$((ELAPSED + POLL_INTERVAL))

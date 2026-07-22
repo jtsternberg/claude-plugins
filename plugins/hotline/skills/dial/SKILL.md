@@ -354,8 +354,12 @@ If cmux is up (`check-cmux.sh` exit 0) **and** you parsed a non-empty `surface_r
 
 ```bash
 # $REMOTE_SESSION_ID and $SURFACE_REF come from Step 4's session-cache.sh get JSON.
+# --cwd is the callee's resolved workspace ($TARGET_PATH from Step 1), so
+# wait-for-response.sh can read the reply from the callee's JSONL transcript
+# instead of scraping the screen.
 REUSE=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-reuse-surface.sh" \
-  --surface "$SURFACE_REF" --session "$REMOTE_SESSION_ID" --prompt "$YOUR_MESSAGE")
+  --surface "$SURFACE_REF" --session "$REMOTE_SESSION_ID" --prompt "$YOUR_MESSAGE" \
+  --cwd "$TARGET_PATH")
 CALL_DIR=$(echo "$REUSE" | jq -r '.call_dir // empty')
 if [[ -n "$CALL_DIR" ]]; then
   # Reused — the message went into the existing surface. The session ID is
