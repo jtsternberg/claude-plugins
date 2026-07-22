@@ -28,10 +28,13 @@
 #   # → {"call_dir": "/tmp/hotline-call-XXXXX"}   (reused)
 #   # → {"fallback": "fresh", "reason": "..."}     (surface gone / send failed)
 #
-# NOTE: the message is typed into a live REPL over `cmux send`, so a single
-# logical line submits cleanly. Multi-line messages risk premature submission
-# at the first embedded newline — keep follow-up messages to one line, or let
-# the fresh-surface fallback (which uses a launch script) carry multi-line ones.
+# NOTE: the message is typed into a live claude REPL, which reads via bracketed
+# paste. So the text and the submit are sent as two steps — `cmux send` for the
+# literal text, then `cmux send-key Enter` to submit (see below). A trailing
+# "\n" bundled into the `cmux send` does NOT submit; the REPL takes it as a
+# literal newline in the input box. Callers still route multi-line follow-ups to
+# the fresh-surface fallback (which uses a launch script); the single-line
+# reuse path is the common case.
 # =============================================================================
 set -euo pipefail
 
@@ -93,11 +96,22 @@ echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
 # the nonce. The receiver echoes it back as `STATUS: <signal> call_id=<nonce>`.
 MSG="[CALL_ID: $CALL_ID] $PROMPT"
 
-# Type into the live REPL. Trailing \n submits it. On failure the surface likely
-# died between the check and now — clean up and fall back to a fresh surface.
-if ! SEND_OUTPUT=$(cmux send --surface "$SURFACE_REF" "$MSG"$'\n' 2>&1); then
+# Type into the live REPL, then submit. The target is a claude TUI/Ink REPL that
+# reads via bracketed paste — NOT a shell. Delivering text + a trailing "\n" in
+# one `cmux send` makes the REPL treat the newline as a literal newline inside
+# the input field, not a submit: the text lands but Enter never registers. So we
+# send the text and the Enter as two distinct steps, with a short settle so the
+# REPL finishes ingesting the paste before the submit key arrives (claude-plugins-5zhp).
+# On failure the surface likely died between the check and now — clean up and
+# fall back to a fresh surface.
+if ! SEND_OUTPUT=$(cmux send --surface "$SURFACE_REF" "$MSG" 2>&1); then
   rm -rf "$CALL_DIR"
   fallback_fresh "cmux send into surface $SURFACE_REF failed: $SEND_OUTPUT"
+fi
+sleep 0.2
+if ! SEND_OUTPUT=$(cmux send-key --surface "$SURFACE_REF" Enter 2>&1); then
+  rm -rf "$CALL_DIR"
+  fallback_fresh "cmux send-key Enter into surface $SURFACE_REF failed: $SEND_OUTPUT"
 fi
 
 jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'
