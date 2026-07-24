@@ -43,9 +43,11 @@ LOG_VIEW="$(printf '%s\n' "${calls[@]}")"
 
 # %q escapes spaces, so the message renders as e.g. `hello\ world` — match with
 # globs that tolerate the escaping.
-send_idx=-1; key_idx=-1; i=0
+send_idx=-1; key_idx=-1; clear_idx=-1; i=0
 for c in "${calls[@]}"; do
   case "$c" in
+    # The clear is the raw Ctrl-C byte ($'\003'); %q renders it as $'\003'.
+    "send --surface w1:s1 "*'\003'*)            clear_idx=$i ;;
     "send --surface w1:s1 "*hello*world*)       send_idx=$i ;;
     "send-key --surface w1:s1 Enter"*)          key_idx=$i ;;
   esac
@@ -70,6 +72,16 @@ $send_has_newline \
 [[ $send_idx -ge 0 && $key_idx -gt $send_idx ]] \
   && pass "Enter is sent after the text" \
   || fail "Enter is sent after the text" "send_idx=$send_idx key_idx=$key_idx"
+
+# The input box is cleared with a raw Ctrl-C byte BEFORE the message is typed, so
+# leftover input can't get prepended to the follow-up (send-key ctrl+c does not
+# reach an in-pane claude REPL — the raw byte via the text path does).
+[[ $clear_idx -ge 0 ]] && pass "input box cleared with raw Ctrl-C (\$'\\003')" \
+  || fail "input box cleared with raw Ctrl-C (\$'\\003')" "log:"$'\n'"$LOG_VIEW"
+
+[[ $clear_idx -ge 0 && $send_idx -gt $clear_idx ]] \
+  && pass "clear precedes the message text" \
+  || fail "clear precedes the message text" "clear_idx=$clear_idx send_idx=$send_idx"
 
 if [[ "$OUT" == *'"call_dir"'* ]]; then
   pass "emits call_dir JSON on success"
