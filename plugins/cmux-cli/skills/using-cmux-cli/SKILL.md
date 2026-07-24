@@ -251,6 +251,18 @@ cmux send-key --help
 
 Use `send-key` for `C-c`, `Up`, `Enter`, etc. Use `send` for literal text.
 
+#### Gotcha: `send-key C-c` does not reach an in-pane Claude Code REPL
+
+When the target surface is running **Claude Code** (the `claude` CLI in its REPL), `cmux send-key --surface <id> ctrl+c` (equivalently `C-c`) does **not** land as a working Ctrl-C inside the REPL — it neither clears half-typed input nor interrupts. Named keys (`backspace`, `Enter`, `Return`, arrows) *do* reach the REPL via `send-key`; the modifier+char `ctrl+c` form specifically does not. Verified live against Claude Code v2.1.216.
+
+To clear or interrupt a claude REPL's prompt box, send the raw Ctrl-C byte (`0x03`) through the **text** path instead:
+
+```bash
+cmux send --surface "$SID" --workspace "$WS" $'\003'
+```
+
+This reliably clears whatever is half-typed in the input box regardless of cursor position or multi-line content. This matters whenever you type a command into a live claude REPL (e.g. a slash command or a follow-up): if the box already holds leftover input, your text gets prepended to it and the intended command silently never runs. Send `$'\003'` first, then type. (Note: this quirk is specific to Claude Code's Ink/bracketed-paste REPL — for an ordinary shell, `send-key C-c` works fine.)
+
 ### Split the current pane
 
 ```!
