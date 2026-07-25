@@ -1,7 +1,7 @@
 {
   "name": "session-tools",
   "description": "Tools for managing Claude Code session transcripts — recaps, catch-up briefings, cleanup, retitling, and more. Ships sessions-weekly-recap and sessions-catch-up; future skills will slot into the same plugin.",
-  "version": "1.1.1",
+  "version": "1.1.0",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"
