@@ -39,3 +39,6 @@ amskills/
 # Python
 __pycache__/
 *.pyc
+
+# visual-review build artifacts
+/.visual-review/

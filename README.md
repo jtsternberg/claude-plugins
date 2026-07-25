@@ -84,7 +84,7 @@ Metacognitive reasoning frameworks for careful decision-making. Includes Chester
 **Install:** `claude plugin install thinking-tools@jtsternberg`
 
 #### 📅 [session-tools](plugins/session-tools)
-Tools for managing Claude Code session transcripts — recaps, cleanup, retitling, etc. Currently ships `sessions-weekly-recap` (daily/weekly recap notes + macOS launchd installer).
+Tools for managing Claude Code session transcripts — recaps, cleanup, retitling, etc. Ships `sessions-weekly-recap` (daily/weekly recap notes + macOS launchd installer) and `sessions-catch-up` (brief yourself on another session — including a `claude export`-style transcript reader that works on dead sessions).
 
 **Install:** `claude plugin install session-tools@jtsternberg`
 

@@ -1,6 +1,6 @@
 # Session Tools
 
-A bucket of skills for working with Claude Code session transcripts stored under `~/.claude/projects/`. Recap, clean up, retitle, or otherwise make sense of what your past sessions contain.
+A bucket of skills for working with Claude Code session transcripts stored under `~/.claude/projects/`. Recap them, catch up on one you abandoned, clean up, retitle, or otherwise make sense of what your past sessions contain.
 
 ## Install
 
@@ -114,6 +114,85 @@ The installed plist:
 | `skills/sessions-weekly-recap/SKILL.md` | Skill definition — modes, merge rules, writing guidelines |
 | `skills/sessions-weekly-recap/scripts/extract_sessions.py` | Scans `~/.claude/projects/*.jsonl` and emits structured JSON |
 | `skills/sessions-weekly-recap/scripts/install_cron.sh` | Installs/manages the weekly launchd job |
+
+---
+
+### 🛟 sessions-catch-up
+
+Brief yourself on a **different** session without touching it. Point it at a session id (or prefix, or slug) and it reads that session's transcript off disk and tells you where the work landed and what's waiting on you.
+
+Built for one specific moment: you come back after a couple of days to a stalled session and can't remember what you were doing. **Speed is the point** — you could scroll back and read the whole thing yourself, so if this isn't faster than that, it's worthless.
+
+```
+/sessions-catch-up 5263bfb5                 # id prefix
+/sessions-catch-up eager-roaming-rose       # session slug
+/sessions-catch-up 5263bfb5 --deep          # also mine the long arc
+```
+
+#### Why not `/export`?
+
+`/export` can't be driven from outside a session. `claude -p "/export <path>"` answers *"/export isn't available in this environment"* and writes nothing — it's a TUI-only local command, and there's no `claude export` subcommand. The only other way to reach it is typing into a live REPL, which needs the session running in a pane and **appends a turn to the session you're trying to read**.
+
+So this reads the JSONL directly. That works on dead sessions, costs zero tokens, mutates nothing, and returns in ~100 ms. It also allows a better shape than a transcript dump:
+
+- Tool-result bodies dropped entirely (they're ~70% of a transcript, and stored *twice*), tool calls collapsed to one-line labels
+- Recent turns near-verbatim, older turns compressed to a timeline
+- **Derived signals** a dump has no concept of: whether the session is blocked on *you*, the last todo state, referenced beads **re-resolved to their current status**, files touched, errors, subagents dispatched
+- Compaction summaries surfaced (detection is `isCompactSummary`, not the long-gone `type: "summary"`)
+
+Typical reduction is 200–800x. Measured: 5.4 MB → 6 KB in 117 ms.
+
+#### `export-session.mjs` — the `claude export` that doesn't exist
+
+The digest is one format of a general-purpose transcript reader, usable on its own and by other tools:
+
+```bash
+SCRIPTS=plugins/session-tools/skills/sessions-catch-up/scripts
+node $SCRIPTS/export-session.mjs <id|prefix|slug> --format digest   # catch-up briefing
+node $SCRIPTS/export-session.mjs <id> --format md                   # full readable transcript
+node $SCRIPTS/export-session.mjs <id> --format json                 # structured
+node $SCRIPTS/export-session.mjs --list                             # id · idle · slug · cwd
+```
+
+Other flags: `--fast`, `--window N`, `--max-chars N` (a hard ceiling), `--truncate N`, `--compaction-full`, `--no-beads`, `--out PATH`, `--cwd PATH`.
+
+Resolution order is exact id → id prefix → slug/title, disambiguated by proximity to your cwd. **Ambiguity is reported, never guessed** — you get a candidate list, same posture as `graveyard peek`.
+
+#### Optional shell wrapper
+
+```bash
+bash $SCRIPTS/install-wrapper.sh install      # → ~/.local/bin/claude-session-catchup
+claude-session-catchup <id>
+claude-session-catchup --yolo <id>            # or CLAUDE_CATCHUP_YOLO=1
+```
+
+`--dangerously-skip-permissions` is **never** assumed — it's opt-in via `--yolo` or the env var. (Bash rather than PHP/Node on purpose: it hands an interactive TTY to `claude`, and a wrapper that captured output would swallow the REPL.)
+
+#### Progressive enhancements
+
+If `hotline` is installed and the target session is blocked on a question, the skill offers to send your answer over. If `handoff` is installed, it can persist the caught-up state. Neither is required, and a small ledger (`~/.claude/sessions-catch-up.prefs.json`) makes sure a declined offer degrades to a one-line protip and then goes quiet permanently.
+
+#### Tests
+
+```bash
+node --test plugins/session-tools/skills/sessions-catch-up/tests/transcript.test.mjs
+```
+
+#### Requirements
+
+Node 18+. (`sessions-weekly-recap` uses Python; this skill uses Node so its parser can be a direct port of the richest existing implementation rather than a third translation of it.)
+
+#### Files
+
+| File | Purpose |
+|------|---------|
+| `skills/sessions-catch-up/SKILL.md` | Two-phase workflow, briefing shape, enhancement gating |
+| `.../scripts/lib/transcript.mjs` | **Source of truth** for parsing + derived signals |
+| `.../scripts/lib/session-index.mjs` | id/prefix/slug resolution + cached index |
+| `.../scripts/lib/format.mjs` | digest / md / text / json renderers |
+| `.../scripts/export-session.mjs` | CLI entry |
+| `.../scripts/nudge.mjs` | Offer-backoff ledger |
+| `.../scripts/install-wrapper.sh` | Optional `claude-session-catchup` shim |
 
 ---
 
