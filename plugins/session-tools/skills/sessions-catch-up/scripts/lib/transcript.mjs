@@ -102,6 +102,10 @@ export function isSyntheticEntry(obj, strippedText) {
 	if (raw && !strippedText) return true;
 	if (/^\s*<command-name>/.test(raw)) return true;
 	if (/^Caveat: The messages below were generated/.test(raw)) return true;
+	// Harness interrupt markers are not things the user said. Left in, they show up
+	// in a catch-up as though they were prompts.
+	if (/^\s*\[Request interrupted by user/.test(strippedText || raw)) return true;
+	if (/^\s*\[Request cancelled/.test(strippedText || raw)) return true;
 	return false;
 }
 
@@ -280,6 +284,31 @@ export function readSubagents(transcriptPath) {
  * blob and destroy any sense of progression — which matters here, because a
  * slash-command-driven session can legitimately contain a single user turn.
  */
+const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+
+/**
+ * Comparison key for detecting a replayed prompt.
+ *
+ * Switching modes re-submits the pending prompt with the slash command appended, so
+ * the two records are not byte-identical: the replay is `<original>\n/plan`. Strip
+ * trailing bare slash-command lines before comparing.
+ */
+export function promptKey(text) {
+	let t = String(text || '').replace(/\n\s*\/[a-z0-9][\w:-]*\s*$/gi, '');
+	return norm(t).toLowerCase();
+}
+
+/** True when two prompts are the same ask — equal keys, or one a prefix of the other. */
+export function samePrompt(a, b) {
+	const ka = promptKey(a), kb = promptKey(b);
+	if (!ka || !kb) return false;
+	if (ka === kb) return true;
+	// A replay can also gain/lose a trailing fragment; only trust prefix-containment
+	// on prompts long enough that the coincidence is implausible.
+	const [short, long] = ka.length <= kb.length ? [ka, kb] : [kb, ka];
+	return short.length >= 60 && long.startsWith(short);
+}
+
 export function mergeConversation(entries) {
 	const turns = [];
 	for (const e of entries) {
@@ -287,6 +316,12 @@ export function mergeConversation(entries) {
 		// correct — it is a hard discontinuity in the conversation.
 		if (e.kind === 'compaction') { turns.push(e); continue; }
 		if (e.role === 'user' && e.kind === 'text') {
+			const prev = turns[turns.length - 1];
+			// Replay dedupe: switching modes (e.g. /plan) re-submits the pending prompt,
+			// so the transcript holds two user records with identical text and different
+			// promptIds. Only collapse CONSECUTIVE identical prompts — with an assistant
+			// turn between them it is a real re-ask and should be kept.
+			if (prev && prev.role === 'user' && samePrompt(prev.text, e.text)) continue;
 			turns.push({ role: 'user', text: e.text, toolUses: [], ts: e.ts });
 			continue;
 		}
@@ -350,6 +385,18 @@ export function extractBeadIds(commands) {
 	return [...ids];
 }
 
+/**
+ * The interesting LINE of a multi-line command, not the whole blob.
+ * Flattening whitespace turned `git commit -F - <<'MSG' … MSG` into 160 chars of
+ * commit-message body, which is noise: the point is that a commit happened.
+ */
+export function notableLine(command) {
+	const lines = String(command).split('\n').map(l => l.trim()).filter(Boolean);
+	const hit = lines.find(l => NOTABLE_CMD.test(l)) || lines[0] || '';
+	const flat = hit.replace(/\s+/g, ' ');
+	return flat.length > 140 ? flat.slice(0, 140) + '…' : flat;
+}
+
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit']);
 const NOTABLE_CMD = /\b(git\s+(commit|push|rebase|merge|revert)|npm\s+(test|run\s+build)|composer\s+test|pytest|phpunit|node\s+--test|make\s+\w+|bd\s+dolt\s+push)\b/;
 
@@ -371,7 +418,7 @@ export function deriveSignals(entries, subagents = []) {
 			if (EDIT_TOOLS.has(t.name) && typeof t.input.file_path === 'string') files.add(t.input.file_path);
 			if (t.name === 'Bash' && typeof t.input.command === 'string') {
 				commands.push(t.input.command);
-				if (NOTABLE_CMD.test(t.input.command)) notable.push(t.input.command.replace(/\s+/g, ' ').slice(0, 160));
+				if (NOTABLE_CMD.test(t.input.command)) notable.push(notableLine(t.input.command));
 			}
 			if (t.name === 'Skill' && typeof t.input.skill === 'string') skills.add(t.input.skill);
 			if (t.name === 'TodoWrite' && Array.isArray(t.input.todos)) todos = t.input.todos;

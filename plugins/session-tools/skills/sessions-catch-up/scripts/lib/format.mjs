@@ -7,7 +7,7 @@
 // derived signals (tail state, todos, beads, files) get top billing.
 // =============================================================================
 
-import { humanIdle, mergeConversation } from './transcript.mjs';
+import { humanIdle, mergeConversation, promptKey, samePrompt } from './transcript.mjs';
 
 const TURN_TRUNC_DEFAULT = 2000;
 
@@ -65,9 +65,18 @@ function renderTimeline(older, maxPrompts = 25) {
 	if (!older.length) return null;
 	let out = [];
 	const toolTally = new Map();
+	// Dedupe identical prompts regardless of position. A mode switch (/plan) replays
+	// the pending prompt, and by then assistant turns sit between the two copies, so
+	// adjacency-based dedupe misses it. This is a compressed overview — a repeated
+	// prompt adds nothing here even when the repeat was genuine.
+	const seenPrompts = [];
 	for (const e of older) {
 		for (const t of e.toolUses || []) toolTally.set(t.name, (toolTally.get(t.name) || 0) + 1);
-		if (e.role === 'user') out.push(`- ${oneLine(e.text, 200)}`);
+		if (e.role !== 'user') continue;
+		if (!promptKey(e.text)) continue;
+		if (seenPrompts.some(p => samePrompt(p, e.text))) continue;
+		seenPrompts.push(e.text);
+		out.push(`- ${oneLine(e.text, 200)}`);
 	}
 	// A long session can have hundreds of earlier prompts; the most recent ones
 	// are the ones that explain where it ended up.

@@ -7,7 +7,8 @@ import path from 'node:path';
 
 import {
 	parseLine, mergeConversation, deriveSignals, deriveTailState,
-	stripSystemNoise, extractBeadIds, textFromContent, toolUseLabel,
+	stripSystemNoise, extractBeadIds, textFromContent, toolUseLabel, notableLine,
+	promptKey, samePrompt,
 } from '../scripts/lib/transcript.mjs';
 import { describeFile, rankCandidates } from '../scripts/lib/session-index.mjs';
 import { formatDigest } from '../scripts/lib/format.mjs';
@@ -193,6 +194,71 @@ test('textFromContent tolerates strings, arrays, and junk', () => {
 	assert.equal(textFromContent([{ type: 'text', text: 'a' }, { type: 'tool_use' }]), 'a');
 	assert.equal(textFromContent(null), '');
 	assert.equal(textFromContent(42), '');
+});
+
+// The next three were all found by running the skill for real, not by unit testing.
+test('harness interrupt markers are not treated as user prompts', () => {
+	assert.equal(parseLine(userText('[Request interrupted by user]')), null);
+	assert.equal(parseLine(userText('[Request interrupted by user for tool use]')), null);
+	assert.ok(parseLine(userText('[Request] something I actually typed')), 'real text still kept');
+});
+
+test('a replayed prompt (mode switch) collapses, a genuine re-ask does not', () => {
+	const dup = mergeConversation([
+		parseLine(userText('do the thing')),
+		parseLine(userText('do the thing')),   // /plan re-submitted it
+	].filter(Boolean));
+	assert.equal(dup.length, 1, 'consecutive identical prompts collapse');
+
+	const reask = mergeConversation([
+		parseLine(userText('do the thing')),
+		parseLine(asst('working on it')),
+		parseLine(userText('do the thing')),   // asked again after a reply — real
+	].filter(Boolean));
+	assert.equal(reask.filter(t => t.role === 'user').length, 2, 'a real re-ask is preserved');
+});
+
+// The exact real-world shape: /plan re-submits the pending prompt with the slash
+// command appended, so the two records are NOT byte-identical.
+test('samePrompt catches a replay that gained a trailing slash command', () => {
+	const original = 'I need a new skill... trigger it with a session id and catch me up on that conversation';
+	const replayed = original + '\n/plan';
+	assert.ok(samePrompt(original, replayed), 'appended slash command must not defeat dedupe');
+	assert.equal(promptKey(original), promptKey(replayed));
+
+	// Guardrails: genuinely different prompts stay distinct, and short ones are not
+	// collapsed by prefix-containment.
+	assert.ok(!samePrompt(original, 'something else entirely'));
+	assert.ok(!samePrompt('yes', 'yes please do that thing'), 'short prefixes must not collapse');
+});
+
+test('the compressed timeline dedupes a replayed prompt even across assistant turns', () => {
+	// The real shape: prompt, work starts, /plan replays the prompt.
+	const entries = [
+		parseLine(userText('build me a thing with a long distinctive prompt body')),
+		parseLine(asst('starting work')),
+		parseLine(userText('build me a thing with a long distinctive prompt body')),
+		parseLine(asst('continuing')),
+	].filter(Boolean);
+	// Pad so the early turns land in the compressed section rather than the window.
+	for (let i = 0; i < 20; i++) entries.push(parseLine(asst('filler ' + i)));
+
+	const data = {
+		meta: { sessionId: 'abc', cwd: '/tmp', idleMs: 1000, liveness: 'idle', sizeBytes: 1000 },
+		entries, signals: deriveSignals(entries),
+	};
+	const out = formatDigest(data, { window: 4 });
+	const section = out.slice(out.indexOf('Your prompts in that stretch'), out.indexOf('Tool activity'));
+	const hits = section.split('long distinctive prompt body').length - 1;
+	assert.equal(hits, 1, `replayed prompt should appear once, appeared ${hits}x`);
+});
+
+test('notable commands show the interesting line, not a heredoc body', () => {
+	const cmd = `cd /repo\ngit commit -q -F - <<'MSG'\nfeat: a very long commit subject line\n\nbody paragraph that should never appear in the digest\nMSG`;
+	const out = notableLine(cmd);
+	assert.match(out, /git commit/);
+	assert.ok(!out.includes('body paragraph'), 'commit body must not leak');
+	assert.ok(out.length <= 141, `too long: ${out.length}`);
 });
 
 test('parseLine survives malformed JSON', () => {
