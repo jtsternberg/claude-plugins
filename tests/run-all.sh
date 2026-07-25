@@ -59,10 +59,19 @@ if have bash; then
 	done
 fi
 
-# ---- gws python suites ------------------------------------------------------
+# ---- python suites ----------------------------------------------------------
 
 PY="$HOME/.venvs/genai/bin/python3"
 [[ -x "$PY" ]] || PY="$(command -v python3 || true)"
+
+# stdlib unittest — no third-party deps, so this always runs.
+if [[ -n "$PY" ]]; then
+	run "session-tools: weekly-recap extractor" \
+		"$PY" -m unittest discover -s plugins/session-tools/skills/sessions-weekly-recap/tests
+else
+	skip "weekly-recap extractor" "python3 not installed"
+fi
+
 if [[ -n "$PY" ]] && "$PY" -c 'import pytest' >/dev/null 2>&1; then
 	for d in plugins/gws/skills/*/tests; do
 		[[ -d "$d" ]] || continue

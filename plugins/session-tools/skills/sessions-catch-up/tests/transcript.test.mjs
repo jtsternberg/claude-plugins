@@ -10,7 +10,7 @@ import {
 	stripSystemNoise, extractBeadIds, textFromContent, toolUseLabel, notableLine,
 	promptKey, samePrompt,
 } from '../scripts/lib/transcript.mjs';
-import { describeFile, rankCandidates } from '../scripts/lib/session-index.mjs';
+import { describeFile, rankCandidates, resolve as resolveTarget } from '../scripts/lib/session-index.mjs';
 import { formatDigest, formatMd } from '../scripts/lib/format.mjs';
 import { decide } from '../scripts/nudge.mjs';
 
@@ -464,4 +464,18 @@ test('archive records local_command system records too', () => {
 test('archive still drops system records that carry no command', () => {
 	assert.equal(parseLine(J({ ...base, type: 'system', subtype: 'turn_duration', content: 'took 4s' }), { archive: true }), null);
 	assert.equal(parseLine(J({ ...base, type: 'system', subtype: 'stop_hook_summary' }), { archive: true }), null);
+});
+
+// A caller that already holds a transcript path (bulk scanners like the weekly
+// recap) should not have to reverse it into a session id just to be resolved.
+test('resolve accepts a direct transcript path', () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'catchup-path-'));
+	const f = path.join(dir, 'abcdef01-0000-0000-0000-000000000000.jsonl');
+	fs.writeFileSync(f, userText('hello from a path') + '\n');
+	try {
+		assert.equal(resolveTarget(f).file, f);
+		assert.equal(resolveTarget(f).how, 'path');
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 });

@@ -151,6 +151,16 @@ export function resolve(target, { cwd = process.cwd() } = {}) {
 	if (!target) throw new NoMatch('(empty)');
 	const t = String(target).trim();
 
+	// --- Tier 0: an actual path. Bulk scanners (the weekly recap walks
+	// ~/.claude/projects itself) already hold the file and should not have to
+	// reverse it into a session id to be let in. Checked first because it needs no
+	// directory scan and cannot be ambiguous. ---
+	if (/[/\\]/.test(t) || t.endsWith('.jsonl')) {
+		try {
+			if (fs.statSync(t).isFile()) return { file: path.resolve(t), how: 'path' };
+		} catch { /* not a path we can use — fall through to the id tiers */ }
+	}
+
 	// --- Tier 1: id / id-prefix. Directory scan only, no file reads. ---
 	const files = allSessionFiles();
 	const exact = files.filter(f => path.basename(f, '.jsonl') === t);

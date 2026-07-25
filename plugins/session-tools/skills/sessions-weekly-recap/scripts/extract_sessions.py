@@ -12,6 +12,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import argparse
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -38,68 +39,116 @@ def previous_week_range() -> tuple[str, str]:
     return last_monday.strftime("%Y-%m-%d"), last_sunday.strftime("%Y-%m-%d")
 
 
-def strip_tags(text: str) -> str:
-    """Remove XML/HTML tags from text."""
-    text = re.sub(r"<[^>]+>[^<]*</[^>]+>", "", text, flags=re.DOTALL)
-    text = re.sub(r"<[^>]+/?>", "", text)
-    return text.strip()
+EXPORT_BIN = (
+    Path(__file__).resolve().parents[2]
+    / "sessions-catch-up"
+    / "scripts"
+    / "export-session.mjs"
+)
 
 
-def extract_session_data(jsonl_path: Path) -> dict:
-    """Extract user messages and metadata from a session transcript."""
-    user_messages: list[str] = []
-    commit_messages: list[str] = []
+class ExportUnavailable(RuntimeError):
+    """export-session.mjs could not be run — see the message for why."""
 
+
+def genuine_user_messages(jsonl_path: Path) -> list[str]:
+    """The things JT actually typed, per lib/transcript.mjs.
+
+    Delegated rather than parsed here on purpose. This script used to read the
+    JSONL itself with a generic strip-all-tags regex and no record filtering, so
+    it counted as "user messages": harness-injected context (isMeta), SUBAGENT
+    prompts (isSidechain), and Claude's own compaction summaries — none of which
+    JT wrote. `--format text` applies the same contract the rest of session-tools
+    uses and emits one flattened line per turn, `❯ ` for user turns.
+    """
+    if not EXPORT_BIN.is_file():
+        raise ExportUnavailable(f"export-session.mjs not found at {EXPORT_BIN}")
     try:
-        with open(jsonl_path, "r") as f:
+        proc = subprocess.run(
+            ["node", str(EXPORT_BIN), str(jsonl_path), "--format", "text", "--no-beads"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except FileNotFoundError as exc:
+        raise ExportUnavailable("node is required to read transcripts") from exc
+    except subprocess.TimeoutExpired:
+        return []
+    if proc.returncode != 0:
+        return []
+
+    out: list[str] = []
+    for line in proc.stdout.splitlines():
+        if not line.startswith("❯ "):
+            continue
+        text = line[2:].strip()
+        if len(text) > 5:
+            out.append(text[:500])
+    return out
+
+
+# A commit shows up in tool output as git's own confirmation line — branch, short
+# sha, subject: "[main 1a2b3c4] fix: thing", "[detached HEAD 1a2b3c4] …",
+# "[main (root-commit) 1a2b3c4] …". Scanning for that is not the transcript
+# contract above, just a targeted look at tool results, so it stays local.
+#
+# Note there is no literal "commit" in that output. The previous version required
+# one (`"commit" in t.lower()`) on top of keying off a record type that does not
+# exist, so it was doubly dead. The shape of the line is the signal.
+COMMIT_LINE = re.compile(r"^\[.{0,60}?\b[0-9a-f]{7,40}\]\s+\S")
+COMMIT_MARKERS = ("create mode", "file changed", "files changed", "insertion")
+
+
+def session_commits(jsonl_path: Path) -> list[str]:
+    """Commit confirmation lines out of tool output.
+
+    Previously keyed off `type == "tool_result"`, which Claude Code does not emit
+    as a record type — tool output is a `type:"user"` record whose content holds
+    tool_result BLOCKS. So this never matched: 0 of 150 sessions in a real week
+    produced a single commit.
+    """
+    commits: list[str] = []
+    try:
+        with open(jsonl_path, "r", errors="ignore") as f:
             for line in f:
                 line = line.strip()
-                if not line:
+                if not line or '"tool_result"' not in line:
                     continue
                 try:
                     entry = json.loads(line)
                 except (json.JSONDecodeError, ValueError):
                     continue
-
-                msg_type = entry.get("type", "")
-
-                if msg_type == "user":
-                    content = entry.get("message", {}).get("content", "")
-                    if isinstance(content, list):
-                        parts = []
-                        for c in content:
-                            if isinstance(c, dict) and c.get("type") == "text":
-                                parts.append(strip_tags(c.get("text", "")))
-                        content = " ".join(parts)
-                    else:
-                        content = strip_tags(content)
-
-                    content = re.sub(r"\s+", " ", content).strip()
-                    if len(content) > 5:
-                        user_messages.append(content[:500])
-
-                elif msg_type == "tool_result":
-                    result_content = entry.get("content", "")
-                    if isinstance(result_content, list):
-                        for c in result_content:
-                            if isinstance(c, dict):
-                                t = c.get("text", "")
-                                if "commit" in t.lower() and (
-                                    "create mode" in t
-                                    or "file changed" in t
-                                    or "insertion" in t
-                                ):
-                                    for cl in t.split("\n"):
-                                        if cl.strip().startswith("[") and "]" in cl:
-                                            commit_messages.append(
-                                                cl.strip()[:200]
-                                            )
+                content = entry.get("message", {}).get("content")
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if not isinstance(block, dict) or block.get("type") != "tool_result":
+                        continue
+                    body = block.get("content", "")
+                    if isinstance(body, list):
+                        body = " ".join(
+                            b.get("text", "")
+                            for b in body
+                            if isinstance(b, dict)
+                        )
+                    if not isinstance(body, str):
+                        continue
+                    if not any(m in body for m in COMMIT_MARKERS):
+                        continue
+                    for cl in body.split("\n"):
+                        cl = cl.strip()
+                        if COMMIT_LINE.match(cl):
+                            commits.append(cl[:200])
     except (OSError, IOError):
         pass
+    return commits
 
+
+def extract_session_data(jsonl_path: Path) -> dict:
+    """Extract user messages and metadata from a session transcript."""
     return {
-        "user_messages": user_messages,
-        "commits": commit_messages[:10],
+        "user_messages": genuine_user_messages(jsonl_path),
+        "commits": session_commits(jsonl_path)[:10],
     }
 
 
