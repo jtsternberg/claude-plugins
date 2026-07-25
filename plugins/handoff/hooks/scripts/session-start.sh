@@ -6,7 +6,9 @@
 #    in the handoff it writes later.
 # 2. Scans the working directory for pending handoffs — HANDOFF*.md files and,
 #    when beads is available, open issues titled "Handoff:" — and prints one
-#    compact line per finding, suggesting /handoff:pickup-handoff.
+#    compact line per finding, suggesting /handoff:pickup-handoff <identifier>.
+#    Each finding line carries its own identifier (bd id, or filename) so pickup
+#    can be invoked with it and resolve directly instead of re-searching.
 #
 # Prints NOTHING when there is nothing to report. Never fails: every error
 # path degrades silently and the script always exits 0.
@@ -116,7 +118,8 @@ fi
 if [ -n "$findings" ]; then
   printf 'Pending handoff(s) found in %s:\n' "$CWD"
   printf '%s' "$findings"
-  printf 'To resume one, run /handoff:pickup-handoff\n'
+  printf 'To resume one, run /handoff:pickup-handoff <id-or-filename> — pass the identifier\n'
+  printf 'from the list above so pickup resolves it directly instead of re-searching.\n'
 fi
 
 exit 0

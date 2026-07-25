@@ -30,13 +30,15 @@ Create or update a handoff for the current work.
 **Two storage backends**, detected automatically:
 
 - **Beads** (preferred, when the `bd` CLI is installed and the repo has a `.beads/` directory): the handoff is stored as a bd issue titled `Handoff: <work-name>`. No file litter, and completion maps to `bd close`.
-- **Files** (universal fallback): a `HANDOFF-<work-name>.md` in the working directory, named for the work (branch-based by default, descriptive when the branch name is generic). The file opens with a pickup banner telling the next agent to run `/handoff:pickup-handoff`, and gets added to `.git/info/exclude` so it never pollutes the repo.
+- **Files** (universal fallback): a `HANDOFF-<work-name>.md` in the working directory, named for the work (branch-based by default, descriptive when the branch name is generic). The file opens with a pickup banner telling the next agent to run `/handoff:pickup-handoff <path>`, and gets added to `.git/info/exclude` so it never pollutes the repo.
 
-### `/handoff:pickup-handoff`
+### `/handoff:pickup-handoff [<bd-issue-id> | <path>]`
 
 Resume work from a handoff in a fresh session.
 
-Finds the handoff (named file → branch/descriptive `HANDOFF*.md` → open `Handoff:` bd issues), reads it once, reconciles it against the actual repo state using the Anchor SHA ("N commits since the handoff was written; here's what changed"), and — assuming the user hasn't read the doc — plainly reports where things stand and the concrete plan before continuing. It also sweeps for stale leftover handoff files and flags obvious corpses.
+**Pass the identifier when you have one** — `/handoff:pickup-handoff claude-plugins-20xu` — and it resolves that handoff in a single lookup. The `handoff` skill prints the identifier when it saves, and the session-start notice lists it per finding, so it's almost always available. Without it, pickup has to search (branch/descriptive `HANDOFF*.md` → open `Handoff:` bd issues), which is guesswork once more than one handoff is open.
+
+It then reads the handoff once, reconciles it against the actual repo state using the Anchor SHA ("N commits since the handoff was written; here's what changed"), and — assuming the user hasn't read the doc — plainly reports where things stand and the concrete plan before continuing. It also sweeps for stale leftover handoff files and flags obvious corpses.
 
 **Lifecycle rule:** the handoff is a boot artifact, not a living document. The pickup agent never updates it after reading; when the work completes, the file is deleted (or the bd issue closed) and the user is told.
 
@@ -44,7 +46,7 @@ Finds the handoff (named file → branch/descriptive `HANDOFF*.md` → open `Han
 
 Installed automatically with the plugin (`hooks/hooks.json`):
 
-- **Session start** (`startup`/`resume`): scans the working directory for `HANDOFF*.md` files and open `Handoff:` bd issues. If any exist, prints one compact line per finding (name, age, commits since its anchor) suggesting `/handoff:pickup-handoff`. Prints nothing when clean. It also caches the session's ID and transcript path to `/tmp/claude-handoff/<pid>.json`, which is where the handoff skill's Session section comes from.
+- **Session start** (`startup`/`resume`): scans the working directory for `HANDOFF*.md` files and open `Handoff:` bd issues. If any exist, prints one compact line per finding (identifier, age, commits since its anchor) telling the agent to run `/handoff:pickup-handoff <id-or-filename>` with the identifier from that list. Prints nothing when clean. It also caches the session's ID and transcript path to `/tmp/claude-handoff/<pid>.json`, which is where the handoff skill's Session section comes from.
 - **Post-compaction** (`compact`): refreshes that cache and prints a one-line reminder that `/handoff:handoff` can bank fresh context before details fade.
 
 Hook scripts are pure bash with no hard dependencies and degrade silently on any failure.

@@ -19,7 +19,7 @@ Check whether the file already exists. If it does, read it in full first to unde
 The file starts with this banner at the very top, before the Goal — it's the next agent's cold-start path:
 
 ```
-> **Resuming this work?** Run `/handoff:pickup-handoff` (or paste: `Read <absolute path to this file> and continue where we left off`).
+> **Resuming this work?** Run `/handoff:pickup-handoff <absolute path to this file>` (or paste: `Read <absolute path to this file> and continue where we left off`).
 ```
 
 Then the contract sections from SKILL.md, in order.

@@ -48,6 +48,12 @@ After saving, output:
 ```
 Handoff saved: <absolute file path, or beads issue ID>
 
-To resume in a fresh session, run /handoff:pickup-handoff
+To resume in a fresh session, run /handoff:pickup-handoff <identifier>
 Fallback: <backend-specific resume line from the reference>
 ```
+
+**`<identifier>` is required, not decorative** — the beads issue ID or the absolute
+file path, whichever backend you just wrote to. You know it at this point; pass it.
+Emitting a bare `/handoff:pickup-handoff` forces the next agent to rediscover what
+you already had, and that search is guesswork when several handoffs are open. Handing
+it the identifier makes pickup deterministic: one `bd show <id>` / one `Read`.
