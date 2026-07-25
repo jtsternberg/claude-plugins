@@ -19,8 +19,9 @@
 //   --window N                     turns kept verbatim in a digest (default 12)
 //   --max-chars N                  digest budget ceiling (default 40000)
 //   --truncate N                   per-turn char cap in a digest (default 2000)
-//   --fast                         smaller window, skip live beads resolution
-//   --no-beads                     skip `bd show` resolution
+//   --fast                         smaller window / tighter per-turn caps
+//   --no-beads                     skip the `bd show` lookup (saves ~0.5s)
+//   --compaction-full              do not cap the compaction summary
 //   --out PATH                     also write to PATH
 //   --cwd PATH                     cwd used to disambiguate names (default: $PWD)
 //   --list                         list all sessions (id, idle, cwd, slug)
@@ -73,19 +74,24 @@ function showCandidates(target, candidates) {
 /**
  * Resolve bead ids to live status. This is the point of extracting them: a
  * two-day-old transcript says what the beads WERE, `bd show` says what they ARE.
+ *
+ * ONE `bd show` call for every id — it accepts multiple. A single invocation costs
+ * ~460ms, so the serial-per-id version would have cost ~4s for nine ids and blown
+ * the latency budget outright. Batched, live bead status is affordable even on the
+ * fast path, which matters because it is often the actual answer to
+ * "what's waiting on me".
  */
 function resolveBeads(ids) {
 	const out = {};
 	if (!ids.length) return out;
-	try { execFileSync('bd', ['--version'], { stdio: 'ignore', timeout: 3000 }); } catch { return out; }
-	for (const id of ids.slice(0, 10)) {
-		try {
-			const raw = execFileSync('bd', ['show', id, '--json'], { encoding: 'utf8', timeout: 4000, stdio: ['ignore', 'pipe', 'ignore'] });
-			const parsed = JSON.parse(raw);
-			const rec = Array.isArray(parsed) ? parsed[0] : (parsed.issue || parsed);
-			if (rec && rec.id) out[id] = { title: rec.title || '', status: rec.status || '?' };
-		} catch { /* unknown id or bd unavailable — drop it */ }
-	}
+	try {
+		const raw = execFileSync('bd', ['show', ...ids.slice(0, 20), '--json'],
+			{ encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
+		const parsed = JSON.parse(raw);
+		for (const rec of (Array.isArray(parsed) ? parsed : [parsed.issue || parsed])) {
+			if (rec && rec.id) out[rec.id] = { title: rec.title || '', status: rec.status || '?' };
+		}
+	} catch { /* bd absent, or none of the ids exist — leave unresolved */ }
 	return out;
 }
 
@@ -120,7 +126,7 @@ function main() {
 	const signals = deriveSignals(parsed.entries, parsed.subagents);
 	const data = { meta: parsed.meta, entries: parsed.entries, signals };
 
-	const resolvedBeads = (o.beads && !o.fast) ? resolveBeads(signals.beadIds) : {};
+	const resolvedBeads = o.beads ? resolveBeads(signals.beadIds) : {};
 
 	let out;
 	switch (o.format) {

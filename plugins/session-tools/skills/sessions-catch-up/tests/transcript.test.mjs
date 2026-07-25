@@ -146,6 +146,26 @@ test('bead ids come from bd invocations, not loose text', () => {
 	assert.ok(!ids.includes('in_progress'), 'stoplist filters status words');
 });
 
+// Regression: found by running the digest against a real session. `bd create` has
+// no id argument, and scanning its title/description produced ids out of ordinary
+// hyphenated words.
+test('bd create text does not yield phantom bead ids', () => {
+	const ids = extractBeadIds([
+		'bd create "handoff: portable/durable handoff flag (cross-machine, co-worker)" --description="post-compact nudge, git-exclude litter fix, read-once pickup, opt-in flag"',
+		'bd close claude-plugins-jew0 --reason "shipped"',
+	]);
+	assert.deepEqual(ids, ['claude-plugins-jew0']);
+	for (const phantom of ['post-compact', 'co-worker', 'opt-in', 'git-exclude', 'read-once', 'cross-machine']) {
+		assert.ok(!ids.includes(phantom), `phantom id leaked: ${phantom}`);
+	}
+});
+
+test('bead ids stop at flags and handle `bd dep add A B`', () => {
+	assert.deepEqual(extractBeadIds(['bd show my-bead-1 --json']), ['my-bead-1']);
+	assert.deepEqual(extractBeadIds(['bd dep add left-1 right-2']).sort(), ['left-1', 'right-2']);
+	assert.deepEqual(extractBeadIds(['bd ready --json']), [], 'ready takes no id');
+});
+
 test('signals collect files, notable commands, skills, errors, tool counts', () => {
 	const entries = [
 		parseLine(asst('', [{ name: 'Edit', input: { file_path: '/a.js' } }, { name: 'Write', input: { file_path: '/b.js' } }])),

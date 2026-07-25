@@ -317,21 +317,33 @@ const BEAD_STOPLIST = new Set([
 	'parent-child', 'related-to', 'pull-request', 'up-to-date', 'json', 'no-color',
 ]);
 
-/** Bead IDs from `bd` invocations only — a loose text regex is too noisy. */
+/**
+ * Bead IDs from `bd` invocations only.
+ *
+ * Deliberately narrow: only verbs that TAKE an id, and only the first one or two
+ * positional tokens after the verb. `bd create` is skipped entirely — it has no id
+ * argument (the id is generated), and its title/description text is full of
+ * hyphenated words that look exactly like ids. Scanning whole command tails
+ * produced false positives like `post-compact`, `co-worker`, and `opt-in`.
+ */
 export function extractBeadIds(commands) {
 	const ids = new Set();
-	const verb = /\bbd\s+(?:dolt\s+\w+|create|update|close|show|dep|defer|supersede|human|ready|list|lint)\b([^\n;|&]*)/g;
+	const verb = /\bbd\s+(update|close|show|dep|defer|supersede|human|reopen|comment)\s+([^\n;|&]*)/g;
 	for (const cmd of commands) {
 		let m;
 		while ((m = verb.exec(cmd)) !== null) {
-			const tail = m[1] || '';
-			for (const tok of tail.split(/\s+/)) {
-				if (!tok || tok.startsWith('-') || tok.includes('/') || tok.includes('=')) continue;
+			const isDep = m[1] === 'dep';
+			let taken = 0;
+			for (const tok of (m[2] || '').split(/\s+/)) {
+				if (!tok) continue;
+				if (tok.startsWith('-')) break;          // flags end the positional run
+				if (isDep && /^(add|remove|list)$/.test(tok)) continue;  // `bd dep add A B`
 				const clean = tok.replace(/^["']|["',.]$/g, '');
 				// Shapes seen in the wild: claude-plugins-kzwk, dotfiles-206, bd-42
 				if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(clean) && !BEAD_STOPLIST.has(clean)) {
 					ids.add(clean);
 				}
+				if (++taken >= (isDep ? 2 : 1)) break;   // only the id argument(s)
 			}
 		}
 	}
