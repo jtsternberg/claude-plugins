@@ -24,7 +24,7 @@ Resume work from a handoff written by a previous agent (via the companion `hando
    **If `$ARGUMENTS` holds an identifier, that IS the handoff — go straight to step 2.**
    The `handoff` skill emits it precisely so this step costs one command:
 
-   - looks like a beads id (e.g. `claude-plugins-20xu`) → `bd show <id>`
+   - looks like a beads id (e.g. `myproject-20xu`) → `bd show <id>`
    - looks like a path → `Read` it
 
    Do **not** also glob for `HANDOFF*.md`, list open `Handoff:` issues, or check the
