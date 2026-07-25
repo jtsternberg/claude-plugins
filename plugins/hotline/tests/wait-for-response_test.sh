@@ -327,6 +327,109 @@ else
 fi
 rm -rf "$H2" "$CD2" "$SD2"
 
+# ---- preemption: the receiver was handed a different task (claude-plugins-dvjo)
+# A visible surface is one the human can type into — that is the point of
+# side-by-side placement. When they do, the receiver never emits OUR nonce's
+# STATUS, and before this the caller sat through the full 1800s cmux timeout with
+# no way to tell "still working" from "will never answer". Observed for real:
+# dotfiles session 84bab936 did the work, got reassigned, and the waiter had to be
+# killed by hand.
+echo ""
+echo "Preemption detection:"
+
+PREEMPT_CHECK="$DIAL_SCRIPTS/preempt-check.sh"
+
+mk_transcript() {   # $1 = body → echoes path
+  local d; d=$(mktemp -d)
+  printf '%s\n' "$1" > "$d/t.jsonl"
+  echo "$d/t.jsonl"
+}
+
+# Our prompt submitted, model still working, nobody else spoke → NOT preempted.
+T_OK=$(mk_transcript \
+'{"type":"user","sessionId":"s","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
+{"type":"assistant","sessionId":"s","message":{"content":[{"type":"text","text":"working on it"}]}}')
+set +e; bash "$PREEMPT_CHECK" "$T_OK" "$TNONCE" >/dev/null 2>&1; RCP=$?; set -e
+if [[ $RCP -ne 0 ]]; then
+  pass "a working receiver is not reported as preempted"
+else
+  fail "a working receiver is not reported as preempted" "rc=$RCP"
+fi
+rm -rf "$(dirname "$T_OK")"
+
+# A human prompt after ours → preempted, and the prompt is reported.
+T_PRE=$(mk_transcript \
+'{"type":"user","sessionId":"s","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
+{"type":"assistant","sessionId":"s","message":{"content":[{"type":"text","text":"on it"}]}}
+{"type":"user","sessionId":"s","message":{"content":"actually go do the PSR4 migration instead"}}')
+set +e; OUTP=$(bash "$PREEMPT_CHECK" "$T_PRE" "$TNONCE" 2>/dev/null); RCP=$?; set -e
+if [[ $RCP -eq 0 ]] && printf '%s' "$OUTP" | grep -q "PSR4 migration"; then
+  pass "a human prompt after ours is reported as preemption"
+else
+  fail "a human prompt after ours is reported as preemption" "rc=$RCP out=$OUTP"
+fi
+rm -rf "$(dirname "$T_PRE")"
+
+# Tool results, meta records and subagent turns are NOT preemption.
+T_NOISE=$(mk_transcript \
+'{"type":"user","sessionId":"s","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
+{"type":"user","sessionId":"s","message":{"content":[{"type":"tool_result","tool_use_id":"t0","content":"file1"}]}}
+{"type":"user","isMeta":true,"sessionId":"s","message":{"content":"injected context"}}
+{"type":"user","isSidechain":true,"sessionId":"s","message":{"content":"subagent prompt"}}
+{"type":"user","isCompactSummary":true,"sessionId":"s","message":{"content":"Summary: things"}}')
+set +e; bash "$PREEMPT_CHECK" "$T_NOISE" "$TNONCE" >/dev/null 2>&1; RCP=$?; set -e
+if [[ $RCP -ne 0 ]]; then
+  pass "tool results, meta, subagent and compaction records are not preemption"
+else
+  fail "tool results, meta, subagent and compaction records are not preemption" "rc=$RCP"
+fi
+rm -rf "$(dirname "$T_NOISE")"
+
+# A user interrupt is preemption too — the receiver will never finish our turn.
+T_INT=$(mk_transcript \
+'{"type":"user","sessionId":"s","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
+{"type":"user","sessionId":"s","message":{"content":"[Request interrupted by user for tool use]"}}')
+set +e; bash "$PREEMPT_CHECK" "$T_INT" "$TNONCE" >/dev/null 2>&1; RCP=$?; set -e
+if [[ $RCP -eq 0 ]]; then
+  pass "a user interrupt counts as preemption"
+else
+  fail "a user interrupt counts as preemption" "rc=$RCP"
+fi
+rm -rf "$(dirname "$T_INT")"
+
+# Our own prompt before the nonce turn must not count (no false positive on the
+# ringing prompt or a prior call in the same session).
+T_PRIOR=$(mk_transcript \
+'{"type":"user","sessionId":"s","message":{"content":"an earlier unrelated human prompt"}}
+{"type":"user","sessionId":"s","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
+{"type":"assistant","sessionId":"s","message":{"content":[{"type":"text","text":"working"}]}}')
+set +e; bash "$PREEMPT_CHECK" "$T_PRIOR" "$TNONCE" >/dev/null 2>&1; RCP=$?; set -e
+if [[ $RCP -ne 0 ]]; then
+  pass "prompts BEFORE our nonce turn are not preemption"
+else
+  fail "prompts BEFORE our nonce turn are not preemption" "rc=$RCP"
+fi
+rm -rf "$(dirname "$T_PRIOR")"
+
+# End to end: wait-for-response.sh must bail fast with exit 3, not sit out the timeout.
+CT3=$(setup_transcript_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"content":[{"type":"text","text":"on it"}]}}
+{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"never mind, do something else entirely"}}')
+H3=${CT3%%|*}; rest3=${CT3#*|}; CD3=${rest3%%|*}; SD3=${rest3#*|}
+START3=$SECONDS
+set +e
+ERR3=$(HOME="$H3" PATH="$SD3:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD3" --timeout 90 --submit-deadline 6 2>&1 >/dev/null)
+RC3=$?
+set -e
+EL3=$((SECONDS - START3))
+if [[ $RC3 -eq 3 && $EL3 -lt 30 ]] && printf '%s' "$ERR3" | grep -qi "reassigned\|preempt"; then
+  pass "wait-for-response exits 3 on preemption instead of waiting out the timeout (${EL3}s)"
+else
+  fail "wait-for-response exits 3 on preemption" "rc=$RC3 elapsed=${EL3}s err=$ERR3"
+fi
+rm -rf "$H3" "$CD3" "$SD3"
+
 # ---- summary ---------------------------------------------------------------
 
 echo ""
