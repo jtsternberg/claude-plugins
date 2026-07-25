@@ -1,0 +1,28 @@
+name: tests
+
+# The repo had no CI at all, so every suite was hand-run and the transcript
+# parser drifted twice without anything noticing. This is the minimum that makes
+# `tests/run-all.sh` automatic.
+#
+# Suites needing cmux (a local macOS terminal multiplexer) self-skip on a runner
+# and are reported as skips, not passes. The runner is Linux on purpose: these are
+# also meant to keep working on the Ubuntu box.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run all suites
+        run: bash tests/run-all.sh
