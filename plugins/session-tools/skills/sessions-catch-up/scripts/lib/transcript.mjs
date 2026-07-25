@@ -21,7 +21,9 @@
 //   - `thinking` blocks persist with EMPTY text (signature only) — reasoning is
 //     unrecoverable, do not plan around it.
 //   - Tool output is stored TWICE: the tool_result content block AND a
-//     duplicate top-level `.toolUseResult`. Both are dropped here.
+//     duplicate top-level `.toolUseResult`. The duplicate is always dropped; the
+//     content block is dropped for catch-up fidelity and kept (clipped) under
+//     `{ archive: true }`, which md/json parse with.
 //   - ~/.claude/todos/ is empty in 2.1.219; todo state must come from the last
 //     TodoWrite tool_use input in the transcript.
 // =============================================================================
@@ -67,16 +69,54 @@ export function stripSystemNoise(text) {
 	return out.trim();
 }
 
-export function toolUseLabel(b) {
+export function toolUseLabel(b, max = 120) {
 	const name = b.name || 'tool';
 	const inp = b.input || {};
 	let hint = '';
 	for (const k of ['command', 'file_path', 'pattern', 'skill', 'description', 'prompt']) {
 		if (typeof inp[k] === 'string') { hint = inp[k]; break; }
 	}
-	hint = String(hint).replace(/\s+/g, ' ').slice(0, 120);
+	hint = String(hint).replace(/\s+/g, ' ').slice(0, max);
 	return hint ? `${name}: ${hint}` : name;
 }
+
+// ---- archive fidelity -------------------------------------------------------
+// A catch-up card and a permanent archive disagree about what counts as content.
+// The card wants human prose and nothing else; the archive has to record what the
+// session was ASKED to do and what its tools returned, or it cannot stand in for
+// the transcript it replaces. `opts.archive` selects the archive reading.
+
+const ARCHIVE_TOOL_CLIP = 2000;
+
+/** `/foo bar` out of a <command-name>/<command-args> envelope, or null. */
+export function parseCommandTurn(raw) {
+	const text = String(raw || '');
+	const name = text.match(/<command-name>\s*([^<]*?)\s*<\/command-name>/);
+	if (!name || !name[1]) return null;
+	const args = text.match(/<command-args>([\s\S]*?)<\/command-args>/);
+	const cmd = name[1].startsWith('/') ? name[1] : `/${name[1]}`;
+	const tail = args ? args[1].replace(/\s+/g, ' ').trim() : '';
+	return tail ? `${cmd} ${tail}` : cmd;
+}
+
+/** Tool output for an archive: newlines kept, clipped with the elision disclosed. */
+export function archiveToolResult(results) {
+	const out = [];
+	for (const r of results) {
+		let text = typeof r.content === 'string' ? r.content : textFromContent(r.content);
+		text = text.replace(/[ \t]+$/gm, '').trim();
+		if (text.length > ARCHIVE_TOOL_CLIP) {
+			const elided = text.length - ARCHIVE_TOOL_CLIP;
+			text = text.slice(0, ARCHIVE_TOOL_CLIP) + `\n… _(${elided} chars elided)_`;
+		}
+		out.push((r.is_error ? '⚠ ' : '') + (text || '(no output)'));
+	}
+	return out.join('\n');
+}
+
+// User-caused events. Harness boilerplate they are not: an interruption is a thing
+// the human did, and an archive that drops it misreports the history.
+const INTERRUPT_MARKERS = [/^\s*\[Request interrupted by user/, /^\s*\[Request cancelled/];
 
 export function summarizeToolResult(results) {
 	const out = [];
@@ -92,20 +132,26 @@ export function summarizeToolResult(results) {
 // Synthetic turns that are machinery, not conversation: resume stubs, slash
 // command plumbing, and turns whose entire content was harness noise. Modeled
 // on graveyard's isSyntheticEntry, which exists for the same reason.
-export function isSyntheticEntry(obj, strippedText) {
+export function isSyntheticEntry(obj, strippedText, opts = {}) {
 	if (obj.isMeta) return true;
 	if (obj.isVisibleInTranscriptOnly && !obj.isCompactSummary) return true;
 	const raw = typeof obj?.message?.content === 'string'
 		? obj.message.content
 		: textFromContent(obj?.message?.content);
+	if (/^Caveat: The messages below were generated/.test(raw)) return true;
+	// An archive keeps the command that drove the session and any interruption the
+	// user caused; for a catch-up card both are plumbing.
+	if (opts.archive) {
+		if (parseCommandTurn(raw)) return false;
+		if (INTERRUPT_MARKERS.some(re => re.test(strippedText || raw))) return false;
+		return raw ? !strippedText : false;
+	}
 	// A turn that was nothing but a <command-*> / <system-reminder> envelope.
 	if (raw && !strippedText) return true;
 	if (/^\s*<command-name>/.test(raw)) return true;
-	if (/^Caveat: The messages below were generated/.test(raw)) return true;
 	// Harness interrupt markers are not things the user said. Left in, they show up
 	// in a catch-up as though they were prompts.
-	if (/^\s*\[Request interrupted by user/.test(strippedText || raw)) return true;
-	if (/^\s*\[Request cancelled/.test(strippedText || raw)) return true;
+	if (INTERRUPT_MARKERS.some(re => re.test(strippedText || raw))) return true;
 	return false;
 }
 
@@ -113,7 +159,7 @@ export function isSyntheticEntry(obj, strippedText) {
  * Parse one JSONL line into a normalized entry, or null to skip.
  * Entries keep tool_use inputs (signals need them); formatters decide what to show.
  */
-export function parseLine(line) {
+export function parseLine(line, opts = {}) {
 	let obj;
 	try { obj = JSON.parse(line); } catch { return null; }
 	if (!obj || typeof obj !== 'object') return null;
@@ -131,6 +177,17 @@ export function parseLine(line) {
 		return { role: 'system', kind: 'compaction', ts, text: text.trim(), uuid: obj.uuid };
 	}
 
+	// A client-side command (/model, /clear) is recorded ONLY as type:"system"
+	// subtype:"local_command", with the envelope in a TOP-LEVEL `content` field
+	// rather than under `message` — so it must be read before the no-message guard
+	// below. Noise on a catch-up card, but it is something the user did, so an
+	// archive keeps it. Sweeping 40 real sessions, 2 of the 36 command-bearing ones
+	// recorded their command exclusively in this shape.
+	if (opts.archive && obj.type === 'system' && obj.subtype === 'local_command') {
+		const cmd = parseCommandTurn(obj.content);
+		if (cmd) return { role: 'user', kind: 'command', ts, text: cmd, uuid: obj.uuid };
+	}
+
 	const msg = obj.message;
 	if (!msg) return null;
 
@@ -139,7 +196,15 @@ export function parseLine(line) {
 		if (Array.isArray(content)) {
 			const toolResults = content.filter(b => b && b.type === 'tool_result');
 			if (toolResults.length && toolResults.length === content.length) {
-				// Tool output. Bodies are dropped; only errors survive, truncated.
+				// An archive keeps the output (clipped) keyed to the call that made it;
+				// a catch-up card drops bodies and surfaces only errors.
+				if (opts.archive) {
+					return {
+						role: 'tool', kind: toolResults.some(r => r.is_error) ? 'tool_error' : 'tool_result',
+						ts, uuid: obj.uuid, toolUseId: toolResults[0].tool_use_id || null,
+						text: archiveToolResult(toolResults),
+					};
+				}
 				const errors = toolResults.filter(r => r.is_error);
 				if (!errors.length) return { role: 'tool', kind: 'tool_result', ts, text: '', uuid: obj.uuid };
 				return {
@@ -149,7 +214,15 @@ export function parseLine(line) {
 			}
 		}
 		const text = stripSystemNoise(textFromContent(content));
-		if (isSyntheticEntry(obj, text)) return null;
+		// Checked before the prose path: stripping removes the <command-args> TAGS but
+		// keeps their body, so a command turn otherwise survives as its bare arguments
+		// ("#2407") with the command that gives them meaning thrown away.
+		if (opts.archive) {
+			const raw = typeof content === 'string' ? content : textFromContent(content);
+			const cmd = parseCommandTurn(raw);
+			if (cmd) return { role: 'user', kind: 'command', ts, text: cmd, uuid: obj.uuid };
+		}
+		if (isSyntheticEntry(obj, text, opts)) return null;
 		if (!text) return null;
 		return { role: 'user', kind: 'text', ts, text, uuid: obj.uuid };
 	}
@@ -161,7 +234,7 @@ export function parseLine(line) {
 		for (const b of content) {
 			if (!b) continue;
 			if (b.type === 'text' && b.text && b.text.trim()) parts.push(b.text);
-			if (b.type === 'tool_use') toolUses.push({ id: b.id, name: b.name || 'tool', input: b.input || {}, label: toolUseLabel(b) });
+			if (b.type === 'tool_use') toolUses.push({ id: b.id, name: b.name || 'tool', input: b.input || {}, label: toolUseLabel(b, opts.archive ? 400 : 120) });
 		}
 		if (!parts.length && !toolUses.length) return null;
 		return {
@@ -173,7 +246,7 @@ export function parseLine(line) {
 	}
 
 	if (obj.type === 'system') {
-		return null; // turn_duration / stop_hook_summary / local_command — no signal
+		return null; // turn_duration / stop_hook_summary — no signal
 	}
 
 	return null;
@@ -217,7 +290,7 @@ export function humanIdle(ms) {
  * Deliberately a full read: a 5.7 MB file parses in well under the 1s budget,
  * and partial reads would break tail-state detection.
  */
-export function parseTranscript(filePath) {
+export function parseTranscript(filePath, opts = {}) {
 	const raw = fs.readFileSync(filePath, 'utf8');
 	const lines = raw.split('\n');
 	const entries = [];
@@ -234,7 +307,7 @@ export function parseTranscript(filePath) {
 				if (o && o.sessionId && o.message) lastObj = o;
 				if (o && o.type === 'custom-title' && o.title) titles.custom = o.title;
 				if (o && o.type === 'ai-title' && o.title) titles.ai = o.title;
-				const e = parseLine(line);
+				const e = parseLine(line, opts);
 				if (e) entries.push(e);
 				continue;
 			} catch { /* fall through */ }
@@ -245,7 +318,7 @@ export function parseTranscript(filePath) {
 			if (o && o.type === 'custom-title' && o.title) titles.custom = o.title;
 			if (o && o.type === 'ai-title' && o.title) titles.ai = o.title;
 		} catch { /* ignore malformed */ }
-		const e = parseLine(line);
+		const e = parseLine(line, opts);
 		if (e) entries.push(e);
 	}
 
@@ -309,13 +382,22 @@ export function samePrompt(a, b) {
 	return short.length >= 60 && long.startsWith(short);
 }
 
-export function mergeConversation(entries) {
+export function mergeConversation(entries, opts = {}) {
 	const turns = [];
 	for (const e of entries) {
+		// Archive rendering pins each tool's output to the call that produced it, by
+		// tool_use_id — the pairing the raw record stream only implies by adjacency.
+		if (opts.attachToolResults && e.role === 'tool' && e.toolUseId && e.text) {
+			for (let i = turns.length - 1; i >= 0; i--) {
+				const hit = (turns[i].toolUses || []).find(t => t.id === e.toolUseId);
+				if (hit) { hit.output = e.text; break; }
+			}
+			continue;
+		}
 		// A compaction boundary passes through and breaks the merge, which is
 		// correct — it is a hard discontinuity in the conversation.
 		if (e.kind === 'compaction') { turns.push(e); continue; }
-		if (e.role === 'user' && e.kind === 'text') {
+		if (e.role === 'user' && (e.kind === 'text' || e.kind === 'command')) {
 			const prev = turns[turns.length - 1];
 			// Replay dedupe: switching modes (e.g. /plan) re-submits the pending prompt,
 			// so the transcript holds two user records with identical text and different

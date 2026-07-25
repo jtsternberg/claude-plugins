@@ -16,6 +16,8 @@
 //   export-session.mjs <session-id|prefix|slug|title> [options]
 //
 //   --format md|json|text|digest   output shape (default: digest)
+//       md/json parse at ARCHIVE fidelity: slash commands and tool output are kept,
+//       because those shapes stand in for the transcript. digest/text stay lossy.
 //   --window N                     turns kept verbatim in a digest (default 12)
 //   --max-chars N                  digest budget ceiling (default 40000)
 //   --truncate N                   per-turn char cap in a digest (default 2000)
@@ -122,7 +124,11 @@ function main() {
 		throw err;
 	}
 
-	const parsed = parseTranscript(file);
+	// md and json are archival/structured readers — they promise the whole record,
+	// so they parse at archive fidelity (slash commands and tool output kept). The
+	// digest and text shapes stay lossy on purpose; that asymmetry is the product.
+	const archive = o.format === 'md' || o.format === 'json';
+	const parsed = parseTranscript(file, { archive });
 	const signals = deriveSignals(parsed.entries, parsed.subagents);
 	const data = { meta: parsed.meta, entries: parsed.entries, signals };
 

@@ -149,7 +149,7 @@ The digest is one format of a general-purpose transcript reader, usable on its o
 ```bash
 SCRIPTS=plugins/session-tools/skills/sessions-catch-up/scripts
 node $SCRIPTS/export-session.mjs <id|prefix|slug> --format digest   # catch-up briefing
-node $SCRIPTS/export-session.mjs <id> --format md                   # full readable transcript
+node $SCRIPTS/export-session.mjs <id> --format md                   # full transcript (archive fidelity)
 node $SCRIPTS/export-session.mjs <id> --format json                 # structured
 node $SCRIPTS/export-session.mjs --list                             # id · idle · slug · cwd
 ```

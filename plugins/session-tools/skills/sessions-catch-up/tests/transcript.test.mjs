@@ -11,7 +11,7 @@ import {
 	promptKey, samePrompt,
 } from '../scripts/lib/transcript.mjs';
 import { describeFile, rankCandidates } from '../scripts/lib/session-index.mjs';
-import { formatDigest } from '../scripts/lib/format.mjs';
+import { formatDigest, formatMd } from '../scripts/lib/format.mjs';
 import { decide } from '../scripts/nudge.mjs';
 
 const J = (o) => JSON.stringify(o);
@@ -332,4 +332,136 @@ test('nudge ladder: full → protip → silent, and accepted goes silent', () =>
 	assert.equal(decide(st({ accepted: true }), 'hotline'), 'silent');
 	assert.equal(decide(st({ lastOfferedAt: new Date().toISOString() }), 'hotline'), 'silent', 'within 7 days');
 	assert.equal(decide(st({ lastOfferedAt: '2020-01-01T00:00:00.000Z' }), 'hotline'), 'full', 'older than 7 days');
+});
+
+// ---- archive fidelity (md) vs catch-up fidelity (digest) ----------------------
+// A permanent archive must record what the session was ASKED to do and what its
+// tools returned. The digest deliberately drops both. These pin the split.
+
+const slashCmd = (name, args = '') => J({
+	...base, type: 'user', uuid: 'c1',
+	message: { role: 'user', content: `<command-name>${name}</command-name><command-message>${name.slice(1)}</command-message><command-args>${args}</command-args>` },
+});
+
+test('slash-command turns: dropped for catch-up, preserved as /foo args for archive', () => {
+	const line = slashCmd('/fix-github-issue', '#2407');
+	assert.equal(parseLine(line), null, 'digest fidelity drops the command envelope');
+
+	const kept = parseLine(line, { archive: true });
+	assert.ok(kept, 'archive fidelity keeps it');
+	assert.equal(kept.role, 'user');
+	assert.equal(kept.kind, 'command');
+	assert.equal(kept.text, '/fix-github-issue #2407');
+});
+
+test('archive keeps a bare command with no args, and still drops harness boilerplate', () => {
+	assert.equal(parseLine(slashCmd('/handoff:pickup-handoff'), { archive: true }).text, '/handoff:pickup-handoff');
+	// isMeta / caveat lines are harness machinery in BOTH modes.
+	assert.equal(parseLine(userText('ctx', { isMeta: true }), { archive: true }), null);
+	assert.equal(parseLine(userText('Caveat: The messages below were generated while running local commands.'), { archive: true }), null);
+});
+
+test('archive keeps user interrupt markers; catch-up drops them', () => {
+	const int = userText('[Request interrupted by user for tool use]');
+	assert.equal(parseLine(int), null, 'not a prompt — noise on a catch-up card');
+	const kept = parseLine(int, { archive: true });
+	assert.ok(kept, 'an interruption IS history in an archive');
+	assert.match(kept.text, /Request interrupted by user/);
+});
+
+test('tool output: body dropped for catch-up, clipped+kept for archive, keyed by tool_use_id', () => {
+	const line = J({
+		...base, type: 'user', uuid: 'tr9',
+		message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't0', content: 'line1\nline2' }] },
+	});
+	assert.equal(parseLine(line).text, '', 'digest drops the body');
+
+	const kept = parseLine(line, { archive: true });
+	assert.equal(kept.toolUseId, 't0');
+	assert.match(kept.text, /line1/);
+	assert.match(kept.text, /line2/);
+});
+
+test('archive clips an oversized tool result and says how much it elided', () => {
+	const huge = 'y'.repeat(9000);
+	const kept = parseLine(J({
+		...base, type: 'user', uuid: 'tr10',
+		message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't0', content: huge }] },
+	}), { archive: true });
+	assert.ok(kept.text.length < 3000, `clipped, got ${kept.text.length}`);
+	assert.match(kept.text, /elided/, 'the elision is disclosed, not silent');
+});
+
+test('mergeConversation attaches tool output to the tool call that produced it', () => {
+	const entries = [
+		parseLine(asst('running it', [{ name: 'Bash', input: { command: 'ls -la' } }]), { archive: true }),
+		parseLine(J({
+			...base, type: 'user', uuid: 'tr11',
+			message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't0', content: 'file1\nfile2' }] },
+		}), { archive: true }),
+	].filter(Boolean);
+
+	const plain = mergeConversation(entries);
+	assert.equal(plain[0].toolUses[0].output, undefined, 'default merge leaves tool output off');
+
+	const merged = mergeConversation(entries, { attachToolResults: true });
+	assert.match(merged[0].toolUses[0].output, /file1/);
+});
+
+test('formatMd records the opening slash command and the tool output', () => {
+	const entries = [
+		parseLine(slashCmd('/visual-review', 'the plan'), { archive: true }),
+		parseLine(asst('on it', [{ name: 'Bash', input: { command: 'git status' } }]), { archive: true }),
+		parseLine(J({
+			...base, type: 'user', uuid: 'tr12',
+			message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't0', content: 'nothing to commit' }] },
+		}), { archive: true }),
+	].filter(Boolean);
+	const md = formatMd({ meta: { sessionId: 's1', cwd: '/tmp/proj' }, entries });
+
+	assert.match(md, /\/visual-review the plan/, 'the archive must say what was asked');
+	assert.match(md, /nothing to commit/, 'and what came back');
+});
+
+test('formatMd keeps every tool call; the digest is the one that caps at 8', () => {
+	const many = Array.from({ length: 11 }, (_, i) => ({ name: 'Bash', input: { command: `step-${i}` } }));
+	const entries = [parseLine(asst('many steps', many), { archive: true })];
+	const md = formatMd({ meta: { sessionId: 's1' }, entries });
+	assert.match(md, /step-10/, 'no +N more elision in a full transcript');
+	assert.doesNotMatch(md, /more$/m);
+});
+
+test('digest output is unchanged by archive support (fast path regression guard)', () => {
+	const entries = [
+		parseLine(slashCmd('/fix-github-issue', '#2407')),
+		parseLine(userText('now do the thing')),
+		parseLine(asst('done', [{ name: 'Bash', input: { command: 'ls' } }])),
+	].filter(Boolean);
+	const digest = formatDigest({
+		meta: { sessionId: 's1', cwd: '/tmp/proj', sizeBytes: 1000, idleMs: 1000, liveness: 'active' },
+		entries, signals: deriveSignals(entries),
+	});
+	assert.doesNotMatch(digest, /fix-github-issue/, 'command turns stay out of the digest');
+	assert.match(digest, /now do the thing/);
+});
+
+// Second shape of a slash command in the wild: a client-side command (/model,
+// /clear) lands as type:"system" subtype:"local_command", envelope in a TOP-LEVEL
+// content field, isMeta:true. Found by sweeping 40 real sessions — 2 of 36
+// command-bearing ones recorded their command only this way.
+test('archive records local_command system records too', () => {
+	const line = J({
+		...base, type: 'system', subtype: 'local_command', isMeta: true, uuid: 'sc1',
+		content: '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>claude-opus-5</command-args>',
+	});
+	assert.equal(parseLine(line), null, 'a client-side setting change is noise on a catch-up card');
+	const kept = parseLine(line, { archive: true });
+	assert.ok(kept, 'but it is something the user did, so the archive keeps it');
+	assert.equal(kept.kind, 'command');
+	assert.equal(kept.text, '/model claude-opus-5');
+});
+
+test('archive still drops system records that carry no command', () => {
+	assert.equal(parseLine(J({ ...base, type: 'system', subtype: 'turn_duration', content: 'took 4s' }), { archive: true }), null);
+	assert.equal(parseLine(J({ ...base, type: 'system', subtype: 'stop_hook_summary' }), { archive: true }), null);
 });

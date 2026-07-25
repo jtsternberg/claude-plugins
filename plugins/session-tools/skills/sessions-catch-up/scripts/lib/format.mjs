@@ -31,16 +31,26 @@ function conversational(entries) {
 	return mergeConversation(entries).filter(e => e.kind !== 'compaction');
 }
 
-function renderTurn(e, truncAt) {
+function renderTurn(e, truncAt, opts = {}) {
 	const who = e.role === 'user' ? '**You:**' : '**Claude:**';
 	const lines = [];
 	const text = trunc(e.text, truncAt);
 	if (text) lines.push(`${who} ${text}`);
 	else lines.push(`${who} _(no text — tool calls only)_`);
-	const tools = (e.toolUses || []).map(t => t.label);
-	if (tools.length) {
-		lines.push(`  ↳ ${tools.slice(0, 8).map(t => `\`${oneLine(t, 100)}\``).join(', ')}${tools.length > 8 ? ` +${tools.length - 8} more` : ''}`);
+	const tools = e.toolUses || [];
+	if (!tools.length) return lines.join('\n');
+
+	// An archive lists every call and what it returned; the digest collapses the lot
+	// to one line of labels, because there the point is only that work happened.
+	if (opts.archive) {
+		for (const t of tools) {
+			lines.push(`  ↳ \`${oneLine(t.label, 400)}\``);
+			if (t.output) lines.push(t.output.split('\n').map(l => `      ${l}`).join('\n'));
+		}
+		return lines.join('\n');
 	}
+	const labels = tools.map(t => t.label);
+	lines.push(`  ↳ ${labels.slice(0, 8).map(t => `\`${oneLine(t, 100)}\``).join(', ')}${labels.length > 8 ? ` +${labels.length - 8} more` : ''}`);
 	return lines.join('\n');
 }
 
@@ -212,7 +222,14 @@ export function formatDigest(data, opts = {}) {
 	return header + out;
 }
 
-/** Full readable transcript — the `/export` replacement shape. */
+/**
+ * Full readable transcript — the `/export` replacement shape, and the format
+ * graveyard archives with. Full fidelity is the contract here, not a nicety: an
+ * archive that drops the slash command a session opened with no longer records
+ * what that session was asked to do, and one that drops tool output no longer
+ * shows what its work actually returned. Feed it entries parsed with
+ * `{ archive: true }` — without that the parse layer has already discarded both.
+ */
 export function formatMd(data) {
 	const { meta, entries } = data;
 	const L = [`# ${meta.title || meta.slug || meta.sessionId}`, ''];
@@ -220,9 +237,9 @@ export function formatMd(data) {
 	L.push(`- cwd \`${meta.cwd || '(unknown)'}\`${meta.gitBranch ? ` · branch \`${meta.gitBranch}\`` : ''}`);
 	L.push(`- ${meta.startedAt || '?'} → ${meta.lastAt || '?'}`);
 	L.push('');
-	for (const e of mergeConversation(entries)) {
+	for (const e of mergeConversation(entries, { attachToolResults: true })) {
 		if (e.kind === 'compaction') { L.push('---', '', '### ⟲ Context compacted', '', e.text, ''); continue; }
-		L.push(renderTurn(e, 1e9), '');
+		L.push(renderTurn(e, 1e9, { archive: true }), '');
 	}
 	return L.join('\n');
 }
