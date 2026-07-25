@@ -200,6 +200,58 @@ else
   fail "parser: noise-only entry dropped entirely (expected 2 entries, got $(echo "$NOISE_T" | jq '.entries | length'))"
 fi
 
+# ---- case: modern compaction boundary (isCompactSummary) --------------------------
+# type:"summary" records no longer exist in claude-code transcripts; compaction is
+# isCompactSummary:true on a *user* record. Without handling it, the boundary is
+# invisible and the summary renders as though the caller typed it.
+
+COMPACT_SID="34343434-5656-7878-9090-121212121212"
+LONG_SUMMARY=$(python3 -c "print('SUMMARY ' + 'x' * 900)")
+python3 - "$PROJECTS_ROOT/-tmp-caller-ws/${COMPACT_SID}.jsonl" "$LONG_SUMMARY" <<'PY'
+import json, sys
+path, long_summary = sys.argv[1], sys.argv[2]
+lines = [
+    {"type": "user", "isCompactSummary": True, "timestamp": "2026-07-02T12:00:00Z",
+     "message": {"role": "user", "content": "Earlier context: we fixed the parser."}},
+    {"type": "user", "timestamp": "2026-07-02T12:00:01Z",
+     "message": {"role": "user", "content": "post-compaction prompt"}},
+    {"type": "user", "isCompactSummary": True, "timestamp": "2026-07-02T12:00:02Z",
+     "message": {"role": "user", "content": [{"type": "text", "text": long_summary}]}},
+]
+with open(path, "w") as fh:
+    for obj in lines:
+        fh.write(json.dumps(obj) + "\n")
+PY
+
+COMPACT_T=$(curl -sf "$BASE/api/transcript?session=$COMPACT_SID")
+if [[ $(echo "$COMPACT_T" | jq -r '.entries[0].kind') == "summary" \
+   && $(echo "$COMPACT_T" | jq -r '.entries[0].role') == "system" ]]; then
+  pass "parser: isCompactSummary marked as a summary boundary"
+else
+  fail "parser: isCompactSummary marked as a summary boundary (got: $(echo "$COMPACT_T" | jq -c '.entries[0]'))"
+fi
+
+if echo "$COMPACT_T" | jq -r '.entries[0].text' | grep -q "we fixed the parser"; then
+  pass "parser: compaction summary text preserved"
+else
+  fail "parser: compaction summary text preserved (got: $(echo "$COMPACT_T" | jq -r '.entries[0].text'))"
+fi
+
+if [[ $(echo "$COMPACT_T" | jq -r '.entries[1].role') == "user" \
+   && $(echo "$COMPACT_T" | jq -r '.entries[1].text') == "post-compaction prompt" ]]; then
+  pass "parser: normal user turns after compaction unaffected"
+else
+  fail "parser: normal user turns after compaction unaffected (got: $(echo "$COMPACT_T" | jq -c '.entries[1]'))"
+fi
+
+# A real summary can be tens of KB — the live lane must not be swamped by one.
+COMPACT_LEN=$(echo "$COMPACT_T" | jq -r '.entries[2].text | length')
+if [[ "$COMPACT_LEN" -lt 800 ]] && echo "$COMPACT_T" | jq -r '.entries[2].text' | grep -q "…"; then
+  pass "parser: oversized compaction summary truncated for display"
+else
+  fail "parser: oversized compaction summary truncated for display (len=$COMPACT_LEN)"
+fi
+
 # ---- case: missing transcript -> 404 ------------------------------------------
 
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/transcript?session=dddddddd-0000-0000-0000-000000000000")

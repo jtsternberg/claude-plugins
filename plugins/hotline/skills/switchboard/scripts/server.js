@@ -209,6 +209,10 @@ function readCalls() {
 
 // ---- transcript JSONL parser -------------------------------------------------
 
+// A compaction summary is the whole prior conversation; cap it so one record
+// cannot swamp a live lane.
+const MAX_SUMMARY_CHARS = 600;
+
 function textFromContent(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -240,8 +244,24 @@ function parseLine(line) {
   if (obj.isSidechain) return null; // subagent chatter
   const ts = obj.timestamp || null;
 
+  // Legacy compaction record. Gone as of claude-code 2.1.219 (zero instances on
+  // disk), but old transcripts still have them.
   if (obj.type === 'summary') {
     return { role: 'system', kind: 'summary', ts, text: obj.summary || 'Conversation compacted' };
+  }
+
+  // Modern compaction boundary: isCompactSummary on a user record, summary in
+  // message.content. Left unhandled it falls through to the user-text path and
+  // renders as though the caller typed the whole summary. Truncated here because
+  // a real one runs to tens of KB and this is a live monitor, not a catch-up.
+  if (obj.isCompactSummary === true) {
+    const text = textFromContent(obj?.message?.content).trim() || 'Conversation compacted';
+    return {
+      role: 'system',
+      kind: 'summary',
+      ts,
+      text: text.length > MAX_SUMMARY_CHARS ? text.slice(0, MAX_SUMMARY_CHARS) + '…' : text,
+    };
   }
 
   const msg = obj.message;
