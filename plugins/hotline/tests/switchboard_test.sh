@@ -169,6 +169,37 @@ else
   fail "parser: compaction summary surfaced"
 fi
 
+# ---- case: slash-command / background-task harness blocks stripped ---------------
+# <local-command-caveat> and <task-notification> appear in any session that used a
+# slash command or a background task. Leaking them renders harness text as
+# conversation. Kept in sync with sessions-catch-up's transcript.mjs NOISE_PATTERNS.
+
+NOISE_SID="12121212-3434-5656-7878-909090909090"
+cat > "$PROJECTS_ROOT/-tmp-caller-ws/${NOISE_SID}.jsonl" <<'EOF'
+{"type":"user","message":{"role":"user","content":"<local-command-caveat>Caveat: The messages below were generated while running local commands.</local-command-caveat>caveat survivor text"}}
+{"type":"user","message":{"role":"user","content":"<task-notification>Background task 42 finished</task-notification>notification survivor text"}}
+{"type":"user","message":{"role":"user","content":"<task-notification>nothing but harness noise</task-notification>"}}
+EOF
+
+NOISE_T=$(curl -sf "$BASE/api/transcript?session=$NOISE_SID")
+if [[ $(echo "$NOISE_T" | jq -r '.entries[0].text') == "caveat survivor text" ]]; then
+  pass "parser: local-command-caveat noise stripped"
+else
+  fail "parser: local-command-caveat noise stripped (got: $(echo "$NOISE_T" | jq -r '.entries[0].text'))"
+fi
+
+if [[ $(echo "$NOISE_T" | jq -r '.entries[1].text') == "notification survivor text" ]]; then
+  pass "parser: task-notification noise stripped"
+else
+  fail "parser: task-notification noise stripped (got: $(echo "$NOISE_T" | jq -r '.entries[1].text'))"
+fi
+
+if [[ $(echo "$NOISE_T" | jq '.entries | length') == "2" ]]; then
+  pass "parser: noise-only entry dropped entirely"
+else
+  fail "parser: noise-only entry dropped entirely (expected 2 entries, got $(echo "$NOISE_T" | jq '.entries | length'))"
+fi
+
 # ---- case: missing transcript -> 404 ------------------------------------------
 
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/transcript?session=dddddddd-0000-0000-0000-000000000000")

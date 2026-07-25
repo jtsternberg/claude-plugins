@@ -220,11 +220,14 @@ function textFromContent(content) {
 
 function stripSystemNoise(text) {
   // Drop injected harness blocks; keep the human/agent-authored part.
+  // Kept in sync with sessions-catch-up's transcript.mjs NOISE_PATTERNS.
   return text
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
     .replace(/<command-name>[\s\S]*?<\/command-name>/g, '')
     .replace(/<command-message>[\s\S]*?<\/command-message>/g, '')
     .replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, '')
+    .replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '')
+    .replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '')
     .replace(/<\/?command-args>/g, '')
     .trim();
 }
