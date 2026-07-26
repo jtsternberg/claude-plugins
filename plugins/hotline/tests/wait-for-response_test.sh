@@ -337,7 +337,8 @@ rm -rf "$H2" "$CD2" "$SD2"
 echo ""
 echo "Preemption detection:"
 
-PREEMPT_CHECK="$DIAL_SCRIPTS/preempt-check.sh"
+# Preemption now lives in the extractor itself (one jq pass, not two) — exit 12.
+PREEMPT_CHECK="$DIAL_SCRIPTS/transcript-extract.sh"
 
 mk_transcript() {   # $1 = body → echoes path
   local d; d=$(mktemp -d)
@@ -350,7 +351,7 @@ T_OK=$(mk_transcript \
 '{"type":"user","sessionId":"s","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
 {"type":"assistant","sessionId":"s","message":{"content":[{"type":"text","text":"working on it"}]}}')
 set +e; bash "$PREEMPT_CHECK" "$T_OK" "$TNONCE" >/dev/null 2>&1; RCP=$?; set -e
-if [[ $RCP -ne 0 ]]; then
+if [[ $RCP -ne 12 ]]; then
   pass "a working receiver is not reported as preempted"
 else
   fail "a working receiver is not reported as preempted" "rc=$RCP"
@@ -363,7 +364,7 @@ T_PRE=$(mk_transcript \
 {"type":"assistant","sessionId":"s","message":{"content":[{"type":"text","text":"on it"}]}}
 {"type":"user","sessionId":"s","message":{"content":"actually go do the PSR4 migration instead"}}')
 set +e; OUTP=$(bash "$PREEMPT_CHECK" "$T_PRE" "$TNONCE" 2>/dev/null); RCP=$?; set -e
-if [[ $RCP -eq 0 ]] && printf '%s' "$OUTP" | grep -q "PSR4 migration"; then
+if [[ $RCP -eq 12 ]] && printf '%s' "$OUTP" | grep -q "PSR4 migration"; then
   pass "a human prompt after ours is reported as preemption"
 else
   fail "a human prompt after ours is reported as preemption" "rc=$RCP out=$OUTP"
@@ -378,7 +379,7 @@ T_NOISE=$(mk_transcript \
 {"type":"user","isSidechain":true,"sessionId":"s","message":{"content":"subagent prompt"}}
 {"type":"user","isCompactSummary":true,"sessionId":"s","message":{"content":"Summary: things"}}')
 set +e; bash "$PREEMPT_CHECK" "$T_NOISE" "$TNONCE" >/dev/null 2>&1; RCP=$?; set -e
-if [[ $RCP -ne 0 ]]; then
+if [[ $RCP -ne 12 ]]; then
   pass "tool results, meta, subagent and compaction records are not preemption"
 else
   fail "tool results, meta, subagent and compaction records are not preemption" "rc=$RCP"
@@ -390,7 +391,7 @@ T_INT=$(mk_transcript \
 '{"type":"user","sessionId":"s","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
 {"type":"user","sessionId":"s","message":{"content":"[Request interrupted by user for tool use]"}}')
 set +e; bash "$PREEMPT_CHECK" "$T_INT" "$TNONCE" >/dev/null 2>&1; RCP=$?; set -e
-if [[ $RCP -eq 0 ]]; then
+if [[ $RCP -eq 12 ]]; then
   pass "a user interrupt counts as preemption"
 else
   fail "a user interrupt counts as preemption" "rc=$RCP"
@@ -404,12 +405,27 @@ T_PRIOR=$(mk_transcript \
 {"type":"user","sessionId":"s","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
 {"type":"assistant","sessionId":"s","message":{"content":[{"type":"text","text":"working"}]}}')
 set +e; bash "$PREEMPT_CHECK" "$T_PRIOR" "$TNONCE" >/dev/null 2>&1; RCP=$?; set -e
-if [[ $RCP -ne 0 ]]; then
+if [[ $RCP -ne 12 ]]; then
   pass "prompts BEFORE our nonce turn are not preemption"
 else
   fail "prompts BEFORE our nonce turn are not preemption" "rc=$RCP"
 fi
 rm -rf "$(dirname "$T_PRIOR")"
+
+# Answered, THEN reassigned → the response is still owed to us. Preemption must
+# never outrank a terminal STATUS that already arrived, or a caller loses a reply
+# it had already earned.
+T_DONE_THEN=$(mk_transcript \
+'{"type":"user","sessionId":"s","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
+{"type":"assistant","sessionId":"s","message":{"content":[{"type":"text","text":"here is the answer\nSTATUS: DONE call_id='"$TNONCE"'"}]}}
+{"type":"user","sessionId":"s","message":{"content":"now go do something completely different"}}')
+set +e; OUTD=$(bash "$PREEMPT_CHECK" "$T_DONE_THEN" "$TNONCE" 2>/dev/null); RCD=$?; set -e
+if [[ $RCD -eq 0 ]] && printf '%s' "$OUTD" | jq -r .response 2>/dev/null | grep -q "here is the answer"; then
+  pass "a completed answer still wins when the receiver is reassigned afterwards"
+else
+  fail "a completed answer still wins when reassigned afterwards" "rc=$RCD out=$OUTD"
+fi
+rm -rf "$(dirname "$T_DONE_THEN")"
 
 # End to end: wait-for-response.sh must bail fast with exit 3, not sit out the timeout.
 CT3=$(setup_transcript_call \

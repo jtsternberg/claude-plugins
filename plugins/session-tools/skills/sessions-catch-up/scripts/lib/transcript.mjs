@@ -2,14 +2,25 @@
 // transcript.mjs — the single source of truth for reading Claude Code session
 // transcripts (~/.claude/projects/<encoded-cwd>/<session-id>.jsonl).
 //
-// SOURCE OF TRUTH. Four divergent implementations of this parser existed before
-// this file — each stripping noise differently:
-//   - plugins/hotline/skills/switchboard/scripts/server.js  (Node, richest)
-//   - plugins/hotline/skills/dial/scripts/transcript-extract.sh  (jq)
-//   - plugins/session-tools/.../extract_sessions.py  (Python, bulk mining)
-//   - ~/.dotfiles/bin/graveyard_lib.php genuineTurns  (PHP, `graveyard peek`)
-// This file is the consolidation target. If you change parsing behavior here,
-// the vendored copies elsewhere need the same change — see the drift-test task.
+// SOURCE OF TRUTH for reading transcripts FOR DISPLAY. One other implementation
+// shares that contract and must stay in sync with this file:
+//   - plugins/hotline/skills/switchboard/scripts/server.js  (Node)
+// tests/parser-drift.test.mjs holds the two together; it caught nothing for months
+// because it did not exist, and both of server.js's divergences (two missing noise
+// patterns, compaction detected via the dead type:"summary") shipped as a result.
+//
+// These read transcripts too but are NOT copies of this contract, and were
+// measured before being excluded (claude-plugins-207y, -wn09, -ocjd):
+//   - hotline/skills/dial/scripts/transcript-extract.sh (jq) — hotline's protocol
+//     reader: nonce correlation + STATUS bracketing, none of which lives here. It
+//     is deliberately noise-PRESERVING, because stripSystemNoise would delete a
+//     harness block an agent legitimately quoted in its answer. Keeping it also
+//     keeps hotline installable without session-tools.
+//   - sessions-weekly-recap/scripts/extract_sessions.py — now delegates its user
+//     messages to export-session.mjs rather than parsing at all.
+//   - ~/.dotfiles/src/Graveyard.php genuineTurns (PHP) — different repo; its
+//     needles keep <system-reminder> BODIES where this file deletes them, which is
+//     load-bearing for graveyard's GATE 2.
 //
 // Schema notes verified against claude-code 2.1.219 (2026-07):
 //   - Filenames ARE the session id, unique across every project dir.

@@ -30,7 +30,37 @@
 #        → caller keeps waiting patiently (model is working)
 #   11 — not submitted yet (no user event carries the nonce)
 #        → caller fails fast once its submit-deadline passes
+#   12 — PREEMPTED: no terminal STATUS, and a genuine human prompt arrived after
+#        our turn, so it is never coming. The preempting prompt (200 chars) goes
+#        to stdout. → caller stops waiting instead of sitting out its timeout.
 #   1  — usage / unreadable transcript error (message on stderr)
+#
+# PREEMPTION (claude-plugins-dvjo)
+# A cmux call lands in a VISIBLE surface, and a visible surface is one the human
+# can type into — that is the point of side-by-side placement, not a misuse. Once
+# they give that session another task, our STATUS never arrives; waiting out the
+# remaining 1800s tells the caller nothing. Counted as preemption: a new human
+# prompt (including one typed as a slash command) and `[Request interrupted by
+# user…]`. NOT counted: tool_result records (no text blocks), isMeta /
+# isSidechain / isCompactSummary / isVisibleInTranscriptOnly records, our own
+# nonce turn or a replay of it, and anything BEFORE our nonce turn. Client-side
+# commands (/model, /clear) are type:"system" subtype:"local_command" rather than
+# user records, so they are out of scope for free — right for /model, a known miss
+# for /clear, which the timeout still catches.
+#
+# WHY THIS STAYS jq AND SELF-CONTAINED (claude-plugins-wn09)
+# The obvious-looking cleanup is to retire this in favour of session-tools'
+# lib/transcript.mjs. Measured, that is wrong twice over. transcript.mjs applies
+# stripSystemNoise to ASSISTANT prose, so a reply that legitimately quotes a
+# harness block — "the bug is that <system-reminder>…</system-reminder> leaks into
+# the dashboard", an actual hotline answer — comes back with the quote deleted:
+# "the bug is that  leaks into the dashboard". Corrupting response bodies to
+# de-duplicate a parser is a bad trade. And none of the logic that matters here
+# (nonce correlation, STATUS bracketing, WORK_IN_PROGRESS reset) exists in
+# transcript.mjs, so the protocol code would stay in hotline anyway while the
+# plugin gained a hard dependency on session-tools and stopped installing
+# standalone. This file is not a vendored copy of that parser; it is hotline's own
+# protocol reader, and it is deliberately noise-preserving.
 #
 # Usage:
 #   transcript-extract.sh <transcript.jsonl> <call_id-nonce>
@@ -57,7 +87,7 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
        and ((.message.content | tostring) | test("CALL_ID: " + $nonce)))
    | index(true)) as $ui
   | if $ui == null then
-      {submitted: false, session_id: "", text: ""}
+      {submitted: false, session_id: "", text: "", preempt: ""}
     else
       {submitted: true,
        session_id: (.[$ui].sessionId // (map(.sessionId // empty) | last) // ""),
@@ -66,7 +96,25 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
                 | .message.content[]?
                 | select(.type == "text")
                 | .text ]
-              | join("\n"))}
+              | join("\n")),
+       # First genuine human prompt after our turn, if any — see the preemption
+       # note in the header. tool_result records contribute no text blocks, so
+       # they drop out here without a special case.
+       preempt: ([ .[$ui + 1:][]
+                   | select(.type == "user")
+                   | select((.isMeta // false) != true)
+                   | select((.isSidechain // false) != true)
+                   | select((.isCompactSummary // false) != true)
+                   | select((.isVisibleInTranscriptOnly // false) != true)
+                   | select((.message.content | tostring | test("CALL_ID: " + $nonce)) | not)
+                   | (if (.message.content | type) == "string"
+                      then .message.content
+                      else ([.message.content[]? | select(.type == "text") | .text] | join(" "))
+                      end)
+                   | select(. != null)
+                   | gsub("^\\s+|\\s+$"; "")
+                   | select(length > 0)
+                 ] | first // "")}
     end
 ' "$TRANSCRIPT") || { echo "jq failed parsing $TRANSCRIPT" >&2; exit 1; }
 
@@ -75,11 +123,20 @@ SUBMITTED=$(printf '%s' "$PARSED" | jq -r '.submitted')
 
 SESSION_ID=$(printf '%s' "$PARSED" | jq -r '.session_id')
 TEXT=$(printf '%s' "$PARSED" | jq -r '.text')
+PREEMPT=$(printf '%s' "$PARSED" | jq -r '.preempt')
 
 # Terminal STATUS for THIS nonce present yet?
+#
+# Checked BEFORE preemption on purpose: a receiver that answered our call and was
+# THEN handed something else has still answered, and that response is owed to the
+# caller. Preemption only decides what to do when no terminal STATUS exists.
 TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE) call_id=${NONCE}[[:space:]]*$"
 if ! printf '%s\n' "$TEXT" | grep -qE "$TERM_RE"; then
-  exit 10   # submitted, still working
+  if [[ -n "$PREEMPT" ]]; then
+    printf '%s\n' "${PREEMPT:0:200}"
+    exit 12   # reassigned — our STATUS is never coming
+  fi
+  exit 10     # submitted, still working
 fi
 
 # Extract the response body: reset the buffer at each WORK_IN_PROGRESS (so only

@@ -17,9 +17,11 @@
 // SCOPE — deliberately two implementations, not four.
 // The other readers named in transcript.mjs's header are NOT vendored copies of
 // this contract and are excluded on purpose:
-//   - hotline/skills/dial/scripts/transcript-extract.sh (jq) strips no harness
-//     noise whatsoever; it filters isSidechain and nothing else. It is slated for
-//     retirement, so the fix is to finish that, not to hold it to this contract.
+//   - hotline/skills/dial/scripts/transcript-extract.sh (jq) is hotline's protocol
+//     reader (nonce + STATUS bracketing) and is deliberately noise-PRESERVING: a
+//     reply quoting a harness block must come back verbatim. Retiring it in favour
+//     of transcript.mjs was investigated and rejected — it would corrupt response
+//     bodies and make hotline depend on session-tools (claude-plugins-wn09).
 //   - sessions-weekly-recap/scripts/extract_sessions.py uses a generic
 //     strip-all-tags regex and filters neither isMeta, isSidechain, nor
 //     compaction. Different strategy, different (narrower) job.

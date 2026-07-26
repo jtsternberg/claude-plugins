@@ -52,7 +52,6 @@ set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRANSCRIPT_EXTRACT="$SELF_DIR/transcript-extract.sh"
-PREEMPT_CHECK="$SELF_DIR/preempt-check.sh"
 TRANSCRIPT_PATH_SH="$SELF_DIR/../../../scripts/transcript-path.sh"
 
 CALL_DIR="${1:-}"
@@ -198,25 +197,23 @@ if $CMUX_MODE; then
           emit_response_json
           exit 0
           ;;
-        10)                       # submitted, model working — be patient, BUT:
-          T_SUBMITTED=true
-          # …patient only while the receiver is still OURS. A visible surface is one
-          # the human can type into, and once they hand that session another task our
-          # STATUS is never coming — waiting out the remaining timeout tells the caller
-          # nothing. Bail immediately and say why. (claude-plugins-dvjo)
-          if [[ -x "$PREEMPT_CHECK" ]] && PRE=$(bash "$PREEMPT_CHECK" "$TRANSCRIPT_PATH" "$CALL_ID" 2>/dev/null); then
-            SURF=$(cat "$CALL_DIR/surface_ref.txt" 2>/dev/null || echo '?')
-            {
-              echo "Callee reassigned mid-call — a new prompt arrived in its session after ours, so it will never emit STATUS for call_id=$CALL_ID."
-              echo "Preempting prompt: $PRE"
-              echo "Surface: $SURF · transcript: $TRANSCRIPT_PATH"
-              echo "Our work order may well have completed anyway — check the surface, or read the transcript, before re-dialing."
-            } > "$CALL_DIR/error.txt"
-            touch "$CALL_DIR/done"
-            cleanup_workspace_and_script
-            cat "$CALL_DIR/error.txt" >&2
-            exit 3
-          fi
+        10) T_SUBMITTED=true ;;   # submitted, model working — be patient
+        12)                       # …but only while the receiver is still OURS.
+          # The extractor found a new human prompt after our turn, so our STATUS is
+          # never coming and waiting out the remaining timeout tells the caller
+          # nothing. Bail now and say why. T_OUT holds the preempting prompt.
+          # (claude-plugins-dvjo)
+          SURF=$(cat "$CALL_DIR/surface_ref.txt" 2>/dev/null || echo '?')
+          {
+            echo "Callee reassigned mid-call — a new prompt arrived in its session after ours, so it will never emit STATUS for call_id=$CALL_ID."
+            echo "Preempting prompt: $T_OUT"
+            echo "Surface: $SURF · transcript: $TRANSCRIPT_PATH"
+            echo "Our work order may well have completed anyway — check the surface, or read the transcript, before re-dialing."
+          } > "$CALL_DIR/error.txt"
+          touch "$CALL_DIR/done"
+          cleanup_workspace_and_script
+          cat "$CALL_DIR/error.txt" >&2
+          exit 3
           ;;
         11)                       # not submitted yet
           if ! $T_SUBMITTED && [[ $T_ELAPSED -ge $SUBMIT_DEADLINE ]]; then
