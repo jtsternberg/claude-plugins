@@ -37,20 +37,27 @@ skip() {
 
 if have node; then
 	run "parser drift (transcript.mjs ↔ switchboard)" node --test tests/parser-drift.test.mjs
-	run "session-tools: transcript/digest" \
-		node --test plugins/session-tools/skills/sessions-catch-up/tests/transcript.test.mjs
+	# Discovered, not listed: a hardcoded list silently omits new suites. The handoff
+	# bash suite shipped with 14 passing tests that CI never ran, because the globs
+	# below used to name one plugin each.
+	for t in plugins/*/skills/*/tests/*.test.mjs plugins/*/tests/*.test.mjs; do
+		[[ -f "$t" ]] || continue
+		run "node: ${t#plugins/}" node --test "$t"
+	done
 else
 	skip "node suites" "node not installed"
 fi
 
-# ---- hotline bash suites ----------------------------------------------------
-# Five of these drive cmux and cannot pass without it (they self-skip, but the
+# ---- bash suites (any plugin) -----------------------------------------------
+# Some hotline suites drive cmux and cannot pass without it (they self-skip, but the
 # skip is worth naming here rather than reading as a pass).
 
 if have bash; then
 	CMUX_OK=0; have cmux && CMUX_OK=1
-	for t in plugins/hotline/tests/*_test.sh; do
-		name="hotline: $(basename "$t" _test.sh)"
+	for t in plugins/*/tests/*_test.sh; do
+		[[ -f "$t" ]] || continue
+		plugin="${t#plugins/}"; plugin="${plugin%%/*}"
+		name="$plugin: $(basename "$t" _test.sh)"
 		if [[ $CMUX_OK -eq 0 ]] && grep -q "command -v cmux" "$t" 2>/dev/null; then
 			skip "$name" "needs cmux"
 			continue

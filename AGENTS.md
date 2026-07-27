@@ -75,6 +75,54 @@ claude plugins add /path/to/claude-plugins/plugins/<plugin-name>
 echo '{"tool_name":"Bash","cwd":"/path","tool_input":{"command":"ls"}}' | bash plugins/<plugin-name>/hooks/<hook-script>.sh
 ```
 
+## Testing
+
+One command runs every suite in the repo, across all three languages:
+
+```bash
+bash tests/run-all.sh
+```
+
+It exits 0 only when every suite that *could* run passed. A suite whose runtime is
+missing (no `cmux`, no `pytest`) is reported as **SKIP**, never silently passed — so
+read the summary, not just the exit code.
+
+CI (`.github/workflows/tests.yml`) runs exactly that script on pushes to `main`, on
+pull requests, and on manual dispatch. It runs on **ubuntu-latest** on purpose: these
+suites also have to keep working on the Linux box, and cmux-dependent suites self-skip
+there.
+
+### Put a new suite where the runner will find it
+
+Suites are **discovered by glob, not listed** — a hardcoded list silently omits new
+tests, which is exactly how the handoff plugin shipped 14 passing tests that CI never
+ran. Match one of these paths and it is covered automatically:
+
+| Language | Path | Runner |
+|---|---|---|
+| bash | `plugins/<plugin>/tests/<name>_test.sh` | `bash` |
+| node | `plugins/<plugin>/skills/<skill>/tests/<name>.test.mjs` | `node --test` |
+| node | `plugins/<plugin>/tests/<name>.test.mjs` | `node --test` |
+| python (stdlib) | `plugins/<plugin>/skills/<skill>/tests/test_*.py` | `unittest discover` |
+| python (pytest) | `plugins/gws/skills/*/tests/` | `pytest` |
+
+Bash suites should print `N passed, M failed` and exit non-zero on failure. If a suite
+needs a tool that may be absent, self-skip with exit 0 and say so on stdout.
+
+Anything that reaches a real database, a real API, or `cmux` must be stubbed — the
+handoff suite stubs `bd` via `PATH`. Tests must never touch a real beads database.
+
+### The parser drift guard
+
+`tests/parser-drift.test.mjs` asserts that `session-tools`' `lib/transcript.mjs` (the
+source of truth for reading Claude Code transcripts) and `hotline`'s
+`switchboard/scripts/server.js` still agree on what counts as harness noise and what a
+compaction boundary looks like. They silently diverged twice before this existed. If you
+change transcript-parsing behavior in either, expect this to fail — and fix both.
+
+Read its header before adding a third implementation to the comparison: the jq and
+Python readers are excluded deliberately, and the reasons are documented there.
+
 ---
 
 # Agent Instructions
@@ -102,7 +150,7 @@ bd dolt push          # Push beads to Dolt remote
 **MANDATORY WORKFLOW:**
 
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
+2. **Run quality gates** (if code changed) - `bash tests/run-all.sh` (see [Testing](#testing)); check the summary for SKIPs, not just the exit code
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
