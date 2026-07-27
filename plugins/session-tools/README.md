@@ -180,35 +180,29 @@ Node 18+. (`sessions-weekly-recap` uses Python; this skill uses Node so its pars
 
 ### 🌱 sessions-fork
 
-Same reader, different ending. `sessions-catch-up` gives you a **briefing**;
-`sessions-fork` gives you a **work-order** and then does the work — for when you want to
-continue or diverge from another session rather than just be caught up on it.
+**The `handoff` skill, inverted.** Handoff pushes context *forward* to a future session;
+this pulls it *back* from a past one — so the session you're in starts out knowing what it
+needs to know.
 
 ```
-/sessions-fork 5263bfb5 -- now do the same thing for the Linux path
-/sessions-fork eager-roaming-rose        # produce the work-order, then ask
+/sessions-fork 5263bfb5
+/sessions-fork eager-roaming-rose
 ```
 
-It restates what it inherited before writing anything: what's **settled** (and so not up
-for relitigation), what's **still open**, which **constraints carry over**, and which
-**dead ends** to avoid. Dead ends are the highest-value thing to inherit — rediscovering
-them costs the most — and because `thinking` blocks are empty on disk, it says "the
+It reads the session, reports what transferred, and **stops on a check-in.** It doesn't
+plan, scaffold, or start work — because the work you're about to do may have nothing to do
+with the session you just read. That's the whole point: catching up is what makes the
+session useful for whatever comes next, related or not.
+
+The most valuable thing it surfaces is **dead ends** — what was already tried and
+abandoned, so it isn't retried. Since `thinking` blocks are empty on disk, it says "the
 transcript doesn't say why" rather than inventing a rationale.
 
-#### The hazard it exists to prevent
+Same reader as `sessions-catch-up`, different question. Catch-up answers *"what's the
+status of that session, and what's waiting on me in it?"* Fork answers *"what does this
+session now know that it didn't before?"*
 
-Reading a transcript is always safe. **Editing is not.** If the source session is live in
-the same repo and you start editing that working tree, two agents share one checkout —
-one staging area, one `git status` — and you get commits that capture half of someone
-else's work.
-
-The digest already reports the target's `cwd` and liveness, so the decision is mechanical:
-target `active`/`recent` in your repo → isolate in a worktree (via
-`git-tree:create-git-tree`) or wait; idle for hours or days → in place is fine. Full rules
-in `references/safe-divergence.md`.
-
-The source session is never resumed, forked, or written to. "Fork" means forking the
-*work*, not the conversation.
+The source session is never resumed, forked, or written to.
 
 ---
 
@@ -221,7 +215,7 @@ one skill:
 ```
 plugins/session-tools/
 ├── scripts/            ← shared: lib/, export-session.mjs, nudge.mjs, install-wrapper.sh
-├── references/         ← shared prose: reading-a-digest.md, safe-divergence.md
+├── references/         ← shared prose: reading-a-digest.md
 ├── tests/              ← transcript.test.mjs
 └── skills/             ← sessions-catch-up, sessions-fork, sessions-weekly-recap
 ```
@@ -246,7 +240,6 @@ duplicate (hotline's switchboard).
 | `scripts/nudge.mjs` | Offer-backoff ledger |
 | `scripts/install-wrapper.sh` | Optional `claude-session-catchup` shim |
 | `references/reading-a-digest.md` | How to read a digest; tail states; what to trust |
-| `references/safe-divergence.md` | Liveness → isolation decision; worktree routing |
 
 #### Tests
 

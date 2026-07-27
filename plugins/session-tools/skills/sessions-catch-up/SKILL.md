@@ -31,9 +31,8 @@ immediately. Phase 2 is optional and only happens if the user wants the longer a
 > *"/export isn't available in this environment"*), and driving it by typing into a live
 > REPL would append a turn to the target.
 >
-> This constrains the *session*, not the repo. Doing new work informed by what you read
-> is fine — that is the `sessions-fork` skill, and it routes through
-> `${CLAUDE_PLUGIN_ROOT}/references/safe-divergence.md` first.
+> This constrains the *session*, not the repo. Doing new work informed by what you read is
+> fine — if that's the goal, `sessions-fork` loads the context and hands back to the user.
 
 ## Arguments
 
@@ -123,10 +122,11 @@ nothing at all.
 Do not offer `hotline` when the target session **is** the caller's own session — there is
 nothing to relay.
 
-## If the user then wants to build on it
+## Related
 
-Hand off to `sessions-fork` rather than editing straight away. It checks liveness against
-your cwd before anything is written — see `${CLAUDE_PLUGIN_ROOT}/references/safe-divergence.md`.
+`sessions-fork` reads the same digest but for a different purpose: priming a session with
+another one's context before starting unrelated work, ending on a check-in rather than a
+briefing about the target's pending state.
 
 ## Requirements
 
