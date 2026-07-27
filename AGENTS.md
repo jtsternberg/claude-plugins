@@ -50,6 +50,40 @@ To confirm a new skill sits where discovery expects it, check that it matches th
 find plugins -name SKILL.md    # every result should be plugins/<plugin>/skills/<skill>/SKILL.md
 ```
 
+## Sharing Code or Docs Between Sibling Skills
+
+When two or more skills in one plugin need the same script or the same reference doc, keep
+**one copy at the plugin root** — `plugins/<plugin>/scripts/` and
+`plugins/<plugin>/references/` — and reach it with `${CLAUDE_PLUGIN_ROOT}`:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/thing.mjs" <args>
+```
+
+And to point the model at a bundled doc, give it a resolvable path:
+
+```markdown
+**Read `${CLAUDE_PLUGIN_ROOT}/references/some-guide.md`** before continuing.
+```
+
+`${CLAUDE_PLUGIN_ROOT}` is the plugin's install directory. It is the documented, supported
+variable, and it keeps working after a marketplace install (which copies the plugin into
+`~/.claude/plugins/cache/`). `plugins/session-tools/` is the reference example — three
+skills share one transcript reader that had already drifted twice when duplicated.
+
+Two things to avoid:
+
+- **`${CLAUDE_SKILL_DIR}/../../`** — `CLAUDE_SKILL_DIR` is documented as the skill's own
+  subdirectory, *not* the plugin root, and traversal out of it is not supported. Several
+  older skills here still do this (`hotline`, `gws`, `fable`); it works today but should
+  migrate to `${CLAUDE_PLUGIN_ROOT}`.
+- **Bare relative paths in SKILL.md prose** (`see references/foo.md`). Nothing resolves
+  those for the model — there is no implicit base directory. Anchor every path to
+  `${CLAUDE_PLUGIN_ROOT}` or `${CLAUDE_SKILL_DIR}`.
+
+Duplicating a file across sibling skills is the thing this avoids: this repo has lost time
+to exactly that, twice, in the transcript parser.
+
 ## Plugin Types
 
 ### Hook-based plugins

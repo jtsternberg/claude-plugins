@@ -39,9 +39,11 @@ def previous_week_range() -> tuple[str, str]:
     return last_monday.strftime("%Y-%m-%d"), last_sunday.strftime("%Y-%m-%d")
 
 
+# The transcript reader lives at the PLUGIN level, not inside a sibling skill:
+# three skills use it now (sessions-catch-up, sessions-fork, and this one), so one
+# copy is the only way it cannot drift. parents[3] is plugins/session-tools/.
 EXPORT_BIN = (
-    Path(__file__).resolve().parents[2]
-    / "sessions-catch-up"
+    Path(__file__).resolve().parents[3]
     / "scripts"
     / "export-session.mjs"
 )

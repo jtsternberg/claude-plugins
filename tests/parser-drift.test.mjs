@@ -38,7 +38,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { parseTranscript } from '../plugins/session-tools/skills/sessions-catch-up/scripts/lib/transcript.mjs';
+import { parseTranscript } from '../plugins/session-tools/scripts/lib/transcript.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SERVER = path.join(REPO, 'plugins/hotline/skills/switchboard/scripts/server.js');

@@ -147,7 +147,7 @@ Typical reduction is 200–800x. Measured: 5.4 MB → 6 KB in 117 ms.
 The digest is one format of a general-purpose transcript reader, usable on its own and by other tools:
 
 ```bash
-SCRIPTS=plugins/session-tools/skills/sessions-catch-up/scripts
+SCRIPTS=plugins/session-tools/scripts
 node $SCRIPTS/export-session.mjs <id|prefix|slug> --format digest   # catch-up briefing
 node $SCRIPTS/export-session.mjs <id> --format md                   # full transcript (archive fidelity)
 node $SCRIPTS/export-session.mjs <id> --format json                 # structured
@@ -172,27 +172,89 @@ claude-session-catchup --yolo <id>            # or CLAUDE_CATCHUP_YOLO=1
 
 If `hotline` is installed and the target session is blocked on a question, the skill offers to send your answer over. If `handoff` is installed, it can persist the caught-up state. Neither is required, and a small ledger (`~/.claude/sessions-catch-up.prefs.json`) makes sure a declined offer degrades to a one-line protip and then goes quiet permanently.
 
-#### Tests
-
-```bash
-node --test plugins/session-tools/skills/sessions-catch-up/tests/transcript.test.mjs
-```
-
 #### Requirements
 
 Node 18+. (`sessions-weekly-recap` uses Python; this skill uses Node so its parser can be a direct port of the richest existing implementation rather than a third translation of it.)
 
-#### Files
+---
+
+### 🌱 sessions-fork
+
+Same reader, different ending. `sessions-catch-up` gives you a **briefing**;
+`sessions-fork` gives you a **work-order** and then does the work — for when you want to
+continue or diverge from another session rather than just be caught up on it.
+
+```
+/sessions-fork 5263bfb5 -- now do the same thing for the Linux path
+/sessions-fork eager-roaming-rose        # produce the work-order, then ask
+```
+
+It restates what it inherited before writing anything: what's **settled** (and so not up
+for relitigation), what's **still open**, which **constraints carry over**, and which
+**dead ends** to avoid. Dead ends are the highest-value thing to inherit — rediscovering
+them costs the most — and because `thinking` blocks are empty on disk, it says "the
+transcript doesn't say why" rather than inventing a rationale.
+
+#### The hazard it exists to prevent
+
+Reading a transcript is always safe. **Editing is not.** If the source session is live in
+the same repo and you start editing that working tree, two agents share one checkout —
+one staging area, one `git status` — and you get commits that capture half of someone
+else's work.
+
+The digest already reports the target's `cwd` and liveness, so the decision is mechanical:
+target `active`/`recent` in your repo → isolate in a worktree (via
+`git-tree:create-git-tree`) or wait; idle for hours or days → in place is fine. Full rules
+in `references/safe-divergence.md`.
+
+The source session is never resumed, forked, or written to. "Fork" means forking the
+*work*, not the conversation.
+
+---
+
+## Shared machinery (why it lives at the plugin root)
+
+Three skills read transcripts — `sessions-catch-up`, `sessions-fork`, and
+`sessions-weekly-recap` — so the reader lives **once**, at the plugin root, not inside any
+one skill:
+
+```
+plugins/session-tools/
+├── scripts/            ← shared: lib/, export-session.mjs, nudge.mjs, install-wrapper.sh
+├── references/         ← shared prose: reading-a-digest.md, safe-divergence.md
+├── tests/              ← transcript.test.mjs
+└── skills/             ← sessions-catch-up, sessions-fork, sessions-weekly-recap
+```
+
+Skills reach it with `${CLAUDE_PLUGIN_ROOT}` — the documented variable for a plugin's
+install directory, which keeps working after a marketplace install:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/export-session.mjs" <target> --format digest
+```
+
+This matters because the parser has already drifted twice across this repo; a per-skill
+copy would guarantee a third. `tests/parser-drift.test.mjs` guards the one remaining
+duplicate (hotline's switchboard).
 
 | File | Purpose |
 |------|---------|
-| `skills/sessions-catch-up/SKILL.md` | Two-phase workflow, briefing shape, enhancement gating |
-| `.../scripts/lib/transcript.mjs` | **Source of truth** for parsing + derived signals |
-| `.../scripts/lib/session-index.mjs` | id/prefix/slug resolution + cached index |
-| `.../scripts/lib/format.mjs` | digest / md / text / json renderers |
-| `.../scripts/export-session.mjs` | CLI entry |
-| `.../scripts/nudge.mjs` | Offer-backoff ledger |
-| `.../scripts/install-wrapper.sh` | Optional `claude-session-catchup` shim |
+| `scripts/lib/transcript.mjs` | **Source of truth** for parsing + derived signals |
+| `scripts/lib/session-index.mjs` | id/prefix/slug resolution + cached index |
+| `scripts/lib/format.mjs` | digest / md / text / json renderers |
+| `scripts/export-session.mjs` | CLI entry |
+| `scripts/nudge.mjs` | Offer-backoff ledger |
+| `scripts/install-wrapper.sh` | Optional `claude-session-catchup` shim |
+| `references/reading-a-digest.md` | How to read a digest; tail states; what to trust |
+| `references/safe-divergence.md` | Liveness → isolation decision; worktree routing |
+
+#### Tests
+
+Covered by the repo-wide runner (`bash tests/run-all.sh`), or directly:
+
+```bash
+node --test plugins/session-tools/tests/transcript.test.mjs
+```
 
 ---
 
