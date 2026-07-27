@@ -1,6 +1,6 @@
 ---
 name: pickup-handoff
-description: Resume work from a handoff written by a previous agent. Use when the user points you at a HANDOFF file, says "pick up where we left off", "continue this handoff", "resume from the handoff doc", hands you a HANDOFF-*.md or a beads issue titled "Handoff:", or a session-start notice reported a pending handoff. Pairs with the handoff skill.
+description: Resume work from a handoff written by a previous agent. Use when the user points you at a HANDOFF file, says "pick up where we left off", "continue this handoff", "resume from the handoff doc", hands you a HANDOFF-*.md or a beads issue titled "pending-handoff:", or a session-start notice reported a pending handoff. Pairs with the handoff skill.
 allowed-tools: Bash, Read, Glob, Grep
 argument-hint: "[<beads-issue-id> | <path-to-HANDOFF.md>]"
 ---
@@ -27,13 +27,13 @@ Resume work from a handoff written by a previous agent (via the companion `hando
    - looks like a beads id (e.g. `myproject-20xu`) → `bd show <id>`
    - looks like a path → `Read` it
 
-   Do **not** also glob for `HANDOFF*.md`, list open `Handoff:` issues, or check the
+   Do **not** also glob for `HANDOFF*.md`, list open `pending-handoff:` issues, or check the
    branch — you were told which one. Skip all of it. Only fall through to the search
    below if the identifier turns out not to resolve, and say so when you do.
 
    **With no argument**, search in this order:
    - `HANDOFF*.md` in the current working directory — prefer the one matching the current branch (`git branch --show-current`), then `HANDOFF.md`.
-   - If bd is available (`command -v bd >/dev/null 2>&1 && [ -d .beads ]`): open issues titled `Handoff:` — `bd list --status open,in_progress --title-contains "Handoff:" --json`.
+   - If bd is available (`command -v bd >/dev/null 2>&1 && [ -d .beads ]`): open issues titled `pending-handoff:` — `bd list --status open,in_progress --title-contains "pending-handoff:" --json`.
    - Multiple candidates and no clear match → list them and ask which to use.
 
 2. **Read it in full** (file, or `bd show <id>`).

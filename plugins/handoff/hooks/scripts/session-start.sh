@@ -5,7 +5,7 @@
 #    /tmp/claude-handoff/<claude-pid>.json so the handoff skill can embed them
 #    in the handoff it writes later.
 # 2. Scans the working directory for pending handoffs — HANDOFF*.md files and,
-#    when beads is available, open issues titled "Handoff:" — and prints one
+#    when beads is available, open issues titled "pending-handoff:" — and prints one
 #    compact line per finding, suggesting /handoff:pickup-handoff <identifier>.
 #    Each finding line carries its own identifier (bd id, or filename) so pickup
 #    can be invoked with it and resolve directly instead of re-searching.
@@ -71,7 +71,8 @@ if [ -n "$CLAUDE_PID" ] && [ -n "$SESSION_ID" ]; then
 fi
 
 # --- scan for pending handoffs ----------------------------------------------
-findings=""
+findings=""   # confident: HANDOFF*.md files + issues with the `pending-handoff:` prefix
+maybes=""     # weaker: issues that merely mention a handoff somewhere in the title
 now=$(date +%s 2>/dev/null || echo "")
 
 for f in "$CWD"/HANDOFF*.md; do
@@ -103,11 +104,32 @@ for f in "$CWD"/HANDOFF*.md; do
 "
 done
 
+# A handoff issue is titled with the `pending-handoff: ` PREFIX (references/beads.md).
+# The marker is deliberately unusual: a plain `Handoff:` prefix collided with ordinary
+# issues about handoffs, and `bd --title-contains` matches case-insensitively and
+# anywhere in the title, so those collisions were awkward to filter after the fact.
+#
+# Still sort rather than discard. Dropping a real handoff is the worse failure — a
+# cold start is exactly what this hook exists to prevent — but announcing an ordinary
+# issue as a pending handoff trains everyone to ignore the notice. Prefix matches are
+# reported as handoffs; anything else the query returned is surfaced separately as a
+# weaker signal rather than thrown away.
 if command -v bd >/dev/null 2>&1 && [ -d "$CWD/.beads" ]; then
-  bdout=$(bd -C "$CWD" list --status open,in_progress --title-contains "Handoff:" --flat --no-pager 2>/dev/null || true)
+  bdout=$(bd -C "$CWD" list --status open,in_progress --title-contains "pending-handoff" --flat --no-pager 2>/dev/null || true)
   while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    # --flat format: "<glyph> <id> [<pri>] [<type>] - <title>". Strip through the
+    # first " - " to isolate the title; with no separator, treat the whole line as
+    # the title rather than dropping the row.
     case "$line" in
-      *Handoff:*) findings="${findings}- Handoff issue: ${line}
+      *" - "*) title="${line#* - }" ;;
+      *) title="$line" ;;
+    esac
+    lower=$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]')
+    case "$lower" in
+      pending-handoff:*) findings="${findings}- Handoff issue: ${line}
+" ;;
+      *) maybes="${maybes}- Mentions a handoff: ${line}
 " ;;
     esac
   done <<EOF
@@ -118,8 +140,15 @@ fi
 if [ -n "$findings" ]; then
   printf 'Pending handoff(s) found in %s:\n' "$CWD"
   printf '%s' "$findings"
+  [ -n "$maybes" ] && printf 'Also open, titled like work ABOUT handoffs rather than a handoff itself:\n%s' "$maybes"
   printf 'To resume one, run /handoff:pickup-handoff <id-or-filename> — pass the identifier\n'
   printf 'from the list above so pickup resolves it directly instead of re-searching.\n'
+elif [ -n "$maybes" ]; then
+  # Nothing carries the `pending-handoff:` prefix, so don't claim one — but
+  # don't stay silent either, in case one was titled by hand without the prefix.
+  printf 'No handoff matched the `pending-handoff:` prefix in %s, but these are open:\n' "$CWD"
+  printf '%s' "$maybes"
+  printf 'If one of those IS the handoff, resume it with /handoff:pickup-handoff <id>.\n'
 fi
 
 exit 0
