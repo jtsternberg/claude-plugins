@@ -1,6 +1,6 @@
 ---
 name: create-git-tree
-description: "Create git worktrees with symlinked dependencies. Use when user says \"git worktree\", \"work on two branches\", \"parallel branch work\", \"review PR without switching\", \"keep my changes while checking out another branch\", or wants isolated branch directories sharing vendor/node_modules."
+description: "Create git worktrees with symlinked vendor/node_modules for parallel branch work."
 disable-model-invocation: true
 ---
 
@@ -11,19 +11,15 @@ Create git worktrees in parallel directories with automatic symlinks to vendor, 
 ## Quick Reference
 
 ```bash
-# From skill directory
-SKILL_DIR="$HOME/.claude/skills/create-git-tree"
-$SKILL_DIR/scripts/git-tree.sh <branch-name> [--repo <path>] [--create]
+# Resolve this once. Under Codex, replace the fallback with the absolute path
+# to this git-tree plugin root, which contains this skill's parent skills/ directory.
+GIT_TREE_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to the git-tree plugin root>}"
+"$GIT_TREE_ROOT/scripts/git-tree.sh" <branch-name> [--repo <path>] [--create]
 ```
 
 ## Workflow
 
-Run the script with the branch name. If no branch provided, ask the user.
-
-```bash
-SKILL_DIR="$HOME/.claude/skills/create-git-tree"
-$SKILL_DIR/scripts/git-tree.sh <branch-name> [--repo <path>] [--create]
-```
+Run the resolved script with the branch name. If no branch is provided, ask the user.
 
 **Flags:**
 - `--repo <path>`: Target repository (defaults to cwd)
