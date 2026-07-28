@@ -115,12 +115,16 @@ Commands for creating git commits from staged or unstaged files with AI-generate
 
 **Commands:** `/commit-staged`, `/commit-unstaged`
 
+**Claude Code only:** Codex does not surface plugin slash commands.
+
 **Install:** `claude plugin install git-commits@jtsternberg`
 
 #### 🔀 [pr-workflow](plugins/pr-workflow)
 Commands for managing pull requests: addressing comments and updating descriptions.
 
 **Commands:** `/address-pr-comments`, `/address-pr-comments-human`, `/update-pr-description`
+
+**Codex:** Skills work in Codex; its slash commands are Claude Code only.
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementing fixes or writing PR descriptions.
 
@@ -137,6 +141,8 @@ Commands for creating and reviewing Claude Code skills, slash commands, and suba
 Work through beads epics from start to completion with automatic PR creation.
 
 **Commands:** `/tackle-epic`, `/fix-findings-beads-tasks`
+
+**Claude Code only:** Codex does not surface plugin slash commands.
 
 **Dependencies:** Requires [beads](https://github.com/steveyegge/beads)
 
