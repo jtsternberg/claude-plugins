@@ -1,6 +1,6 @@
 ---
 name: hotline-wiretap
-description: "Finds and returns the path to the current session's conversation transcript file. Use when the user asks 'where is my transcript?', 'find my transcript', 'open the transcript', 'show transcript path', or wants to locate the JSONL conversation log."
+description: "Return the path to this session's JSONL conversation transcript — 'where is my transcript', 'open/show the transcript'."
 allowed-tools: Bash
 ---
 

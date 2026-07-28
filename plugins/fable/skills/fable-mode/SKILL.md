@@ -1,6 +1,8 @@
 ---
 name: fable-mode
-description: The operating stance behind trustworthy agent judgment, modeled on the Fable model. Use when the main agent is running on an Opus-level or Sonnet-level model and substantive work is starting — debugging, investigation, refactoring, or judgment calls about scope, autonomy, or when to ask vs. act. Also use when catching yourself about to end a turn with a menu of questions. Sonnet agents must load the bundled guardrails reference first; not for Haiku-level models.
+description: "Operating stance for trustworthy agent judgment. Use when a main agent on an Opus- or Sonnet-level model starts substantive work — debugging, investigation, refactoring, scope/autonomy calls — or is about to end a turn with a menu of questions. Not for Haiku."
+when_to_use: |
+  Also for judgment calls about when to ask vs. act. Sonnet agents must load the bundled guardrails reference first.
 ---
 
 # Think Like Fable

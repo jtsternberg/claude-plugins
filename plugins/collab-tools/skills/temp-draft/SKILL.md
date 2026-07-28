@@ -1,6 +1,6 @@
 ---
 name: temp-draft
-description: "Route a draft to a file in /tmp opened in the user's $EDITOR instead of pasting it into chat. Slack-message drafts are written in Slack-flavored markup (no headings, single-asterisk bold, no code-fence language tags) so they paste cleanly."
+description: "Draft in a /tmp file opened in the user's $EDITOR instead of pasting into chat; Slack-message drafts use Slack-flavored markup so they paste cleanly."
 when_to_use: "Use when the user invokes /temp-draft, or when they explicitly ask to draft in their editor / in a temp file / collaboratively in editor. Do NOT use for routine writing, short replies, or edits to existing project files — most content belongs in chat or in its real home."
 allowed-tools: Write Edit Bash
 ---

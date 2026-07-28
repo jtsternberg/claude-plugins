@@ -1,6 +1,6 @@
 ---
 name: promote-draft
-description: "Move a draft out of /tmp/collab-tools/ (or an explicit source path) into its real home, optionally renaming off the -draft / -YYYY-MM-DD suffix."
+description: "Move a draft out of /tmp/collab-tools/ into its real home, optionally dropping the -draft/-date suffix. Companion to temp-draft; not for arbitrary file moves."
 when_to_use: "Use when the user invokes /promote-draft, or when they say the temp-draft is ready, ask to 'move the draft to <path>', 'promote this draft', 'land the draft', or otherwise indicate that a draft should now live somewhere permanent. Do NOT use for arbitrary file moves — this is specifically the companion to the temp-draft skill. The default source location is /tmp/collab-tools/, but the user may name any source path explicitly."
 ---
 

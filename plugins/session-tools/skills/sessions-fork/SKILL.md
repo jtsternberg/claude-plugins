@@ -1,6 +1,6 @@
 ---
 name: sessions-fork
-description: "Prime this session with another session's context, then stop and check in. Reads a session's transcript off disk and loads what's transferable — decisions, constraints, dead ends, current repo state — so this session is ready to take on new work. The new work need not be related to the one you read. The source session is never resumed or written to."
+description: "Prime this session with another session's transferable context (decisions, constraints, repo state), then check in."
 when_to_use: |
   Use when the user wants THIS session to inherit another session's context before
   starting something else: "catch up on <id> then we'll work on something",

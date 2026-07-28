@@ -1,6 +1,6 @@
 ---
 name: using-cmux-cli
-description: "Drives cmux (macOS terminal multiplexer / workspace manager) via the `cmux` CLI — windows, workspaces, panes, surfaces, tabs, terminal I/O, the embedded browser, notifications, sidebar progress, and named layouts."
+description: "Drives cmux (macOS terminal multiplexer) via the `cmux` CLI — windows, workspaces, panes, tabs, sending keystrokes and reading terminal output, embedded browser, notifications, layouts."
 when_to_use: "Use when the user mentions cmux, workspaces, panes, surfaces, tabs, or splits; asks to send keystrokes to or read output from a terminal; wants to drive cmux's embedded browser; wants to post a notification into a workspace; or runs tmux-style commands (capture-pane, wait-for, swap-pane) where cmux is the multiplexer in play."
 argument-hint: "[describe what you want to do]"
 allowed-tools:

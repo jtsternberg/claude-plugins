@@ -1,6 +1,6 @@
 ---
 name: gws-account
-description: "Check, add, list, or switch the active Google account. This skill is the ONLY way to manage Google accounts — there is no standalone CLI command for account management."
+description: "Check, add, list, or switch the active Google account. The only way to manage gws accounts — the CLI has no `account` subcommand."
 when_to_use: |
   Use when the user asks anything about Google accounts: "which google account am I using?",
   "switch google account", "add google account", "what account is active?",

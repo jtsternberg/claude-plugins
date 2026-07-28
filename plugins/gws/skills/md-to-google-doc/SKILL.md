@@ -1,6 +1,6 @@
 ---
 name: md-to-google-doc
-description: "Upload markdown to Google Drive as a Google Doc. Three source rungs: gws CLI (full create/update/tab support), gcloud ADC (create + update-in-place via a state file, for accounts gws can't reach), or the claude.ai Google Drive connector (zero setup, create-only, no update/no pageless/no table-cell emphasis). Strips frontmatter and Obsidian callouts. Triggers on \"upload to google docs\", \"push to drive\", \"sync to gdoc\", \"create a google doc\", \"gws upload\", or requests to push markdown to a work/other Google account."
+description: "Upload or sync local markdown to Google Drive as a Google Doc, via gws CLI, gcloud ADC, or the Drive connector."
 disable-model-invocation: true
 argument-hint: '[file.md] [folder-id-or-url | --folder <id-or-url> | doc-id-or-url] [--title "Title"]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) mcp__claude_ai_Google_Drive__create_file'

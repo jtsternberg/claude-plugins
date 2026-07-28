@@ -1,6 +1,6 @@
 ---
 name: read-slack
-description: "Read Slack messages from the terminal via the Slack Web API — fetch a full thread or message by URL, search messages across the workspace, or read a channel's recent history, all as clean plain text. Use this whenever the user pastes a Slack message/thread URL (slack.com/archives/…), asks to pull, read, fetch, quote, or investigate a Slack thread or conversation, wants context from Slack to feed into an investigation, or asks to search Slack for something — even if they don't name the API. Strongly prefer this over asking the user to copy/paste Slack content by hand, which is lossy and drops reply structure, timestamps, and links."
+description: "Read Slack from the terminal via the Web API — fetch a thread or message from a pasted slack.com/archives URL, search workspace messages, or read a channel's recent history as plain text. Covers 'pull/read/quote/investigate this Slack thread' and 'search Slack for X'."
 when_to_use: |
   Use when the user:
   - pastes a Slack URL (https://<workspace>.slack.com/archives/C…/p…) and wants its content

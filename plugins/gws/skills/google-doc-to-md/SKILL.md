@@ -1,6 +1,6 @@
 ---
 name: google-doc-to-md
-description: "Download a Google Doc as a local markdown file. Three source rungs: gws CLI (native text/markdown export), gcloud ADC (same clean export, different auth — for accounts gws can't reach), or the claude.ai Google Drive connector (works with zero setup, needs de-escaping). Supports native Doc tabs on the gws rung: --list-tabs and per-tab export via --tab. Triggers on \"download google doc\", \"pull from drive\", \"gdoc to markdown\", \"export google doc\", \"gws download\", or requests to pull a doc from a work/other Google account."
+description: "Download a Google Doc (tabs supported) as local markdown, via gws CLI, gcloud ADC, or the Drive connector."
 disable-model-invocation: true
 argument-hint: '<doc-id-or-url> [output.md] [--title] [--list-tabs] [--tab <tab-title-or-id>]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) mcp__claude_ai_Google_Drive__download_file_content mcp__claude_ai_Google_Drive__get_file_metadata'

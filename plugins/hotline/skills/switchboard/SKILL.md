@@ -1,6 +1,8 @@
 ---
 name: hotline-switchboard
-description: "Serves a live, read-only HTML dashboard of all hotline conversations — the switchboard. Use when the user asks to 'open the switchboard', 'watch the hotline calls', 'show hotline conversations', 'monitor the calls', or wants a live view of cross-workspace Claude conversations. Also handles 'stop the switchboard' and 'is the switchboard running?'."
+description: "Live read-only HTML dashboard of hotline conversations — 'open/stop the switchboard', 'watch the hotline calls', 'is the switchboard running?'"
+when_to_use: |
+  Also 'show hotline conversations', 'monitor the calls', or any request for a live view of cross-workspace Claude conversations.
 allowed-tools: Bash
 ---
 

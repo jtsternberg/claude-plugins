@@ -1,6 +1,8 @@
 ---
 name: gmail-draft-from-markdown
-description: "Draft a Gmail message from a local markdown file via the gws CLI. Converts markdown to HTML, saves as a Gmail draft (never sends), and returns a clickable Gmail drafts URL so the user reviews and sends from Gmail's UI. Triggers on \"draft an email from\", \"gmail draft from markdown\", \"create a draft in gmail\", \"draft a follow-up email\", \"turn this note into an email draft\"."
+description: "Turn a local markdown file into a Gmail draft via gws — converts to HTML, never sends, returns the Gmail drafts URL for review."
+when_to_use: |
+  Triggers on 'draft an email from this file/note', 'gmail draft from markdown', 'create a draft in Gmail', 'draft a follow-up email', 'turn this note into an email draft'.
 argument-hint: '[file.md] [recipient-email-or-name] [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) Bash(marked *) Bash(pandoc *)'
 ---
