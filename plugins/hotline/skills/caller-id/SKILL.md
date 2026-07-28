@@ -1,6 +1,6 @@
 ---
 name: hotline-caller-id
-description: "Discovers and returns the current Claude Code session ID. Use when the user asks 'what is your session ID?', 'what session is this?', 'give me your session ID', or any variation of asking for the current conversation's session identifier."
+description: "Return the current Claude Code session ID — 'what is your/this session ID?'"
 allowed-tools: Bash
 ---
 

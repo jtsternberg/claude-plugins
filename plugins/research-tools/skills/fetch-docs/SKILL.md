@@ -1,6 +1,6 @@
 ---
 name: fetch-docs
-description: "Pulls a URL's raw content into a local file so Claude reads the authoritative source instead of WebFetch's summary. Use when the user wants docs, a page, or an API reference grounded in what the source actually says — not what a small-model pass thinks the page says. Works on any http/https URL; optional HTML→markdown conversion."
+description: "Pull a URL's raw content into a local file (optional HTML→markdown) so the authoritative source gets read instead of WebFetch's summary — docs pages, API references, READMEs, changelogs."
 when_to_use: |
   Use when the user says any of:
   "fetch the docs", "fetch this URL raw", "fetch this page",

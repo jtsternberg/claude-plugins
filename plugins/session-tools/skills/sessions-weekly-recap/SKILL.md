@@ -1,6 +1,6 @@
 ---
 name: sessions-weekly-recap
-description: "Generate daily or weekly recap notes from Claude Code session transcripts. Extracts session data, synthesizes human-readable summaries grouped by theme, and writes them as markdown files. Supports incremental merge into existing notes. JT's fork — adds --weekly mode, --output-dir override, and launchd cron management (macOS only)."
+description: "Generate daily/weekly recap notes from session transcripts; supports incremental merge and launchd cron."
 disable-model-invocation: true
 allowed-tools: "Bash(python3 *), Bash(bash *), Read, Write, Edit"
 argument-hint: "[--weekly] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--output-dir PATH] [--all]"

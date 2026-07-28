@@ -1,6 +1,8 @@
 ---
 name: handoff
-description: Write or update a handoff so a next agent with fresh context can continue the current work. Use when the user asks to "hand off", "write a handoff", "wrap up for the next agent", "save context for later", is ending a work session and wants continuity, or right after context was compacted mid-task. Not for routine note-taking mid-task.
+description: "Write or update a handoff so a next agent with fresh context can continue — 'hand off', 'wrap up for the next agent', session ending, or right after mid-task compaction."
+when_to_use: |
+  Also 'write a handoff', 'save context for later'. Not for routine note-taking mid-task.
 allowed-tools: Bash, Read, Write
 ---
 

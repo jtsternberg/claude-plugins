@@ -1,6 +1,6 @@
 ---
 name: sessions-catch-up
-description: "Catch up on another Claude Code session without touching it. Given a session id, prefix, or slug, distills that session's transcript into a short briefing — where the work landed, what's blocking, and what's waiting on the user. Runs as a sidecar so the target session's context is never modified."
+description: "Distill another session's transcript into a briefing — status, blockers, what's waiting — without touching it."
 when_to_use: |
   Use when the user wants to get back up to speed on a DIFFERENT session:
   "catch me up on <session-id>", "what was I doing in that session",

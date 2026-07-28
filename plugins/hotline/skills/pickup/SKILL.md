@@ -1,6 +1,6 @@
 ---
 name: hotline-pickup
-description: "Generates and caches a concise identity for the current workspace. Used by hotline-dial for workspace resolution and fuzzy matching. Trigger when a workspace identity is stale, missing, or needs refreshing."
+description: "Generate and cache this workspace's identity for hotline-dial resolution."
 disable-model-invocation: true
 argument-hint: "[--fresh]"
 allowed-tools: Bash

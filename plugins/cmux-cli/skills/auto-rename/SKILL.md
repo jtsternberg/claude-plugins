@@ -1,6 +1,8 @@
 ---
 name: auto-rename
-description: "Use when the user wants a cmux tab or workspace renamed to something meaningful without dictating the name — 'rename this tab', 'auto-rename', 'name this workspace something useful', 'fix these tab names', 'rename all tabs in this workspace', or when tabs/workspaces have default/stale names (zsh, Terminal, bash, node) that should reflect what's actually running there."
+description: "Rename cmux tabs or workspaces to meaningful names — 'rename this tab', 'auto-rename', 'fix these tab names' — or when default/stale names (zsh, bash, node) should reflect what's actually running."
+when_to_use: |
+  Also triggers on 'name this workspace something useful', 'rename all tabs in this workspace', or when the user wants renames without dictating the exact names.
 argument-hint: "[tab | workspace | both | all] [optional target hints]"
 allowed-tools:
   - "Bash(cmux *)"

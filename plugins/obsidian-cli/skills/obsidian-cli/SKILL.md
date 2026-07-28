@@ -1,11 +1,6 @@
 ---
 name: obsidian-cli
-description: |
-  Interacts with Obsidian vaults from the terminal using the official Obsidian CLI (v1.12+).
-  Manages notes, tasks, properties, daily notes, bases, tags, search, vault health,
-  file operations, and Obsidian automation. Triggers on "obsidian", "vault", "daily note",
-  "obsidian task", "obsidian search", "obsidian property", "note in obsidian", "obsidian base",
-  or any request involving Obsidian vault interaction from the command line.
+description: "Work with Obsidian vaults from the terminal via the official Obsidian CLI — notes, daily notes, tasks, properties, tags, bases, search, vault health, automation."
 ---
 
 # Obsidian CLI

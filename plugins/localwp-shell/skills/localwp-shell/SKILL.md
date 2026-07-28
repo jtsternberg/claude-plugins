@@ -1,6 +1,6 @@
 ---
 name: localwp-shell
-description: "Wraps WP-CLI, PHP, MySQL, and Composer commands through LocalWP's sandboxed environment. Use when working inside a LocalWP site directory. Triggers on wp/php/mysql/composer commands in WordPress context, 'command not found' errors, wrong PHP version errors, opcache/xdebug loading failures, or MySQL socket errors."
+description: "Run wp/php/mysql/composer through LocalWP's sandboxed environment when inside a LocalWP site — fixes 'command not found', wrong PHP version, opcache/xdebug load failures, MySQL socket errors."
 ---
 
 # LocalWP Shell

@@ -1,6 +1,6 @@
 ---
 name: diff-view
-description: "Generate a rich, self-contained HTML code-diff view (2-way side-by-side or 3-way) from files, pasted code, or git refs — with syntax highlighting, word-level intra-line marks, and optional full-page PNG screenshots for dropping into a PR or Slack."
+description: "Generate a self-contained HTML code diff (2-way side-by-side or 3-way) from files, pasted code, or git refs — word-level highlights, optional PNG screenshots for a PR or Slack."
 when_to_use: "Use when the user wants a shareable visual diff of code — comparing two versions of a file, two similar functions, or three variants (e.g. before / after / refactored-shared). Triggers on 'diff these', 'side-by-side', 'compare these two/three', 'show the diff as HTML', 'screenshot the diff', or when a plain text/unified diff would be hard to read. Not for applying patches or routine git diffs the user just wants to read in the terminal."
 allowed-tools: "Bash(node *) Bash(${CLAUDE_SKILL_DIR}/scripts/*) Bash(eval *) Bash(git show *) Bash(mkdir *) Read Write Edit"
 ---

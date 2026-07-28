@@ -1,6 +1,8 @@
 ---
 name: gmail-read
-description: "Search and read Gmail messages via the gws CLI. Runs a Gmail search query, returns structured results (id, subject, from, date, snippet), and optionally fetches full message bodies with HTML stripped to plain text. Triggers on \"find email about\", \"read the email from\", \"search my inbox for\", \"show me the message where\", \"pull that email about X\"."
+description: "Search and read Gmail via gws — 'find the email about X', 'search my inbox for', read a message's full body as plain text."
+when_to_use: |
+  Also 'read the email from <sender>', 'show me the message where …', 'pull that email about X'.
 argument-hint: '["<gmail search query>"] [--id <messageId>] [--limit N] [--body] [--account LABEL|EMAIL] [--pretty]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *)'
 ---

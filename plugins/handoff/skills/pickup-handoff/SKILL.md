@@ -1,6 +1,8 @@
 ---
 name: pickup-handoff
-description: Resume work from a handoff written by a previous agent. Use when the user points you at a HANDOFF file, says "pick up where we left off", "continue this handoff", "resume from the handoff doc", hands you a HANDOFF-*.md or a beads issue titled "pending-handoff:", or a session-start notice reported a pending handoff. Pairs with the handoff skill.
+description: "Resume work from a handoff — a HANDOFF-*.md file, 'pick up where we left off', a pending-handoff beads issue, or a session-start pending-handoff notice."
+when_to_use: |
+  Also 'continue this handoff', 'resume from the handoff doc'. Pairs with the handoff skill.
 allowed-tools: Bash, Read, Glob, Grep
 argument-hint: "[<beads-issue-id> | <path-to-HANDOFF.md>]"
 ---

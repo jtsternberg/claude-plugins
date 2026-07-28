@@ -1,6 +1,6 @@
 ---
 name: hotline-ringing
-description: "Handles incoming cross-workspace calls from hotline-dial. Primes the agent with communication protocol, workspace isolation rules, and response format. Activated when another Claude Code agent connects to this workspace."
+description: "Prime this agent to handle an incoming hotline call — protocol, isolation rules, response format."
 argument-hint: "[MODE: mode] [CALLER: path] [SESSION: id] task..."
 disable-model-invocation: true
 ---

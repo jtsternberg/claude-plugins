@@ -1,6 +1,6 @@
 ---
 name: hotline-dial
-description: "Initiates cross-workspace communication with another Claude Code instance. Supports quick calls, work orders, and conference calls. Use when the user wants to call, dial, message, delegate to, or collaborate with another workspace or project."
+description: "Call another Claude Code workspace — quick calls, work orders, conference calls. 'Call/dial/message/delegate to <workspace or project>'."
 argument-hint: "[--headless] [--detached] [--window <name|ref>] [workspace] [task/question...]"
 allowed-tools: Bash
 ---
