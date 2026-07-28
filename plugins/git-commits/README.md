@@ -2,6 +2,8 @@
 
 Create git commits with AI-generated commit messages.
 
+**Claude Code only:** Codex does not surface plugin slash commands.
+
 ## Installation
 
 ```bash

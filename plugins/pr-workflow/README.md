@@ -2,6 +2,8 @@
 
 Commands and skills for managing pull requests: addressing comments, updating descriptions, and watching PRs for events.
 
+**Codex:** Skills work in Codex; its slash commands are Claude Code only.
+
 ## Installation
 
 ```bash

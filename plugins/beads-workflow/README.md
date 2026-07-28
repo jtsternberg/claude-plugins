@@ -2,6 +2,8 @@
 
 This plugin provides the `/tackle-epic` command for working through beads epics.
 
+**Claude Code only:** Codex does not surface plugin slash commands.
+
 ## Installation
 
 ```bash
