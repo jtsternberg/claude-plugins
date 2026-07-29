@@ -1,0 +1,16 @@
+{
+  "name": "jtsternberg",
+  "interface": {
+    "displayName": "JT Sternberg"
+  },
+  "plugins": [
+    {
+      "name": "codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
+      },
+      "category": "Coding"
+    }
+  ]
+}
