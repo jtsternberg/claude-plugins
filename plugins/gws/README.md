@@ -111,6 +111,27 @@ core Google Workspace scopes.
 
 Check auth status with `gws auth status`.
 
+## Raw `gws` calls: `--params` is the URL, `--json` is the body
+
+The scripts in this plugin already get this right; the trap is for ad-hoc calls.
+On a write (`create`/`insert`/`update`/`patch`), body fields passed via `--params`
+are **silently discarded** — exit 0, a well-formed resource comes back, and the
+fields you sent are simply gone:
+
+```bash
+# WRONG → creates an "Untitled" octet-stream file in My Drive root
+gws drive files create --params '{"name":"Notes","mimeType":"application/vnd.google-apps.folder","parents":["FOLDER_ID"]}'
+
+# RIGHT
+gws drive files create --json '{"name":"Notes","mimeType":"application/vnd.google-apps.folder","parents":["FOLDER_ID"]}'
+```
+
+Reads take `--params` (`fileId`, `q`, `fields` genuinely *are* query params), which
+is why the habit forms. `--dry-run` prints the `body` / `query_params` split and is
+the cheapest pre-flight for any write. `gws schema drive.files.create` (dotted path,
+not subcommands) says which keys are query params. Full write-up in
+`skills/account/SKILL.md`.
+
 ## Accounts & Authentication
 
 `gws` authenticates with a Google OAuth **"installed app"** client

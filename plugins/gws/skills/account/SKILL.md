@@ -101,6 +101,53 @@ Each account directory contains:
 - `token_cache.json` — cached access token (per-account)
 - `account.json` — metadata with label and email (for listing)
 
+## Before You Write Anything: `--json` Is the Body, `--params` Is the URL
+
+This bites every agent exactly once, and it fails **silently with exit 0**. If you
+are about to run a `gws` write (`create`, `insert`, `update`, `patch`), read this.
+
+- `--params` → URL/query and path parameters only (`fileId`, `userId`, `fields`)
+- `--json` → the request body (`name`, `mimeType`, `parents`, `trashed`, …)
+
+Put body fields in `--params` and the CLI drops every one of them, returns exit 0,
+and hands back a well-formed resource — so nothing looks wrong:
+
+```bash
+# WRONG — creates an "Untitled" application/octet-stream file in My Drive root
+gws drive files create --params '{"name":"7.28.26","mimeType":"application/vnd.google-apps.folder","parents":["FOLDER_ID"]}'
+# → {"id":"1bv5...","name":"Untitled","mimeType":"application/octet-stream"}
+
+# RIGHT
+gws drive files create --json '{"name":"7.28.26","mimeType":"application/vnd.google-apps.folder","parents":["FOLDER_ID"]}'
+# → {"id":"1bQL...","name":"7.28.26","mimeType":"application/vnd.google-apps.folder"}
+```
+
+The only warning you get is a misleading one — `parameter 'parents' is not marked as
+repeated` — which describes array encoding, not the actual mistake. **Treat that
+warning on a write as "you meant `--json`."**
+
+**Always `--dry-run` a write first.** It prints the split explicitly, so the mistake
+is visible before it fires:
+
+```bash
+gws drive files create --dry-run --json '{"name":"x","mimeType":"application/vnd.google-apps.folder","parents":["ID"]}'
+# → {"body":{"mimeType":"...","name":"x","parents":["ID"]},"query_params":[],"url":"..."}
+#      ^^^^ body populated, query_params empty = correct.
+#      With --params it's the reverse: empty body, and the write silently no-ops.
+```
+
+Then verify what came back matches what you sent — `name` and `mimeType` in the
+response are the tell. A returned ID does **not** mean the fields landed.
+
+Why the habit forms: reads legitimately take `--params`, because their arguments
+really are query params (`gws drive files list --params '{"q":"..."}'`,
+`gws drive files get --params '{"fileId":"..."}'`). By your first write, `--params`
+is muscle memory.
+
+Related papercut: `gws schema` takes a **dotted** path, not subcommands —
+`gws schema drive.files.create`, not `gws schema drive files create`. Use it to
+check whether a given key is a query param (`"location": "query"`) or a body field.
+
 ## Integration with Other Skills
 
 When using `google-doc-to-md` or `md-to-google-doc` with a doc/folder that belongs to
