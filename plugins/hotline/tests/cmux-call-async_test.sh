@@ -537,6 +537,121 @@ else
   pass "--fork-session with --resume passes the guard"
 fi
 
+# ---------------------------------------------------------------------------
+# Fork placement: a FORK writes to a NEW session id, so the resume target is
+# NOT where the transcript lands. cmux mode has no structured output to read
+# the real id back from (unlike headless, which parses stream-json), so the
+# launcher must CHOOSE the fork's id up front via --session-id and record that
+# as the preset. Verified against the live CLI:
+#   claude --resume A --fork-session --session-id B   → transcript lands in B
+#   claude --resume A --session-id B                  → hard error:
+#     "--session-id can only be used with --continue or --resume if
+#      --fork-session is also specified."
+# So --session-id is REQUIRED on a fork and FORBIDDEN on a plain resume.
+# Regression: preset used to be the resume target on forks, so
+# wait-for-session.sh returned the wrong id and wait-for-response.sh polled the
+# original session's transcript — reporting "the message never submitted" while
+# the fork had already answered.
+# ---------------------------------------------------------------------------
+
+# Minimal cmux fake whose new-workspace SUCCEEDS, so the launcher runs to
+# completion and leaves the generated launch script in place to inspect.
+make_ok_cmux() {
+  cat > "$1" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  new-workspace) echo "OK workspace:123" ;;
+  read-screen)   echo "$ " ;;
+  send)          exit 0 ;;
+  *)             exit 0 ;;
+esac
+EOF
+  chmod +x "$1"
+}
+
+run_detached_launch() {
+  # Echoes "<call_dir>" after running the launcher with a succeeding cmux stub.
+  local tmp="$1"; shift
+  mkdir -p "$tmp/bin" "$tmp/cwd"
+  make_ok_cmux "$tmp/bin/cmux"
+  PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --detached --cwd "$tmp/cwd" \
+    --prompt "hello" "$@" > "$tmp/out.json" 2>"$tmp/err.txt"
+  jq -r '.call_dir // empty' < "$tmp/out.json"
+}
+
+UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+RESUME_TARGET="11111111-2222-3333-4444-555555555555"
+
+# --- Fork: fresh preset + --session-id in the launch script -----------------
+tmp=$(mktemp -d /tmp/hotline-fork-test-XXXXXX)
+call_dir=$(run_detached_launch "$tmp" --resume "$RESUME_TARGET" --fork-session)
+if [[ -n "$call_dir" && -d "$call_dir" ]]; then
+  preset=$(cat "$call_dir/session_id_preset.txt" 2>/dev/null || echo "")
+  launch=$(cat "$(cat "$call_dir/launch_script.txt" 2>/dev/null)" 2>/dev/null || echo "")
+
+  if [[ "$preset" != "$RESUME_TARGET" ]]; then
+    pass "fork: session_id_preset is NOT the resume target"
+  else
+    fail "fork: session_id_preset is NOT the resume target" "preset=$preset"
+  fi
+
+  if [[ "$preset" =~ $UUID_RE ]]; then
+    pass "fork: session_id_preset is a fresh lowercase UUID"
+  else
+    fail "fork: session_id_preset is a fresh lowercase UUID" "preset=$preset"
+  fi
+
+  if printf '%s' "$launch" | grep -q -- "--session-id"; then
+    pass "fork: launch script passes --session-id"
+  else
+    fail "fork: launch script passes --session-id" "launch=$launch"
+  fi
+
+  if printf '%s' "$launch" | grep -q -- "--session-id $preset"; then
+    pass "fork: --session-id matches the recorded preset"
+  else
+    fail "fork: --session-id matches the recorded preset" "preset=$preset launch=$launch"
+  fi
+
+  if printf '%s' "$launch" | grep -q -- "--resume $RESUME_TARGET" \
+     && printf '%s' "$launch" | grep -q -- "--fork-session"; then
+    pass "fork: launch script keeps --resume and --fork-session"
+  else
+    fail "fork: launch script keeps --resume and --fork-session" "launch=$launch"
+  fi
+else
+  fail "fork: launcher returned a usable call_dir" "out=$(cat "$tmp/out.json" 2>/dev/null)"
+fi
+[[ -n "$call_dir" && -f "$call_dir/launch_script.txt" ]] && \
+  rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
+# --- Plain resume: preset IS the resume target, NO --session-id -------------
+tmp=$(mktemp -d /tmp/hotline-fork-test-XXXXXX)
+call_dir=$(run_detached_launch "$tmp" --resume "$RESUME_TARGET")
+if [[ -n "$call_dir" && -d "$call_dir" ]]; then
+  preset=$(cat "$call_dir/session_id_preset.txt" 2>/dev/null || echo "")
+  launch=$(cat "$(cat "$call_dir/launch_script.txt" 2>/dev/null)" 2>/dev/null || echo "")
+
+  if [[ "$preset" == "$RESUME_TARGET" ]]; then
+    pass "plain resume: session_id_preset IS the resume target"
+  else
+    fail "plain resume: session_id_preset IS the resume target" "preset=$preset"
+  fi
+
+  # claude hard-errors on --resume + --session-id without --fork-session.
+  if printf '%s' "$launch" | grep -q -- "--session-id"; then
+    fail "plain resume: launch script omits --session-id" "launch=$launch"
+  else
+    pass "plain resume: launch script omits --session-id"
+  fi
+else
+  fail "plain resume: launcher returned a usable call_dir" "out=$(cat "$tmp/out.json" 2>/dev/null)"
+fi
+[[ -n "$call_dir" && -f "$call_dir/launch_script.txt" ]] && \
+  rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then

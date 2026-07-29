@@ -255,6 +255,54 @@ else
   fail "--fork-session without --resume errors and exits 1" "rc=$fork_rc out=$fork_out"
 fi
 
+# ---------------------------------------------------------------------------
+# Fork placement (conference transport). A fork writes to a NEW session id, so
+# the resume target is not where the transcript lands and is not what we should
+# report back as .session_id. cmux mode can't read the real id back from
+# structured output, so the launcher must choose it via --session-id.
+# Live-verified CLI rule: "--session-id can only be used with --continue or
+# --resume if --fork-session is also specified."
+# ---------------------------------------------------------------------------
+tmpf=$(mktemp -d /tmp/hotline-cmux-fork-XXXXXX)
+mkdir -p "$tmpf/bin" "$tmpf/cwd"
+cat > "$tmpf/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  new-workspace) echo "OK workspace:123" ;;
+  send)          printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args" ;;
+esac
+EOF
+chmod +x "$tmpf/bin/cmux"
+
+FORK_TARGET="11111111-2222-3333-4444-555555555555"
+PATH="$tmpf/bin:$PATH" CMUX_FAKE_STATE="$tmpf" bash "$SCRIPT_UNDER_TEST" \
+  --detached --cwd "$tmpf/cwd" --resume "$FORK_TARGET" --fork-session \
+  --prompt "fork me" > "$tmpf/out.json" 2> "$tmpf/stderr.txt"
+
+fork_send=$(cat "$tmpf/send_args" 2>/dev/null || true)
+fork_ls=$(printf '%s' "$fork_send" | sed -E 's/.*bash (\/tmp\/hotline-cmux-launch-[^\\[:space:]]+).*/\1/')
+LAUNCH_SCRIPTS+=("$fork_ls")
+fork_body=$(cat "$fork_ls" 2>/dev/null || true)
+fork_sid=$(jq -r '.session_id' "$tmpf/out.json" 2>/dev/null || true)
+
+assert_contains "fork keeps --resume" "$fork_body" "--resume"
+assert_contains "fork keeps --fork-session" "$fork_body" "--fork-session"
+assert_contains "fork passes --session-id" "$fork_body" "--session-id"
+
+if [[ "$fork_sid" != "$FORK_TARGET" && "$fork_sid" =~ ^[0-9a-f-]{36}$ ]]; then
+  pass "fork returns the NEW forked session id, not the resume target"
+else
+  fail "fork returns the NEW forked session id, not the resume target" "got: $fork_sid"
+fi
+
+if printf '%s' "$fork_body" | grep -q -- "--session-id $fork_sid"; then
+  pass "fork's reported session id matches the id handed to claude"
+else
+  fail "fork's reported session id matches the id handed to claude" \
+       "sid=$fork_sid body=$fork_body"
+fi
+rm -rf "$tmpf"
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then

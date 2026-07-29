@@ -147,16 +147,36 @@ bash "$(dirname "${BASH_SOURCE[0]}")/persist-call-meta.sh" "$CALL_DIR" "$CWD" "$
 # after it sees the REPL banner. That way the "session ID is available"
 # signal genuinely means "claude is up", not "the wrapper generated a UUID".
 #
-# First contact (no --resume): generate a fresh UUID and pass it to claude via
-# --session-id so the transcript is written under our chosen ID.
+# cmux mode has no structured output to read the real session ID back from
+# (headless parses it out of stream-json), so the preset must be *authoritative*
+# — whatever we record here is what the wait-for-* scripts will treat as the
+# callee's session. Three cases:
 #
-# Follow-up (--resume): the session already exists — use RESUME_ID directly.
+#   First contact (no --resume): generate a fresh UUID and pass it to claude via
+#   --session-id so the transcript is written under our chosen ID.
+#
+#   Fork (--resume + --fork-session): the fork writes to a NEW session, so the
+#   resume target is NOT where the transcript lands. Generate a fresh UUID and
+#   pass it via --session-id — that is the only way to know the fork's ID.
+#
+#   Plain resume (--resume alone): the session already exists and keeps its ID —
+#   use RESUME_ID and do NOT pass --session-id (claude rejects that combination).
+#
+# The CLI states the rule itself: "--session-id can only be used with --continue
+# or --resume if --fork-session is also specified." So --session-id is REQUIRED
+# on a fork and FORBIDDEN on a plain resume.
 #
 # uuidgen (macOS/Linux), /proc/sys/kernel/random/uuid, and /dev/urandom are
 # tried in order so the script degrades gracefully on minimal systems.
+#
+# PRESET_IS_OURS: true when we chose the ID (first contact or fork) and must
+# therefore tell claude about it; false when claude already owns it (plain
+# resume). Drives the --session-id flag below.
 SESSION_ID_PRESET=""
-if [[ -n "$RESUME_ID" ]]; then
+PRESET_IS_OURS=true
+if [[ -n "$RESUME_ID" ]] && ! $FORK_SESSION; then
   SESSION_ID_PRESET="$RESUME_ID"
+  PRESET_IS_OURS=false
 else
   SESSION_ID_PRESET=$(
     uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' \
@@ -221,7 +241,9 @@ chmod 700 "$LAUNCH_SCRIPT"
   # shell won't inherit it). e.g. HOTLINE_CLAUDE_MODEL=opus
   [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && printf ' --model %q' "$HOTLINE_CLAUDE_MODEL"
   [[ -n "$RESUME_ID"         ]] && printf ' --resume %q'     "$RESUME_ID"
-  [[ -z "$RESUME_ID" && -n "$SESSION_ID_PRESET" ]] && \
+  # --session-id only when the preset is OURS (first contact or fork). On a
+  # plain resume claude owns the ID and rejects the flag outright.
+  $PRESET_IS_OURS && [[ -n "$SESSION_ID_PRESET" ]] && \
                                     printf ' --session-id %q' "$SESSION_ID_PRESET"
   $FORK_SESSION                && printf ' --fork-session'
   [[ -n "$SESSION_NAME"      ]] && printf ' -n %q'           "$SESSION_NAME"
