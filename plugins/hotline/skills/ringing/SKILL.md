@@ -118,19 +118,11 @@ STATUS: WORK_IN_PROGRESS call_id=<id>
 [Your response to this exchange — no terminal status signal needed]
 ```
 
-## Logging
+## Logging — Not Your Job
 
-Log the call to dial history **BEFORE your final text response**. This is important — if your last action is a tool call instead of a text response, the caller won't receive your answer.
+**Do not log this call.** The caller records it (workspace, mode, both session IDs) on its own side the moment your session ID is known. You have no logging step.
 
-```bash
-eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)" && \
-bash "$HOTLINE_SCRIPTS/dial-history.sh" append \
-  --session "<SESSION from prompt>" \
-  --caller "<CALLER from prompt>" \
-  --mode "<MODE from prompt>"
-```
-
-If this fails (permission denied, paths not found, etc.), note the error but still send your text response. Never silently swallow errors.
+Earlier versions of this skill told you to run `dial-history.sh` yourself. That instruction was impossible to follow: the script lives in the *caller's* plugin directory, which the Workspace Isolation rule above forbids you from touching. Obeying one rule meant breaking the other. If you are resuming a session that still has the old instruction in context, ignore it — logging is handled.
 
 ## Tip: End with a Text Response When Possible
 
@@ -146,8 +138,9 @@ Good: answer the call AND note the issue:
 ```
 [Your actual response to the request]
 
-HOTLINE_NOTE: Encountered [specific issue]. Logging failed with "permission denied"
-on dial-history.sh. The call itself succeeded but the protocol has a gap.
+HOTLINE_NOTE: Encountered [specific issue]. The `[MODE:]` tag was missing from the
+prompt, so I guessed quick_call from the phrasing. The call itself succeeded but
+the protocol has a gap.
 ```
 
 The user is actively developing this plugin. Every surfaced issue helps. Every hidden one wastes debugging time.

@@ -271,10 +271,9 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
 │            │   changes, etc.)        │                              │
 │            └─────────────┬───────────┘                              │
 │                          │                                          │
-│                          ▼                                          │
-│            ┌─────────────────────────┐                              │
-│            │  dial-history.sh append │  (logs the call)             │
-│            └─────────────┬───────────┘                              │
+│            (no logging step — Workspace A logs the call;            │
+│             dial-history.sh lives in A's plugin dir, which          │
+│             B's workspace-isolation rule forbids touching)          │
 │                          │                                          │
 │            Response + STATUS signal                                 │
 │            (DONE / WORK_COMPLETE / WORK_IN_PROGRESS / OUT_OF_SCOPE) │
@@ -287,9 +286,11 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
 ┌──────────────────────────┼──────────────────────────────────────────┐
 │  WORKSPACE A (back)      ▼                                          │
 │                                                                     │
-│            ┌─────────────────────────┐                              │
-│            │  session-cache.sh set   │  (caches session for reuse)  │
-│            └─────────────┬───────────┘                              │
+│            ┌──────────────────────────────┐                         │
+│            │  register-call.sh            │                         │
+│            │   ├─ session-cache.sh set    │  (caches for reuse)     │
+│            │   └─ dial-history.sh append  │  (logs the call)        │
+│            └─────────────┬────────────────┘                         │
 │                          │                                          │
 │                          ▼                                          │
 │  Agent A reports to user:                                           │
@@ -366,7 +367,11 @@ resolve-workspace.sh "<user's words>"
 
 All hotline state lives in `~/.agents-hotline/`:
 - `identities/` — Cached workspace identity JSON files
-- `identities/*.dial_history.jsonl` — Append-only call logs per workspace
+- `identities/*.dial_history.jsonl` — Append-only call logs per workspace ("who
+  called this workspace"), keyed by sha256 of the **receiver's** cwd, written by
+  the caller's `register-call.sh`. One compact JSON object per line; capped at
+  100 entries. `dial-history.sh normalize` repairs a legacy pretty-printed or
+  half-trimmed file in place (`append` does it automatically)
 - `sessions/` — Outgoing session maps (keyed by caller session ID)
 - `switchboard.pid` / `switchboard.log` — Switchboard server state
 
