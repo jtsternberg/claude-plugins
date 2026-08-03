@@ -245,3 +245,10 @@ intentionally flatten the doc to one tab.
 shared drive — Drive v3 writes need `supportsAllDrives=true` (reads work
 without it, so the 404 is misleading). The bundled ADC scripts pass it; if
 calling the API by hand, add it.
+**"remembered doc … is not readable" warning (ADC rung):** the doc in the
+state file returned 404, so a new doc was created. Drive returns 404 both for
+a deleted doc and for one you've lost access to, so check whether it was a
+sharing change before keeping the copy — the original may still exist.
+**"no write access to doc … insufficientFilePermissions" (ADC rung):** you can
+read the doc but not edit it. Request edit access from the owner, or pass
+`--new` to render to a fresh doc you own.
