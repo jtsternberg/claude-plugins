@@ -4,9 +4,14 @@ name: tests
 # parser drifted twice without anything noticing. This is the minimum that makes
 # `tests/run-all.sh` automatic.
 #
-# Suites needing cmux (a local macOS terminal multiplexer) self-skip on a runner
-# and are reported as skips, not passes. The runner is Linux on purpose: these are
-# also meant to keep working on the Ubuntu box.
+# The runner is Linux on purpose: these suites also have to keep working on the
+# Ubuntu box.
+#
+# The cmux suites do NOT skip here, contrary to what this comment said until
+# 2026-08-03 — they stub cmux via PATH and genuinely run on Linux. run-all.sh
+# still carries a skip guard for a suite that needs the real binary; nothing
+# currently trips it. So a clean run reports `skipped 0`, and any nonzero skip
+# count is worth reading rather than shrugging at.
 
 on:
   push:
@@ -24,5 +29,17 @@ jobs:
         with:
           node-version: '22'
 
+      # Explicit, even though ubuntu-latest ships a python3: the python suites
+      # were skipped in CI for months because they were gated on a package the
+      # workflow never installed, and nothing here declared a python dependency
+      # to notice. Declaring it means a runner image change can't silently
+      # re-skip 60 tests. The suites are stdlib unittest — no pip step needed.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # The run prints a passed/failed/skipped summary at the end. Read it — a
+      # green exit over a pile of skips is the failure mode this file exists to
+      # catch, and it looks identical to a real pass from the badge alone.
       - name: Run all suites
         run: bash tests/run-all.sh

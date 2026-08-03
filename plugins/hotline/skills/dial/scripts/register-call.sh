@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Register Call: Record a call in the sessions registry from call_dir metadata.
+# Register Call: Record a call in the sessions registry from call_dir metadata,
+# and log it to the receiver's dial history.
 #
 # Reads session_id.txt plus the meta files written by persist-call-meta.sh
-# (cwd.txt, mode.txt, caller_session.txt) and runs session-cache.sh set.
-# Called by wait-for-session.sh the moment the remote session ID is known,
-# and by cmux-call.sh for synchronous conference calls — so the registry is
-# written by scripts, not by agent discipline.
+# (cwd.txt, mode.txt, caller_cwd.txt, caller_session.txt) and runs
+# session-cache.sh set. Called by wait-for-session.sh the moment the remote
+# session ID is known, and by cmux-call.sh for synchronous conference calls — so
+# the registry is written by scripts, not by agent discipline.
+#
+# Dial history is written here too, for the same reason plus one more: the
+# receiving agent used to run dial-history.sh itself (per the ringing skill),
+# but that script lives in the CALLER's plugin install dir, which the ringing
+# skill's own workspace-isolation rule forbids the receiver from touching. A
+# receiver that obeyed isolation skipped logging; one that logged broke
+# isolation. The caller has every field the entry needs, so it writes it.
 #
 # Usage:
 #   register-call.sh <call_dir>
@@ -44,5 +52,23 @@ bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
   --caller-session "$CALLER_SESSION" \
   --session "$SESSION_ID" \
   --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
+
+# Dial history: "who called THIS workspace", keyed by the RECEIVER's cwd.
+# --session keeps its historical meaning (the CALLER's session id); the callee's
+# own session goes in --receiver-session. caller_cwd.txt is optional metadata,
+# so fall back rather than skip the log entirely.
+DIAL_HISTORY="$SCRIPT_DIR/../../../scripts/dial-history.sh"
+if [[ -f "$DIAL_HISTORY" ]]; then
+  CALLER_CWD=""
+  [[ -s "$CALL_DIR/caller_cwd.txt" ]] && CALLER_CWD=$(cat "$CALL_DIR/caller_cwd.txt")
+  bash "$DIAL_HISTORY" append \
+    --cwd "$TARGET" \
+    --session "$CALLER_SESSION" \
+    --caller "${CALLER_CWD:-unknown}" \
+    --mode "$MODE" \
+    --receiver-session "$SESSION_ID" >/dev/null 2>&1 || debug "dial-history.sh append failed"
+else
+  debug "dial-history.sh not found at $DIAL_HISTORY"
+fi
 
 exit 0

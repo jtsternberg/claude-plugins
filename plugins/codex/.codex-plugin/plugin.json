@@ -1,0 +1,38 @@
+{
+  "name": "codex",
+  "version": "0.1.0",
+  "description": "Codex model stances and delegation discipline for testing frontier-model behavior across Sol, Terra, and supporting models.",
+  "author": {
+    "name": "Justin Sternberg",
+    "email": "me@jtsternberg.com",
+    "url": "https://github.com/jtsternberg"
+  },
+  "repository": "https://github.com/jtsternberg/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "sol",
+    "terra",
+    "delegation",
+    "agentic-coding"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex",
+    "shortDescription": "Model stances and delegation for Codex",
+    "longDescription": "Experiment with Sol-style delegation and A/B model stances in Codex. Use sol-delegate for a Sol main agent routing execution to Terra or other available models, and compare fable-mode with sol-mode on Terra or another Codex model.",
+    "developerName": "JT Sternberg",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/jtsternberg/claude-plugins",
+    "defaultPrompt": [
+      "Use $codex:sol-delegate to plan and route execution across Codex models.",
+      "Use $codex:fable-mode for the Fable-style A/B condition.",
+      "Use $codex:sol-mode for the Sol-style A/B condition."
+    ]
+  }
+}

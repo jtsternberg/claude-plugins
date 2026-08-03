@@ -61,6 +61,11 @@ def _clients():
 
 
 def export_markdown(doc_id: str) -> bytes:
+    # Deliberately no supportsAllDrives here, unlike md-to-google-doc's ADC
+    # scripts, which need it on every call or shared-drive writes 404. Drive v3
+    # files.export takes only fileId and mimeType; googleapiclient validates
+    # kwargs against the discovery doc, so adding it raises TypeError. Pinned by
+    # tests/test_adc_export.py — see claude-plugins-zwr7.
     drive = _clients()
     return drive.files().export(fileId=doc_id, mimeType="text/markdown").execute()
 

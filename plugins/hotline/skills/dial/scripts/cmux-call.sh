@@ -121,9 +121,18 @@ else
   PLACE_REF="$SURF_REF"; PLACE_KIND="surface"
 fi
 
+# Session ID for the callee. See cmux-call-async.sh for the full rationale:
+# cmux mode can't read the real ID back from structured output, so the ID we
+# record here is authoritative. A FORK writes to a new session, so the resume
+# target is NOT it — generate a fresh ID and hand it to claude via --session-id.
+# Plain resume keeps its own ID and rejects --session-id outright ("--session-id
+# can only be used with --continue or --resume if --fork-session is also
+# specified"). PRESET_IS_OURS distinguishes the two below.
 SESSION_ID_PRESET=""
-if [[ -n "$RESUME_ID" ]]; then
+PRESET_IS_OURS=true
+if [[ -n "$RESUME_ID" ]] && ! $FORK_SESSION; then
   SESSION_ID_PRESET="$RESUME_ID"
+  PRESET_IS_OURS=false
 else
   SESSION_ID_PRESET=$(
     uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' \
@@ -150,11 +159,10 @@ chmod 700 "$LAUNCH_SCRIPT"
   printf 'claude'
   # Model override, baked in at write time from the caller's env.
   [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && printf ' --model %q' "$HOTLINE_CLAUDE_MODEL"
-  if [[ -n "$RESUME_ID" ]]; then
-    printf ' --resume %q' "$RESUME_ID"
-  elif [[ -n "$SESSION_ID_PRESET" ]]; then
+  [[ -n "$RESUME_ID" ]] && printf ' --resume %q' "$RESUME_ID"
+  # --session-id only when the preset is OURS (first contact or fork).
+  $PRESET_IS_OURS && [[ -n "$SESSION_ID_PRESET" ]] && \
     printf ' --session-id %q' "$SESSION_ID_PRESET"
-  fi
   [[ -n "$SESSION_NAME" ]] && printf ' -n %q' "$SESSION_NAME"
   $FORK_SESSION && printf ' --fork-session'
   # Opt-in via HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS — see cmux-call-async.sh

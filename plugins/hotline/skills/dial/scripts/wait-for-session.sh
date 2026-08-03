@@ -102,6 +102,13 @@ if $CMUX_MODE; then
   # the session, so its existence is a strong REPL-liveness signal that
   # doesn't depend on terminal rendering (banner can scroll out of the read
   # window between polls, ANSI/--resume variance can defeat the regex).
+  #
+  # This depends on the preset being the id the callee ACTUALLY writes to. The
+  # launcher guarantees that: fresh UUID on first contact, fresh UUID handed to
+  # `--session-id` on a fork, resume target only on a plain resume. (When forks
+  # presetted the resume target instead, this signal matched the ORIGINAL
+  # session's long-existing transcript and fired instantly — a false
+  # REPL-booted, and the wrong id to hand wait-for-response.sh.)
   # Encoding: Claude Code replaces EVERY non-alphanumeric char (path
   # separators, dots, AND spaces) with '-' when deriving the project-dir
   # name (verified against ~/.claude/projects/; e.g. '/Users/JT/.dotfiles' →

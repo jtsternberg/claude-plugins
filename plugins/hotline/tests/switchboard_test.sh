@@ -377,6 +377,32 @@ else
   fail "auto-cache: wait-for-session registers call in sessions registry (sid=$GOT_SID, file=$([[ -f $REG_FILE ]] && echo yes || echo no))"
 fi
 
+# Same registration writes the receiver's dial history. This used to be the
+# RECEIVING agent's job, which it could not do without violating the ringing
+# skill's workspace-isolation rule (dial-history.sh lives in the caller's plugin
+# dir) — so calls went unlogged. The caller owns it now.
+DH_HASH=$(echo -n "$(realpath /tmp/reg-target-ws 2>/dev/null || echo /tmp/reg-target-ws)" \
+  | shasum -a 256 | cut -c1-16)
+DH_FILE="$REG_HOME/.agents-hotline/identities/${DH_HASH}.dial_history.jsonl"
+if [[ -s "$DH_FILE" ]] \
+   && [[ $(jq -r '.session_id' "$DH_FILE" | tail -1) == "aaaaaaaa-1111-2222-3333-444444444444" ]] \
+   && [[ $(jq -r '.receiver_session' "$DH_FILE" | tail -1) == "$REG_SID" ]] \
+   && [[ $(jq -r '.caller' "$DH_FILE" | tail -1) == "/tmp/caller-ws" ]] \
+   && [[ $(jq -r '.mode' "$DH_FILE" | tail -1) == "quick_call" ]]; then
+  pass "auto-cache: register-call logs the call to the receiver's dial history"
+else
+  fail "auto-cache: register-call logs the call to the receiver's dial history" \
+       "file=$DH_FILE contents=$(cat "$DH_FILE" 2>/dev/null)"
+fi
+
+# One entry per call, one line per entry (the cap counts entries).
+if [[ $(wc -l < "$DH_FILE" 2>/dev/null | tr -d ' ') == "1" ]]; then
+  pass "auto-cache: dial history entry is a single compact line"
+else
+  fail "auto-cache: dial history entry is a single compact line" \
+       "$(cat "$DH_FILE" 2>/dev/null)"
+fi
+
 # register-call.sh is a silent no-op when metadata is missing
 BARE_DIR=$(mktemp -d "$SANDBOX/bare.XXXX")
 echo "some-sid" > "$BARE_DIR/session_id.txt"

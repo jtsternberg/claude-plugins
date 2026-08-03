@@ -118,13 +118,23 @@ bash tests/run-all.sh
 ```
 
 It exits 0 only when every suite that *could* run passed. A suite whose runtime is
-missing (no `cmux`, no `pytest`) is reported as **SKIP**, never silently passed — so
-read the summary, not just the exit code.
+missing (no `cmux`) is reported as **SKIP**, never silently passed — so read the
+summary, not just the exit code.
+
+**A skip is only honest if something can actually satisfy it.** The gws suites were
+gated on `import pytest` while CI installed no python packages, so 54 tests were
+permanently skipped and the run still exited 0 — indistinguishable from a real pass
+unless you read the summary line. Before gating a suite on a runtime, confirm CI
+installs that runtime.
 
 CI (`.github/workflows/tests.yml`) runs exactly that script on pushes to `main`, on
 pull requests, and on manual dispatch. It runs on **ubuntu-latest** on purpose: these
-suites also have to keep working on the Linux box, and cmux-dependent suites self-skip
-there.
+suites also have to keep working on the Linux box.
+
+The cmux suites stub `cmux` via `PATH`, so they run on Linux rather than skipping —
+a green CI run currently reports `skipped 0`. `run-all.sh` keeps a skip guard for a
+suite that needs the real binary, but nothing trips it today, so treat any nonzero
+skip count as something to read rather than expected noise.
 
 ### Put a new suite where the runner will find it
 
@@ -137,8 +147,14 @@ ran. Match one of these paths and it is covered automatically:
 | bash | `plugins/<plugin>/tests/<name>_test.sh` | `bash` |
 | node | `plugins/<plugin>/skills/<skill>/tests/<name>.test.mjs` | `node --test` |
 | node | `plugins/<plugin>/tests/<name>.test.mjs` | `node --test` |
-| python (stdlib) | `plugins/<plugin>/skills/<skill>/tests/test_*.py` | `unittest discover` |
-| python (pytest) | `plugins/gws/skills/*/tests/` | `pytest` |
+| python | `plugins/<plugin>/skills/<skill>/tests/test_*.py` | `unittest discover` |
+| python | `plugins/<plugin>/tests/test_*.py` | `unittest discover` |
+
+Python suites must be **stdlib `unittest`** — `unittest discover` collects only
+`unittest.TestCase` subclasses, so a pytest-style module of bare `def test_x()`
+functions would be silently ignored. The runner greps for `import unittest` in every
+`test_*.py` and fails the suite if it's missing, rather than quietly not running it.
+There is no pytest path; don't add one without also installing pytest in CI.
 
 Bash suites should print `N passed, M failed` and exit non-zero on failure. If a suite
 needs a tool that may be absent, self-skip with exit 0 and say so on stdout.

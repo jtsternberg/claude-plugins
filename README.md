@@ -108,6 +108,9 @@ Skills for working with — and like — the Fable model (`claude-fable-5`). Shi
 
 **Install:** `claude plugin install fable@jtsternberg`
 
+#### 🧪 [codex](plugins/codex)
+Codex-native A/B experiments: `codex:sol-delegate` for Sol-led delegation to Terra and other available models, plus `codex:fable-mode` and `codex:sol-mode` for comparing competitive frontier-model stances on Terra.
+
 ### Commands
 
 #### 💬 [git-commits](plugins/git-commits)
