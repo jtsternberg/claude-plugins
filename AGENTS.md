@@ -129,8 +129,12 @@ installs that runtime.
 
 CI (`.github/workflows/tests.yml`) runs exactly that script on pushes to `main`, on
 pull requests, and on manual dispatch. It runs on **ubuntu-latest** on purpose: these
-suites also have to keep working on the Linux box, and cmux-dependent suites self-skip
-there.
+suites also have to keep working on the Linux box.
+
+The cmux suites stub `cmux` via `PATH`, so they run on Linux rather than skipping —
+a green CI run currently reports `skipped 0`. `run-all.sh` keeps a skip guard for a
+suite that needs the real binary, but nothing trips it today, so treat any nonzero
+skip count as something to read rather than expected noise.
 
 ### Put a new suite where the runner will find it
 
