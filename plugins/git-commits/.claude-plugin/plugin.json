@@ -1,7 +1,7 @@
 {
   "name": "git-commits",
-  "description": "Commands for creating git commits from staged or unstaged files with AI-generated commit messages.",
-  "version": "1.0.1",
+  "description": "Skills for creating git commits from staged or unstaged files with AI-generated commit messages.",
+  "version": "1.1.0",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

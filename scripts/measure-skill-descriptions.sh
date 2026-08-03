@@ -139,8 +139,8 @@ while IFS= read -r skill_file; do
   grand_total=$((grand_total + char_count))
 done < <(find "$repo_root/plugins" -path '*/skills/*/SKILL.md' -type f -print | sort)
 
-if [ "$skill_count" -ne 50 ]; then
-  printf 'Expected 50 skill descriptions; parsed %s.\n' "$skill_count" >&2
+if [ "$skill_count" -ne 55 ]; then
+  printf 'Expected 55 skill descriptions; parsed %s.\n' "$skill_count" >&2
   exit 1
 fi
 

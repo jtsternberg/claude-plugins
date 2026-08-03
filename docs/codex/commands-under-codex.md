@@ -76,15 +76,14 @@ All seven command files are unavailable to Codex as commands:
 | --- | --- | --- | --- |
 | `beads-workflow` | `commands/tackle-epic.md` | Work a Beads epic and create a PR | Not surfaced or invokable. |
 | `beads-workflow` | `commands/fix-findings-beads-tasks.md` | Fix findings as tracked, separately committed tasks | Not surfaced or invokable. |
-| `git-commits` | `commands/commit-staged.md` | Commit staged files | Not surfaced or invokable. |
-| `git-commits` | `commands/commit-unstaged.md` | Stage and commit unstaged files | Not surfaced or invokable. |
 | `pr-workflow` | `commands/update-pr-description.md` | Refresh a PR description | Not surfaced or invokable. |
 | `pr-workflow` | `commands/address-pr-comments.md` | Address PR comments and post the result | Not surfaced or invokable. |
 | `pr-workflow` | `commands/address-pr-comments-human.md` | Address PR comments with an approval gate | Not surfaced or invokable. |
 
 `beads-workflow` contains only its two command files and README (plus its
-manifest); `git-commits` is the same. They are thus **effectively empty in
-Codex**. `pr-workflow` is not empty: its two skills, `qa-walkthrough-pr` and
+manifest), so it is **effectively empty in Codex**. `git-commits` was migrated
+to the `commit-staged` and `commit-unstaged` skills after this command audit.
+`pr-workflow` is not empty: its two skills, `qa-walkthrough-pr` and
 `watch-pr-then-action`, remain a separate potentially usable Codex surface,
 but none of its three command workflows do.
 
