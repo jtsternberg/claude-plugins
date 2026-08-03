@@ -101,6 +101,11 @@ When making any changes to a plugin (skills, commands, hooks, metadata), always 
 
 ## Development Commands
 
+Repository-wide analysis scripts are documented in
+[`scripts/README.md`](scripts/README.md). They are maintainer checks and report
+generators, not plugin runtime dependencies; run them from the repository root
+when auditing the current tree.
+
 ```bash
 # Install plugin locally for testing
 claude plugins add /path/to/claude-plugins/plugins/<plugin-name>

@@ -244,6 +244,11 @@ plugins/
     └── commands/        # Slash commands / skills (optional)
 ```
 
+For the current Codex support boundary, see the
+[Codex compatibility guide](docs/codex/compatibility.md). Detailed probe logs
+and historical decisions are kept separately in the
+[Codex research archive](docs/codex/README.md).
+
 ---
 
 ## Contributing

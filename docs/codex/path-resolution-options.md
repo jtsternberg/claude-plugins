@@ -1,6 +1,12 @@
 # Path resolution under Codex — option space and recommendation
 
-Status: **decision doc, no option selected.** For beads `claude-plugins-p81u.3`. Written 2026-07-27 against the evidence in [plugin-root-semantics.md](plugin-root-semantics.md), [compat-matrix.md](compat-matrix.md), and [frontmatter-and-path-semantics.md](frontmatter-and-path-semantics.md). Four Codex probes are still in flight; every ranking below states which result would move it.
+Status: **historical decision record.** Written 2026-07-27 against the evidence in [plugin-root-semantics.md](plugin-root-semantics.md), [compat-matrix.md](compat-matrix.md), and [frontmatter-and-path-semantics.md](frontmatter-and-path-semantics.md). The option rankings below reflect the probe state at that date; later results are summarized in the [maintained compatibility guide](compatibility.md).
+
+The SessionStart-hook option was subsequently tested on codex-cli 0.146.0 and
+did not persist `CLAUDE_SKILL_DIR` into a later skill-body shell. Treat that
+option as rejected in its simple export form; the detailed hook record is in
+[hooks-under-codex.md](hooks-under-codex.md). Reverify after a Codex upgrade
+before reopening any option based on undocumented environment behavior.
 
 ## The problem
 

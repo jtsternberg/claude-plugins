@@ -18,6 +18,13 @@ This was tested on `codex-cli 0.145.0` in a fresh scratch `CODEX_HOME`, with a
 throwaway local plugin and marker script. No real profile, handoff script, or
 repository plugin file was changed.
 
+**Follow-up, tested on codex-cli 0.146.0 (2026-08-03):** a trusted
+`SessionStart` hook ran and successfully received `${CLAUDE_PLUGIN_ROOT}`, but
+an `export CLAUDE_SKILL_DIR=...` from that hook was absent in a later
+skill-body shell. A hook can record state for a skill only if the skill
+explicitly reads that state; it cannot inject a persistent per-skill shell
+variable by itself. Reverify this boundary after Codex upgrades.
+
 ## Probe results
 
 The initial hook config mirrored handoff's startup entry: `SessionStart`,
