@@ -70,7 +70,7 @@ working Codex custom prompt in the current runtime.
 
 ## Q3 — Repository command inventory
 
-All seven command files are unavailable to Codex as commands:
+The remaining five command files are unavailable to Codex as commands:
 
 | Plugin | Command file | Claude command intent | Codex result |
 | --- | --- | --- | --- |

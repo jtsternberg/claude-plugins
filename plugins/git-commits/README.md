@@ -21,7 +21,7 @@ Provides skills for creating commits from staged or unstaged files with automati
 
 ## Skills
 
-### `$commit-staged`
+### `commit-staged`
 
 Create a commit from currently staged files.
 
@@ -29,18 +29,18 @@ If you provide a commit message in your request, it will be used. Otherwise, the
 
 **Example:**
 ```
-$commit-staged
+Invoke the `commit-staged` skill.
 ```
 
-### `$commit-unstaged`
+### `commit-unstaged`
 
-Stage all unstaged files and create a commit.
+Review, stage, and commit the intended unstaged changes.
 
 The skill reviews and stages each intended file explicitly, then creates a commit with either your provided message or an AI-generated one.
 
 **Example:**
 ```
-Use `$commit-unstaged` with the message `fix: resolve navigation bug`
+Invoke the `commit-unstaged` skill with the message `fix: resolve navigation bug`.
 ```
 
 ## How It Works
