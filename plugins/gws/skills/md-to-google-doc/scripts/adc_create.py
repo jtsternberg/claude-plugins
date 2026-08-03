@@ -67,7 +67,7 @@ def doc_exists(drive, doc_id: str) -> bool:
     from googleapiclient.errors import HttpError
 
     try:
-        drive.files().get(fileId=doc_id, fields="id").execute()
+        drive.files().get(fileId=doc_id, fields="id", supportsAllDrives=True).execute()
         return True
     except HttpError as e:
         if e.status_code in (403, 404):
@@ -98,7 +98,9 @@ def create_doc(drive, docs, md_path: str, title: str, folder_id: str | None) -> 
     if folder_id:
         body["parents"] = [folder_id]
     media = MediaFileUpload(md_path, mimetype="text/markdown")
-    doc = drive.files().create(body=body, media_body=media, fields="id").execute()
+    doc = drive.files().create(
+        body=body, media_body=media, fields="id", supportsAllDrives=True
+    ).execute()
     doc_id = doc["id"]
     _set_pageless(docs, doc_id)
     return doc_id
@@ -108,7 +110,9 @@ def update_doc(drive, doc_id: str, md_path: str, title: str) -> None:
     from googleapiclient.http import MediaFileUpload
 
     media = MediaFileUpload(md_path, mimetype="text/markdown")
-    drive.files().update(fileId=doc_id, body={"name": title}, media_body=media).execute()
+    drive.files().update(
+        fileId=doc_id, body={"name": title}, media_body=media, supportsAllDrives=True
+    ).execute()
 
 
 def main(argv):

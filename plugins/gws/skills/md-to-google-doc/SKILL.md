@@ -241,3 +241,7 @@ the file into cwd first, or `cd` to the file's directory before uploading.
 **"This doc has N native tabs" error:** the doc uses native tabs; use
 `tab-update.sh` (see "Updating a Single Tab") or pass `--force` to
 intentionally flatten the doc to one tab.
+**404 on write to a doc that reads fine (ADC rung):** the doc lives on a
+shared drive — Drive v3 writes need `supportsAllDrives=true` (reads work
+without it, so the 404 is misleading). The bundled ADC scripts pass it; if
+calling the API by hand, add it.
