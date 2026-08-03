@@ -24,5 +24,17 @@ jobs:
         with:
           node-version: '22'
 
+      # Explicit, even though ubuntu-latest ships a python3: the python suites
+      # were skipped in CI for months because they were gated on a package the
+      # workflow never installed, and nothing here declared a python dependency
+      # to notice. Declaring it means a runner image change can't silently
+      # re-skip 60 tests. The suites are stdlib unittest — no pip step needed.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The run prints a passed/failed/skipped summary at the end. Read it — a
+      # green exit over a pile of skips is the failure mode this file exists to
+      # catch, and it looks identical to a real pass from the badge alone.
       - name: Run all suites
         run: bash tests/run-all.sh

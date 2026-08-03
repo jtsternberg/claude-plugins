@@ -6,8 +6,12 @@
 # Exit 0 only when every suite that could run passed.
 #
 # The suites are scattered by plugin and written in three languages (node --test,
-# bash, pytest), which is why nothing was running them together. A suite whose
-# runtime is absent is SKIPPED and reported as such — never silently passed.
+# bash, python unittest), which is why nothing was running them together. A suite
+# whose runtime is absent is SKIPPED and reported as such — never silently passed.
+#
+# Corollary learned the hard way: a skip is only honest if it can actually be
+# satisfied. Gating a suite on a runtime that CI never installs is a permanent
+# skip wearing a temporary skip's clothing — see the python section.
 # =============================================================================
 set -u
 
@@ -71,21 +75,36 @@ fi
 PY="$HOME/.venvs/genai/bin/python3"
 [[ -x "$PY" ]] || PY="$(command -v python3 || true)"
 
-# stdlib unittest — no third-party deps, so this always runs.
+# Every python suite here is stdlib unittest, so a bare python3 runs all of them.
+# This used to be a hardcoded session-tools case plus a gws loop gated on
+# `import pytest` — and since CI installs no python packages, that gate skipped
+# all six gws suites (54 tests) on every run while still exiting 0. Same
+# hardcoded-list failure the node section warns about, one language over.
+# Glob by path, never by plugin name.
 if [[ -n "$PY" ]]; then
-	run "session-tools: weekly-recap extractor" \
-		"$PY" -m unittest discover -s plugins/session-tools/skills/sessions-weekly-recap/tests
-else
-	skip "weekly-recap extractor" "python3 not installed"
-fi
-
-if [[ -n "$PY" ]] && "$PY" -c 'import pytest' >/dev/null 2>&1; then
-	for d in plugins/gws/skills/*/tests; do
+	for d in plugins/*/skills/*/tests plugins/*/tests; do
 		[[ -d "$d" ]] || continue
-		run "gws: $(basename "$(dirname "$d")")" "$PY" -m pytest -q "$d"
+		compgen -G "$d/test_*.py" >/dev/null || continue
+
+		plugin="${d#plugins/}"; plugin="${plugin%%/*}"
+		sub="$(basename "$(dirname "$d")")"
+		label="python: $plugin"
+		[[ "$sub" != "$plugin" ]] && label="python: $plugin/$sub"
+
+		# `unittest discover` collects only unittest.TestCase subclasses. A
+		# pytest-style module of bare `def test_x()` functions would be silently
+		# ignored — the exact silent-omission this file exists to prevent — so
+		# fail loudly rather than reporting a green run over uncollected tests.
+		for f in "$d"/test_*.py; do
+			grep -q 'import unittest' "$f" && continue
+			printf '\n\033[31m✗ %s has no `import unittest` — discover will not collect it\033[0m\n' "$f"
+			FAIL=$((FAIL + 1)); FAILED+=("$label ($(basename "$f") not unittest-based)")
+		done
+
+		run "$label" "$PY" -m unittest discover -s "$d"
 	done
 else
-	skip "gws python suites" "pytest not available"
+	skip "python suites" "python3 not installed"
 fi
 
 # ---- summary ----------------------------------------------------------------
