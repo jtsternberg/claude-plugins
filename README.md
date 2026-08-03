@@ -111,12 +111,12 @@ Skills for working with — and like — the Fable model (`claude-fable-5`). Shi
 #### 🧪 [codex](plugins/codex)
 Codex-native A/B experiments: `codex:sol-delegate` for Sol-led delegation to Terra and other available models, plus `codex:fable-mode` and `codex:sol-mode` for comparing competitive frontier-model stances on Terra.
 
-### Commit workflows
+### Commands and workflows
 
 #### 💬 [git-commits](plugins/git-commits)
 Skills for creating git commits from staged or unstaged files with AI-generated messages. Works in Claude Code and Codex.
 
-**Skills:** `$commit-staged`, `$commit-unstaged`
+**Skills:** `commit-staged`, `commit-unstaged`
 
 **Install:** `claude plugin install git-commits@jtsternberg`
 
