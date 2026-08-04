@@ -14,7 +14,11 @@
 #        → `cmux new-surface --pane <adjacent> --type <t> [--url]`
 #          (reuses the real estate the user has already allocated instead of
 #           creating a third pane column.)
-#   4. Parse `OK surface:<n> pane:<p> workspace:<w>` from cmux's output.
+#   4. Parse `OK surface:<n> pane:<p> workspace:<w>` from cmux's output, then
+#      resolve UUIDs + human-readable names from a fresh `--id-format both` tree.
+#   5. Apply `--title` via `cmux rename-tab` so the tab is findable in the UI,
+#      and hand back surface_title / workspace_name — a positional ref is not
+#      something the user can locate.
 
 set -euo pipefail
 trap 'exit 0' PIPE
@@ -23,6 +27,7 @@ trap 'exit 130' INT
 SUBJECT="caller"     # caller | focused
 SURFACE_TYPE="terminal"
 URL=""
+TITLE=""
 OUTPUT_JSON=0
 WAIT_READY=0
 WAIT_READY_TIMEOUT=5
@@ -41,6 +46,11 @@ Options:
                           Use when the user says "next to what I'm looking at".
       --type <t>         Surface type: terminal (default) or browser.
       --url <url>        URL for browser surfaces. Ignored for terminal.
+      --title <text>     Human-visible tab title, applied with `cmux rename-tab`
+                          right after creation. STRONGLY RECOMMENDED: without it
+                          the tab keeps a generic auto-title (e.g. "zsh" or the
+                          workspace's own name) that the user cannot pick out of
+                          the tab bar. 2-5 words naming the activity.
       --json             Emit a JSON object on success. Default: human-readable.
       --wait-ready       For terminal surfaces, block until the PTY is attached
                           and the shell is actually executing input. Forces
@@ -58,11 +68,16 @@ subject's workspace has only one pane) and `cmux new-surface --pane <adj>`
 Output (text):
   OK surface:34 pane:12 workspace:9 (via new-surface)
   surface_id: F73756CC-...        # the UUID to target by
+  title: dev server :3000         # what to tell the user (refs mean nothing to them)
+  workspace: lindris frontend (workspace:9)
 
 Output (--json): carries both the stable UUID (*_id — pass these to commands)
-and the positional ref (*_ref — display only):
+and the positional ref (*_ref — display only), plus the human-readable
+names to report back (surface_title, workspace_name):
   {"surface_ref":"surface:34","surface_id":"F73756CC-...",
    "pane_ref":"pane:12","pane_id":"...","workspace_ref":"workspace:9","workspace_id":"...",
+   "surface_title":"dev server :3000","workspace_name":"lindris frontend",
+   "title_status":"applied",
    "mode":"new-surface","subject":"caller","surface_type":"terminal","url":null,"ready":"ready"}
 
 Requires: cmux, jq.
@@ -83,6 +98,7 @@ while [[ $# -gt 0 ]]; do
     --focused)  SUBJECT="focused"; shift ;;
     --type)     SURFACE_TYPE="${2:-}"; shift 2 ;;
     --url)      URL="${2:-}"; shift 2 ;;
+    --title)    TITLE="${2:-}"; shift 2 ;;
     --json)     OUTPUT_JSON=1; shift ;;
     --wait-ready) WAIT_READY=1; shift ;;
     --wait-ready-timeout) WAIT_READY_TIMEOUT="${2:-}"; shift 2 ;;
@@ -214,26 +230,60 @@ if [[ -z "$new_surface" ]]; then
   exit 1
 fi
 
-# --- Resolve stable UUIDs for the new surface ---
+# --- Resolve stable UUIDs (and human-readable names) for the new surface ---
 # The `OK ...` line only gives positional refs, which renumber as surfaces open
 # and close. Look the new surface up in a fresh `--id-format both` tree so we can
 # hand callers UUIDs (the `.id` fields) to target by — and use them ourselves for
 # the readiness probes below. If lookup fails, we fall back to refs so behavior
 # is never worse than before.
-new_surface_id=""; new_pane_id=""; new_ws_id=""
+#
+# The same lookup also pulls the surface's title and its workspace's name: a
+# positional ref like `surface:258` is meaningless to the human (cmux's UI never
+# shows it, and it renumbers), so callers need names to report back.
+new_surface_id=""; new_pane_id=""; new_ws_id=""; new_surface_title=""; new_ws_name=""
 tree_both=$(cmux tree --all --json --id-format both 2>/dev/null || true)
 if [[ -n "$tree_both" ]]; then
-  read -r new_surface_id new_pane_id new_ws_id < <(
+  IFS=$'\t' read -r new_surface_id new_pane_id new_ws_id new_surface_title new_ws_name < <(
     printf '%s' "$tree_both" | jq -r --arg s "$new_surface" '
       .windows[].workspaces[] as $ws
       | $ws.panes[].surfaces[]
       | select(.ref == $s)
-      | "\(.id // "") \(.pane_id // "") \($ws.id // "")"' 2>/dev/null | head -1
+      | [(.id // ""), (.pane_id // ""), ($ws.id // ""), (.title // ""), ($ws.title // "")]
+      | @tsv' 2>/dev/null | head -1
   )
 fi
 # Prefer UUIDs; fall back to the parsed refs when resolution came up empty.
 surface_handle="${new_surface_id:-$new_surface}"
 pane_handle="${new_pane_id:-$new_pane}"
+ws_handle="${new_ws_id:-$new_ws}"
+
+# --- Give the surface a human-visible name ---
+# A freshly-created surface inherits a generic auto-title ("zsh", the cwd
+# basename, or the workspace's own name). Reporting only `surface:<n>` for such a
+# tab tells the user nothing they can act on — they cannot see refs in the UI and
+# cannot distinguish three tabs all labelled the same generic word. So: name it,
+# and if the caller didn't supply a name, say so loudly rather than silently
+# handing back an unfindable surface.
+title_status="unset"
+if [[ -n "$TITLE" ]]; then
+  if cmux rename-tab --workspace "$ws_handle" --tab "$surface_handle" -- "$TITLE" >/dev/null 2>&1; then
+    new_surface_title="$TITLE"
+    title_status="applied"
+  else
+    title_status="failed"
+    {
+      echo "open-side-surface: created $new_surface but 'cmux rename-tab' failed — the tab keeps its generic auto-title."
+      echo "  Retry: cmux rename-tab --workspace $ws_handle --tab $surface_handle \"$TITLE\""
+    } >&2
+  fi
+else
+  {
+    echo "open-side-surface: hint — no --title given, so $new_surface keeps a generic auto-title"
+    echo "  (\"zsh\", the cwd, or the workspace name). The user cannot find it in the tab bar, and"
+    echo "  \"$new_surface\" is not a locator they can use. Name it before reporting back:"
+    echo "    cmux rename-tab --workspace $ws_handle --tab $surface_handle \"<2-5 word purpose>\""
+  } >&2
+fi
 
 # --- Optional: wait for PTY readiness ---
 #
@@ -308,6 +358,9 @@ if [[ $OUTPUT_JSON -eq 1 ]]; then
     --arg pane_id    "$new_pane_id" \
     --arg ws         "$new_ws" \
     --arg ws_id      "$new_ws_id" \
+    --arg title      "$new_surface_title" \
+    --arg ws_name    "$new_ws_name" \
+    --arg title_st   "$title_status" \
     --arg mode       "$mode" \
     --arg subject    "$SUBJECT" \
     --arg type       "$SURFACE_TYPE" \
@@ -316,6 +369,9 @@ if [[ $OUTPUT_JSON -eq 1 ]]; then
     '{surface_ref: $surface, surface_id: (if $surface_id == "" then null else $surface_id end),
       pane_ref: $pane, pane_id: (if $pane_id == "" then null else $pane_id end),
       workspace_ref: $ws, workspace_id: (if $ws_id == "" then null else $ws_id end),
+      surface_title: (if $title == "" then null else $title end),
+      workspace_name: (if $ws_name == "" then null else $ws_name end),
+      title_status: $title_st,
       mode: $mode, subject: $subject, surface_type: $type,
       url: (if $url == "" then null else $url end),
       ready: $ready}'
@@ -324,4 +380,7 @@ else
     "$new_surface" "$new_pane" "$new_ws" "$mode" "$SUBJECT" "$subject_pane"
   # Print the UUID to target by (falls back to the ref if lookup came up empty).
   printf 'surface_id: %s\n' "$surface_handle"
+  # Names, not refs, are what you report to the user.
+  printf 'title: %s\n' "${new_surface_title:-(unnamed — rename it before reporting)}"
+  printf 'workspace: %s (%s)\n' "${new_ws_name:-(unnamed)}" "$new_ws"
 fi

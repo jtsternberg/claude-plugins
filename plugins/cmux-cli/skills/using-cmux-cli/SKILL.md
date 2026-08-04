@@ -124,12 +124,16 @@ For any "open X" / "start X" / "ssh to X" / "run Y in a new terminal" request th
 The one-call recipe:
 
 ```bash
-# 1. Open a sibling surface next to the user's current view AND wait until
-#    its PTY is attached + shell is actually executing input. --wait-ready
-#    handles both the focus-pane attach step and a round-trip probe; on
-#    timeout it exits 3 with a diagnostic instead of returning a non-ready
-#    surface ref.
-SID=$(${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh --wait-ready --json | jq -r '.surface_id')
+# 1. Open a sibling surface next to the user's current view, NAME it, AND wait
+#    until its PTY is attached + shell is actually executing input. --title is
+#    what makes the tab findable (see "Name it, then report it by name" below);
+#    --wait-ready handles both the focus-pane attach step and a round-trip
+#    probe, exiting 3 with a diagnostic rather than returning a non-ready ref.
+OUT=$(${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh \
+        --wait-ready --title "dev server :3000" --json)
+SID=$(jq -r '.surface_id'     <<<"$OUT")   # target commands with this
+TITLE=$(jq -r '.surface_title' <<<"$OUT")  # tell the user this
+WSNAME=$(jq -r '.workspace_name' <<<"$OUT")
 
 # 2. Send the work into it, targeting the surface's UUID. Append \n so it runs.
 cmux send --surface "$SID" "ssh user@host\n"
@@ -138,6 +142,9 @@ cmux send --surface "$SID" "ssh user@host\n"
 
 # 3. Verify it actually executed — see "Send keystrokes" below for why.
 cmux read-screen --surface "$SID" --lines 20
+
+# 4. Report it by NAME: "opened '$TITLE' in the '$WSNAME' workspace" — never
+#    "opened surface:258".
 ```
 
 > **Manual fallback** (historical — most callers should use `--wait-ready`):
@@ -151,6 +158,32 @@ cmux read-screen --surface "$SID" --lines 20
 
 Use `--focused` on `open-side-surface.sh` when the user says "next to the tab I'm looking at" instead of "next to yours" — the defaults diverge when the user is viewing a different tab than the one the agent lives in.
 
+### Name it, then report it by name (required)
+
+Visibility isn't just "the surface is on screen" — it's "the user can *find* the thing you opened." Two rules, both mandatory for **any** surface, pane, or workspace you create:
+
+**1. Give it a meaningful human-visible title.** A fresh surface inherits a generic auto-title — `zsh`, the cwd basename, or the workspace's own name — which is indistinguishable from every other tab. Name it for the activity, 2–5 words, no trailing punctuation (`dev server :3000`, `ssh prod-web1`, `tail nginx logs`, `pytest watch`). Never leave it as the tool (`zsh`, `node`, `claude`) or as a placeholder word like `workspace` or `test`. The companion `auto-rename` skill has the full naming rubric.
+
+```bash
+# Preferred — one call, title applied at creation:
+${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh --wait-ready --title "dev server :3000" --json
+
+# Any other creation path — name it immediately afterward:
+cmux rename-tab --workspace <ws-uuid> --tab <surface-uuid> "dev server :3000"
+cmux rename-workspace --workspace <ws-uuid> "lindris frontend"   # if you created the workspace
+```
+
+**2. Report the title plus its workspace — never a bare positional ref.** `surface:258` is an internal handle: cmux's UI never displays it, it renumbers as tabs open and close, and the user has no way to search for it. What locates a tab for a human is its **title** + the **workspace name** it lives under (+ which **window**, when more than one cmux window is open — `cmux list-windows`; note cmux exposes no window *title* via the CLI, so anchor a window by the workspace it's currently showing).
+
+```
+✅ Opened "dev server :3000" in the "lindris frontend" workspace, right of your pane.
+❌ Opened surface:258.
+```
+
+**Real failure this prevents:** an agent opened a test surface whose title *and* workspace were both the generic word "workspace", then reported only `surface:258`. Correct handle, zero information — the user could not find the tab, and the report was useless.
+
+**If the names themselves aren't distinguishing, that's still a failure.** A title or workspace name that is generic (`workspace`, `zsh`, `test`) or duplicated across several tabs is not a locator. Fix it rather than reporting it: rename the surface, rename the workspace too if you created it, or — if it's a pre-existing workspace you shouldn't rename — give the user a concrete visible anchor instead ("the tab immediately right of the one you're in, in the window showing *cmb security*"). Verify with `cmux tree --workspace <ws-uuid>` that the title you intended is the title that's actually there before you report it.
+
 ### When to break the default (escape hatches)
 
 Flip to a separate-workspace path **only** when the user explicitly asks for it. Trigger phrases:
@@ -159,7 +192,7 @@ Flip to a separate-workspace path **only** when the user explicitly asks for it.
 - "in a separate window" / "open a new cmux window" → `cmux new-window`
 - "open a full cmux ssh workspace to X" / "I need drag-drop / remote browser / relay for agent X" → `cmux ssh <host>` (see [references/ssh.md](references/ssh.md))
 
-When you pick a hidden path deliberately, **tell the user the new surface isn't visible yet** and how to reach it (tab switch, window focus). Surprise hiding is the failure mode this section exists to prevent.
+When you pick a hidden path deliberately, **tell the user the new surface isn't visible yet** and how to reach it (tab switch, window focus). Surprise hiding is the failure mode this section exists to prevent. Naming matters *more* on these paths, not less — a hidden tab is only reachable if it has a name: always pass `--name` to `new-workspace` / `cmux ssh`, then name the surface inside it, and give the user both names in your report ("switch to the *deploy staging* workspace, tab *ansible run*").
 
 ### The `cmux ssh` decision
 
@@ -430,11 +463,12 @@ Key options (run `--help` for the full list):
 - `--focused` — open next to the pane the **user** is currently looking at. Use when the user says *"next to what I'm looking at"*. `caller` and `focused` usually coincide but diverge when the user is viewing a different tab than the one the agent lives in.
 - `--type terminal|browser` (default terminal).
 - `--url <url>` — for browser surfaces.
-- `--json` — emit `{surface_ref, surface_id, pane_ref, pane_id, workspace_ref, workspace_id, mode, subject, surface_type, url, ready}` for chaining. Chain on the `*_id` UUIDs (`surface_id`, `workspace_id`), not the `*_ref` positional labels.
+- `--title <text>` — **pass this every time.** Applies the title with `cmux rename-tab` at creation, so the tab is findable and the returned `surface_title` is something you can report. Omitting it leaves a generic auto-title and prints a hint on stderr; `title_status` in the JSON tells you whether it was `applied`, `failed`, or `unset`.
+- `--json` — emit `{surface_ref, surface_id, pane_ref, pane_id, workspace_ref, workspace_id, surface_title, workspace_name, title_status, mode, subject, surface_type, url, ready}` for chaining. Chain on the `*_id` UUIDs (`surface_id`, `workspace_id`), not the `*_ref` positional labels — and report `surface_title` + `workspace_name` to the user, never the refs.
 - `--wait-ready` — for terminal surfaces, block until the PTY is attached *and* the shell is actually executing input (forces `focus-pane`, then round-trips an `echo <marker>` probe). Without this you have to hand-roll a readiness loop and dodge the "Terminal surface not found" race. No-op for browser surfaces.
 - `--wait-ready-timeout <seconds>` — override the wait-ready budget (default 5).
 
-On success it prints the new surface's ref + pane + workspace, plus which branch it took (`new-surface` vs `new-pane`). Failure goes to stderr with exit 1 (cmux error), 2 (context error), or 3 (`--wait-ready` timed out — surface exists but PTY never echoed the probe).
+On success it prints the new surface's ref + pane + workspace, its `title:` and `workspace:` names, plus which branch it took (`new-surface` vs `new-pane`). Failure goes to stderr with exit 1 (cmux error), 2 (context error), or 3 (`--wait-ready` timed out — surface exists but PTY never echoed the probe).
 
 ### What it decides under the hood
 
@@ -456,7 +490,7 @@ Creating a new pane column when an adjacent one already exists shoves your surfa
 
 ### Verify
 
-The script parses cmux's `OK surface:<n> pane:<p> workspace:<w>` output and reports the result. Re-confirm with `cmux tree --workspace $CMUX_WORKSPACE_ID` if you need to see it in situ — the new ref should appear under the expected pane with `[selected]` on it.
+The script parses cmux's `OK surface:<n> pane:<p> workspace:<w>` output and reports the result. Re-confirm with `cmux tree --workspace $CMUX_WORKSPACE_ID` if you need to see it in situ — the new ref should appear under the expected pane with `[selected]` on it, **carrying the title you asked for**. A ref sitting there under a generic auto-title means the rename didn't land; fix it before reporting (see [Name it, then report it by name](#name-it-then-report-it-by-name-required)).
 
 ---
 
@@ -562,11 +596,11 @@ When the user describes an action informally, map it to cmux vocabulary:
 
 | User says | cmux command | Notes |
 |-----------|--------------|-------|
-| "open a new tab next to mine" / "new terminal side-by-side" / **any bare "open a terminal" / "start a dev server" / "run Y in a new terminal"** | [Default recipe](#default-principle-make-new-work-visible-to-the-user) — `open-side-surface.sh --json` + `cmux send --surface <ref> "...\n"` | Default: the user wants to watch. Never silently spawn a new workspace. |
+| "open a new tab next to mine" / "new terminal side-by-side" / **any bare "open a terminal" / "start a dev server" / "run Y in a new terminal"** | [Default recipe](#default-principle-make-new-work-visible-to-the-user) — `open-side-surface.sh --title "<purpose>" --json` + `cmux send --surface <uuid> "...\n"` | Default: the user wants to watch. Never silently spawn a new workspace. Always `--title` it, and report the title + workspace name, not the ref. |
 | "ssh to X" / "ssh into box.example.com" (ambiguous) | [Default recipe](#default-principle-make-new-work-visible-to-the-user) with `cmux send --surface <ref> "ssh user@host\n"` | Plain SSH in a visible split. Agent can `read-screen` while user watches. |
 | "ssh into X **as a workspace**" / "I need drag-drop / remote browser / relay" | `cmux ssh box.example.com` | Escape hatch — opens a **new workspace** (hidden tab). Warn the user. See [references/ssh.md](references/ssh.md). |
 | "split this right" / "split pane right" | `cmux new-split right` | Literal split — creates a new pane column (terminal only). |
-| "open a new workspace in /foo" / "as its own tab" | `cmux new-workspace --cwd /foo` | Explicit escape hatch — hidden tab. `--command` auto-runs something on launch. |
+| "open a new workspace in /foo" / "as its own tab" | `cmux new-workspace --name "<purpose>" --cwd /foo` | Explicit escape hatch — hidden tab, so `--name` is mandatory: it's the only way the user finds it. `--command` auto-runs something on launch. |
 | "open a new cmux window" / "in a separate window" | `cmux new-window` | Escape hatch — separate OS window. |
 | "what's in the other pane?" / "read the terminal" | `cmux read-screen` | add `--scrollback --lines 200` for history |
 | "run `npm test` in the other pane" | `cmux send --surface <ref> "npm test\n"` | shell target: **append `\n`** or the command never runs. Into a live `claude` REPL the `\n` does *not* submit — [see the gotcha](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl) |
@@ -584,7 +618,7 @@ When the user describes an action informally, map it to cmux vocabulary:
 
 cmux prints what it did (new surface ref, new workspace ID, applied title, etc.). **Read the output** — don't assume success from exit code alone.
 
-- After `new-split`, confirm the new surface ref appears in the output.
+- After creating anything (`new-split`, `new-pane`, `new-surface`, `new-workspace`), confirm the new ref appears in the output, then confirm with `cmux tree --workspace <ws-uuid>` that it carries the **title you gave it**. Refs are for your follow-up calls; the title + workspace name are what you tell the user ([details](#name-it-then-report-it-by-name-required)). A report of "opened `surface:258`" is a failed report even when the command succeeded.
 - After `send`, if a command was supposed to run, verify with `read-screen` rather than trusting it landed — but a `Jump to bottom` marker in the output means the view is scrolled and stale, not that the send failed ([details](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom)).
 - After `workspace-action` or `tab-action`, re-list (`list-workspaces` / `tree`) to confirm state.
 - If output is quieter than expected, append `--id-format both` to force UUIDs + refs so there's something concrete to verify against.
