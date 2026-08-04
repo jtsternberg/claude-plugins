@@ -352,7 +352,7 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 
 ##### Reuse the existing surface (preferred, cmux only)
 
-If cmux is up (`check-cmux.sh` exit 0) **and** you parsed a non-empty `surface_ref` **and** `$YOUR_MESSAGE` is a single logical line, route this message INTO the surface the session already occupies — don't open a new one. The surface holds a live, idle claude REPL for that exact session, so we just type the next message into it. (For a multi-line message, skip straight to the fresh-surface path below — its launch script handles newlines; typing them into a live REPL would submit early.)
+If cmux is up (`check-cmux.sh` exit 0) **and** you parsed a non-empty `surface_ref` **and** `$YOUR_MESSAGE` is a single logical line, route this message INTO the surface the session already occupies — don't open a new one. The surface holds a live, idle claude REPL for that exact session, so we just type the next message into it. (For a multi-line message, skip straight to the fresh-surface path below — it hands the prompt to a launch script as an argument, so newlines never go through keystroke simulation at all. See the note under the snippet for why.)
 
 ```bash
 # $REMOTE_SESSION_ID and $SURFACE_REF come from Step 4's session-cache.sh get JSON.
@@ -375,7 +375,11 @@ else
 fi
 ```
 
-Keep follow-up messages to a single logical line when reusing — the message is typed into a live REPL, so an embedded newline would submit early. Multi-line follow-ups should take the fresh-surface path (it uses a launch script that handles multi-line prompts).
+Keep follow-up messages to a single logical line when reusing. Note what an embedded newline does **not** do: it does not submit early. A newline bundled into a `cmux send` payload reaches claude's Ink REPL through bracketed paste, so it lands as a **literal line break in the input box and no submit ever registers** — which is exactly why `cmux-reuse-surface.sh` sends the text and `cmux send-key Enter` as two separate steps with a settle between them (claude-plugins-5zhp, verified live on claude v2.1.216).
+
+The single-line rule survives for a different reason: that settle is a fixed `sleep 0.2`, verified sufficient for a one-line paste and never verified for a long multi-line one. If Enter lands mid-paste the failure mode is a *partial* submit — half a message runs as a real turn, which is harder to notice than a message that plainly never submitted. The fresh-surface path has no such race, so route multi-line follow-ups there.
+
+**If a reused-surface follow-up seems to vanish** — no reply, and no new user turn in the callee's transcript — suspect the transport, not your message content. Escaping/quoting of the message body is almost never the cause. Check with `cmux read-screen --surface "$SURFACE_REF"`: an unsubmitted message is sitting visibly in the REPL's input box.
 
 ##### Open a new surface / session (fallback)
 
