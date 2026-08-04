@@ -21,7 +21,7 @@ The skill is deliberately thin: rather than mirroring cmux's flags into prose (w
 
 Two common multi-step patterns are baked in as decision trees rather than left for the agent to rediscover:
 
-1. **Open a side-by-side surface in the current window** — routes intelligently between `cmux new-surface --pane <adjacent>` (when an adjacent pane already exists, so the new surface lands as a tab there) and `cmux new-split right` (when it doesn't). Uses `cmux identify`'s `caller.pane_ref` to know where the agent is, and `focused.pane_ref` when the user means "next to what I'm looking at" rather than "next to mine".
+1. **Open a side-by-side surface in the current window** — routes intelligently between `cmux new-surface --pane <adjacent>` (when an adjacent pane already exists, so the new surface lands as a tab there) and `cmux new-split right` (when it doesn't). Uses `cmux identify`'s `caller.pane_ref` to know where the agent is, and `focused.pane_ref` when the user means "next to what I'm looking at" rather than "next to mine". Every surface it opens gets a human-visible title (`--title`), and it hands back `surface_title` + `workspace_name` — because "opened surface:258" is a correct handle and a useless report: cmux never shows refs in its UI and they renumber as tabs come and go.
 2. **Target another surface (find → read → interact)** — uses the bundled `find-surface.sh` helper to locate a surface by workspace name, title, or on-screen content, then `cmux read-screen` / `cmux send` against the returned handle.
 
 ## Skills
