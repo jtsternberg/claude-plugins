@@ -239,9 +239,38 @@ printf '%s\n' "$out" | grep -qF 'Press up to edit queued'   && echo "QUEUED — 
 cmux send --help
 ```
 
-Escape sequences matter: `\n` and `\r` send Enter; `\t` sends Tab. If a command should actually execute, append `\n` — otherwise you're just typing into the prompt.
+Escape sequences matter: `\n` and `\r` send Enter; `\t` sends Tab. **Against a shell**, if a command should actually execute, append `\n` — otherwise you're just typing into the prompt. **Against a live TUI/Ink REPL (`claude`) the `\n` does not submit at all** — see [a trailing `\n` does not submit into a TUI/Ink REPL](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl) below before sending into one.
 
-**Always `read-screen` after `send` to confirm execution started — not just that the send succeeded.** `cmux send` returns success when bytes are delivered to the PTY; it has no opinion about whether the remote shell did anything with them. Concrete failure mode: if you `send` into a freshly-created surface before its shell has finished initializing, the trailing `\n` gets swallowed by the shell's startup output and the command sits at the prompt unexecuted. Exit code 0, nothing happened. The only way to know is to read the screen back and look for evidence the command ran (output, new prompt line, process spinning). See the [default recipe](#default-principle-make-new-work-visible-to-the-user) for the wait-for-PTY pattern, and Troubleshooting for the `Terminal surface not found` variant. **Caveat:** the read-back only proves anything if it reflects the *live* bottom — if the user has scrolled the surface up, your capture is stale (see [read-screen returns the scrolled viewport](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom) before concluding nothing happened).
+**Always `read-screen` after `send` to confirm execution started — not just that the send succeeded.** `cmux send` returns success when bytes are delivered to the PTY; it has no opinion about whether the remote shell did anything with them. Concrete failure mode: if you `send` into a freshly-created surface before its shell has finished initializing, the trailing `\n` gets swallowed by the shell's startup output and the command sits at the prompt unexecuted. Exit code 0, nothing happened. (That is a *shell-startup* race, fixed by waiting for the PTY. A live TUI REPL produces the identical "exit 0, nothing happened" symptom from a different cause that waiting will never fix — see the [gotcha below](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl).) The only way to know is to read the screen back and look for evidence the command ran (output, new prompt line, process spinning). See the [default recipe](#default-principle-make-new-work-visible-to-the-user) for the wait-for-PTY pattern, and Troubleshooting for the `Terminal surface not found` variant. **Caveat:** the read-back only proves anything if it reflects the *live* bottom — if the user has scrolled the surface up, your capture is stale (see [read-screen returns the scrolled viewport](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom) before concluding nothing happened).
+
+#### Gotcha: a trailing `\n` does not submit into a TUI/Ink REPL
+
+**The inlined `cmux send --help` above states the rule unconditionally — "Escape sequences: `\n` and `\r` send Enter." That holds for a shell and is false for a live TUI/Ink REPL** (Claude Code, and anything else reading input via bracketed paste). cmux is describing the bytes it writes to the PTY, not what the program on the other end does with them. A shell reads the PTY byte-by-byte, so CR is a submit. An Ink REPL receives the whole payload wrapped in a bracketed paste and treats everything inside it as *content* — so your `\n` lands as a **literal line break in the input box, and nothing submits**. Verified live against Claude Code v2.1.216.
+
+Split the rule by target:
+
+```bash
+# Shell target — one call, the \n executes it.
+cmux send --surface "$SID" "npm test\n"
+
+# TUI/Ink REPL target (claude) — two calls, and the newline is not one of them.
+cmux send     --surface "$SID" "$MSG"    # bracketed paste: the text only
+sleep 0.2                                # let the REPL finish ingesting the paste
+cmux send-key --surface "$SID" Enter     # a real key event, outside the paste — this submits
+```
+
+`send-key Enter` works precisely because it arrives as a key event rather than paste content. Keep the settle: an Enter landing mid-paste submits a *partial* message, which is worse than not submitting at all — you get a real answer to a truncated question.
+
+**The symptom, and why it misleads.** An unsubmitted message is invisible from outside the surface. `cmux send` exits 0 (the bytes *were* delivered), and since the REPL never started a turn, **no user event appears in the target session's transcript at all**. From the caller's side that looks exactly like the message was mangled in transit — which reads as an escaping/quoting bug in your content (backticks, `$`, quotes). It isn't; the text arrived intact. Escaping is almost never the cause. Suspect the transport first.
+
+**How to check** — `read-screen` after the send, before concluding anything:
+
+```bash
+cmux send --surface "$SID" "$MSG"
+cmux read-screen --surface "$SID"   # text still in the input box, or did a turn start?
+```
+
+If the text is sitting in the prompt box and the REPL is idle, it never submitted: send `Enter` via `send-key`. Do **not** re-send the text — it appends to what's already in the box (clear it first per the `C-c` gotcha below).
 
 ### Send a single key (modifiers, arrows, ctrl-combos)
 
@@ -502,7 +531,7 @@ When the user describes an action informally, map it to cmux vocabulary:
 | "open a new workspace in /foo" / "as its own tab" | `cmux new-workspace --cwd /foo` | Explicit escape hatch — hidden tab. `--command` auto-runs something on launch. |
 | "open a new cmux window" / "in a separate window" | `cmux new-window` | Escape hatch — separate OS window. |
 | "what's in the other pane?" / "read the terminal" | `cmux read-screen` | add `--scrollback --lines 200` for history |
-| "run `npm test` in the other pane" | `cmux send --surface <ref> "npm test\n"` | **append `\n`** or the command never runs |
+| "run `npm test` in the other pane" | `cmux send --surface <ref> "npm test\n"` | shell target: **append `\n`** or the command never runs. Into a live `claude` REPL the `\n` does *not* submit — [see the gotcha](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl) |
 | "send ctrl-c to that pane" | `cmux send-key --surface <ref> C-c` | use `send-key` for modifiers, not `send` |
 | "rename this workspace to 'build'" | `cmux rename-workspace "build"` | inside cmux, current workspace is default |
 | "pin this tab" / "close tabs to the right" | `cmux tab-action --action pin` / `--action close-right` | see `cmux tab-action --help` for full action list |
