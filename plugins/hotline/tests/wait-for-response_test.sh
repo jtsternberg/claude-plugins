@@ -320,10 +320,23 @@ ERR2=$(HOME="$H2" PATH="$SD2:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$
 RC2=$?
 set -e
 EL2=$((SECONDS - START))
-if [[ $RC2 -ne 0 && $EL2 -lt 30 ]] && printf '%s' "$ERR2" | grep -q "never submitted"; then
-  pass "fast-fails as never-submitted when no nonce user event appears (${EL2}s)"
+# CONTRACT CHANGED (mo8m). This used to assert a fast-fail claiming "the message
+# never submitted into the REPL". That cause is not observable from a timer: a
+# follow-up sent while the callee is mid-turn is queued and its user event only
+# lands when that turn ends, so the old assertion pinned a guess. This fixture's
+# cmux stub is a bare `exit 0`, so read-screen yields nothing and the box check
+# is inconclusive — the script must now stay patient and report uncertainty.
+# The evidence-backed fast-fail is covered under "Submit discrimination" below.
+if [[ $RC2 -ne 0 ]] && printf '%s' "$ERR2" | grep -qiE "could not confirm|no submit confirmation"; then
+  pass "no nonce user event + unreadable screen → reports uncertainty, not a cause (${EL2}s)"
 else
-  fail "fast-fails as never-submitted" "rc=$RC2 elapsed=${EL2}s err=$ERR2"
+  fail "no nonce user event + unreadable screen → reports uncertainty, not a cause" \
+    "rc=$RC2 elapsed=${EL2}s err=$ERR2"
+fi
+if printf '%s' "$ERR2" | grep -qiE "the message never submitted|never submitted into the REPL"; then
+  fail "no longer asserts the unobservable 'never submitted' cause" "err=$ERR2"
+else
+  pass "no longer asserts the unobservable 'never submitted' cause"
 fi
 rm -rf "$H2" "$CD2" "$SD2"
 
@@ -445,6 +458,147 @@ else
   fail "wait-for-response exits 3 on preemption" "rc=$RC3 elapsed=${EL3}s err=$ERR3"
 fi
 rm -rf "$H3" "$CD3" "$SD3"
+
+# ---- submit discrimination (claude-plugins-mo8m) ---------------------------
+# The submit deadline expiring is NOT evidence the message never submitted. A
+# follow-up sent to a REPL that is mid-turn is queued, and its user event only
+# lands when that turn ends — measured at 3.1-4.2s for short turns, and bounded
+# only by the callee's current turn in principle. So a bare timer cannot tell
+# "never submitted" from "submitted, still queued".
+#
+# What CAN tell them apart is the input box. If no user event carries the nonce
+# and the nonce is nonetheless visible on the callee's screen, the text is
+# sitting unsubmitted in the prompt box — that is real evidence. If it is not
+# visible, we do not know, and must not assert a cause.
+echo ""
+echo "Submit discrimination:"
+
+# Same fixture shape as setup_transcript_call, but the cmux stub can render a
+# screen and the surface ref is optional.
+setup_discrim_call() {  # $1=transcript body  $2=screen text  $3=with_surface(true/false)
+  local body="$1" screen="$2" with_surface="${3:-true}"
+  local h cd sd cwd enc
+  h=$(mktemp -d); cd=$(mktemp -d /tmp/hotline-disc-XXXXX); sd=$(mktemp -d)
+  cwd="/fake/callee/ws"
+  enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
+  mkdir -p "$h/.claude/projects/$enc"
+  printf '%s\n' "$body" > "$h/.claude/projects/$enc/sess-tcm.jsonl"
+  echo "$cwd"     > "$cd/cwd.txt"
+  echo "sess-tcm" > "$cd/session_id.txt"
+  echo "$TNONCE"  > "$cd/call_id.txt"
+  echo "true"     > "$cd/keep_workspace.txt"
+  [[ "$with_surface" == "true" ]] && echo "w1:s1" > "$cd/surface_ref.txt"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'if [[ "$1" == "read-screen" ]]; then'
+    printf '  cat <<%s\n' "'SCREENEOF'"
+    printf '%s\n' "$screen"
+    echo "SCREENEOF"
+    echo '  exit 0'
+    echo 'fi'
+    echo 'exit 0'
+  } > "$sd/cmux"
+  chmod +x "$sd/cmux"
+  echo "$h|$cd|$sd"
+}
+
+# Same, but `cmux read-screen` fails outright (surface gone).
+setup_discrim_call_broken_screen() {  # $1=transcript body
+  local body="$1" h cd sd cwd enc
+  h=$(mktemp -d); cd=$(mktemp -d /tmp/hotline-disc-XXXXX); sd=$(mktemp -d)
+  cwd="/fake/callee/ws"
+  enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
+  mkdir -p "$h/.claude/projects/$enc"
+  printf '%s\n' "$body" > "$h/.claude/projects/$enc/sess-tcm.jsonl"
+  echo "$cwd"     > "$cd/cwd.txt"
+  echo "sess-tcm" > "$cd/session_id.txt"
+  echo "$TNONCE"  > "$cd/call_id.txt"
+  echo "true"     > "$cd/keep_workspace.txt"
+  echo "w1:s1"    > "$cd/surface_ref.txt"
+  {
+    echo '#!/usr/bin/env bash'
+    echo '[[ "$1" == "read-screen" ]] && { echo "Error: internal_error" >&2; exit 1; }'
+    echo 'exit 0'
+  } > "$sd/cmux"
+  chmod +x "$sd/cmux"
+  echo "$h|$cd|$sd"
+}
+
+NO_EVENT_BODY='{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unrelated chatter"}}'
+
+# CASE 1 — nonce visible in the input box, no user event: a real non-submit.
+# The script has evidence, so it may fast-fail AND name the cause.
+D1=$(setup_discrim_call "$NO_EVENT_BODY" \
+"╭──────────────────────────────────────╮
+│ > [CALL_ID: $TNONCE] do the thing    │
+╰──────────────────────────────────────╯
+  ? for shortcuts" true)
+H4=${D1%%|*}; r4=${D1#*|}; CD4=${r4%%|*}; SD4=${r4#*|}
+START4=$SECONDS
+set +e
+ERR4=$(HOME="$H4" PATH="$SD4:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD4" --timeout 60 --submit-deadline 4 2>&1 >/dev/null)
+RC4=$?
+set -e
+EL4=$((SECONDS - START4))
+if [[ $RC4 -ne 0 && $EL4 -lt 30 ]] && printf '%s' "$ERR4" | grep -qi "input box"; then
+  pass "unsubmitted text visible in the box → fast-fail naming the real cause (${EL4}s)"
+else
+  fail "unsubmitted text visible in the box → fast-fail naming the real cause" \
+    "rc=$RC4 elapsed=${EL4}s err=$ERR4"
+fi
+rm -rf "$H4" "$CD4" "$SD4"
+
+# CASE 2 — nonce NOT on screen, no user event: indistinguishable from a queued
+# submit behind a long turn. The script must NOT claim it never submitted, and
+# must NOT give up at the submit deadline — it stays patient until --timeout.
+D2=$(setup_discrim_call "$NO_EVENT_BODY" \
+"╭──────────────────────────────────────╮
+│ >                                    │
+╰──────────────────────────────────────╯
+  ? for shortcuts" true)
+H5=${D2%%|*}; r5=${D2#*|}; CD5=${r5%%|*}; SD5=${r5#*|}
+START5=$SECONDS
+set +e
+ERR5=$(HOME="$H5" PATH="$SD5:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD5" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
+RC5=$?
+set -e
+EL5=$((SECONDS - START5))
+# Match the ASSERTIVE claim, not the words — the correct hedge legitimately
+# contains "may never have submitted", which a naive grep would flag.
+if printf '%s' "$ERR5" | grep -qiE "the message never submitted|never submitted into the REPL"; then
+  fail "empty box → must not assert 'never submitted'" "err=$ERR5"
+else
+  pass "empty box → does not assert 'never submitted'"
+fi
+if [[ $EL5 -ge 10 ]]; then
+  pass "empty box → stays patient past the submit deadline (${EL5}s of 12s)"
+else
+  fail "empty box → stays patient past the submit deadline" \
+    "gave up after ${EL5}s with a 4s submit-deadline and a 12s timeout; rc=$RC5 err=$ERR5"
+fi
+
+# CASE 3 — the surface ref exists but read-screen FAILS (surface died between
+# the send and now), so the discriminator is unavailable. Transcript mode only
+# runs in CMUX mode, which requires a surface/workspace ref — a call_dir with no
+# ref is headless and never reaches the submit deadline at all, so an unreadable
+# surface is the real "cannot discriminate" case, not a missing one.
+D3=$(setup_discrim_call_broken_screen "$NO_EVENT_BODY")
+H6=${D3%%|*}; r6=${D3#*|}; CD6=${r6%%|*}; SD6=${r6#*|}
+set +e
+ERR6=$(HOME="$H6" PATH="$SD6:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD6" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
+RC6=$?
+set -e
+if printf '%s' "$ERR6" | grep -qiE "the message never submitted|never submitted into the REPL"; then
+  fail "unreadable surface → must not assert 'never submitted'" "err=$ERR6"
+else
+  pass "unreadable surface → does not assert 'never submitted'"
+fi
+if printf '%s' "$ERR6" | grep -qiE "could not confirm|no submit confirmation|may (still )?be"; then
+  pass "unreadable surface → reports the uncertainty instead of a cause"
+else
+  fail "unreadable surface → reports the uncertainty instead of a cause" "err=$ERR6"
+fi
+rm -rf "$H5" "$CD5" "$SD5" "$H6" "$CD6" "$SD6"
 
 # ---- summary ---------------------------------------------------------------
 

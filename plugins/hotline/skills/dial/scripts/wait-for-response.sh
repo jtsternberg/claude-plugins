@@ -172,10 +172,36 @@ if $CMUX_MODE; then
     TRANSCRIPT_PATH=$(bash "$TRANSCRIPT_PATH_SH" --cwd "$RECV_CWD" --session "$SESSION_ID" 2>/dev/null || true)
   fi
 
+  # Is the nonce sitting unsubmitted in the callee's input box? That is the only
+  # thing that actually distinguishes "never submitted" from "submitted, queued
+  # behind the callee's current turn" — the submit deadline cannot (mo8m).
+  #
+  # Measured: a user event lands 0.35-1.0s after Enter on an idle REPL, and
+  # 3.1-4.2s when the REPL has anything in flight, because a follow-up sent
+  # mid-turn is QUEUED and its event only lands when that turn ends. A callee
+  # working a long task therefore has no upper bound worth hard-coding.
+  #
+  # We only ever ask this when NO user event carries the nonce, which is what
+  # makes the check sound: a submitted message renders into the transcript, so
+  # if the nonce is on screen with no user event, it is still in the prompt box.
+  # Returns 0 = visibly unsubmitted, 1 = not visible, 2 = could not look.
+  nonce_visible_in_input_box() {
+    [[ -z "$CALL_ID" ]] && return 2
+    [[ ${#READ_TARGET[@]} -eq 0 ]] && return 2
+    local scr
+    scr=$(cmux read-screen "${READ_TARGET[@]}" 2>/dev/null) || return 2
+    [[ -z "$scr" ]] && return 2
+    printf '%s' "$scr" | grep -qF "$CALL_ID" && return 0
+    return 1
+  }
+
   if [[ -n "$TRANSCRIPT_PATH" ]]; then
     T_ELAPSED=0
     T_SUBMITTED=false
     FELL_BACK=false
+    # Set once the submit deadline passes with no confirmation, so the final
+    # timeout message can say submit was never confirmed without asserting why.
+    SUBMIT_UNCONFIRMED=false
     FILE_GRACE=10   # transcript appears ~instantly for a live session; else fall back
     while [[ $T_ELAPSED -lt $TIMEOUT ]]; do
       if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
@@ -215,12 +241,38 @@ if $CMUX_MODE; then
           cat "$CALL_DIR/error.txt" >&2
           exit 3
           ;;
-        11)                       # not submitted yet
+        11)                       # no user event carries the nonce yet
           if ! $T_SUBMITTED && [[ $T_ELAPSED -ge $SUBMIT_DEADLINE ]]; then
-            echo "No user event carrying call_id=$CALL_ID in the callee's transcript within ${SUBMIT_DEADLINE}s ($TRANSCRIPT_PATH) — the message never submitted into the REPL. Re-dial via a fresh surface. (claude-plugins-0pwc)" >&2
-            touch "$CALL_DIR/done" 2>/dev/null || true
-            cleanup_workspace_and_script
-            exit 1
+            # The deadline alone proves nothing (mo8m). Ask the input box, which
+            # is the only thing that can actually tell the two cases apart.
+            set +e
+            nonce_visible_in_input_box
+            BOX_RC=$?
+            set -e
+            if [[ $BOX_RC -eq 0 ]]; then
+              # EVIDENCE: our text is on the callee's screen and no user event
+              # exists for it, so it is sitting in the prompt box unsubmitted.
+              {
+                echo "Message is still sitting UNSUBMITTED in the callee's input box after ${SUBMIT_DEADLINE}s — call_id=$CALL_ID is visible on screen but no user event carries it ($TRANSCRIPT_PATH)."
+                echo "This is a transport failure, not a problem with your message content — escaping/quoting is almost never the cause."
+                echo "Send Enter to the surface (cmux send-key --surface $WS_REF Enter) rather than re-sending the text, which would append to what is already in the box. Or re-dial via a fresh surface."
+              } >&2
+              touch "$CALL_DIR/done" 2>/dev/null || true
+              cleanup_workspace_and_script
+              exit 1
+            fi
+            # Not visible, or we could not look: a follow-up sent while the callee
+            # was mid-turn is QUEUED and its user event only lands when that turn
+            # ends, so this is indistinguishable from a slow submit. Do not assert
+            # a cause and do not give up — stay patient until --timeout.
+            if ! $SUBMIT_UNCONFIRMED; then
+              SUBMIT_UNCONFIRMED=true
+              if [[ $BOX_RC -eq 2 ]]; then
+                echo "hotline: no submit confirmation within ${SUBMIT_DEADLINE}s and the callee's screen could not be read, so slow-vs-never-submitted is undecidable — still waiting (up to ${TIMEOUT}s)." >&2
+              else
+                echo "hotline: no submit confirmation within ${SUBMIT_DEADLINE}s, but the text is not in the callee's input box either — it may be queued behind the callee's current turn. Still waiting (up to ${TIMEOUT}s)." >&2
+              fi
+            fi
           fi
           ;;
         *)  FELL_BACK=true; break ;;   # extractor usage/read error → fall back
@@ -231,8 +283,19 @@ if $CMUX_MODE; then
     if ! $FELL_BACK; then
       # Ran the full TIMEOUT in transcript mode while merely working → a genuine
       # timeout, not a reason to re-scrape. Report it and stop.
-      echo "Timed out waiting for the callee to finish (transcript mode, ${TIMEOUT}s) — $TRANSCRIPT_PATH" \
-        > "$CALL_DIR/error.txt"
+      if $SUBMIT_UNCONFIRMED; then
+        # Never got submit confirmation, and the box check did not incriminate the
+        # transport either. Report both live possibilities and how to settle it,
+        # rather than picking one the script cannot observe (mo8m).
+        {
+          echo "Timed out after ${TIMEOUT}s in transcript mode with NO submit confirmation — no user event ever carried call_id=$CALL_ID ($TRANSCRIPT_PATH)."
+          echo "Could not confirm whether the message submitted: it may still be queued behind a long turn, or it may never have submitted. The script cannot tell these apart from timing alone."
+          echo "To check: cmux read-screen --surface $WS_REF — if your text is sitting in the input box it never submitted; if the callee is mid-turn it was queued. Do NOT blindly re-dial; that risks double-queueing the same work."
+        } > "$CALL_DIR/error.txt"
+      else
+        echo "Timed out waiting for the callee to finish (transcript mode, ${TIMEOUT}s) — $TRANSCRIPT_PATH" \
+          > "$CALL_DIR/error.txt"
+      fi
       touch "$CALL_DIR/done"
       cleanup_workspace_and_script
       cat "$CALL_DIR/error.txt" >&2
