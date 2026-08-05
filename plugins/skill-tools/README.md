@@ -1,6 +1,6 @@
 # Skill Tools Plugin
 
-Skills for creating and reviewing Claude Code skills, slash commands, and subagents.
+Skills for creating and reviewing Claude Code skills, slash commands, and subagents, plus validating shared skills under Claude Code and Codex.
 
 ## Installation
 
@@ -75,6 +75,17 @@ Analyzes a skill file against best practices:
 - Trigger pattern effectiveness
 - Tool usage patterns
 
+### `/skill-tools:validate-dual-harness-skill`
+
+Validate a new or edited skill against this repository's Claude Code and Codex contracts.
+
+```text
+Claude Code: /skill-tools:validate-dual-harness-skill <skill-name-or-path>
+Codex: $skill-tools:validate-dual-harness-skill <skill-name-or-path>
+```
+
+Checks discovery, routing metadata, explicit-invocation gates, argument interpolation, runtime paths, dynamic context, permission assumptions, versioning, and focused behavioral proof.
+
 ### `/skill-tools:review-slash-command`
 
 Review a slash command for quality and consistency.
@@ -117,4 +128,5 @@ Evaluates command files for:
 - [skills/create-slash-command/SKILL.md](skills/create-slash-command/SKILL.md)
 - [skills/create-subagent/SKILL.md](skills/create-subagent/SKILL.md)
 - [skills/review-skill/SKILL.md](skills/review-skill/SKILL.md)
+- [skills/validate-dual-harness-skill/SKILL.md](skills/validate-dual-harness-skill/SKILL.md)
 - [skills/review-slash-command/SKILL.md](skills/review-slash-command/SKILL.md)

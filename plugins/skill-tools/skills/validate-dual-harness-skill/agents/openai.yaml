@@ -1,0 +1,5 @@
+interface:
+  display_name: Validate Dual-Harness Skill
+  short_description: Check a skill under Claude Code and Codex contracts
+policy:
+  allow_implicit_invocation: false

@@ -25,15 +25,26 @@ plugins/
     └── hooks/                   # Hook scripts (optional)
 ```
 
-Each skill's `SKILL.md` belongs at `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`. That path is what makes the skill discoverable in autocomplete. Claude Code invokes an installed plugin skill as `/<plugin-name>:<frontmatter-name>`; Codex invokes it as `$<frontmatter-name>`. Use the bare frontmatter name only when referring to the skill in prose. Keep `.claude-plugin/plugin.json` at the plugin root; everything a skill needs (its `SKILL.md` and any `scripts/`) sits together under its own `skills/<skill-name>/` directory.
+Each skill's `SKILL.md` belongs at `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`. That path is what makes the skill discoverable in autocomplete. Claude Code invokes an installed plugin skill as `/<plugin-name>:<frontmatter-name>`; Codex invokes it as `$<plugin-name>:<frontmatter-name>`. Use the bare frontmatter name only when referring to the skill in prose. Keep `.claude-plugin/plugin.json` at the plugin root; everything a skill needs (its `SKILL.md` and any `scripts/`) sits together under its own `skills/<skill-name>/` directory.
+
+## Dual-Harness Skill Contract
+
+Every new or edited skill must preserve behavior under both Claude Code and Codex unless it is explicitly marked harness-specific. Skills are the authoring primitive and plugins are the distribution primitive: add reusable workflows as `skills/<name>/SKILL.md`, not `commands/*.md`. Before committing a skill change, run `validate-dual-harness-skill` against it and run the focused compatibility tests plus `bash tests/run-all.sh`; behavior involving path resolution, invocation, hooks, or permissions needs a representative probe in both harnesses.
+
+The review must account for the actual contracts, not assume one harness mirrors the other: keep Codex routing terms in `description` because it ignores Claude's `when_to_use`; preserve Claude's literal `$ARGUMENTS` wherever positional interpolation matters and give Codex adjacent fallback prose; mirror `disable-model-invocation: true` with `policy.allow_implicit_invocation: false` in `agents/openai.yaml`; and treat Claude's `argument-hint`, `when_to_use`, `effort`, dynamic `!` context, and `allowed-tools` permission grants as Claude-only behavior unless current Codex evidence says otherwise. Keep `allowed-tools` synchronized with the commands Claude will actually execute.
+
+Claude path tokens in executable skill text must remain bare `${CLAUDE_SKILL_DIR}` or `${CLAUDE_PLUGIN_ROOT}` tokens—never shell-default wrappers—so Claude Code can resolve them mechanically. Put Codex's instruction in adjacent prose without repeating the token there, and repeat the local assignment in every independently executed block because Codex shells do not retain state. Hook variables are a separate runtime contract; do not infer hook behavior from skill-shell behavior.
 
 When a skill runs bundled scripts, reference them through the runtime-resolved skill path so they work from any working directory:
 
+Codex: this path resolves under Claude Code; substitute the directory containing this `SKILL.md`.
+
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/<script-name> [args]
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/<script-name>" [args]
 ```
 
-Use `${CLAUDE_SKILL_DIR}/scripts/…` in `SKILL.md` (and in the skill's `allowed-tools` frontmatter). This anchors each call to the installed skill directory, so it resolves whether the skill fires from the repo, an install cache, or a user's unrelated project. See `plugins/research-tools/skills/fetch-docs/SKILL.md` for a working example.
+Use that form in every executable block in `SKILL.md`. Under Claude Code the bare token is mechanically resolved; under Codex the model substitutes the installed skill directory described in the adjacent prose. Keep any `allowed-tools` matcher aligned with the resulting Claude command. See `plugins/research-tools/skills/fetch-docs/SKILL.md` for a working example.
 
 ## Adding a New Plugin
 
@@ -54,32 +65,35 @@ find plugins -name SKILL.md    # every result should be plugins/<plugin>/skills/
 
 When two or more skills in one plugin need the same script or the same reference doc, keep
 **one copy at the plugin root** — `plugins/<plugin>/scripts/` and
-`plugins/<plugin>/references/` — and reach it with `${CLAUDE_PLUGIN_ROOT}`:
+`plugins/<plugin>/references/` — and resolve it from the plugin root.
+
+Codex: this path resolves under Claude Code; substitute the installed plugin directory.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/thing.mjs" <args>
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+node "$PLUGIN_ROOT/scripts/thing.mjs" <args>
 ```
 
 And to point the model at a bundled doc, give it a resolvable path:
+
+Codex: substitute the installed plugin directory for the path below.
 
 ```markdown
 **Read `${CLAUDE_PLUGIN_ROOT}/references/some-guide.md`** before continuing.
 ```
 
-`${CLAUDE_PLUGIN_ROOT}` is the plugin's install directory. It is the documented, supported
-variable, and it keeps working after a marketplace install (which copies the plugin into
-`~/.claude/plugins/cache/`). `plugins/session-tools/` is the reference example — three
-skills share one transcript reader that had already drifted twice when duplicated.
+Claude Code mechanically resolves the bare plugin-root token to the installed plugin directory.
+Codex does not expose that environment variable to skill shells, so the adjacent instruction
+must tell it which directory to substitute. `plugins/session-tools/` is the reference example —
+three skills share one transcript reader that had already drifted twice when duplicated.
 
 Two things to avoid:
 
-- **`${CLAUDE_SKILL_DIR}/../../`** — `CLAUDE_SKILL_DIR` is documented as the skill's own
-  subdirectory, *not* the plugin root, and traversal out of it is not supported. Several
-  older skills here still do this (`hotline`, `gws`, `fable`); it works today but should
-  migrate to `${CLAUDE_PLUGIN_ROOT}`.
+- **`${CLAUDE_SKILL_DIR}/../../`** — the skill token names the skill's own subdirectory;
+  traversal out of it is unsupported. Use the plugin-root form above for shared resources.
 - **Bare relative paths in SKILL.md prose** (`see references/foo.md`). Nothing resolves
-  those for the model — there is no implicit base directory. Anchor every path to
-  `${CLAUDE_PLUGIN_ROOT}` or `${CLAUDE_SKILL_DIR}`.
+  those for the model — there is no implicit base directory. Use a mechanically resolvable
+  Claude path plus adjacent Codex substitution prose.
 
 Duplicating a file across sibling skills is the thing this avoids: this repo has lost time
 to exactly that, twice, in the transcript parser.
@@ -119,7 +133,7 @@ practices for Sonnet), and the AM Skills overlay README if the plugin is mapped 
 Hook scripts in `hooks/` that intercept Claude Code events (permissions, notifications, etc.) and return JSON decisions.
 
 ### Skill-based plugins
-Each skill is a `SKILL.md` at `skills/<skill-name>/SKILL.md`, with its scripts bundled in `skills/<skill-name>/scripts/` and referenced via `${CLAUDE_SKILL_DIR}/scripts/…`. This layout surfaces the skill in autocomplete. Invoke it as `/<plugin-name>:<frontmatter-name>` in Claude Code or `$<frontmatter-name>` in Codex.
+Each skill is a `SKILL.md` at `skills/<skill-name>/SKILL.md`, with its scripts bundled in `skills/<skill-name>/scripts/` and referenced via `${CLAUDE_SKILL_DIR}/scripts/…`. This layout surfaces the skill in autocomplete. Invoke it as `/<plugin-name>:<frontmatter-name>` in Claude Code or `$<plugin-name>:<frontmatter-name>` in Codex.
 
 ### Command-based plugins
 Markdown files in `commands/` that define slash commands Claude can invoke.
