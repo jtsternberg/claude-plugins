@@ -1,0 +1,5 @@
+interface:
+  display_name: Commit Unstaged Changes
+  short_description: Stage intended changes explicitly and commit them
+policy:
+  allow_implicit_invocation: false

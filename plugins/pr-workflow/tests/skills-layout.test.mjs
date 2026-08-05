@@ -32,7 +32,7 @@ test('converted PR skills preserve safe cross-harness contracts', () => {
 
 	for (const content of [automatic, human, updateDescription]) {
 		assert.match(content, /\$ARGUMENTS/);
-		assert.match(content, /Codex: if `\$ARGUMENTS` above is not substituted/);
+		assert.match(content, /Codex: if the invocation text above is not populated/);
 	}
 
 	for (const content of [automatic, human]) {

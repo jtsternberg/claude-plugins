@@ -16,7 +16,7 @@ claude plugin marketplace add jtsternberg/claude-plugins
 claude plugin install hotline@jtsternberg
 ```
 
-This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`). Invoke them as `/hotline:<skill-name>` in Claude Code—for example, `/hotline:hotline-dial`—or `$<skill-name>` in Codex. Bare names are prose identifiers only.
+This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`). Invoke them as `/hotline:<skill-name>` in Claude Code—for example, `/hotline:hotline-dial`—or `$hotline:<skill-name>` in Codex. Bare names are prose identifiers only.
 
 ---
 

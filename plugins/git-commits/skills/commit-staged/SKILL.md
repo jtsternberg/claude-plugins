@@ -12,7 +12,7 @@ Use this skill only when the user explicitly asks to commit their staged changes
 
 **Arguments provided:** $ARGUMENTS
 
-Codex: if `$ARGUMENTS` above is not substituted, use a commit message supplied after the skill name or in the current request. If none is available, infer the message from the diff.
+Codex: if the invocation text above is not populated, use a commit message supplied after the skill name or in the current request. If none is available, infer the message from the diff.
 
 ## Workflow
 

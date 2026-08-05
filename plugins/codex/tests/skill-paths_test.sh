@@ -97,6 +97,13 @@ else
 	fail "Codex fallback prose contains Claude-substituted tokens ($codex_prose_violations files)"
 fi
 
+codex_argument_violations=$(grep -RIlE 'Codex.*\$ARGUMENTS' "$REPO/plugins" --include='SKILL.md' | wc -l | tr -d ' ')
+if [[ $codex_argument_violations -eq 0 ]]; then
+	pass 'Codex fallback prose survives Claude argument substitution'
+else
+	fail "Codex fallback prose contains Claude-substituted arguments ($codex_argument_violations files)"
+fi
+
 hotline_docs=(
 	"$REPO/plugins/hotline/README.md"
 	"$REPO/plugins/hotline/skills/dial/SKILL.md"

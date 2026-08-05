@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 You are given an epic identifier and optional flags: `$ARGUMENTS`
 
-Codex: if `$ARGUMENTS` above is not substituted, use the invocation text after the skill name. If it is unavailable, infer the epic identifier and optional flags from the current request.
+Codex: if the invocation text above is not populated, use the text after the skill name. If it is unavailable, infer the epic identifier and optional flags from the current request.
 
 Parse the arguments:
 - The epic identifier is the first argument (everything before any `--` flags)

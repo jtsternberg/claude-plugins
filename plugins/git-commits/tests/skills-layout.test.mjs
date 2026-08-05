@@ -18,7 +18,10 @@ test('git-commits exposes both workflows as skills, not legacy commands', () => 
 		assert.match(content, /allowed-tools: \[Bash\]/);
 		assert.match(content, /argument-hint: "Optional commit message/);
 		assert.match(content, /\*\*Arguments provided:\*\* \$ARGUMENTS/);
-		assert.match(content, /Codex: if `\$ARGUMENTS` above is not substituted/);
+		assert.match(content, /Codex: if the invocation text above is not populated/);
+
+		const codexMetadata = readFileSync(join(pluginRoot, 'skills', skill, 'agents', 'openai.yaml'), 'utf8');
+		assert.match(codexMetadata, /policy:\s+allow_implicit_invocation: false/s);
 	}
 
 	const commandsDirectory = join(pluginRoot, 'commands');

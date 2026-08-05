@@ -11,7 +11,7 @@ disable-model-invocation: true
 
 Parse `$ARGUMENTS` to determine the mode.
 
-Codex: if `$ARGUMENTS` above is not substituted, use the invocation text after the skill name. If unavailable, infer the PR number or comment URL from the current request.
+Codex: if the invocation text above is not populated, use the text after the skill name. If unavailable, infer the PR number or comment URL from the current request.
 
 - **Specific comment URL** — matches pattern `https://github.com/{owner}/{repo}/pull/{number}#discussion_r{id}` or `#pullrequestreview-{id}`
   - Extract: `owner`, `repo`, `pr_number`, and `comment_anchor` (the fragment after `#`)

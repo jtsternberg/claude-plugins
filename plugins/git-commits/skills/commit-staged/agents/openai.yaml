@@ -1,0 +1,5 @@
+interface:
+  display_name: Commit Staged Changes
+  short_description: Commit changes that are already staged
+policy:
+  allow_implicit_invocation: false

@@ -33,4 +33,4 @@ Invoke the skill with an epic ID or name. Add `--here` to work on the current br
 
 Fix a list of findings one at a time, with one Beads task and one commit per finding. Add `--push` to push each completed fix.
 
-The names above are the canonical skill names. Explicit invocation uses `/beads-workflow:tackle-epic` or `/beads-workflow:fix-findings-beads-tasks` in Claude Code, and `$tackle-epic` or `$fix-findings-beads-tasks` in Codex. The slash and dollar-sign forms are harness syntax, not part of the skill names.
+The names above are the canonical skill names. Explicit invocation uses `/beads-workflow:tackle-epic` or `/beads-workflow:fix-findings-beads-tasks` in Claude Code, and `$beads-workflow:tackle-epic` or `$beads-workflow:fix-findings-beads-tasks` in Codex. The slash and dollar-sign forms are harness syntax, not part of the skill names.
