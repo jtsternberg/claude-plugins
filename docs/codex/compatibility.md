@@ -5,7 +5,7 @@ behaves under Codex. Runtime behavior changes with Codex releases, so treat
 these results as versioned compatibility information, not a permanent API
 guarantee.
 
-**Last reviewed:** 2026-08-03
+**Last reviewed:** 2026-08-05
 
 **Tested on:** codex-cli 0.146.0 for the hook and skill-shell probe; related
 plugin-surface probes were run on codex-cli 0.145.0.
@@ -23,7 +23,7 @@ skill-loader change.
 | Plugin hook commands | Supported after the user trusts the plugin; `${CLAUDE_PLUGIN_ROOT}` resolves inside the hook process. | 0.145.0–0.146.0 |
 | Skill-body shell commands | Do not rely on `${CLAUDE_SKILL_DIR}` or `${CLAUDE_PLUGIN_ROOT}` being set. A SessionStart hook export does not persist into a later skill-body shell. | 0.146.0 |
 | Installed plugin `bin/` on `PATH` | Not provided as a general skill-script path solution. | 0.145.0 |
-| Skill descriptions | The current source tree has 55 descriptions totaling 7,311 characters (91.39% of the approximate 8,000-character Codex pool). | 2026-08-03 source-tree measurement |
+| Skill descriptions | The current source tree has 60 descriptions totaling 7,700 characters (96.25% of the approximate 8,000-character Codex pool). | 2026-08-05 source-tree measurement |
 
 ## Authoring guidance
 

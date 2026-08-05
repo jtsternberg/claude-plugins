@@ -121,40 +121,40 @@ Skills for creating git commits from staged or unstaged files with AI-generated 
 **Install:** `claude plugin install git-commits@jtsternberg`
 
 #### 🔀 [pr-workflow](plugins/pr-workflow)
-Commands for managing pull requests: addressing comments and updating descriptions.
+Skills for managing pull requests: addressing comments, updating descriptions, watching PRs, and guiding QA.
 
-**Commands:** `/address-pr-comments`, `/address-pr-comments-human`, `/update-pr-description`
+**Skills:** `address-pr-comments`, `address-pr-comments-human`, `update-pr-description`, `watch-pr-then-action`, `qa-walkthrough-pr`
 
-**Codex:** Skills work in Codex; its slash commands are Claude Code only.
+Works in Claude Code and Codex.
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementing fixes or writing PR descriptions.
 
-**Install:** `claude plugin install pr-workflow@jtsternberg`
+**Install:** `claude plugin install pr-workflow@jtsternberg` or `codex plugin add pr-workflow@jtsternberg`
 
 #### 🛠️ [skill-tools](plugins/skill-tools)
-Commands for creating and reviewing Claude Code skills, slash commands, and subagents.
+Skills for creating and reviewing Claude Code skills, slash commands, and subagents.
 
-**Commands:** `/create-slash-command`, `/create-subagent`, `/review-skill`, `/review-slash-command`
+**Skills:** `create-slash-command`, `create-subagent`, `review-skill`, `review-slash-command`
 
 **Install:** `claude plugin install skill-tools@jtsternberg`
 
 #### 📦 [beads-workflow](plugins/beads-workflow)
 Work through beads epics from start to completion with automatic PR creation.
 
-**Commands:** `/tackle-epic`, `/fix-findings-beads-tasks`
+**Skills:** `tackle-epic`, `fix-findings-beads-tasks`
 
-**Claude Code only:** Codex does not surface plugin slash commands.
+Works in Claude Code and Codex.
 
 **Dependencies:** Requires [beads](https://github.com/steveyegge/beads)
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementation work or fixing findings.
 
-**Install:** `claude plugin install beads-workflow@jtsternberg`
+**Install:** `claude plugin install beads-workflow@jtsternberg` or `codex plugin add beads-workflow@jtsternberg`
 
 #### 🤝 [handoff](plugins/handoff)
 Create handoff documents to preserve context between Claude Code sessions.
 
-**Commands:** `/handoff`
+**Skills:** `handoff`, `pickup-handoff`
 
 **Install:** `claude plugin install handoff@jtsternberg`
 

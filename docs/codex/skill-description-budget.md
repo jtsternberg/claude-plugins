@@ -1,6 +1,6 @@
 # Skill-description budget
 
-`bash scripts/measure-skill-descriptions.sh` parsed **55** skill descriptions across 25 plugins with skills. Their combined length is **7,311 characters**: **91.39%** of Codex's approximately 8,000-character description budget. Three marketplace plugins have no skills and contribute zero characters.
+`bash scripts/measure-skill-descriptions.sh` parsed **60** skill descriptions across 26 plugins with skills. Their combined length is **7,700 characters**: **96.25%** of Codex's approximately 8,000-character description budget. Two marketplace plugins have no skills and contribute zero characters.
 
 The parser reads only YAML front matter and supports quoted and plain scalars plus YAML folded (`>`) and literal (`|`) multi-line scalars. It measured `work-with-media/yt-dlp` at **263** characters while correctly ignoring that skill's adjacent multi-line `when_to_use` field; the `obsidian-cli` description measured **161** characters.
 
@@ -8,7 +8,7 @@ The parser reads only YAML front matter and supports quoted and plain scalars pl
 
 | plugin | skills | description chars |
 |---|---:|---:|
-| beads-workflow | 0 | 0 |
+| beads-workflow | 2 | 140 |
 | bible | 1 | 62 |
 | cmux-cli | 2 | 381 |
 | codex | 3 | 490 |
@@ -26,7 +26,7 @@ The parser reads only YAML front matter and supports quoted and plain scalars pl
 | mac-caffeinate | 1 | 88 |
 | obsidian-cli | 1 | 161 |
 | paperclip | 1 | 69 |
-| pr-workflow | 2 | 209 |
+| pr-workflow | 5 | 458 |
 | publish-insights | 0 | 0 |
 | research-tools | 1 | 186 |
 | session-tools | 3 | 329 |
@@ -36,7 +36,7 @@ The parser reads only YAML front matter and supports quoted and plain scalars pl
 | thinking-tools | 2 | 433 |
 | work-with-media | 2 | 517 |
 | workspace-status | 0 | 0 |
-| **Grand total** | **55** | **7,311** |
+| **Grand total** | **60** | **7,700** |
 
 ## Descriptions over 500 characters
 
@@ -48,7 +48,7 @@ No descriptions currently exceed 500 characters. The longest is `slack/read-slac
 
 ## Recommendation
 
-Adopt a **140-character hard maximum** for `description:` and enforce a **7,000-character marketplace total**. The current 55 descriptions total 7,311 characters, so the aggregate is already 311 characters above that target even though every individual description is below 500 characters. The description should contain one clear action plus at most two or three high-signal aliases.
+Adopt a **140-character hard maximum** for `description:` and enforce a **7,000-character marketplace total**. The current 60 descriptions total 7,700 characters, so the aggregate is already 700 characters above that target even though every individual description is below 500 characters. The description should contain one clear action plus at most two or three high-signal aliases.
 
 Move exhaustive trigger-phrase inventories, routing detail, and examples into a `when_to_use:` frontmatter field or a `## Trigger examples` section near the top of the skill body. Claude Code users and maintainers still have the full vocabulary available there. Codex implicit invocation should not be assumed to read those supplemental fields, so retain the most discriminative terms in the short description rather than moving every trigger out of it.
 

@@ -16,7 +16,7 @@ totals, the grand total, and descriptions over 500 characters.
 bash scripts/measure-skill-descriptions.sh
 ```
 
-The script currently expects 55 skill descriptions and exits nonzero if the
+The script currently expects 60 skill descriptions and exits nonzero if the
 count changes. That is an intentional drift guard: when a skill is added or
 removed, update the expected count and refresh
 [`docs/codex/skill-description-budget.md`](../docs/codex/skill-description-budget.md)
@@ -38,7 +38,7 @@ node scripts/compare-skill-descriptions.mjs --dump-current
 
 This is a phase/rewrite-plan tool, not the current budget guard. Its proposal
 file describes the earlier 50-skill rewrite set, while the live tree now has
-55 skills; it therefore exits with a count mismatch until that proposal set
+60 skills; it therefore exits with a count mismatch until that proposal set
 and its report are deliberately refreshed. Do not turn its exit code into CI
 policy without updating the proposal inventory and regenerating the companion
 rewrite report.

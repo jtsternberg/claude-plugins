@@ -68,9 +68,9 @@ experiment establishes that simply shipping a Claude `commands/` directory does
 not bridge that gap: it is copied but unavailable. So a plugin cannot ship a
 working Codex custom prompt in the current runtime.
 
-## Q3 — Repository command inventory
+## Q3 — Repository command inventory at audit time
 
-The remaining five command files are unavailable to Codex as commands:
+The five command files present when this audit was written were unavailable to Codex as commands:
 
 | Plugin | Command file | Claude command intent | Codex result |
 | --- | --- | --- | --- |
@@ -80,26 +80,19 @@ The remaining five command files are unavailable to Codex as commands:
 | `pr-workflow` | `commands/address-pr-comments.md` | Address PR comments and post the result | Not surfaced or invokable. |
 | `pr-workflow` | `commands/address-pr-comments-human.md` | Address PR comments with an approval gate | Not surfaced or invokable. |
 
-`beads-workflow` contains only its two command files and README (plus its
-manifest), so it is **effectively empty in Codex**. `git-commits` was migrated
-to the `commit-staged` and `commit-unstaged` skills after this command audit.
-`pr-workflow` is not empty: its two skills, `qa-walkthrough-pr` and
-`watch-pr-then-action`, remain a separate potentially usable Codex surface,
-but none of its three command workflows do.
+At audit time, `beads-workflow` was **effectively empty in Codex**.
+`git-commits` was migrated to the `commit-staged` and `commit-unstaged` skills
+after the initial audit. The five files above were subsequently promoted to
+same-named explicit-only skills, with Claude's invocation gate in `SKILL.md`
+and Codex's gate in each skill's `agents/openai.yaml`.
 
-## Options — no decision
+## Resolution
 
-1. **Promote selected commands to skills.** Cost: redesign `$ARGUMENTS`,
-   Claude-specific command assumptions, and permission/frontmatter behavior;
-   bump and test the plugins. Buys a current, installable Codex workflow and
-   keeps Claude compatibility.
-2. **Ship a prompts export.** Cost: it is manual and only useful to users
-   deliberately running pre-0.117 Codex; it is not a current plugin feature.
-   Buys migration help for an obsolete runtime, not a Codex 0.145.0 command.
-3. **Declare these command-only plugins Claude-only.** Cost: document the
-   compatibility boundary and accept no Codex workflow for them. Buys an honest
-   install experience and avoids a misleading, apparently successful empty
-   Codex install.
+Promote all five workflows to skills. Preserve the command names as canonical
+skill names and preserve the automatic versus human-reviewed PR-comment modes
+as separate skills because their side-effect contracts differ. Do not ship a
+legacy prompts export. Layout tests now fail if command Markdown returns or if
+either harness's explicit-only invocation gate is lost.
 
 [slash-commands-source]: https://raw.githubusercontent.com/openai/codex/main/docs/slash_commands.md
 [custom-prompts-removed]: https://github.com/openai/codex/issues/15941
