@@ -11,7 +11,7 @@ when_to_use: |
   - asks for a channel's recent messages
   Prefer this over hand-copied Slack text — the API preserves authors, timestamps,
   reply order, and links that copy/paste loses.
-allowed-tools: "Bash(bash ${CLAUDE_SKILL_DIR}/scripts/slack.sh *) Read"
+allowed-tools: "Bash(bash */scripts/slack.sh *) Read"
 ---
 
 # read-slack
@@ -34,7 +34,9 @@ The token is passed to `curl` on stdin, never on the command line — it won't s
 On first use — or whenever a call fails — run the check (it makes one `auth.test` call and prints the authenticated user/workspace). Don't run it on every invocation; once it passes for the session, trust it.
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/slack.sh --check
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this read-slack skill directory>}"
+bash "$SKILL_DIR/scripts/slack.sh" --check
 ```
 
 If it errors, the message says what's missing — usually the token isn't exported yet.
@@ -44,13 +46,17 @@ If it errors, the message says what's missing — usually the token isn't export
 When the user gives a Slack message or thread URL, pass it straight through:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/slack.sh thread 'https://acme.slack.com/archives/C08L6GH92R3/p1766517669357109?thread_ts=1763502924.627409&cid=C08L6GH92R3'
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this read-slack skill directory>}"
+bash "$SKILL_DIR/scripts/slack.sh" thread 'https://acme.slack.com/archives/C08L6GH92R3/p1766517669357109?thread_ts=1763502924.627409&cid=C08L6GH92R3'
 ```
 
 The URL carries the channel ID and timestamps, so nothing else is needed. If `thread_ts` is present the whole thread is returned; otherwise just that message. You can also pass a channel ID and a raw `ts` instead of a URL:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/slack.sh thread C08L6GH92R3 1763502924.627409
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this read-slack skill directory>}"
+bash "$SKILL_DIR/scripts/slack.sh" thread C08L6GH92R3 1763502924.627409
 ```
 
 Output is one block per message — author, local timestamp, then the message text with `<@U…>` mentions, `<#C…|chan>` channel refs, and `<url|label>` links unwrapped into readable form.
@@ -58,7 +64,9 @@ Output is one block per message — author, local timestamp, then the message te
 ## Searching
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/slack.sh search 'rate limit migration' 20
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this read-slack skill directory>}"
+bash "$SKILL_DIR/scripts/slack.sh" search 'rate limit migration' 20
 ```
 
 Uses `search.messages` (user-token only) and prints each match with its channel, author, timestamp, text, and a permalink you can hand back to the user. Slack search operators work inside the query, e.g. `search 'in:#lindris-onboarding 503 error'`.
@@ -66,7 +74,9 @@ Uses `search.messages` (user-token only) and prints each match with its channel,
 ## Channel history
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/slack.sh history C08L6GH92R3 30
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this read-slack skill directory>}"
+bash "$SKILL_DIR/scripts/slack.sh" history C08L6GH92R3 30
 ```
 
 Prints the most recent messages (newest first) for a channel ID (or an `/archives/<id>` URL). Default limit is 20.
@@ -76,7 +86,9 @@ Prints the most recent messages (newest first) for a channel ID (or an `/archive
 The script writes to stdout. For a long thread you're about to reason over, redirect it to a file and read that, rather than pasting a wall of text into the conversation:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/slack.sh thread '<url>' > /tmp/slack-thread.txt
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this read-slack skill directory>}"
+bash "$SKILL_DIR/scripts/slack.sh" thread '<url>' > /tmp/slack-thread.txt
 ```
 
 Then Read `/tmp/slack-thread.txt`. This keeps the chat lean and gives you the complete, faithful thread to investigate from.

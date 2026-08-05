@@ -1,7 +1,7 @@
 {
   "name": "slack",
   "description": "Read-only Slack access via the Slack Web API — fetch a full thread or message by URL, search messages, and read a channel's recent history as clean text, so Slack context can be fed to Claude without lossy copy/paste.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

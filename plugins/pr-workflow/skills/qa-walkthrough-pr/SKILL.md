@@ -4,7 +4,7 @@ description: "Guided manual QA walkthrough of a PR or branch — test plan as a 
 disable-model-invocation: true
 when_to_use: "Use when the user says \"QA this PR\", \"qa walkthrough\", \"manual testing\", \"walk me through testing\", \"QA my changes\", \"test my changes\", or wants to manually verify work before merging or pushing."
 argument-hint: "[<pr-number> | --branch | --describe \"...\"]"
-allowed-tools: "Bash(gh *) Bash(git *) Bash(bd *) Bash(bash \"${CLAUDE_SKILL_DIR}/scripts/*\")"
+allowed-tools: "Bash(gh *) Bash(git *) Bash(bd *) Bash(bash \"*/scripts/*\")"
 effort: high
 ---
 
@@ -68,7 +68,9 @@ Set `QA_LABEL="PR #<number>"`.
 
 ```bash
 # Get the diff summary and changes
-bash "${CLAUDE_SKILL_DIR}/scripts/extract-test-plan.sh" --from-diff[=<base-ref>]
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this qa-walkthrough-pr skill directory>}"
+bash "$SKILL_DIR/scripts/extract-test-plan.sh" --from-diff[=<base-ref>]
 ```
 
 Set `QA_LABEL` to the branch name (`git branch --show-current`).
@@ -90,7 +92,9 @@ In all modes: if a HANDOFF.md exists in the working directory, read it and extra
 Try the bundled extraction script first:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/scripts/extract-test-plan.sh" <number>
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this qa-walkthrough-pr skill directory>}"
+bash "$SKILL_DIR/scripts/extract-test-plan.sh" <number>
 ```
 
 This parses the PR description for common test plan headings (`## Testing`, `## Test Plan`, `## How to Test`, etc.). If the script finds a section, use it as the starting point.
@@ -132,11 +136,13 @@ Create a beads epic and individual tasks with dependencies.
 Build a JSON test plan array and pipe it to the script:
 
 ```bash
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this qa-walkthrough-pr skill directory>}"
 echo '[
   {"name": "Pre-setup: ...", "description": "...", "depends_on_index": null},
   {"name": "Admin UI: ...", "description": "...", "depends_on_index": 0},
   {"name": "Checkout flow: ...", "description": "...", "depends_on_index": 1}
-]' | bash "${CLAUDE_SKILL_DIR}/scripts/build-qa-epic.sh" "$QA_LABEL" "<short description>"
+]' | bash "$SKILL_DIR/scripts/build-qa-epic.sh" "$QA_LABEL" "<short description>"
 ```
 
 The script creates the epic, all tasks, and wires up dependencies in one shot. It returns JSON with the epic and task IDs.
@@ -235,7 +241,9 @@ Once all QA tasks and any punted bugs are resolved:
 2. Ask the user: "All tests passed. Want me to delete the testing epic and tasks? They don't add historical value since there are no code changes."
 3. If confirmed:
    ```bash
-   bash "${CLAUDE_SKILL_DIR}/scripts/qa-cleanup.sh" <epic-id>
+   # Codex: replace the fallback with the directory containing this SKILL.md.
+   SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this qa-walkthrough-pr skill directory>}"
+   bash "$SKILL_DIR/scripts/qa-cleanup.sh" <epic-id>
    ```
 
 If the user decides to stop before all bugs are resolved, do NOT close the epic. Leave it open with a note summarizing the remaining failures so the next session can pick up where this one left off:
