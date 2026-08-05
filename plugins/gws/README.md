@@ -69,13 +69,29 @@ bash plugins/gws/scripts/calendar-get-event.sh --match "coaching"
 # List accessible calendars (★ = primary)
 bash plugins/gws/scripts/calendar-list-calendars.sh
 
+# Check your access to one calendar before writing to it
+bash plugins/gws/scripts/calendar-list-calendars.sh --id "<calendarId>"
+
 # Create event with auto-generated Meet link
 bash plugins/gws/scripts/calendar-create-event.sh \
   --title "Sync" --start "2026-05-08T14:00" --end "2026-05-08T15:00" \
   --attendees "a@x.com,b@y.com" --meet
+
+# All-day event — a date-only --start is all it takes
+bash plugins/gws/scripts/calendar-create-event.sh --title "Offsite" --start 2026-09-28
+
+# Multi-day all-day event, inclusive last day
+bash plugins/gws/scripts/calendar-create-event.sh \
+  --title "Conference" --start 2026-09-28 --through 2026-09-30
 ```
 
 Date specs: `today` | `tomorrow` | `yesterday` | `YYYY-MM-DD` | `+Nd` | `+Nw`. All scripts accept `--json` for programmatic output.
+
+All-day events use Google's `{"date": …}` bounds rather than `{"dateTime": …}`;
+`calendar-create-event.sh` picks the right shape from whether `--start` carries a
+time, and refuses mixed bounds up front instead of letting the API answer with an
+opaque `400 Bad Request`. Google's `end` date is **exclusive** — `--through` takes
+the inclusive last day so you don't have to remember that.
 
 ### gmail-read
 
@@ -109,7 +125,24 @@ core Google Workspace scopes.
 - `gws` CLI installed and on `$PATH`
 - An OAuth client (`client_secret.json`) in place and an authenticated account (see **Accounts & Authentication** below)
 
-Check auth status with `gws auth status`.
+Check auth status with `scripts/auth-preflight.sh`, not a hand-rolled
+`gws auth status` check:
+
+```bash
+bash plugins/gws/scripts/auth-preflight.sh          # human-readable
+bash plugins/gws/scripts/auth-preflight.sh --json   # machine-readable
+bash plugins/gws/scripts/auth-preflight.sh --quiet  # guard: silent, exit code only
+```
+
+Two reasons it exists. First, `gws` writes `Using keyring backend: keyring` to
+**stderr on every invocation**, so anything shaped like
+`gws auth status 2>&1 | python3 -c '...json.load...'` hits a parse error every
+time and reports a false "NOT AUTHENTICATED". Read `2>/dev/null`, never `2>&1`.
+Second, it separates three states a bare exit-code check conflates: authenticated,
+*no account selected* (fix with `/gws-account switch <label>` — re-running OAuth
+is a pointless detour), and genuinely no credentials (`gws auth login`). It also
+warns when calls are silently going to the default account because nothing is
+selected — the usual cause of work landing on a personal calendar.
 
 ## Raw `gws` calls: `--params` is the URL, `--json` is the body
 
@@ -194,8 +227,9 @@ claude plugins add /path/to/claude-plugins/plugins/gws
 | `scripts/calendar-list-events.sh` | List events in a date range |
 | `scripts/calendar-get-event.sh` | Get a single event by id or fuzzy match |
 | `scripts/calendar-links.sh` | Extract Meet/Zoom links for events |
-| `scripts/calendar-list-calendars.sh` | List accessible calendars |
-| `scripts/calendar-create-event.sh` | Create a calendar event (optional Meet link) |
+| `scripts/calendar-list-calendars.sh` | List accessible calendars, or check access to one (`--id`) |
+| `scripts/calendar-create-event.sh` | Create a timed or all-day calendar event (optional Meet link) |
+| `scripts/auth-preflight.sh` | Report the precise auth/account state; guard for other scripts |
 
 ## Disclaimer
 

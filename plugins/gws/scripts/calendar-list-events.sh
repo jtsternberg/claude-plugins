@@ -41,11 +41,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! gws auth status >/dev/null 2>&1; then
-  echo "ERROR: gws not authenticated. Run: gws auth login" >&2
-  echo "  or switch accounts: bash $SCRIPT_DIR/account-switch.sh <label>" >&2
-  exit 1
-fi
+bash "$SCRIPT_DIR/auth-preflight.sh" --quiet || exit 1
 
 TIME_MIN="$(calendar_resolve_date "$FROM" start)"
 TIME_MAX="$(calendar_resolve_date "$TO" end)"

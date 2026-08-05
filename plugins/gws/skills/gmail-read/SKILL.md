@@ -17,7 +17,7 @@ deletes. For composing, see the sibling `gmail-draft-from-markdown` skill.
 ## Prerequisites
 
 ```!
-gws auth status 2>&1 || echo "NOT AUTHENTICATED — run: gws auth login"
+bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
 ```
 
 ## Task

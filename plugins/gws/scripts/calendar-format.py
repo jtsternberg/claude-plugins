@@ -94,12 +94,19 @@ def format_time(iso, tz):
     return f"{label} {tzname} ({date_part})"
 
 
+def is_cancelled(event):
+    # events.get on a deleted event still returns it, with status "cancelled".
+    # Rendering that as a normal event reads as "the delete didn't work".
+    return event.get('status') == 'cancelled'
+
+
 def format_event(event, self_email, tz, indent=''):
     title = event.get('summary', '(no title)')
     start = event_start(event)
     when = format_time(start, tz)
     declined = is_declined(event, self_email)
-    flag = ' [DECLINED]' if declined else ''
+    flag = ' [CANCELLED]' if is_cancelled(event) else ''
+    flag += ' [DECLINED]' if declined else ''
     attendees = event.get('attendees') or []
     n_att = len(attendees)
     lines = []
@@ -154,6 +161,7 @@ def main():
                 'end': (e.get('end') or {}).get('dateTime') or (e.get('end') or {}).get('date'),
                 'attendees': len(e.get('attendees') or []),
                 'declined': is_declined(e, args.self),
+                'cancelled': is_cancelled(e),
                 'links': extract_links(e),
                 'location': e.get('location'),
                 'htmlLink': e.get('htmlLink'),

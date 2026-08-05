@@ -39,10 +39,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! gws auth status >/dev/null 2>&1; then
-  echo "ERROR: gws not authenticated. Run: gws auth login" >&2
-  exit 1
-fi
+bash "$SCRIPT_DIR/auth-preflight.sh" --quiet || exit 1
 
 SELF_EMAIL="$(bash "$SCRIPT_DIR/account-current.sh" --email 2>/dev/null || echo '')"
 

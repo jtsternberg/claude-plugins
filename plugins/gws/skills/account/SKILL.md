@@ -20,8 +20,29 @@ is stored in its own config directory under `~/.config/gws-accounts/<label>/`.
 ## Prerequisites
 
 ```!
-gws auth status 2>&1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Authenticated as: {d.get(\"user\",\"unknown\")}')" 2>/dev/null || echo "NOT AUTHENTICATED — run: gws auth login"
+bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
 ```
+
+Read that output carefully — it distinguishes three states that a plain
+`gws auth status` check conflates:
+
+| Output | What it means | Fix |
+|---|---|---|
+| `Authenticated as: X (account: <label>)` | Ready | — |
+| Same, plus a `Note: no account is selected` block | Calls are silently going to the **default** config while other authed accounts exist | `account-switch.sh <label>` |
+| `ERROR: no account is selected and the default config has no credentials` | Nothing selected, default is empty, but other accounts are authed | `account-switch.sh <label>` — **not** `gws auth login` |
+| `ERROR: the selected account '<label>' no longer exists` | `.active` names a directory that is gone | `account-switch.sh <label>` (or re-add it) |
+| `ERROR: gws has no stored credentials for any account` | Genuinely unauthenticated | `gws auth login` |
+
+That fourth row is a **hard stop on purpose**, even when the default account is
+authenticated: continuing would run as an identity you didn't select. The
+selection file is left in place rather than "self-healed" away — deleting it
+would erase the only evidence that anything was wrong and make the next run look
+normal while acting as the wrong account.
+
+Never re-run OAuth on the strength of a failed `gws auth status` alone. `gws`
+writes `Using keyring backend: keyring` to stderr on every call, so any check
+that merges stderr into a JSON parser reports a false negative every time.
 
 ## Task
 
