@@ -51,7 +51,9 @@ fi
 # invoking this script. Treating that as a user override would suppress the
 # account-selection diagnostics for every script guard. So an override only
 # counts as one when it differs from what resolution would have picked anyway.
-RESOLVED_DIR="$(resolve_active_config)"
+# stderr suppressed: this script emits its own, better message for the dangling
+# case below, and duplicating the resolver's warning just adds noise.
+RESOLVED_DIR="$(resolve_active_config 2>/dev/null)"
 if [[ -n "${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-}" \
       && "$GOOGLE_WORKSPACE_CLI_CONFIG_DIR" != "$RESOLVED_DIR" ]]; then
   CONFIG_DIR="$GOOGLE_WORKSPACE_CLI_CONFIG_DIR"
@@ -68,6 +70,12 @@ fi
 # "not authenticated", and it silently routes every call to the default config.
 ACTIVE_SELECTED=true
 [[ -f "$ACTIVE_FILE" ]] || ACTIVE_SELECTED=false
+
+# A selection pointing at a directory that no longer exists is worse than no
+# selection: the caller believes it is acting as one account while every call
+# falls through to the default (usually personal) identity. Stop rather than
+# proceed under the wrong identity.
+DANGLING_LABEL="$(resolve_dangling_label)"
 
 # Other account dirs that hold stored credentials — candidates to switch to.
 CANDIDATES=()
@@ -120,6 +128,31 @@ print(json.dumps({
     "candidates": [x for x in c.split(",") if x],
 }, indent=2))'
 }
+
+# A dangling selection is a hard stop even when the fallback config is authed —
+# succeeding here means running as an identity the caller did not choose.
+if [[ "$OVERRIDDEN" != true && -n "$DANGLING_LABEL" ]]; then
+  STATE="dangling_selection"
+  if [[ "$AS_JSON" == true ]]; then
+    emit_json
+  else
+    {
+      echo "ERROR: the selected account '$DANGLING_LABEL' no longer exists"
+      echo "  ($ACCOUNTS_BASE/$DANGLING_LABEL is named by $ACTIVE_FILE but is not there.)"
+      echo "  Refusing to fall through to the default account — that would run as"
+      echo "  an identity you did not choose."
+      if [[ ${#CANDIDATES[@]} -gt 0 ]]; then
+        echo "  Accounts that do exist: ${CANDIDATES[*]}"
+        echo "  Select one with: account-switch.sh <label>"
+      else
+        echo "  No other accounts have stored credentials. Either re-add it:"
+        echo "    account-add.sh $DANGLING_LABEL"
+        echo "  or select the default: account-switch.sh default"
+      fi
+    } >&2
+  fi
+  exit 1
+fi
 
 if [[ "$HAVE_CREDS" == true ]]; then
   if [[ "$AS_JSON" == true ]]; then

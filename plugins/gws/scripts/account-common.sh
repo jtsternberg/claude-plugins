@@ -8,6 +8,17 @@ ACTIVE_FILE="$ACCOUNTS_BASE/.active"
 
 # Resolve the active config directory.
 # Priority: .active file > default config.
+#
+# A dangling .active (pointing at a directory that no longer exists) warns and
+# falls back, but must NOT delete the file. This used to `rm -f "$ACTIVE_FILE"`
+# as self-healing, which was destructive on a *read* path: nearly every
+# account-aware script calls this, most capture stdout and discard stderr, so
+# the warning was invisible — and once the file was gone the warning could never
+# fire again. The user's account selection was destroyed silently, and every
+# subsequent Google call ran as the default (typically personal) identity with no
+# trace of why. Warning about a recoverable state beats erasing the evidence.
+# auth-preflight.sh turns this into a hard stop so the wrong identity is never
+# used silently.
 resolve_active_config() {
   if [[ -f "$ACTIVE_FILE" ]]; then
     local label
@@ -17,10 +28,21 @@ resolve_active_config() {
       echo "$dir"
       return
     fi
-    echo "WARNING: .active points to '$label' but directory not found. Falling back to default." >&2
-    rm -f "$ACTIVE_FILE"
+    # State the fact only. Callers decide what to do: auth-preflight.sh refuses
+    # to proceed, so promising a fallback here would contradict it.
+    echo "WARNING: .active selects '$label' but $dir does not exist." >&2
   fi
   echo "$DEFAULT_CONFIG"
+}
+
+# Print the label named by .active when its directory is missing; empty
+# otherwise. Lets callers distinguish "nothing selected" from "selection points
+# somewhere that no longer exists" — different problems with different fixes.
+resolve_dangling_label() {
+  [[ -f "$ACTIVE_FILE" ]] || return 0
+  local label
+  label=$(cat "$ACTIVE_FILE")
+  [[ -d "$ACCOUNTS_BASE/$label" ]] || echo "$label"
 }
 
 # Resolve the config directory for a specific account, given a label or email.

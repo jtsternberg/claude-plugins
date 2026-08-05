@@ -160,6 +160,50 @@ else bad "propagated config dir still gets selection diagnostics" \
   "exit 1 naming 'no account is selected' + account-switch.sh" "rc=$RC out=$OUT"; fi
 unset GOOGLE_WORKSPACE_CLI_CONFIG_DIR
 
+# --- dangling selection -------------------------------------------------------
+# .active naming a directory that no longer exists. Falling through to the
+# default account here means running as an identity the caller did not choose,
+# so this is a hard stop even when the default config IS authenticated.
+setup dangling
+authed_dir "$HOME/.config/gws"          # default config is fine...
+authed_dir "$GWS_ACCOUNTS_DIR/dw"
+printf 'work' > "$GWS_ACCOUNTS_DIR/.active"   # ...but 'work' does not exist
+run_preflight
+if [[ $RC -eq 1 && "$OUT" == *"'work' no longer exists"* ]]; then ok
+else bad "dangling .active is a hard stop, not a silent fallback" \
+  "exit 1 naming 'work' as gone" "rc=$RC out=$OUT"; fi
+
+if [[ "$OUT" == *"identity you did not choose"* && "$OUT" == *"dw"* ]]; then ok
+else bad "dangling stop explains the risk and lists real accounts" \
+  "wrong-identity warning + 'dw'" "$OUT"; fi
+
+# The resolver must not delete .active to 'self-heal' — that erases the only
+# evidence of the problem and makes the next run look normal.
+if [[ -f "$GWS_ACCOUNTS_DIR/.active" ]]; then ok
+else bad "preflight does not delete a dangling .active" \
+  ".active still present after the run" "file was removed"; fi
+
+run_preflight --json
+if [[ $RC -eq 1 ]] && printf '%s' "$OUT" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+sys.exit(0 if d["state"]=="dangling_selection" and not d["authenticated"] else 1)'; then ok
+else bad "--json reports state dangling_selection" \
+  "state=dangling_selection, authenticated=false" "rc=$RC out=$OUT"; fi
+
+# resolve_active_config itself must warn without deleting.
+setup resolver
+authed_dir "$GWS_ACCOUNTS_DIR/dw"
+printf 'gone' > "$GWS_ACCOUNTS_DIR/.active"
+RESOLVER_OUT="$(
+  source "$PLUGIN_ROOT/scripts/account-common.sh"
+  resolve_active_config 2>&1
+)"
+if [[ "$RESOLVER_OUT" == *"WARNING"* && "$RESOLVER_OUT" == *"gone"* \
+      && -f "$GWS_ACCOUNTS_DIR/.active" ]]; then ok
+else bad "resolve_active_config warns and preserves .active" \
+  "warning naming 'gone', file intact" "out=$RESOLVER_OUT present=$([[ -f "$GWS_ACCOUNTS_DIR/.active" ]] && echo yes || echo no)"; fi
+
 # --- gws missing from PATH ----------------------------------------------------
 setup nocli
 if OUT="$(PATH="/usr/bin:/bin" bash "$PREFLIGHT" 2>&1)"; then
