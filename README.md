@@ -79,7 +79,7 @@ Cross-workspace communication for Claude Code agents. Dial another workspace to 
 **Install:** `claude plugin install hotline@jtsternberg`
 
 #### 🧠 [thinking-tools](plugins/thinking-tools)
-Metacognitive reasoning frameworks for careful decision-making. Includes Chesterton's Fence (investigate before removing).
+Metacognitive reasoning frameworks for careful decision-making. Ships `chestertons-fence` (investigate before removing), `pink-elephant` (rewrite counterproductive prohibitions as positive directives), and `interview-mode` (after two rejected drafts of the same artifact, stop generating variants and interview the user to build from their own wording).
 
 **Install:** `claude plugin install thinking-tools@jtsternberg`
 
