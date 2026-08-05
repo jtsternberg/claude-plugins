@@ -1,7 +1,7 @@
 {
   "name": "beads-workflow",
-  "description": "Command for working on beads epics from start to completion with automatic PR creation.",
-  "version": "1.1.1",
+  "description": "Skills for working through beads epics and fixing findings with granular task and commit tracking.",
+  "version": "1.2.0",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

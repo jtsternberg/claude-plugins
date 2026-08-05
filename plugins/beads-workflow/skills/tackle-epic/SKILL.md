@@ -1,11 +1,13 @@
 ---
+name: tackle-epic
 description: Work on an epic from beads until completion, then create a PR
 argument-hint: <epic-id-or-name> [--here]
+disable-model-invocation: true
 ---
 
 # Tackle Epic
 
-You are given an epic identifier and optional flags: `$ARGUMENTS`
+Parse the invocation text after the skill name. If it is unavailable, infer the epic identifier and optional flags from the current request.
 
 Parse the arguments:
 - The epic identifier is the first argument (everything before any `--` flags)
@@ -30,15 +32,22 @@ Once you have the epic:
 
 ## Step 3: Set Up Working Environment
 
-**If `--here` flag is set:** Skip worktree creation. Work on the current branch in the current directory. Continue to Step 4.
+**If `--here` flag is set:** Skip worktree creation, then:
+
+1. Record the current directory as `worktree_path`.
+2. Resolve the active branch with `branch_name="$(git branch --show-current)"`.
+3. Stop if `branch_name` is empty; a detached HEAD cannot be pushed safely by this workflow.
+4. Resolve `base_ref` from the PR base branch when one exists, otherwise from the repository's default remote branch.
 
 **Otherwise (default):** Create a worktree for this epic:
 
 1. Generate a branch name from the epic title/context (lowercase, hyphenated, max 50 chars)
    - Format: `feature/<epic-id>-<short-description>`
    - Example: `feature/buddy-cli-98w-webhook-management`
-2. Create the worktree: `git worktree add ../<repo-name>-<short-description> -b <branch-name>`
-3. Change into the worktree directory and continue all work there
+2. Record that value as `branch_name`, resolve a concrete `worktree_path`, and create it: `git worktree add "<worktree_path>" -b "$branch_name"`
+3. Resolve `base_ref` from the repository's default remote branch.
+
+For every command in the remaining steps, explicitly use `worktree_path` as the working directory. Do not rely on shell `cd` state persisting between tool calls.
 
 ## Step 3.5: Load Project Conventions (if available)
 
@@ -56,7 +65,7 @@ If `CODE_CONVENTIONS` is unset or the file doesn't exist, skip this step and pro
 For each child task of the epic (in priority order):
 
 1. Run `bd ready --parent=<epic-id>` to find tasks ready to work on
-2. **Parallelization**: When multiple ready tasks are independent (different files, no shared state), delegate them to sub-agents using the Task tool to work in parallel. Only parallelize tasks unlikely to conflict.
+2. **Parallelization**: When multiple ready tasks are independent (different files, no shared state), delegate them through the active harness only when repository instructions permit sub-agent work. Only parallelize tasks unlikely to conflict.
 3. For each ready task:
    - Run `bd update <task-id> --status=in_progress`
    - Complete the work required
@@ -72,7 +81,7 @@ If there are no child tasks, work directly on the epic's requirements, still com
 
 After completing the work:
 
-1. Review the changes made: `git diff --name-only`
+1. Review the complete branch changes: `git diff --name-only "$base_ref"...HEAD`
 2. Assess if README.md needs updates based on:
    - New features added
    - Changed CLI commands or options
@@ -84,7 +93,7 @@ After completing the work:
 
 1. If README was updated, commit it separately
 2. Verify all changes are committed: `git status`
-3. Push the branch: `git push -u origin <branch-name>`
+3. Push the resolved branch explicitly: `git push -u origin "$branch_name"`
 
 Note: Most commits should already exist from Step 4. This step handles any final changes and the push.
 
@@ -104,7 +113,6 @@ gh pr create --title "<Epic title>" --body "$(cat <<'EOF'
 - Epic: <epic-id>
 - Child tasks: <list of closed task IDs>
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
 )"
 ```

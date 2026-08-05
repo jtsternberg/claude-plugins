@@ -1,36 +1,36 @@
 # Beads Workflow Plugin
 
-This plugin provides the `/tackle-epic` command for working through beads epics.
-
-**Claude Code only:** Codex does not surface plugin slash commands.
+Skills for working through Beads epics and fixing multiple findings with granular issue and commit tracking. Both workflows work in Claude Code and Codex.
 
 ## Installation
 
 ```bash
-# Add the marketplace (if not already added)
+# Claude Code
 claude plugin marketplace add jtsternberg/claude-plugins
-
-# Install the plugin
 claude plugin install beads-workflow@jtsternberg
+
+# Codex
+codex plugin add beads-workflow@jtsternberg
 ```
 
 ## Dependencies
 
-This plugin requires [beads](https://github.com/steveyegge/beads) to be installed and configured:
+Install and configure [beads](https://github.com/steveyegge/beads):
 
 ```bash
-# Install beads
 npm install -g @beads/cli
-
-# Or follow installation instructions at:
-# https://github.com/steveyegge/beads
 ```
 
-## Usage
+## Skills
 
-```
-/tackle-epic <epic-id> [--here]
-```
+### `tackle-epic`
 
-- **Default:** Creates a new worktree and branch for the epic, then works through all sub-tasks and opens a PR when complete.
-- **`--here`:** Work on the current branch in the current directory instead of creating a worktree.
+Work through a Beads epic, using a dedicated worktree by default, then create a pull request.
+
+Invoke the skill with an epic ID or name. Add `--here` to work on the current branch instead of creating a worktree.
+
+### `fix-findings-beads-tasks`
+
+Fix a list of findings one at a time, with one Beads task and one commit per finding. Add `--push` to push each completed fix.
+
+The names above are the canonical skill names. In Codex, explicit invocation uses `$tackle-epic` or `$fix-findings-beads-tasks`; Claude Code exposes the same plugin skills through its skill interface.
