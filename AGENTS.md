@@ -84,6 +84,35 @@ Two things to avoid:
 Duplicating a file across sibling skills is the thing this avoids: this repo has lost time
 to exactly that, twice, in the transcript parser.
 
+## Stance Skills Travel in a Set — Keep Them in Lockstep
+
+Three skills teach the same operating stance and cannot be edited one at a time:
+
+| File | Role |
+|---|---|
+| `plugins/fable/skills/fable-mode/SKILL.md` | canonical stance, for Claude models |
+| `plugins/codex/skills/fable-mode/SKILL.md` | Codex A/B arm, Fable frame |
+| `plugins/codex/skills/sol-mode/SKILL.md` | Codex A/B arm, Sol frame |
+
+They deliberately **share no text.** The `codex/` pair paraphrases the stance because those
+two exist to A/B a competitive frontier-model frame on Terra-class models, and they must
+never claim to *be* Fable or Sol. So `grep` for a phrase you changed will not find them —
+that is by design, and it is exactly how they drift.
+
+Two rules when the stance changes:
+
+1. **Propagate the substance to all three.** Match the idea, not the wording. A practice
+   bullet or closing check added to the canonical file that never reaches the `codex/` pair
+   leaves them teaching a strictly weaker stance.
+2. **Keep the two `codex/` arms symmetric with each other.** Improving one arm and not the
+   other makes the A/B measure your edit instead of the frame it was built to test. If you
+   cannot do both, do neither and say so.
+
+Also sweep what *asserts* the stance rather than stating it: `plugins/fable/README.md`,
+`plugins/fable/skills/fable-mode/references/sonnet-guardrails.md` (which re-fences the same
+practices for Sonnet), and the AM Skills overlay README if the plugin is mapped in
+`.amskills.json`. None are derived from `SKILL.md`, all of them go stale when it changes.
+
 ## Plugin Types
 
 ### Hook-based plugins
