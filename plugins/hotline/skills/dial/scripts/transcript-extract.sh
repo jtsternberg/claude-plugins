@@ -36,7 +36,22 @@
 #   12 — PREEMPTED: no terminal STATUS, and a genuine human prompt arrived after
 #        our turn, so it is never coming. The preempting prompt (200 chars) goes
 #        to stdout. → caller stops waiting instead of sitting out its timeout.
+#   13 — AWAITING_REVIEW: this step's reply is complete but the work order is not
+#        finished. Same JSON as exit 0 plus `"awaiting_review": true`.
+#        → caller stops waiting and keeps the session live for a follow-up.
 #   1  — usage / unreadable transcript error (message on stderr)
+#
+# AWAITING_REVIEW (claude-plugins-n4vy)
+# "Is the work finished" and "is the reply ready" are two different facts, and the
+# protocol used to have only one word for both. A callee told to do step 1 of 3,
+# report, and hold for the lead's review can honestly emit only WORK_IN_PROGRESS —
+# the work order IS unfinished — and WORK_IN_PROGRESS is precisely what the caller
+# treats as "keep polling". Observed live: the waiter blocked past its 600s tool
+# timeout, got backgrounded, and had to be killed while the finished report sat
+# complete in the transcript. `STATUS: AWAITING_REVIEW call_id=<nonce>` resolves
+# the wait exactly like a terminal status, and the separate exit code plus the
+# payload marker tell the caller the surface and session are still live and a
+# follow-up is expected. WORK_IN_PROGRESS still means keep polling, unchanged.
 #
 # PREEMPTION (claude-plugins-dvjo)
 # A cmux call lands in a VISIBLE surface, and a visible surface is one the human
@@ -186,12 +201,15 @@ SESSION_ID=$(printf '%s' "$PARSED" | jq -r '.session_id')
 TEXT=$(printf '%s' "$PARSED" | jq -r '.text')
 PREEMPT=$(printf '%s' "$PARSED" | jq -r '.preempt')
 
-# Terminal STATUS for THIS nonce present yet?
+# A resolving STATUS for THIS nonce present yet? Terminal ones end the call;
+# AWAITING_REVIEW ends only this turn (see the note above). Both deliver a body,
+# so both stop the wait — they differ in what the caller does next, which the
+# exit code carries.
 #
 # Checked BEFORE preemption on purpose: a receiver that answered our call and was
 # THEN handed something else has still answered, and that response is owed to the
-# caller. Preemption only decides what to do when no terminal STATUS exists.
-TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE) call_id=${NONCE}[[:space:]]*$"
+# caller. Preemption only decides what to do when no resolving STATUS exists.
+TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=${NONCE}[[:space:]]*$"
 if ! printf '%s\n' "$TEXT" | grep -qE "$TERM_RE"; then
   if [[ -n "$PREEMPT" ]]; then
     printf '%s\n' "${PREEMPT:0:200}"
@@ -200,14 +218,19 @@ if ! printf '%s\n' "$TEXT" | grep -qE "$TERM_RE"; then
   exit 10     # submitted, still working
 fi
 
+# Which resolving STATUS stopped us? The FIRST one in the text wins, matching the
+# awk below (which stops at the first `term` match), so the body and the exit code
+# always describe the same sentinel.
+RESOLVED=$(printf '%s\n' "$TEXT" | grep -oE "$TERM_RE" | head -1 | awk '{print $2}')
+
 # Extract the response body: reset the buffer at each WORK_IN_PROGRESS (so only
 # the final attempt's prose counts — matches the screen-scrape semantics), stop
-# at the terminal STATUS, drop the STATUS sentinel lines, and trim surrounding
+# at the resolving STATUS, drop the STATUS sentinel lines, and trim surrounding
 # blank lines.
 BODY=$(printf '%s\n' "$TEXT" | awk -v nonce="$NONCE" '
   BEGIN {
     wip  = "STATUS: WORK_IN_PROGRESS call_id=" nonce "[[:space:]]*$"
-    term = "STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE) call_id=" nonce "[[:space:]]*$"
+    term = "STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=" nonce "[[:space:]]*$"
   }
   $0 ~ wip  { n=0; delete L; next }
   $0 ~ term { stop=1; exit }
@@ -219,6 +242,16 @@ BODY=$(printf '%s\n' "$TEXT" | awk -v nonce="$NONCE" '
     for (i=s; i<=e; i++) print L[i]
   }
 ')
+
+if [[ "$RESOLVED" == "AWAITING_REVIEW" ]]; then
+  # Additive marker — present ONLY on this path, so every existing status keeps
+  # emitting byte-identical JSON. It exists because the documented caller pattern
+  # reads response.json from the call_dir, where `$?` is long gone; the record
+  # itself has to say the work order is unfinished.
+  jq -n -c --arg sid "$SESSION_ID" --arg resp "$BODY" \
+    '{session_id: $sid, response: $resp, awaiting_review: true}'
+  exit 13
+fi
 
 jq -n -c --arg sid "$SESSION_ID" --arg resp "$BODY" '{session_id: $sid, response: $resp}'
 exit 0

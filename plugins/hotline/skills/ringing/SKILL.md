@@ -102,21 +102,41 @@ STATUS: WORK_IN_PROGRESS call_id=<id>
 
 STATUS: WORK_COMPLETE call_id=<id>
 ```
-Or if you need another exchange (you can re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` mid-response as a step marker too — the caller resets its body buffer on every WORK_IN_PROGRESS, so only the content after the LAST WORK_IN_PROGRESS counts as the response):
+
+**Work order paused at a review checkpoint** — you finished this step, your report is ready, and the work order still has steps left. End on `AWAITING_REVIEW`:
 ```
 STATUS: WORK_IN_PROGRESS call_id=<id>
 
-[Progress update and what's remaining]
+[What you did this step, the result, and what's left]
 
-STATUS: WORK_IN_PROGRESS call_id=<id>
+STATUS: AWAITING_REVIEW call_id=<id>
 ```
 
 **Conference call:**
 ```
 STATUS: WORK_IN_PROGRESS call_id=<id>
 
-[Your response to this exchange — no terminal status signal needed]
+[Your response to this exchange]
+
+STATUS: AWAITING_REVIEW call_id=<id>
 ```
+
+### AWAITING_REVIEW — "reply ready, work order not finished"
+
+Use it whenever you are done talking for now but not done with the job: a multi-step work order where the caller asked you to report after each step, anything you paused to get a decision on, and every conference-call turn. It says three things at once — this reply is complete, the work order is not, and you are idle waiting for their next message.
+
+**Every turn ends on `DONE`, `WORK_COMPLETE`, `OUT_OF_SCOPE`, or `AWAITING_REVIEW`.** Those four are the ones that hand control back. `WORK_IN_PROGRESS` is a body-start marker and a mid-response step marker — the caller's waiter reads it as "keep polling" and keeps blocking until it times out, even with your finished report already sitting there. That is a real incident, not a hypothetical: a worker on task 1 of 3 accurately reported "still working the order" with `WORK_IN_PROGRESS`, and the caller's waiter had to be killed by hand while the reply sat complete in the transcript. `AWAITING_REVIEW` is how you say the same true thing and still hand control back.
+
+So pick by what is true of *this turn*, not of the whole job:
+
+| Your state | STATUS to end on |
+|---|---|
+| Answer delivered, nothing left | `DONE` (quick call) / `WORK_COMPLETE` (work order) |
+| This step reported, more to do, waiting on them | `AWAITING_REVIEW` |
+| Request belongs to another workspace | `OUT_OF_SCOPE` |
+| Still working — mid-response only, never last | `WORK_IN_PROGRESS` |
+
+You can still re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` mid-response as a step marker: the caller resets its body buffer on every WORK_IN_PROGRESS, so only the content after the LAST one counts as the response.
 
 ## Logging — Not Your Job
 

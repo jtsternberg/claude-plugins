@@ -25,6 +25,8 @@
 #
 # Output (stdout, both modes):
 #   {"session_id":"...","response":"..."}
+# plus, on exit 4 only, an additive `"awaiting_review":true` — every other status
+# emits byte-identical JSON to before.
 #
 # The emitted JSON is compact (single line) and re-validated via jq before
 # being written to stdout — so stdout is guaranteed to be parseable JSON on
@@ -36,7 +38,7 @@
 # call_dir/response.json file directly.
 #
 # Exit codes:
-#   0 — response received (valid JSON on stdout)
+#   0 — response received, call finished (valid JSON on stdout)
 #   1 — error (timeout, remote failure, unparseable response.json, or — in
 #       transcript mode — no submit evidence for the nonce within
 #       --submit-deadline while the text sits visibly in the callee's input box;
@@ -45,6 +47,20 @@
 #       for this nonce is never coming. error.txt names the preempting prompt and
 #       the surface to look at. The work may have completed anyway.
 #       (claude-plugins-dvjo)
+#   4 — AWAITING_REVIEW: response received, but the work order is NOT finished —
+#       the callee reported a checkpoint and is idle waiting for your review or
+#       follow-up. Same valid JSON on stdout as exit 0, plus
+#       `"awaiting_review": true`; the surface/session is deliberately left LIVE
+#       (never closed, whatever keep_workspace.txt says) so you can reply into it
+#       via cmux-reuse-surface.sh. Not a failure. (claude-plugins-n4vy)
+#
+# Why 4 exists: "is the work finished" and "is the reply ready" are separate
+# facts, and the protocol used to have one word for both. A callee doing step 1
+# of 3 with a report-and-hold instruction could only honestly say
+# WORK_IN_PROGRESS — which is exactly what this script treats as "keep polling".
+# Observed live: the waiter blocked past its 600s tool timeout, was backgrounded,
+# and had to be killed while the finished report sat complete in the callee's
+# transcript. WORK_IN_PROGRESS still means keep polling, unchanged.
 #
 # Usage:
 #   wait-for-response.sh <call_dir> [--timeout <seconds>] [--submit-deadline <seconds>]
@@ -139,6 +155,13 @@ if $CMUX_MODE; then
     STATUS_TAIL_AWK="[[:space:]]*$"
   fi
 
+  # AWAITING_REVIEW leaves the surface alone: a follow-up is expected, so closing
+  # it would destroy the very session the caller is about to reply into. This is
+  # the one path that overrides keep_workspace.txt=false. (claude-plugins-n4vy)
+  cleanup_script_only() {
+    rm -f "$LAUNCH_SCRIPT" 2>/dev/null || true
+  }
+
   cleanup_workspace_and_script() {
     rm -f "$LAUNCH_SCRIPT" 2>/dev/null || true
     if [[ "$KEEP" != "true" ]]; then
@@ -228,6 +251,16 @@ if $CMUX_MODE; then
           cleanup_workspace_and_script
           emit_response_json
           exit 0
+          ;;
+        13)  # checkpoint reached — reply ready, work order unfinished, session live.
+          # Same delivery as exit 0 (response.json + done + stdout JSON, and T_OUT
+          # already carries awaiting_review:true from the extractor) minus the
+          # close: the caller replies into this same surface next.
+          printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
+          touch "$CALL_DIR/done"
+          cleanup_script_only
+          emit_response_json
+          exit 4
           ;;
         10) T_SUBMITTED=true ;;   # submitted, model working — be patient
         12)                       # …but only while the receiver is still OURS.
@@ -353,7 +386,7 @@ if $CMUX_MODE; then
     [[ -z "$LATEST_STATUS" ]] && continue
     [[ "$LATEST_STATUS" =~ ^STATUS:\ WORK_IN_PROGRESS ]] && continue
 
-    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE) ]]; then
+    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) ]]; then
       # Strip terminal chrome before extracting the response. Aggressive
       # prefix match strips lines starting with claude's box-drawing
       # characters (the REPL renders its idle prompt as a multi-line box
@@ -371,7 +404,7 @@ if $CMUX_MODE; then
       # every terminal STATUS, emit the LAST saved buffer — matches the
       # LATEST_STATUS we chose for detection.
       WIP_RE="STATUS: WORK_IN_PROGRESS${STATUS_TAIL_AWK}"
-      TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)${STATUS_TAIL_AWK}"
+      TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)${STATUS_TAIL_AWK}"
       RESPONSE=$(echo "$CLEAN" \
         | grep -v "^bash /tmp/hotline-launch" \
         | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
@@ -382,6 +415,19 @@ if $CMUX_MODE; then
             {buf = buf $0 ORS}
             END {printf "%s", result}
           ')
+
+      # Scrape path mirrors the transcript path's AWAITING_REVIEW contract, or a
+      # callee that checkpoints would hang here exactly as it used to: the status
+      # matched neither the WIP `continue` nor the terminal branch, so the loop ran
+      # to timeout with the report on screen. (claude-plugins-n4vy)
+      if [[ "$LATEST_STATUS" =~ ^STATUS:\ AWAITING_REVIEW ]]; then
+        jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
+          '{session_id: $sid, response: $resp, awaiting_review: true}' > "$CALL_DIR/response.json"
+        touch "$CALL_DIR/done"
+        cleanup_script_only
+        emit_response_json
+        exit 4
+      fi
 
       jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
         '{session_id: $sid, response: $resp}' > "$CALL_DIR/response.json"

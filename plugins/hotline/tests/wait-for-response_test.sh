@@ -663,6 +663,99 @@ else
 fi
 rm -rf "$H8" "$CD8" "$SD8"
 
+# ---- AWAITING_REVIEW (claude-plugins-n4vy) ---------------------------------
+# A checkpointed work order — do step 1, report, hold for the lead's review — had
+# no honest terminal STATUS. WORK_IN_PROGRESS was the only truthful thing to emit
+# ("the work order is not finished"), and that is exactly what this script treats
+# as "keep polling", so the waiter blocked past its 600s tool timeout while the
+# callee's finished report sat complete in its transcript and had to be scraped by
+# hand. AWAITING_REVIEW returns the body like a terminal status does, but on
+# exit 4 and with `awaiting_review: true` in the JSON — and it must NEVER close
+# the surface, because the whole point is that a follow-up is coming.
+echo ""
+echo "AWAITING_REVIEW checkpoint:"
+
+# Same shape as setup_transcript_call, but keep_workspace=false and the cmux stub
+# logs every invocation, so we can prove the live surface was left alone.
+setup_await_call() {  # $1 = transcript body → echoes "HOME|CALL_DIR|STUBDIR|LOG"
+  local body="$1" h cd sd cwd enc log
+  h=$(mktemp -d); cd=$(mktemp -d /tmp/hotline-await-XXXXX); sd=$(mktemp -d)
+  log="$sd/cmux.log"
+  cwd="/fake/callee/ws"
+  enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
+  mkdir -p "$h/.claude/projects/$enc"
+  printf '%s\n' "$body" > "$h/.claude/projects/$enc/sess-tcm.jsonl"
+  echo "$cwd"     > "$cd/cwd.txt"
+  echo "sess-tcm" > "$cd/session_id.txt"
+  echo "$TNONCE"  > "$cd/call_id.txt"
+  echo "w1:s1"    > "$cd/surface_ref.txt"
+  echo "false"    > "$cd/keep_workspace.txt"   # would normally close the surface
+  {
+    echo '#!/usr/bin/env bash'
+    echo "printf '%s\\n' \"\$*\" >> '$log'"
+    echo 'exit 0'
+  } > "$sd/cmux"
+  chmod +x "$sd/cmux"
+  : > "$log"
+  echo "$h|$cd|$sd|$log"
+}
+
+AW=$(setup_await_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] task 1 of 3, report and hold"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\ntask 1 done, holding for review\nSTATUS: AWAITING_REVIEW call_id='"$TNONCE"'"}]}}')
+H9=${AW%%|*}; r9=${AW#*|}; CD9=${r9%%|*}; r9b=${r9#*|}; SD9=${r9b%%|*}; LOG9=${r9b#*|}
+START9=$SECONDS
+set +e
+OUT9=$(HOME="$H9" PATH="$SD9:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD9" --timeout 40 --submit-deadline 6 2>/dev/null)
+RC9=$?
+set -e
+EL9=$((SECONDS - START9))
+if [[ $RC9 -eq 4 && $EL9 -lt 20 ]]; then
+  pass "AWAITING_REVIEW returns instead of polling, exit 4 (${EL9}s)"
+else
+  fail "AWAITING_REVIEW returns instead of polling, exit 4" "rc=$RC9 elapsed=${EL9}s out=$OUT9"
+fi
+if [[ "$(printf '%s' "$OUT9" | jq -r .response 2>/dev/null)" == *"holding for review"* ]]; then
+  pass "AWAITING_REVIEW delivers the response body like a terminal status"
+else
+  fail "AWAITING_REVIEW delivers the response body" "out=$OUT9"
+fi
+if [[ "$(printf '%s' "$OUT9" | jq -r '.awaiting_review // false' 2>/dev/null)" == "true" ]]; then
+  pass "stdout JSON carries awaiting_review:true"
+else
+  fail "stdout JSON carries awaiting_review:true" "out=$OUT9"
+fi
+if [[ "$(jq -r '.awaiting_review // false' "$CD9/response.json" 2>/dev/null)" == "true" ]]; then
+  pass "response.json carries awaiting_review:true for a file-reading caller"
+else
+  fail "response.json carries awaiting_review:true" "$(cat "$CD9/response.json" 2>/dev/null)"
+fi
+if grep -qE "close-surface|close-workspace" "$LOG9" 2>/dev/null; then
+  fail "AWAITING_REVIEW must leave the surface live for the follow-up" "cmux calls: $(cat "$LOG9")"
+else
+  pass "AWAITING_REVIEW leaves the surface live even with keep_workspace=false"
+fi
+rm -rf "$H9" "$CD9" "$SD9"
+
+# WORK_IN_PROGRESS semantics unchanged: a WIP-only transcript is still "keep
+# polling", so the waiter must sit out the timeout rather than resolving early.
+AW2=$(setup_await_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] task 1 of 3"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nstill grinding"}]}}')
+HA=${AW2%%|*}; rA=${AW2#*|}; CDA=${rA%%|*}; rAb=${rA#*|}; SDA=${rAb%%|*}; LOGA=${rAb#*|}
+STARTA=$SECONDS
+set +e
+ERRA=$(HOME="$HA" PATH="$SDA:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDA" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
+RCA=$?
+set -e
+ELA=$((SECONDS - STARTA))
+if [[ $RCA -eq 1 && $ELA -ge 10 ]]; then
+  pass "WORK_IN_PROGRESS still means keep polling (${ELA}s of 12s, then timeout)"
+else
+  fail "WORK_IN_PROGRESS still means keep polling" "rc=$RCA elapsed=${ELA}s err=$ERRA"
+fi
+rm -rf "$HA" "$CDA" "$SDA"
+
 # ---- summary ---------------------------------------------------------------
 
 echo ""

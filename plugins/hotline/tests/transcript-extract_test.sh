@@ -3,8 +3,8 @@
 # Regression tests for transcript-extract.sh — the JSONL-transcript reader that
 # replaces terminal screen-scraping for hotline's cmux transport
 # (claude-plugins-0pwc). Drives synthetic transcripts through the extractor and
-# asserts the exit-code contract (0 done / 10 working / 11 not-submitted) and
-# the reconstructed response body.
+# asserts the exit-code contract (0 done / 10 working / 11 not-submitted /
+# 12 preempted / 13 awaiting review) and the reconstructed response body.
 # =============================================================================
 set -u
 
@@ -217,6 +217,75 @@ $WIP")
 bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1
 [[ $? -eq 10 ]] && pass "tool_result records around the injection are not preemption" \
   || fail "tool_result records around the injection are not preemption" "got exit $?"
+rm -f "$F"
+
+# ---- AWAITING_REVIEW (claude-plugins-n4vy) -----------------------------------
+# A multi-step work order with review checkpoints has a state the protocol had no
+# word for: THIS STEP's reply is complete and the callee is now idle waiting for
+# the caller's review, while the work order itself is NOT finished. The only
+# honest thing a callee could emit was WORK_IN_PROGRESS, which means "keep
+# polling" — so the caller's waiter blocked past its tool timeout with the
+# finished report already sitting in the transcript. AWAITING_REVIEW resolves the
+# wait like a terminal status, but on exit 13 and with `awaiting_review: true` in
+# the payload, so the caller knows the session is still live and owes a follow-up.
+AWAIT='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"step 1 report line 1\nstep 1 report line 2\n\nSTATUS: AWAITING_REVIEW call_id='"$NONCE"'"}]}}'
+
+# Case 17: AWAITING_REVIEW resolves the extract with its own exit code + marker.
+F=$(mkf "$USER_NONCE
+$AWAIT")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
+RESP=$(printf '%s' "$OUT" | jq -r '.response' 2>/dev/null)
+AWFLAG=$(printf '%s' "$OUT" | jq -r '.awaiting_review // false' 2>/dev/null)
+[[ $RC -eq 13 ]] && pass "exit 13 on STATUS: AWAITING_REVIEW" \
+  || fail "exit 13 on STATUS: AWAITING_REVIEW" "rc=$RC out=$OUT"
+[[ "$RESP" == *"step 1 report line 1"* && "$RESP" == *"line 2"* ]] \
+  && pass "AWAITING_REVIEW body reconstructed like a terminal status" \
+  || fail "AWAITING_REVIEW body reconstructed" "resp=$RESP"
+[[ "$RESP" != *"STATUS:"* ]] && pass "AWAITING_REVIEW sentinel stripped from body" \
+  || fail "AWAITING_REVIEW sentinel stripped" "resp=$RESP"
+[[ "$AWFLAG" == "true" ]] && pass "awaiting_review:true marks the payload" \
+  || fail "awaiting_review:true marks the payload" "out=$OUT"
+rm -f "$F"
+
+# Case 18: WORK_IN_PROGRESS then AWAITING_REVIEW — the checkpoint shape from the
+# live incident. Resolves, and only the prose after the last WIP counts.
+F=$(mkf "$USER_NONCE
+$WIP
+$AWAIT")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
+RESP=$(printf '%s' "$OUT" | jq -r '.response' 2>/dev/null)
+[[ $RC -eq 13 && "$RESP" == *"step 1 report line 1"* ]] \
+  && pass "WORK_IN_PROGRESS then AWAITING_REVIEW resolves (exit 13)" \
+  || fail "WORK_IN_PROGRESS then AWAITING_REVIEW resolves" "rc=$RC out=$OUT"
+rm -f "$F"
+
+# Case 19: WORK_IN_PROGRESS semantics are UNCHANGED — still "keep polling".
+F=$(mkf "$USER_NONCE
+$WIP")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "WORK_IN_PROGRESS alone still exits 10 (keep polling)" \
+  || fail "WORK_IN_PROGRESS alone still exits 10" "got exit $RC"
+rm -f "$F"
+
+# Case 20: the existing statuses stay byte-compatible — no marker field appears.
+F=$(mkf "$USER_NONCE
+$WIP
+$BODY")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>/dev/null); RC=$?
+if [[ $RC -eq 0 ]] && ! printf '%s' "$OUT" | jq -e 'has("awaiting_review")' >/dev/null 2>&1; then
+  pass "DONE payload unchanged (no awaiting_review key)"
+else
+  fail "DONE payload unchanged (no awaiting_review key)" "rc=$RC out=$OUT"
+fi
+rm -f "$F"
+
+# Case 21: a sibling call's AWAITING_REVIEW must not resolve our wait.
+OTHER_AWAIT='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"other step report\nSTATUS: AWAITING_REVIEW call_id=ffff0000ffff0000"}]}}'
+F=$(mkf "$USER_NONCE
+$OTHER_AWAIT")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "a sibling call's AWAITING_REVIEW does not resolve ours" \
+  || fail "a sibling call's AWAITING_REVIEW does not resolve ours" "got exit $RC"
 rm -f "$F"
 
 echo ""
