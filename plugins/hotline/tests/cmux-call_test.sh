@@ -10,6 +10,28 @@ FAILED_CASES=()
 LAUNCH_SCRIPTS=()
 SCRIPT_UNDER_TEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/dial/scripts/cmux-call.sh"
 
+# ---------------------------------------------------------------------------
+# Poison stubs — same guard as cmux-call-async_test.sh. The header promises
+# this suite never launches cmux, and nothing enforced it: an invocation that
+# forgets its PATH="$tmp/bin:$PATH" prefix falls through to the real binaries.
+# In the async sibling that opened a live `claude --resume abc123` pane on
+# every test run. These sit at the FRONT of PATH so a missing stub fails loudly
+# instead of escaping; a test's own fake prepends ahead of them and still wins.
+# ---------------------------------------------------------------------------
+POISON_BIN="$(mktemp -d)"
+POISON_LOG="$POISON_BIN/violations"
+for _poison in cmux claude; do
+  cat > "$POISON_BIN/$_poison" <<POISON
+#!/usr/bin/env bash
+echo "$_poison \$*" >> "$POISON_LOG"
+echo "TEST BUG: reached the real $_poison — this invocation is missing its PATH stub" >&2
+exit 127
+POISON
+  chmod +x "$POISON_BIN/$_poison"
+done
+PATH="$POISON_BIN:$PATH"
+trap 'rm -rf "$POISON_BIN"' EXIT
+
 pass() {
   PASS=$((PASS + 1))
   echo "  ✓ $1"
@@ -302,6 +324,13 @@ else
        "sid=$fork_sid body=$fork_body"
 fi
 rm -rf "$tmpf"
+
+# The whole point of the poison stubs: a leak is a test failure, not a stray pane.
+if [[ -s "$POISON_LOG" ]]; then
+  fail "no test reaches the real cmux or claude" "$(cat "$POISON_LOG")"
+else
+  pass "no test reaches the real cmux or claude"
+fi
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"

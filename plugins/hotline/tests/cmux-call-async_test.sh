@@ -10,6 +10,32 @@ FAIL=0
 FAILED_CASES=()
 SCRIPT_UNDER_TEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/dial/scripts/cmux-call-async.sh"
 
+# ---------------------------------------------------------------------------
+# Poison stubs: the header promises this suite never launches cmux or Claude,
+# and nothing enforced it. Every invocation below is supposed to carry its own
+# PATH="$tmp/bin:$PATH" prefix; one of them didn't, ran on into the REAL cmux,
+# and opened a live pane running `claude --resume abc123` on every single test
+# run — cluttering the user's cmux and writing junk session transcripts into
+# ~/.claude/projects/.
+#
+# These sit at the FRONT of PATH for the whole file, so a missing stub now
+# fails loudly instead of escaping. Tests that install their own fake prepend
+# ahead of these and still win.
+# ---------------------------------------------------------------------------
+POISON_BIN="$(mktemp -d)"
+POISON_LOG="$POISON_BIN/violations"
+for _poison in cmux claude; do
+  cat > "$POISON_BIN/$_poison" <<POISON
+#!/usr/bin/env bash
+echo "$_poison \$*" >> "$POISON_LOG"
+echo "TEST BUG: reached the real $_poison — this invocation is missing its PATH stub" >&2
+exit 127
+POISON
+  chmod +x "$POISON_BIN/$_poison"
+done
+PATH="$POISON_BIN:$PATH"
+trap 'rm -rf "$POISON_BIN"' EXIT
+
 pass() {
   PASS=$((PASS + 1))
   echo "  ✓ $1"
@@ -530,12 +556,29 @@ else
 fi
 
 # --fork-session WITH --resume must pass the guard (no fork error emitted).
-fork_ok_out=$(bash "$SCRIPT_UNDER_TEST" --cwd /tmp --prompt "hello" --fork-session --resume abc123 2>&1)
+# This one needs a stubbed PATH and a scratch --cwd: unlike the case above it
+# does NOT exit at the guard, so with the real PATH it continued into cmux and
+# launched an actual `claude --resume abc123` pane. That leak is what the
+# poison stubs at the top of this file now catch.
+fork_ok_tmp="$(mktemp -d)"
+mkdir -p "$fork_ok_tmp/bin" "$fork_ok_tmp/cwd"
+cat > "$fork_ok_tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  new-workspace) echo "OK workspace:123" ;;
+  read-screen)   echo "$ " ;;
+  *)             exit 0 ;;
+esac
+EOF
+chmod +x "$fork_ok_tmp/bin/cmux"
+fork_ok_out=$(PATH="$fork_ok_tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" \
+  --cwd "$fork_ok_tmp/cwd" --prompt "hello" --fork-session --resume abc123 2>&1)
 if printf '%s' "$fork_ok_out" | grep -q "fork-session requires --resume"; then
   fail "--fork-session with --resume passes the guard" "unexpected fork error: $fork_ok_out"
 else
   pass "--fork-session with --resume passes the guard"
 fi
+rm -rf "$fork_ok_tmp"
 
 # ---------------------------------------------------------------------------
 # Fork placement: a FORK writes to a NEW session id, so the resume target is
@@ -651,6 +694,13 @@ fi
 [[ -n "$call_dir" && -f "$call_dir/launch_script.txt" ]] && \
   rm -f "$(cat "$call_dir/launch_script.txt")"
 rm -rf "$tmp" "$call_dir"
+
+# The whole point of the poison stubs: a leak is a test failure, not a stray pane.
+if [[ -s "$POISON_LOG" ]]; then
+  fail "no test reaches the real cmux or claude" "$(cat "$POISON_LOG")"
+else
+  pass "no test reaches the real cmux or claude"
+fi
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
