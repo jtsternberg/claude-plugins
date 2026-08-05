@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Regression tests for cmux-reuse-surface.sh. Two behaviors are pinned here:
+# Regression tests for cmux-reuse-surface.sh. Three behaviors are pinned here:
 #
 #   1. TWO-STEP SUBMIT — the follow-up is typed as literal text via `cmux send`,
 #      then submitted via `cmux send-key Enter`. Bundling the newline into the
@@ -15,9 +15,15 @@
 #      single argument contains one, and the concatenation must reproduce the
 #      payload byte for byte.
 #
+#   3. CONDITIONAL INPUT-BOX CLEAR (claude-plugins-06ws) — the raw Ctrl-C byte
+#      is sent ONLY when the REPL's input box visibly holds unsent text AND the
+#      REPL shows no sign of an active turn. Into a busy REPL, or an interrupted
+#      one, or one whose box would not clear, the script must not send text at
+#      all — it returns the fresh-surface fallback.
+#
 # `cmux` is stubbed on PATH. read-screen serves a scripted sequence of fixture
-# screens (one per call, holding on the last), so a test can stage a REPL whose
-# screen changes between reads. Nothing here touches a real cmux or REPL.
+# screens (one per call, holding on the last), so a test can stage "parked then
+# clean" or "changing while busy". Nothing here touches a real cmux or REPL.
 # =============================================================================
 set -u
 
@@ -250,6 +256,100 @@ else
 fi
 
 echo ""
+echo "  -- conditional input-box clear (06ws) --"
+
+# --- Idle + empty box: no clear at all, message goes through. ---------------
+run_case idle_empty screen_idle_empty -- --prompt "follow up"
+[[ "$(clear_count)" -eq 0 ]] \
+  && pass "idle REPL with an empty box gets NO Ctrl-C" \
+  || fail "idle REPL with an empty box gets NO Ctrl-C" "log:"$'\n'"$(log_view)"
+[[ "$OUT" == *'"call_dir"'* ]] \
+  && pass "idle REPL with an empty box: emits call_dir" \
+  || fail "idle REPL with an empty box: emits call_dir" "out: $OUT"
+
+# --- Empty box on a never-used REPL: the placeholder is not parked text. ----
+run_case placeholder screen_placeholder -- --prompt "follow up"
+[[ "$(clear_count)" -eq 0 ]] \
+  && pass "placeholder hint is not mistaken for parked text" \
+  || fail "placeholder hint is not mistaken for parked text" "log:"$'\n'"$(log_view)"
+
+# --- Busy + empty box: still no clear, and the message is still sent. -------
+#     Text+Enter into a busy REPL is enqueued and delivered; the destructive
+#     thing is the interrupt, so it is the interrupt we withhold.
+run_case busy_empty screen_busy_empty -- --prompt "follow up"
+[[ "$(clear_count)" -eq 0 ]] \
+  && pass "busy REPL with an empty box gets NO Ctrl-C" \
+  || fail "busy REPL with an empty box gets NO Ctrl-C" "log:"$'\n'"$(log_view)"
+[[ "$OUT" == *'"call_dir"'* ]] \
+  && pass "busy REPL with an empty box: message still sent, emits call_dir" \
+  || fail "busy REPL with an empty box: message still sent, emits call_dir" "out: $OUT"
+
+# --- Idle + parked text: clear, confirm it took, then send. -----------------
+run_case parked_clears screen_idle_parked screen_idle_parked screen_idle_empty -- --prompt "follow up"
+[[ "$(clear_count)" -ge 1 ]] \
+  && pass "idle REPL with parked text IS cleared" \
+  || fail "idle REPL with parked text IS cleared" "log:"$'\n'"$(log_view)"
+ci="$(clear_index)"; msg_i=-1; i=0
+while IFS= read -r line; do
+  case "$line" in send*follow*up*) msg_i=$i; break ;; esac
+  i=$((i + 1))
+done < "$CALLLOG"
+[[ "$ci" -ge 0 && "$msg_i" -gt "$ci" ]] \
+  && pass "the clear precedes the message text" \
+  || fail "the clear precedes the message text" "clear=$ci msg=$msg_i"
+[[ "$OUT" == *'"call_dir"'* ]] \
+  && pass "cleared box: emits call_dir" \
+  || fail "cleared box: emits call_dir" "out: $OUT"
+
+# --- Idle + parked text that will not clear: fall back, send nothing. -------
+run_case parked_sticks screen_idle_parked screen_idle_parked screen_idle_parked -- --prompt "follow up"
+[[ "$OUT" == *'"fallback"'* ]] \
+  && pass "a box that will not clear returns the fresh-surface fallback" \
+  || fail "a box that will not clear returns the fresh-surface fallback" "out: $OUT"
+if printf '%s' "$(assembled)" | grep -q "follow up"; then
+  fail "a box that will not clear never receives the message" "it was sent anyway"
+else
+  pass "a box that will not clear never receives the message"
+fi
+
+# --- Busy + parked text: no clear, no send, fall back. ----------------------
+run_case busy_parked screen_busy_parked screen_busy_parked -- --prompt "follow up"
+[[ "$(clear_count)" -eq 0 ]] \
+  && pass "busy REPL with parked text gets NO Ctrl-C" \
+  || fail "busy REPL with parked text gets NO Ctrl-C" "log:"$'\n'"$(log_view)"
+[[ "$OUT" == *'"fallback"'* ]] \
+  && pass "busy REPL with parked text returns the fresh-surface fallback" \
+  || fail "busy REPL with parked text returns the fresh-surface fallback" "out: $OUT"
+if printf '%s' "$(assembled)" | grep -q "follow up"; then
+  fail "busy REPL with parked text never receives the message" "it was sent anyway"
+else
+  pass "busy REPL with parked text never receives the message"
+fi
+
+# --- Parked text on a REPL with no spinner but a changing screen. -----------
+run_case parked_moving screen_parked_moving_a screen_parked_moving_b -- --prompt "follow up"
+[[ "$(clear_count)" -eq 0 ]] \
+  && pass "a changing screen counts as busy: no Ctrl-C" \
+  || fail "a changing screen counts as busy: no Ctrl-C" "log:"$'\n'"$(log_view)"
+[[ "$OUT" == *'"fallback"'* ]] \
+  && pass "a changing screen with parked text returns the fallback" \
+  || fail "a changing screen with parked text returns the fallback" "out: $OUT"
+
+# --- Interrupted REPL: send nothing, fall back (06ws acceptance criteria). --
+run_case interrupted screen_interrupted -- --prompt "follow up"
+[[ "$OUT" == *'"fallback"'* ]] \
+  && pass "an interrupted REPL returns the fresh-surface fallback, not exit 0 success" \
+  || fail "an interrupted REPL returns the fresh-surface fallback, not exit 0 success" "out: $OUT"
+[[ "$(clear_count)" -eq 0 ]] \
+  && pass "an interrupted REPL gets NO Ctrl-C" \
+  || fail "an interrupted REPL gets NO Ctrl-C" "log:"$'\n'"$(log_view)"
+if printf '%s' "$(assembled)" | grep -q "follow up"; then
+  fail "an interrupted REPL never receives the message" "it was sent anyway"
+else
+  pass "an interrupted REPL never receives the message"
+fi
+
+echo ""
 echo "  -- submit contract --"
 
 # --- Enter is a send-key, and it comes after every text chunk. --------------
@@ -266,22 +366,6 @@ done < "$CALLLOG"
 [[ "$ei" -gt "$last_send" && "$last_send" -ge 0 ]] \
   && pass "Enter comes after the LAST text chunk" \
   || fail "Enter comes after the LAST text chunk" "enter=$ei last_send=$last_send"
-
-# --- The input box is cleared with a raw Ctrl-C byte before the message is
-#     typed, so leftover input can't get prepended to the follow-up (`send-key
-#     ctrl+c` does not reach an in-pane claude REPL — the raw byte does).
-run_case clear screen_idle_empty -- --prompt "follow up"
-ci="$(clear_index)"; msg_i=-1; i=0
-while IFS= read -r line; do
-  case "$line" in send*follow*up*) msg_i=$i; break ;; esac
-  i=$((i + 1))
-done < "$CALLLOG"
-[[ "$(clear_count)" -ge 1 ]] \
-  && pass "input box cleared with raw Ctrl-C (\$'\\003')" \
-  || fail "input box cleared with raw Ctrl-C (\$'\\003')" "log:"$'\n'"$(log_view)"
-[[ "$ci" -ge 0 && "$msg_i" -gt "$ci" ]] \
-  && pass "clear precedes the message text" \
-  || fail "clear precedes the message text" "clear=$ci msg=$msg_i"
 
 # --- Surface gone → fallback, and nothing typed anywhere. ------------------
 CASEDIR="$STUBROOT/gone"; mkdir -p "$CASEDIR"
