@@ -48,7 +48,9 @@ If any cron flag is present, **load `references/CRON.md` and follow its instruct
 Run the extraction script, passing through `--weekly`, `--since`, `--until`, `--all`:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/extract_sessions.py [--weekly] [--since ...] [--until ...] [--all]
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"
+python3 "$SKILL_DIR/scripts/extract_sessions.py" [--weekly] [--since ...] [--until ...] [--all]
 ```
 
 **Do not pass `--output-dir` to the script** — that flag is handled by this SKILL.md, not the extractor.
@@ -83,12 +85,14 @@ Resolution order:
 2. Otherwise, inject the bundled generic default (`references/EXAMPLE-WEEKLY.md`).
 
 ```!
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"
 if [ -n "${SESSIONS_RECAP_EXAMPLE:-}" ] && [ -r "${SESSIONS_RECAP_EXAMPLE:-}" ]; then
   echo "<!-- style anchor: user override (\$SESSIONS_RECAP_EXAMPLE=$SESSIONS_RECAP_EXAMPLE) -->"
   cat "$SESSIONS_RECAP_EXAMPLE"
 else
   echo "<!-- style anchor: bundled default -->"
-  cat "${CLAUDE_SKILL_DIR}/references/EXAMPLE-WEEKLY.md"
+  cat "$SKILL_DIR/references/EXAMPLE-WEEKLY.md"
 fi
 ```
 

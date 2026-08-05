@@ -18,11 +18,11 @@ When a cron flag is present, **skip the recap workflow in SKILL.md entirely**. R
 
 | Skill flag | Script invocation |
 |---|---|
-| `--install-cron --output-dir "<path>" [--day <d>] [--time <t>]` | `bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh install --output-dir "<path>" [--day <d>] [--time <t>]` |
-| `--uninstall-cron` | `bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh uninstall` |
-| `--cron-status` | `bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh status` |
-| `--cron-logs` | `bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh logs` |
-| `--cron-run-now` | `bash ${CLAUDE_SKILL_DIR}/scripts/install_cron.sh run-now` |
+| `--install-cron --output-dir "<path>" [--day <d>] [--time <t>]` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" install --output-dir "<path>" [--day <d>] [--time <t>]` |
+| `--uninstall-cron` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" uninstall` |
+| `--cron-status` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" status` |
+| `--cron-logs` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" logs` |
+| `--cron-run-now` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" run-now` |
 
 Rules:
 

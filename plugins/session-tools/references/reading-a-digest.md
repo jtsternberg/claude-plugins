@@ -4,7 +4,9 @@ Shared by `sessions-catch-up` and `sessions-fork`. Both run the same command and
 the same output; they differ only in what they do with it.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/export-session.mjs" "<target>" --format digest --fast
+# Codex: replace the fallback with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this session-tools plugin directory>}"
+node "$PLUGIN_ROOT/scripts/export-session.mjs" "<target>" --format digest --fast
 ```
 
 The digest is already 200–800x smaller than the transcript. **Read it directly from the

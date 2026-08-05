@@ -36,10 +36,12 @@ One positional: the session to read — id, id-prefix, slug, or title. If it's m
 ## 1. Read it
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/export-session.mjs" "<target>" --format digest
+# Codex: replace the fallback with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this session-tools plugin directory>}"
+node "$PLUGIN_ROOT/scripts/export-session.mjs" "<target>" --format digest
 ```
 
-**Read `${CLAUDE_PLUGIN_ROOT}/references/reading-a-digest.md`** for resolution and
+**Read `$PLUGIN_ROOT/references/reading-a-digest.md`**, resolving `PLUGIN_ROOT` with the same fallback, for resolution and
 ambiguity, what each tail state means, and which signals to trust. Shared with
 `sessions-catch-up` so the two can't drift on it.
 
