@@ -48,7 +48,7 @@ If any cron flag is present, **load `references/CRON.md` and follow its instruct
 Run the extraction script, passing through `--weekly`, `--since`, `--until`, `--all`:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 python3 "$SKILL_DIR/scripts/extract_sessions.py" [--weekly] [--since ...] [--until ...] [--all]
 ```
@@ -85,7 +85,7 @@ Resolution order:
 2. Otherwise, inject the bundled generic default (`references/EXAMPLE-WEEKLY.md`).
 
 ```!
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 if [ -n "${SESSIONS_RECAP_EXAMPLE:-}" ] && [ -r "${SESSIONS_RECAP_EXAMPLE:-}" ]; then
   echo "<!-- style anchor: user override (\$SESSIONS_RECAP_EXAMPLE=$SESSIONS_RECAP_EXAMPLE) -->"

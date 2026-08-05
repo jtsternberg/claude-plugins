@@ -4,7 +4,7 @@ Shared by `sessions-catch-up` and `sessions-fork`. Both run the same command and
 the same output; they differ only in what they do with it.
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 node "$PLUGIN_ROOT/scripts/export-session.mjs" "<target>" --format digest --fast
 ```

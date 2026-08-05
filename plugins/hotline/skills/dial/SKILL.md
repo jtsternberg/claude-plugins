@@ -49,7 +49,7 @@ same shell. Shell state does not persist across tool calls. Under Codex, replace
 Before you can call anyone else, you need to know your own session ID. Run:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_SCRIPTS/session-init.sh"
@@ -61,7 +61,7 @@ Parse the JSON output:
 - `{"status": "planted", "fingerprint": "..."}` — The transcript needs to be written first. In a **separate tool call**, run:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_SCRIPTS/session-init.sh" discover "<fingerprint>"
@@ -94,7 +94,7 @@ USER_REFERENCE="<the user's exact words for the target>"
 Then resolve:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/resolve-workspace.sh" "$USER_REFERENCE" --caller-session "$MY_SESSION_ID"
@@ -118,7 +118,7 @@ Only skip this confirmation when the match is clearly correct (e.g., user said "
 If resolution fails or returns stale results, check whether the target's identity cache needs refreshing:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_PICKUP_SCRIPTS/identity-cache.sh" is-stale --cwd "$TARGET_PATH"
@@ -127,7 +127,7 @@ bash "$HOTLINE_PICKUP_SCRIPTS/identity-cache.sh" is-stale --cwd "$TARGET_PATH"
 If exit 0 (stale): run a quick headless call to populate it:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
@@ -157,7 +157,7 @@ This is automatic — never ask the user about transport. They don't care how th
 Otherwise, check CMUX availability:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
@@ -201,7 +201,7 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 See if there's already an active session with this workspace:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
@@ -209,7 +209,7 @@ bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-sessio
 
 - **Exit 0**: Active session found. Parse the JSON for `session_id`, `mode`, and `surface_ref` (present only when the session lives in a visible cmux surface). The `surface_ref` key is legacy naming: treat its value as an opaque cmux handle. Side-by-side entries store a stable UUID when cmux exposes one, not a positional `surface:N` label. Set `REMOTE_SESSION_ID` and `SURFACE_REF` from it for the Follow-Up step:
   ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
   CACHED=$(bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID")
@@ -256,7 +256,7 @@ There are two distinct first-contact cases. Pick the one that matches how the ta
 - **Case (B) — fork a given session ID** (the user handed you a specific session ID; see Step 4): fork it. **Pass `--resume "$TARGET_SESSION_ID"` AND `--fork-session` together** — never one without the other.
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # === Case (A): fresh workspace — no resume, no fork ===
@@ -283,7 +283,7 @@ CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 **Handle the headless-fallback signal (cmux transport, default placement only).** When a cmux-call returns `{"fallback":"headless"}` instead of a `call_dir`, cmux is up but the `cmux-cli` plugin isn't installed, so side-by-side placement is unavailable. Re-route this exact call through the headless transport — same `--cwd`/`--prompt`/`--resume`/`--fork-session` args, just the headless launcher:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 if [[ "$(echo "$CALL_RESULT" | jq -r '.fallback // empty')" == "headless" ]]; then
@@ -335,7 +335,7 @@ The session is cached automatically (`cmux-call.sh` registers it from the ringin
 **Wait for the session ID** (returns quickly once the remote agent starts):
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 REMOTE_SESSION_ID=$(bash "$HOTLINE_DIAL_SCRIPTS/wait-for-session.sh" "$CALL_DIR")
@@ -348,7 +348,7 @@ REMOTE_SESSION_ID=$(bash "$HOTLINE_DIAL_SCRIPTS/wait-for-session.sh" "$CALL_DIR"
 **Then wait for the response:**
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/wait-for-response.sh" "$CALL_DIR" >/dev/null
@@ -365,7 +365,7 @@ RESPONSE=$(jq -r '.response' "$CALL_DIR/response.json")
 **⚠️ Do not do this** — under zsh (the default shell on macOS, and the shell Claude Code's Bash tool runs in) the `echo`-pipe pattern corrupts any JSON with backslash escapes (`\n`, `\f`, `\u001b`, ...):
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # WRONG — zsh's echo interprets \f and \u001b in the captured JSON,
@@ -389,7 +389,7 @@ Use the `mode` field you parsed from Step 4's session-cache.sh JSON (it's one of
 Check cmux first:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
@@ -400,7 +400,7 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 If cmux is up (`check-cmux.sh` exit 0) **and** you parsed a non-empty `surface_ref` **and** `$YOUR_MESSAGE` is a single logical line, route this message INTO the surface the session already occupies — don't open a new one. The surface holds a live claude REPL for that exact session, so we just type the next message into it. The REPL does **not** have to be idle: a message typed into a busy REPL is enqueued, not lost (see below). (For a multi-line message, skip straight to the fresh-surface path below — it hands the prompt to a launch script as an argument, so newlines never go through keystroke simulation at all. See the note under the snippet for why.)
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # $REMOTE_SESSION_ID and $SURFACE_REF come from Step 4's session-cache.sh get JSON.
@@ -455,7 +455,7 @@ Use this when there's **no** `surface_ref` (the prior call was headless or detac
 - **Exit 1**: `headless-call.sh`
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # CMUX transport (quick call / work order): honors the same $PLACEMENT_FLAG —
@@ -478,7 +478,7 @@ bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
 Update the cache timestamp. If this follow-up opened a **new** surface (the fresh-surface fallback, not reuse), refresh `surface_ref` so the next follow-up reuses the new surface instead of the dead one — read it from the fallback's `CALL_DIR`:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 NEW_SURFACE=""
@@ -494,7 +494,7 @@ bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-ses
 If the mode is **conference call** and CMUX is available:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # First contact (no --resume): include /hotline:hotline-ringing so the receiver loads
@@ -540,7 +540,7 @@ If the user asks to take over the conversation directly, give them the escape ha
 When they return, resume the session yourself to pick up any final state:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --prompt "Summarize what happened since the caller took over." --resume "$REMOTE_SESSION_ID"

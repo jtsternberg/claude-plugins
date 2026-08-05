@@ -13,7 +13,7 @@ Look for the skill at the provided path, or in `.claude/skills/$ARGUMENTS/` or `
 
 ## Current Skills Documentation
 
-Codex: replace `${CLAUDE_SKILL_DIR}` below with the directory containing this SKILL.md.
+Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 
 Skills docs cached at: !`SKILL_DIR="${CLAUDE_SKILL_DIR}"; bash "$SKILL_DIR/scripts/fetch-docs.sh"`
 

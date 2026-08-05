@@ -36,7 +36,7 @@ One positional: the session to read — id, id-prefix, slug, or title. If it's m
 ## 1. Read it
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 node "$PLUGIN_ROOT/scripts/export-session.mjs" "<target>" --format digest
 ```

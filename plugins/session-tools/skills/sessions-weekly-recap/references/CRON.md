@@ -16,8 +16,8 @@ claude -p "/session-tools:sessions-weekly-recap --weekly --output-dir \"<path>\"
 
 When a cron flag is present, **skip the recap workflow in SKILL.md entirely**. Route to the installer script, run it, and report its stdout directly.
 
-Under Codex, replace `${CLAUDE_SKILL_DIR}` in the commands below with the
-directory containing the sessions-weekly-recap SKILL.md.
+Codex: these paths resolve under Claude Code; substitute the directory
+containing the sessions-weekly-recap SKILL.md in the commands below.
 
 | Skill flag | Script invocation |
 |---|---|

@@ -38,7 +38,7 @@ produced which doc ID, so reruns update instead of duplicating. Sets
 PAGELESS via a `batchUpdate` after create, same as `gws`.
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/adc-check.sh"   # fast preflight; exit 0 = configured
 bash "$SKILL_DIR/scripts/adc-create.sh" <file.md> [folder-id-or-url] [--title "Title"] [--new]
@@ -65,7 +65,7 @@ the connector's write path, not its read path.
 
 1. Clean the markdown (same as rung 1/2):
    ```bash
-   # Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+   # Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
    SKILL_DIR="${CLAUDE_SKILL_DIR}"
    bash "$SKILL_DIR/scripts/clean.sh" <file.md> /tmp/cleaned-$$.md
    ```
@@ -102,7 +102,7 @@ message naming which rungs were tried and why each failed.
 ## Prerequisites (rung 1)
 
 ```!
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
@@ -114,7 +114,7 @@ create vs update based on whether the destination looks like a doc URL/ID
 or a folder ID:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/gdoc.sh" $ARGUMENTS
 ```
@@ -128,7 +128,7 @@ Optional flags: `--title "Custom Title"` overrides the auto-derived title.
 ### Creating a New Google Doc
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/upload.sh" ./file.md FOLDER_ID
 ```
@@ -137,7 +137,7 @@ The folder may be a bare ID or a full Drive folder URL, and may be passed
 positionally or via `--folder`. All of these are equivalent:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/upload.sh" ./file.md FOLDER_ID
 bash "$SKILL_DIR/scripts/upload.sh" ./file.md "https://drive.google.com/drive/u/0/folders/FOLDER_ID"
@@ -147,7 +147,7 @@ bash "$SKILL_DIR/scripts/upload.sh" ./file.md --folder "https://drive.google.com
 With a custom title:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/upload.sh" ./file.md FOLDER_ID --title "My Document"
 ```
@@ -174,7 +174,7 @@ When no `--title` is given, the script:
 ### Updating an Existing Google Doc
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/update.sh" ./file.md DOC_ID
 ```
@@ -182,7 +182,7 @@ bash "$SKILL_DIR/scripts/update.sh" ./file.md DOC_ID
 Also accepts a full Google Doc URL instead of a bare doc ID:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/update.sh" ./file.md "https://docs.google.com/document/d/DOC_ID/edit"
 ```
@@ -196,7 +196,7 @@ run against a multi-tab doc unless you pass `--force`.
 To publish markdown into one tab while preserving the others:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/tab-update.sh" ./file.md DOC_ID --tab "Tab Title"
 bash "$SKILL_DIR/scripts/tab-update.sh" ./file.md DOC_ID --tab t.abc123
@@ -216,7 +216,7 @@ matching section heading in another tab (e.g. a "Next Steps" tab linking into
 the main findings tab):
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/link-sections.sh" DOC_ID
 bash "$SKILL_DIR/scripts/link-sections.sh" DOC_ID --target-tab "Findings" --from-tab "Next Steps"
@@ -229,7 +229,7 @@ all other tabs are scanned. Idempotent — safe to re-run after edits. Run it
 ### Managing Tabs
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/tabs.sh" list DOC_ID
 bash "$SKILL_DIR/scripts/tabs.sh" add DOC_ID "Next Steps" --emoji "⭐" --index 1
@@ -243,7 +243,7 @@ When uploading multiple files to the same folder, run upload commands in
 parallel for efficiency:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/upload.sh" ./file1.md FOLDER_ID &
 bash "$SKILL_DIR/scripts/upload.sh" ./file2.md FOLDER_ID &

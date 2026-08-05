@@ -25,7 +25,7 @@ mode 0600 (plaintext, matching the gws plugin's bash-script convention).
 Confirm the user is authenticated for YouTube on the active account:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 test -f "$(jq -r '.' <(bash "$PLUGIN_ROOT/scripts/account-current.sh" --json) 2>/dev/null | jq -r '.config_dir // empty')/youtube_credentials.json" \
   && echo "youtube credentials present" \
@@ -67,7 +67,7 @@ Mutating scripts (`add`, `remove`) additionally support:
 ### Auth lifecycle
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # Authenticate (writes <account-dir>/youtube_credentials.json mode 0600)
 bash "$PLUGIN_ROOT/scripts/youtube-login.sh" \
@@ -85,7 +85,7 @@ suggest this when wrapping up a multi-step workflow.
 ### Read primitives
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # List playlists owned by the authenticated user
 bash "$PLUGIN_ROOT/scripts/youtube-list-playlists.sh" \
@@ -104,7 +104,7 @@ pagination correctness when listing items.
 ### Mutating primitives
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # Add a video to a playlist (dedupe-aware by default)
 bash "$PLUGIN_ROOT/scripts/youtube-add-item.sh" \
@@ -134,7 +134,7 @@ Before suggesting any destructive operation, build a complete picture in
 JSON. This costs one quota unit per playlist plus one per page of items:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # 1. Snapshot all playlists
 bash "$PLUGIN_ROOT/scripts/youtube-list-playlists.sh" --json > /tmp/yt_playlists.json

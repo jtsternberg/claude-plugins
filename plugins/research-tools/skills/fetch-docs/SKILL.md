@@ -24,7 +24,7 @@ When Claude Code calls WebFetch, a small-model pass filters the page through the
 ## Prerequisites
 
 ```!
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/fetch-docs.sh" --check
 ```
@@ -36,7 +36,7 @@ bash "$SKILL_DIR/scripts/fetch-docs.sh" --check
 ## The default: raw HTML
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>")
 ```
@@ -57,7 +57,7 @@ Either way, the file is saved as `.md` and the conversion pipeline is skipped. `
 When the source is HTML and you want markdown:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --md)
 ```
@@ -97,7 +97,7 @@ The reader-mode extraction is opinionated — it removes page chrome by design. 
 `--render` closes that gap. It fetches through a real headless browser ([`agent-browser`](https://github.com/vercel-labs/agent-browser)) instead of `curl`, waits for the page to settle, then captures the fully-rendered DOM:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --render)
 file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --render --md)   # render, then convert to markdown
@@ -132,7 +132,7 @@ This is a **fallback tier, not the default.** Reach for it only when the cheaper
 ## Custom slug
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --slug=my-name)
 ```
@@ -144,7 +144,7 @@ Defaults to a 12-char hash of the URL (`/tmp/fetch-docs-4dc77b8f88a3.md`). Overr
 Default TTL is 24h. A second call with the same URL within 24h returns the cached path instantly without refetching. Override:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --ttl=0       # force refetch
 bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --ttl=3600    # 1h cache

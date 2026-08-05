@@ -90,6 +90,13 @@ else
 	fail "dynamic context contains no model-resolved path placeholders ($dynamic_violations files)"
 fi
 
+codex_prose_violations=$(grep -RIlE '(Codex|Under Codex).*\$\{CLAUDE_(SKILL_DIR|PLUGIN_ROOT)\}' "$REPO/plugins" --include='*.md' | wc -l | tr -d ' ')
+if [[ $codex_prose_violations -eq 0 ]]; then
+	pass 'Codex fallback prose survives Claude path substitution'
+else
+	fail "Codex fallback prose contains Claude-substituted tokens ($codex_prose_violations files)"
+fi
+
 hotline_docs=(
 	"$REPO/plugins/hotline/README.md"
 	"$REPO/plugins/hotline/skills/dial/SKILL.md"

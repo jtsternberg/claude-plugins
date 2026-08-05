@@ -13,7 +13,7 @@ Locate the JSONL transcript file for the current Claude Code session.
 Resolve plugin paths first:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 ```
@@ -27,7 +27,7 @@ This is a **two-step process** that requires **two separate Bash tool calls**. T
 ### Step 1: Check Cache or Plant Fingerprint
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")" && \
 bash "$HOTLINE_SCRIPTS/session-init.sh" --expanded
@@ -44,7 +44,7 @@ Parse the JSON output:
 **This MUST be a separate Bash tool call** — the transcript needs to flush between steps.
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")" && \
 bash "$HOTLINE_SCRIPTS/session-init.sh" --expanded discover "<fingerprint>"

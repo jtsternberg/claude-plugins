@@ -44,7 +44,7 @@ Sections, in order:
 8. **Session** — run:
 
    ```bash
-   # Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+   # Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
    SKILL_DIR="${CLAUDE_SKILL_DIR}"
    bash "$SKILL_DIR/scripts/session-info.sh"
    ```

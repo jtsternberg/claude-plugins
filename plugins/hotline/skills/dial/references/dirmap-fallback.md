@@ -3,7 +3,7 @@
 If `dirmap` is not in PATH, use the bundled fallback scripts:
 
 ```bash
-# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # List all projects

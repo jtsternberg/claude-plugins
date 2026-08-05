@@ -22,7 +22,7 @@ A local dashboard that shows every hotline call — who dialed whom, live/recent
 All via one script:
 
 ```bash
-# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/switchboard.sh" start [--port=4160] [--no-open]
 bash "$SKILL_DIR/scripts/switchboard.sh" stop
