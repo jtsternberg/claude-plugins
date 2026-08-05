@@ -10,7 +10,9 @@ Fix the issues/findings from this conversation, each tracked with a beads task a
 ✅ DO ONE COMMIT PER FIX.
 ❌ DO NOT CREATE ONE BIG COMMIT.
 
-Parse any invocation text after the skill name. If none is available, infer the findings and optional `--push` flag from the current request.
+$ARGUMENTS
+
+Codex: if `$ARGUMENTS` above is not substituted, use the invocation text after the skill name. If none is available, infer the findings and optional `--push` flag from the current request.
 
 ## Workflow
 

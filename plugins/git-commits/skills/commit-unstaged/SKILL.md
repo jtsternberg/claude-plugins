@@ -1,6 +1,7 @@
 ---
 name: commit-unstaged
 description: Review unstaged changes, stage the intended files explicitly, and create a commit with a supplied or concise conventional message.
+argument-hint: "Optional commit message (will be generated if not provided)"
 disable-model-invocation: true
 allowed-tools: [Bash]
 ---
@@ -8,6 +9,10 @@ allowed-tools: [Bash]
 # Commit Unstaged Changes
 
 Use this skill only when the user explicitly asks to stage and commit their current changes.
+
+**Arguments provided:** $ARGUMENTS
+
+Codex: if `$ARGUMENTS` above is not substituted, use a commit message supplied after the skill name or in the current request. If none is available, infer the message from the diff.
 
 ## Workflow
 

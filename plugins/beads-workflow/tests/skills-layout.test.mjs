@@ -29,9 +29,12 @@ test('converted beads skills retain portable execution contracts', () => {
 	const fixFindings = readFileSync(join(pluginRoot, 'skills', 'fix-findings-beads-tasks', 'SKILL.md'), 'utf8');
 	const tackleEpic = readFileSync(join(pluginRoot, 'skills', 'tackle-epic', 'SKILL.md'), 'utf8');
 
-	assert.doesNotMatch(fixFindings, /\$ARGUMENTS/);
+	assert.match(fixFindings, /^\$ARGUMENTS$/m);
+	assert.match(fixFindings, /Codex: if `\$ARGUMENTS` above is not substituted/);
 	assert.match(fixFindings, /`AGENTS\.md`, `CLAUDE\.md`/);
-	assert.doesNotMatch(tackleEpic, /\$ARGUMENTS|Task tool|Generated with \[Claude Code/);
+	assert.match(tackleEpic, /optional flags: `\$ARGUMENTS`/);
+	assert.match(tackleEpic, /Codex: if `\$ARGUMENTS` above is not substituted/);
+	assert.doesNotMatch(tackleEpic, /Task tool|Generated with \[Claude Code/);
 	assert.match(tackleEpic, /branch_name="\$\(git branch --show-current\)"/);
 	assert.match(tackleEpic, /git diff --name-only "\$base_ref"\.\.\.HEAD/);
 	assert.match(tackleEpic, /git push -u origin "\$branch_name"/);

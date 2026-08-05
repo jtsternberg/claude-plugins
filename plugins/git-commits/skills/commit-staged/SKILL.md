@@ -1,6 +1,7 @@
 ---
 name: commit-staged
 description: Create a commit from already staged changes, using a supplied message or a concise conventional commit message inferred from the diff.
+argument-hint: "Optional commit message (will be generated if not provided)"
 disable-model-invocation: true
 allowed-tools: [Bash]
 ---
@@ -8,6 +9,10 @@ allowed-tools: [Bash]
 # Commit Staged Changes
 
 Use this skill only when the user explicitly asks to commit their staged changes.
+
+**Arguments provided:** $ARGUMENTS
+
+Codex: if `$ARGUMENTS` above is not substituted, use a commit message supplied after the skill name or in the current request. If none is available, infer the message from the diff.
 
 ## Workflow
 

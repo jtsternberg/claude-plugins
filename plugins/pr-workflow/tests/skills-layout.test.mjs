@@ -31,7 +31,8 @@ test('converted PR skills preserve safe cross-harness contracts', () => {
 	const updateDescription = readFileSync(join(pluginRoot, 'skills', 'update-pr-description', 'SKILL.md'), 'utf8');
 
 	for (const content of [automatic, human, updateDescription]) {
-		assert.doesNotMatch(content, /\$ARGUMENTS/);
+		assert.match(content, /\$ARGUMENTS/);
+		assert.match(content, /Codex: if `\$ARGUMENTS` above is not substituted/);
 	}
 
 	for (const content of [automatic, human]) {

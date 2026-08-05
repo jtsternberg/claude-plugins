@@ -15,7 +15,9 @@ This skill will:
 4. Use your git diff tool to show the difference between current and proposed descriptions
 5. If approved, update the PR with the new description
 
-Parse invocation text after the skill name. If none is available, infer an optional date, commit hash, or `--force` flag from the current request.
+Arguments provided: $ARGUMENTS
+
+Codex: if `$ARGUMENTS` above is not substituted, use the invocation text after the skill name. If none is available, infer an optional date, commit hash, or `--force` flag from the current request.
 
 **Arguments:**
 - **Date/Commit Hash**: Specify either a date (e.g., "2025-01-15", "2025-01-15T10:30:00") or commit hash (e.g., "abc123f") to find commits since that point

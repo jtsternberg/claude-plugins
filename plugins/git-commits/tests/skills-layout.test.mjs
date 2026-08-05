@@ -16,6 +16,9 @@ test('git-commits exposes both workflows as skills, not legacy commands', () => 
 		assert.match(content, new RegExp(`name: ${skill}`));
 		assert.match(content, /disable-model-invocation: true/);
 		assert.match(content, /allowed-tools: \[Bash\]/);
+		assert.match(content, /argument-hint: "Optional commit message/);
+		assert.match(content, /\*\*Arguments provided:\*\* \$ARGUMENTS/);
+		assert.match(content, /Codex: if `\$ARGUMENTS` above is not substituted/);
 	}
 
 	const commandsDirectory = join(pluginRoot, 'commands');
