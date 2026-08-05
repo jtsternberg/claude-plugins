@@ -83,7 +83,7 @@ function shortName(p) {
 
 // ---- discovery scan: reconstruct calls the registry missed -------------------
 // Every callee transcript opens with the ringing handshake:
-//   /hotline-ringing ... [MODE: x] [CALLER: /path] [SESSION: <caller-sid>]
+//   /hotline:hotline-ringing ... [MODE: x] [CALLER: /path] [SESSION: <caller-sid>]
 // so calls can be reconstructed straight from ~/.claude/projects even when the
 // dialing agent never registered them. Head-of-file parse, cached by mtime.
 
@@ -104,7 +104,7 @@ function readHead(file, bytes) {
 function parseRingingHandshake(file, sessionId) {
   let head;
   try { head = readHead(file, HEAD_BYTES); } catch { return null; }
-  if (!head.includes('/hotline-ringing')) return null;
+  if (!/\/(?:hotline:)?hotline-ringing\b/.test(head)) return null;
   const mode = (head.match(/\[MODE: ([a-z_]+)\]/) || [])[1];
   const callerPath = (head.match(/\[CALLER: ([^\]]+)\]/) || [])[1];
   const callerSid = (head.match(/\[SESSION: ([A-Za-z0-9-]+)\]/) || [])[1];

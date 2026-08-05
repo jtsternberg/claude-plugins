@@ -3,14 +3,15 @@
 If `dirmap` is not in PATH, use the bundled fallback scripts:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # List all projects
 bash "$HOTLINE_SCRIPTS/dirmap-fallback.sh" list
 
 # Get path for a project ID
 bash "$HOTLINE_SCRIPTS/dirmap-fallback.sh" get <id>
 ```
-
-(Requires `PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this hotline plugin directory>}"; eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"` to have been run first.)
 
 These read from `~/.dirmap.json`. To set up dirmap for the first time, create `~/.dirmap.json`:
 

@@ -84,7 +84,7 @@ env -u HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS \
   --cwd "$tmp/cwd" \
   --name "hotline test" \
   --tools "Bash(git *) Edit" \
-  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hello there" \
+  --prompt "/hotline:hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hello there" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
 rc=$?
 
@@ -103,7 +103,7 @@ LAUNCH_SCRIPTS+=("$launch_script")
 launch_body=$(cat "$launch_script" 2>/dev/null || true)
 assert_contains "first-contact launch script runs claude" "$launch_body" "claude"
 assert_contains "first-contact pre-sets session id" "$launch_body" "--session-id"
-assert_contains "first-contact launch script contains conference prompt" "$launch_body" "/hotline-ringing"
+assert_contains "first-contact launch script contains conference prompt" "$launch_body" "/hotline:hotline-ringing"
 assert_contains "first-contact preserves conference mode" "$launch_body" "conference_call"
 
 # Regression: --allowedTools is variadic — must be terminated with `--` before
@@ -213,7 +213,7 @@ env -u HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS \
   HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
   bash "$SCRIPT_UNDER_TEST" \
   --cwd "$tmp/cwd" --name "sbs test" \
-  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hi" \
+  --prompt "/hotline:hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hi" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
 rc=$?
 if [[ $rc -eq 0 ]]; then

@@ -86,7 +86,7 @@ FLAGS=()
 [ "$YOLO" = "1" ] && FLAGS+=(--dangerously-skip-permissions)
 
 # A sidecar session: separate from the one being read, so its context is untouched.
-exec claude "${FLAGS[@]}" "/sessions-catch-up $TARGET"
+exec claude "${FLAGS[@]}" "/session-tools:sessions-catch-up $TARGET"
 WRAPPER
 
 		chmod +x "$TARGET"

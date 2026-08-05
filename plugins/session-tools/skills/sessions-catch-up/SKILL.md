@@ -47,8 +47,8 @@ If no target was given, list sessions and ask which one.
 ## Step 1 — Digest
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this session-tools plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 node "$PLUGIN_ROOT/scripts/export-session.mjs" "<target>" --format digest --fast
 node "$PLUGIN_ROOT/scripts/export-session.mjs" --list  # list every session
 ```
@@ -105,8 +105,8 @@ Opt-in extras. Check the ledger before mentioning any of them; it enforces "offe
 then demote to a protip, then go quiet":
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this session-tools plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 node "$PLUGIN_ROOT/scripts/nudge.mjs" bump           # once, at the start
 node "$PLUGIN_ROOT/scripts/nudge.mjs" check hotline  # → full | protip | silent
 node "$PLUGIN_ROOT/scripts/nudge.mjs" record hotline accepted|declined
@@ -119,7 +119,7 @@ nothing at all.
 |---|---|---|
 | `hotline` | **only** when tail state is `BLOCKED ON YOU` | If `hotline:dial` is available, offer to send the user's answer into that session. Confirm before writing into a live session. If not installed, offer to install: `claude plugin install hotline@jtsternberg` |
 | `handoff` | session is substantial and the user won't act now | If the `handoff` skill is available, offer to persist this caught-up state as a handoff |
-| `wrapper` | any successful catch-up | Offer the shell shim so future catch-ups are one command: `PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this session-tools plugin directory>}"; bash "$PLUGIN_ROOT/scripts/install-wrapper.sh" install`. Note permissions are **not** skipped unless they pass `--yolo` |
+| `wrapper` | any successful catch-up | Offer the shell shim so future catch-ups are one command: `PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"; bash "$PLUGIN_ROOT/scripts/install-wrapper.sh" install`. Under Codex, replace `${CLAUDE_PLUGIN_ROOT}` with the session-tools plugin directory. Note permissions are **not** skipped unless they pass `--yolo` |
 
 Do not offer `hotline` when the target session **is** the caller's own session — there is
 nothing to relay.

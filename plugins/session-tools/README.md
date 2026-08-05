@@ -28,7 +28,7 @@ Forked from Fernando Duro's upstream `sessions-recap`. Adds weekly mode, `--outp
 
 - **`--weekly` flag** — groups sessions by ISO week (Mon–Sun); defaults to the previous full week
 - **`--output-dir PATH`** — override the default output location
-- **`scripts/install_cron.sh`** — manages a weekly launchd job that fires `claude -p "/sessions-weekly-recap --weekly ..."` headlessly
+- **`scripts/install_cron.sh`** — manages a weekly launchd job that fires `claude -p "/session-tools:sessions-weekly-recap --weekly ..."` headlessly
 - **Renamed to `sessions-weekly-recap`** to avoid clobbering upstream `sessions-recap` if re-installed via amskills
 
 #### Modes
@@ -41,20 +41,20 @@ Forked from Fernando Duro's upstream `sessions-recap`. Adds weekly mode, `--outp
 **Generate recaps:**
 
 ```
-/sessions-weekly-recap                                    # Daily, last 7 days
-/sessions-weekly-recap --since 2026-04-01                 # Daily, from a date
-/sessions-weekly-recap --weekly                           # Weekly, previous full week
-/sessions-weekly-recap --weekly --output-dir "~/notes"    # Weekly, custom output
+/session-tools:sessions-weekly-recap                                    # Daily, last 7 days
+/session-tools:sessions-weekly-recap --since 2026-04-01                 # Daily, from a date
+/session-tools:sessions-weekly-recap --weekly                           # Weekly, previous full week
+/session-tools:sessions-weekly-recap --weekly --output-dir "~/notes"    # Weekly, custom output
 ```
 
 **Manage the weekly cron (macOS launchd):**
 
 ```
-/sessions-weekly-recap --install-cron --output-dir "/absolute/path" [--day mon] [--time 09:00]
-/sessions-weekly-recap --cron-status
-/sessions-weekly-recap --cron-run-now
-/sessions-weekly-recap --cron-logs
-/sessions-weekly-recap --uninstall-cron
+/session-tools:sessions-weekly-recap --install-cron --output-dir "/absolute/path" [--day mon] [--time 09:00]
+/session-tools:sessions-weekly-recap --cron-status
+/session-tools:sessions-weekly-recap --cron-run-now
+/session-tools:sessions-weekly-recap --cron-logs
+/session-tools:sessions-weekly-recap --uninstall-cron
 ```
 
 Default output:
@@ -96,7 +96,7 @@ bash $SCRIPTS/install_cron.sh uninstall
 The installed plist:
 - **Label:** `com.jtsternberg.sessions-weekly-recap`
 - **Path:** `~/Library/LaunchAgents/com.jtsternberg.sessions-weekly-recap.plist`
-- **Fires:** `claude -p "/sessions-weekly-recap --weekly --output-dir \"<path>\"" --dangerously-skip-permissions`
+- **Fires:** `claude -p "/session-tools:sessions-weekly-recap --weekly --output-dir \"<path>\"" --dangerously-skip-permissions`
 - **Logs:** `~/.claude/logs/sessions-weekly-recap.{out,err}.log`
 
 `--dangerously-skip-permissions` is required because there's no TTY to approve tool calls during the scheduled run. The job runs as your user with your existing Claude Code auth.
@@ -124,9 +124,9 @@ Brief yourself on a **different** session without touching it. Point it at a ses
 Built for one specific moment: you come back after a couple of days to a stalled session and can't remember what you were doing. **Speed is the point** — you could scroll back and read the whole thing yourself, so if this isn't faster than that, it's worthless.
 
 ```
-/sessions-catch-up 5263bfb5                 # id prefix
-/sessions-catch-up eager-roaming-rose       # session slug
-/sessions-catch-up 5263bfb5 --deep          # also mine the long arc
+/session-tools:sessions-catch-up 5263bfb5                 # id prefix
+/session-tools:sessions-catch-up eager-roaming-rose       # session slug
+/session-tools:sessions-catch-up 5263bfb5 --deep          # also mine the long arc
 ```
 
 #### Why not `/export`?

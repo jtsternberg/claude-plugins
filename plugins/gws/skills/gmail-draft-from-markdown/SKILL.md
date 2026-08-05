@@ -20,8 +20,8 @@ will never send an email directly.
 ## Prerequisites
 
 ```!
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
@@ -35,8 +35,8 @@ installed.
 Run the entrypoint script, passing all arguments through:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this gmail-draft-from-markdown skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/draft.sh" $ARGUMENTS
 ```
 
@@ -121,8 +121,8 @@ are signed in. Always relay the account email to the user along with the URL.
 ## Examples
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this gmail-draft-from-markdown skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 # Email address known
 bash "$SKILL_DIR/scripts/draft.sh" ./coaching-followup.md alice@example.com --subject "Session recap"
 

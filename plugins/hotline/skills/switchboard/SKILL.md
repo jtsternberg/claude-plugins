@@ -13,7 +13,7 @@ A local dashboard that shows every hotline call — who dialed whom, live/recent
 ## How it works
 
 - Call registry: `~/.agents-hotline/sessions/*.json` (caller, callees, session IDs, modes).
-- Discovery scan: calls missing from the registry are reconstructed from the `/hotline-ringing` handshake in each callee transcript's head and shown with a `traced` stamp.
+- Discovery scan: calls missing from the registry are reconstructed from the `/hotline:hotline-ringing` handshake in each callee transcript's head and shown with a `traced` stamp.
 - Transcripts: each session ID maps to `~/.claude/projects/*/<session-id>.jsonl`, which Claude Code appends to live. The server tails these from byte offsets and streams new entries to the browser over SSE.
 - Zero dependencies: single-file Node server, inline HTML/JS UI, no build step.
 
@@ -22,8 +22,8 @@ A local dashboard that shows every hotline call — who dialed whom, live/recent
 All via one script:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this switchboard skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/switchboard.sh" start [--port=4160] [--no-open]
 bash "$SKILL_DIR/scripts/switchboard.sh" stop
 bash "$SKILL_DIR/scripts/switchboard.sh" status

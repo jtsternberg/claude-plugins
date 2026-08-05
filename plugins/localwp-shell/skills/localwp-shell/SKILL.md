@@ -14,8 +14,8 @@ Run commands through LocalWP's sandboxed environment (PHP, MySQL, WP-CLI, Compos
 All scripts live in this skill's directory. Resolve that directory at every independent shell block, then run them with `bash`:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this localwp-shell skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 
 # WP-CLI (most common) — silent by default
 bash "$SKILL_DIR/scripts/wplocal" plugin list
@@ -57,8 +57,8 @@ bash "$SKILL_DIR/scripts/silentlocalwpshell" php -r 'echo PHP_VERSION;'
 **WordPress Multisite: always pass `--url=`.** On a multisite install, WP-CLI without `--url` targets the network's primary site — pages, options, and plugin changes land on the WRONG site silently. Find the right URL first (`wp site list`), then include it in every command:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this localwp-shell skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/wplocal" site list
 bash "$SKILL_DIR/scripts/wplocal" post list --post_type=page --url=https://wp.wpengine/coaching
 ```
@@ -75,8 +75,8 @@ bash "$SKILL_DIR/scripts/wplocal" post list --post_type=page --url=https://wp.wp
 ### Recovery
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this localwp-shell skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 # Instead of:        Use:
 wp plugin list       bash "$SKILL_DIR/scripts/wplocal" plugin list
 php -v               bash "$SKILL_DIR/scripts/localwpshell" php -v

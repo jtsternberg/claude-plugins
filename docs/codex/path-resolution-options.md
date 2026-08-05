@@ -2,6 +2,12 @@
 
 Status: **historical decision record.** Written 2026-07-27 against the evidence in [plugin-root-semantics.md](plugin-root-semantics.md), [compat-matrix.md](compat-matrix.md), and [frontmatter-and-path-semantics.md](frontmatter-and-path-semantics.md). The option rankings below reflect the probe state at that date; later results are summarized in the [maintained compatibility guide](compatibility.md).
 
+**Superseded runtime conclusion (2026-08-05):** Claude Code 2.1.221 replaces
+only the exact `${CLAUDE_SKILL_DIR}` and `${CLAUDE_PLUGIN_ROOT}` tokens in plugin
+Markdown. It does not export those variables or replace `${VAR:-fallback}`.
+The fallback examples below are retained as decision history, not current
+authoring guidance.
+
 The SessionStart-hook option was subsequently tested on codex-cli 0.146.0 and
 did not persist `CLAUDE_SKILL_DIR` into a later skill-body shell. Treat that
 option as rejected in its simple export form; the detailed hook record is in

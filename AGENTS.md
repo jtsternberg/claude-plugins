@@ -25,7 +25,7 @@ plugins/
     └── hooks/                   # Hook scripts (optional)
 ```
 
-Each skill's `SKILL.md` belongs at `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`. That path is what makes the skill discoverable in autocomplete and invocable as `$<skill-name>`. Keep `.claude-plugin/plugin.json` at the plugin root; everything a skill needs (its `SKILL.md` and any `scripts/`) sits together under its own `skills/<skill-name>/` directory.
+Each skill's `SKILL.md` belongs at `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`. That path is what makes the skill discoverable in autocomplete. Claude Code invokes an installed plugin skill as `/<plugin-name>:<frontmatter-name>`; Codex invokes it as `$<frontmatter-name>`. Use the bare frontmatter name only when referring to the skill in prose. Keep `.claude-plugin/plugin.json` at the plugin root; everything a skill needs (its `SKILL.md` and any `scripts/`) sits together under its own `skills/<skill-name>/` directory.
 
 When a skill runs bundled scripts, reference them through the runtime-resolved skill path so they work from any working directory:
 
@@ -119,7 +119,7 @@ practices for Sonnet), and the AM Skills overlay README if the plugin is mapped 
 Hook scripts in `hooks/` that intercept Claude Code events (permissions, notifications, etc.) and return JSON decisions.
 
 ### Skill-based plugins
-Each skill is a `SKILL.md` at `skills/<skill-name>/SKILL.md`, with its scripts bundled in `skills/<skill-name>/scripts/` and referenced via `${CLAUDE_SKILL_DIR}/scripts/…`. This layout is what surfaces the skill in autocomplete and lets Claude invoke it as `$<skill-name>`.
+Each skill is a `SKILL.md` at `skills/<skill-name>/SKILL.md`, with its scripts bundled in `skills/<skill-name>/scripts/` and referenced via `${CLAUDE_SKILL_DIR}/scripts/…`. This layout surfaces the skill in autocomplete. Invoke it as `/<plugin-name>:<frontmatter-name>` in Claude Code or `$<frontmatter-name>` in Codex.
 
 ### Command-based plugins
 Markdown files in `commands/` that define slash commands Claude can invoke.

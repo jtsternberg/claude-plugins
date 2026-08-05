@@ -20,8 +20,8 @@ is stored in its own config directory under `~/.config/gws-accounts/<label>/`.
 ## Prerequisites
 
 ```!
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
@@ -54,8 +54,8 @@ the appropriate script.
 ### Add a new account
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/account-add.sh" <label>
 ```
 
@@ -68,24 +68,24 @@ will open and they need to complete the login.
 ### List all accounts
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/account-list.sh"
 ```
 
 For programmatic use:
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/account-list.sh" --json
 ```
 
 ### Switch active account
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/account-switch.sh" <label>
 ```
 
@@ -94,32 +94,32 @@ subsequent account-aware scripts will use that account. To switch
 back to the default account:
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/account-switch.sh" default
 ```
 
 ### Check current account
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/account-current.sh"
 ```
 
 For programmatic use:
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/account-current.sh" --json
 ```
 
 Just the email:
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/account-current.sh" --email
 ```
 

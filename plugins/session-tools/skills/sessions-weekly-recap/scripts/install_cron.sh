@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Manage the weekly sessions-weekly-recap launchd job on macOS.
-# Writes a plist that fires `claude -p "/sessions-weekly-recap --weekly ..."` on a schedule.
+# Writes a plist that fires `claude -p "/session-tools:sessions-weekly-recap --weekly ..."` on a schedule.
 #
 # Usage:
 #   install_cron.sh install --output-dir "<path>" [--day mon] [--time 09:00]
@@ -103,7 +103,7 @@ for i in \$(seq 1 "\$LOOKBACK_WEEKS"); do
   fi
   echo "[\$(date '+%F %T')] run  \$fname (\$mon → \$sun)"
   cd "\$HOME"
-  "\$CLAUDE_BIN" -p "/sessions-weekly-recap --weekly --since \$mon --until \$sun --output-dir \"\$OUTPUT_DIR\"" --dangerously-skip-permissions || \\
+  "\$CLAUDE_BIN" -p "/session-tools:sessions-weekly-recap --weekly --since \$mon --until \$sun --output-dir \"\$OUTPUT_DIR\"" --dangerously-skip-permissions || \\
     echo "[\$(date '+%F %T')] claude exited non-zero for \$fname"
   ran_any=1
 done

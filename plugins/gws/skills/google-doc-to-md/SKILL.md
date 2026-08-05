@@ -38,8 +38,8 @@ instead of `gws`. Use this when the doc's account has ADC set up but not
 login` for).
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/adc-check.sh"   # fast preflight; exit 0 = configured
 bash "$SKILL_DIR/scripts/adc-export.sh" <doc-id-or-url> [output.md]
 ```
@@ -53,8 +53,9 @@ it up isn't worth it right now, fall through to rung 3.
 > backslash-escapes markdown-significant punctuation that appears as
 > literal text in the doc (`Catch up\!`, `\#123`, `(Q2 2026\)`) — verified
 > live 2026-07-16 on a real doc. It's valid CommonMark, but if the raw
-> markdown is for human editing, the same de-escaper works on any rung's
-> output: `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"; python3 "$SKILL_DIR/scripts/deescape.py" in.md out.md`.
+> markdown is for human editing, the same de-escaper works on any rung. Under
+> Codex, replace `${CLAUDE_SKILL_DIR}` with the directory containing this
+> SKILL.md: `SKILL_DIR="${CLAUDE_SKILL_DIR}"; python3 "$SKILL_DIR/scripts/deescape.py" in.md out.md`.
 > Docs that round-tripped from markdown import export clean; docs with
 > hand-typed punctuation don't. The connector rung *always* needs it.
 
@@ -78,8 +79,8 @@ to prefer, a de-escape pass is required.
    or write to a temp file and `base64 -d`).
 4. De-escape it:
    ```bash
-   # Codex: replace the fallback with the directory containing this SKILL.md.
-   SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"
+   # Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+   SKILL_DIR="${CLAUDE_SKILL_DIR}"
    python3 "$SKILL_DIR/scripts/deescape.py" TEMP_INPUT.md CLEANED.md
    ```
 5. Write `CLEANED.md`'s content to the output file (same filename-derivation
@@ -97,8 +98,8 @@ after rung 1.
 ## Prerequisites (rung 1)
 
 ```!
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
@@ -107,8 +108,8 @@ bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 Run the entrypoint script, passing all arguments through:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/download.sh" $ARGUMENTS
 ```
 
@@ -120,24 +121,24 @@ and optionally the output file path.
 ### Downloading a Google Doc
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/download.sh" DOC_ID_OR_URL
 ```
 
 With a custom output path:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/download.sh" DOC_ID_OR_URL ./output.md
 ```
 
 With `--title` flag to use the doc's title as the filename:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/download.sh" DOC_ID_OR_URL --title
 ```
 
@@ -170,8 +171,8 @@ Google limits exported content from `files.export` to **10 MB**.
 List a doc's tabs (id, index, title — indented by nesting):
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/download.sh" DOC_ID --list-tabs
 ```
 
@@ -179,8 +180,8 @@ Export a single tab as markdown (basic fidelity: headings, bold/italic,
 links, lists, tables):
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/download.sh" DOC_ID out.md --tab "Tab Title"
 ```
 
@@ -193,8 +194,8 @@ confusing for multi-tab ones. Use `--list-tabs` first when unsure.
 When downloading multiple docs, run in parallel:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this google-doc-to-md skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/download.sh" DOC_URL_1 ./doc1.md &
 bash "$SKILL_DIR/scripts/download.sh" DOC_URL_2 ./doc2.md &
 wait

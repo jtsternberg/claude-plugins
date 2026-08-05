@@ -44,8 +44,8 @@ Sections, in order:
 8. **Session** — run:
 
    ```bash
-   # Codex: replace the fallback with the directory containing this SKILL.md.
-   SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this handoff skill directory>}"
+   # Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+   SKILL_DIR="${CLAUDE_SKILL_DIR}"
    bash "$SKILL_DIR/scripts/session-info.sh"
    ```
 

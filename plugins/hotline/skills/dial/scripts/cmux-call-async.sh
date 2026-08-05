@@ -206,7 +206,7 @@ CALL_ID=$(
 echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
 # Insert [CALL_ID: ...] into the prompt so the receiver can parse it and
 # include it in its STATUS markers. If the prompt begins with a slash command
-# (e.g. /hotline-ringing), the CALL_ID must go AFTER the command token —
+# (e.g. /hotline:hotline-ringing), the CALL_ID must go AFTER the command token —
 # otherwise the leading bracket prevents claude from parsing the slash command
 # at all. For non-slash prompts, prepend as before.
 if [[ "$PROMPT" == /* ]]; then

@@ -18,12 +18,12 @@ Dial another workspace to ask questions, delegate work, or collaborate.
 - **`$1+`** (optional): The task/question for the remote workspace.
 
 ```
-/hotline-dial dotfiles what branch are you on?
-/hotline-dial coaching write the about page
-/hotline-dial 5b1dda91-... what went wrong?
-/hotline-dial --headless dotfiles what branch are you on?
-/hotline-dial --detached dotfiles run the full test suite
-/hotline-dial --window lindris backend tests, please
+/hotline:hotline-dial dotfiles what branch are you on?
+/hotline:hotline-dial coaching write the about page
+/hotline:hotline-dial 5b1dda91-... what went wrong?
+/hotline:hotline-dial --headless dotfiles what branch are you on?
+/hotline:hotline-dial --detached dotfiles run the full test suite
+/hotline:hotline-dial --window lindris backend tests, please
 ```
 
 **Parse the flags first**: scan the raw args for the literal tokens `--headless`, `--detached` (alias `--new-workspace`), and `--window <value>`, and remove them (and `--window`'s value) from the arg list before resolving `$0` and `$1+`:
@@ -39,15 +39,19 @@ If `$0` is provided (after stripping `--headless`), use it as `USER_REFERENCE` i
 
 ## Script Paths
 
-!`PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this hotline plugin directory>}"; bash "$PLUGIN_ROOT/scripts/paths.sh"`
-
-The above sets `HOTLINE_SCRIPTS`, `HOTLINE_DIAL_SCRIPTS`, and `HOTLINE_PICKUP_SCRIPTS`.
+Every independent shell block below resolves the Hotline plugin path and loads
+`HOTLINE_SCRIPTS`, `HOTLINE_DIAL_SCRIPTS`, and `HOTLINE_PICKUP_SCRIPTS` in that
+same shell. Shell state does not persist across tool calls. Under Codex, replace
+`${CLAUDE_PLUGIN_ROOT}` with the Hotline plugin directory before running a block.
 
 ## Prerequisites: Know Thyself
 
 Before you can call anyone else, you need to know your own session ID. Run:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_SCRIPTS/session-init.sh"
 ```
 
@@ -57,6 +61,9 @@ Parse the JSON output:
 - `{"status": "planted", "fingerprint": "..."}` — The transcript needs to be written first. In a **separate tool call**, run:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_SCRIPTS/session-init.sh" discover "<fingerprint>"
 ```
 
@@ -87,6 +94,9 @@ USER_REFERENCE="<the user's exact words for the target>"
 Then resolve:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/resolve-workspace.sh" "$USER_REFERENCE" --caller-session "$MY_SESSION_ID"
 ```
 
@@ -108,14 +118,20 @@ Only skip this confirmation when the match is clearly correct (e.g., user said "
 If resolution fails or returns stale results, check whether the target's identity cache needs refreshing:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_PICKUP_SCRIPTS/identity-cache.sh" is-stale --cwd "$TARGET_PATH"
 ```
 
 If exit 0 (stale): run a quick headless call to populate it:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
-  --prompt "/hotline-pickup"
+  --prompt "/hotline:hotline-pickup"
 ```
 
 Then retry resolution from the top.
@@ -141,6 +157,9 @@ This is automatic — never ask the user about transport. They don't care how th
 Otherwise, check CMUX availability:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 ```
 
@@ -182,11 +201,17 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 See if there's already an active session with this workspace:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
 ```
 
 - **Exit 0**: Active session found. Parse the JSON for `session_id`, `mode`, and `surface_ref` (present only when the session lives in a visible cmux surface). Set `REMOTE_SESSION_ID` and `SURFACE_REF` from it for the Follow-Up step:
   ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
   CACHED=$(bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID")
   REMOTE_SESSION_ID=$(echo "$CACHED" | jq -r '.session_id')
   SURFACE_REF=$(echo "$CACHED" | jq -r '.surface_ref // empty')
@@ -231,37 +256,43 @@ There are two distinct first-contact cases. Pick the one that matches how the ta
 - **Case (B) — fork a given session ID** (the user handed you a specific session ID; see Step 4): fork it. **Pass `--resume "$TARGET_SESSION_ID"` AND `--fork-session` together** — never one without the other.
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # === Case (A): fresh workspace — no resume, no fork ===
 
 # CMUX transport (quick call / work order):
 # $PLACEMENT_FLAG is "", "--detached", or "--window <value>" (from Arguments).
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" $PLACEMENT_FLAG \
-  --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  --prompt "/hotline:hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 
 # CMUX transport (conference call):
 CMUX_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" $PLACEMENT_FLAG \
-  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  --prompt "/hotline:hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 
 # Headless fallback (any mode):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" \
-  --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  --prompt "/hotline:hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 ```
 
 **Handle the headless-fallback signal (cmux transport, default placement only).** When a cmux-call returns `{"fallback":"headless"}` instead of a `call_dir`, cmux is up but the `cmux-cli` plugin isn't installed, so side-by-side placement is unavailable. Re-route this exact call through the headless transport — same `--cwd`/`--prompt`/`--resume`/`--fork-session` args, just the headless launcher:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 if [[ "$(echo "$CALL_RESULT" | jq -r '.fallback // empty')" == "headless" ]]; then
   # Re-issue via headless-call-async.sh (quick call / work order) or
   # headless-call.sh (conference). Do NOT pass $PLACEMENT_FLAG — headless
   # ignores placement.
   CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
     --name "$SESSION_NAME" \
-    --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+    --prompt "/hotline:hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
   CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 fi
 
@@ -273,18 +304,18 @@ fi
 # CMUX transport (quick call / work order):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" $PLACEMENT_FLAG --resume "$TARGET_SESSION_ID" --fork-session \
-  --prompt "/hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  --prompt "/hotline:hotline-ringing [MODE: quick_call|work_order] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 
 # CMUX transport (conference call):
 CMUX_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" $PLACEMENT_FLAG --resume "$TARGET_SESSION_ID" --fork-session \
-  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  --prompt "/hotline:hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 
 # Headless fallback (any mode):
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/headless-call-async.sh" --cwd "$TARGET_PATH" \
   --name "$SESSION_NAME" --resume "$TARGET_SESSION_ID" --fork-session \
-  --prompt "/hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
+  --prompt "/hotline:hotline-ringing [MODE: quick_call|work_order|conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT")
 CALL_DIR=$(echo "$CALL_RESULT" | jq -r '.call_dir')
 ```
 
@@ -304,6 +335,9 @@ The session is cached automatically (`cmux-call.sh` registers it from the ringin
 **Wait for the session ID** (returns quickly once the remote agent starts):
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 REMOTE_SESSION_ID=$(bash "$HOTLINE_DIAL_SCRIPTS/wait-for-session.sh" "$CALL_DIR")
 ```
 
@@ -314,6 +348,9 @@ REMOTE_SESSION_ID=$(bash "$HOTLINE_DIAL_SCRIPTS/wait-for-session.sh" "$CALL_DIR"
 **Then wait for the response:**
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/wait-for-response.sh" "$CALL_DIR" >/dev/null
 REMOTE_SESSION_ID=$(jq -r '.session_id' "$CALL_DIR/response.json")
 RESPONSE=$(jq -r '.response' "$CALL_DIR/response.json")
@@ -328,6 +365,9 @@ RESPONSE=$(jq -r '.response' "$CALL_DIR/response.json")
 **⚠️ Do not do this** — under zsh (the default shell on macOS, and the shell Claude Code's Bash tool runs in) the `echo`-pipe pattern corrupts any JSON with backslash escapes (`\n`, `\f`, `\u001b`, ...):
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # WRONG — zsh's echo interprets \f and \u001b in the captured JSON,
 #         producing malformed bytes jq then rejects with a parse error.
 RESPONSE_JSON=$(bash "$HOTLINE_DIAL_SCRIPTS/wait-for-response.sh" "$CALL_DIR")
@@ -344,11 +384,14 @@ Clean up: `rm -rf "$CALL_DIR"`
 
 Use the `mode` field you parsed from Step 4's session-cache.sh JSON (it's one of `quick_call`, `work_order`, or `conference_call`). Also parse **`surface_ref`** from that same JSON — it's present when the session already lives in a visible cmux surface, and it's the key to reusing that surface instead of stacking a new one.
 
-**Important: follow-ups never re-wrap with `/hotline-ringing`.** The remote session already invoked that slash command on first contact — the ringing skill is in its context, including the STATUS protocol. Sending raw `$YOUR_MESSAGE` keeps the conversation going naturally; re-invoking `/hotline-ringing` would re-trigger the skill's first-contact setup and confuse the receiver. Every transport below passes `$YOUR_MESSAGE` raw, matching what `headless-call.sh` already does.
+**Important: follow-ups never re-wrap with `/hotline:hotline-ringing`.** The remote session already invoked that slash command on first contact — the ringing skill is in its context, including the STATUS protocol. Sending raw `$YOUR_MESSAGE` keeps the conversation going naturally; re-invoking `/hotline:hotline-ringing` would re-trigger the skill's first-contact setup and confuse the receiver. Every transport below passes `$YOUR_MESSAGE` raw, matching what `headless-call.sh` already does.
 
 Check cmux first:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 ```
 
@@ -357,6 +400,9 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 If cmux is up (`check-cmux.sh` exit 0) **and** you parsed a non-empty `surface_ref` **and** `$YOUR_MESSAGE` is a single logical line, route this message INTO the surface the session already occupies — don't open a new one. The surface holds a live claude REPL for that exact session, so we just type the next message into it. The REPL does **not** have to be idle: a message typed into a busy REPL is enqueued, not lost (see below). (For a multi-line message, skip straight to the fresh-surface path below — it hands the prompt to a launch script as an argument, so newlines never go through keystroke simulation at all. See the note under the snippet for why.)
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # $REMOTE_SESSION_ID and $SURFACE_REF come from Step 4's session-cache.sh get JSON.
 # --cwd is the callee's resolved workspace ($TARGET_PATH from Step 1), so
 # wait-for-response.sh can read the reply from the callee's JSONL transcript
@@ -409,6 +455,9 @@ Use this when there's **no** `surface_ref` (the prior call was headless or detac
 - **Exit 1**: `headless-call.sh`
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 # CMUX transport (quick call / work order): honors the same $PLACEMENT_FLAG —
 # opens a fresh surface (or workspace, if --detached) and resumes into it.
 CALL_RESULT=$(bash "$HOTLINE_DIAL_SCRIPTS/cmux-call-async.sh" --cwd "$TARGET_PATH" \
@@ -429,6 +478,9 @@ bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
 Update the cache timestamp. If this follow-up opened a **new** surface (the fresh-surface fallback, not reuse), refresh `surface_ref` so the next follow-up reuses the new surface instead of the dead one — read it from the fallback's `CALL_DIR`:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 NEW_SURFACE=""
 [[ -n "${CALL_DIR:-}" && -s "$CALL_DIR/surface_ref.txt" ]] && NEW_SURFACE=$(cat "$CALL_DIR/surface_ref.txt")
 bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-session "$MY_SESSION_ID" \
@@ -442,10 +494,13 @@ bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" --caller-ses
 If the mode is **conference call** and CMUX is available:
 
 ```bash
-# First contact (no --resume): include /hotline-ringing so the receiver loads
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
+# First contact (no --resume): include /hotline:hotline-ringing so the receiver loads
 # the protocol skill on its first turn.
 bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
-  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT"
+  --prompt "/hotline:hotline-ringing [MODE: conference_call] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $YOUR_PROMPT"
 
 # Resume (--resume): the ringing skill is already loaded — send raw $YOUR_MESSAGE.
 bash "$HOTLINE_DIAL_SCRIPTS/cmux-call.sh" --cwd "$TARGET_PATH" \
@@ -485,6 +540,9 @@ If the user asks to take over the conversation directly, give them the escape ha
 When they return, resume the session yourself to pick up any final state:
 
 ```bash
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --prompt "Summarize what happened since the caller took over." --resume "$REMOTE_SESSION_ID"
 ```
 

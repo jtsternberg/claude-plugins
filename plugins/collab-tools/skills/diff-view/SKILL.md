@@ -54,8 +54,8 @@ You need exactly **2 or 3** sources. Each can come from:
 ### 2. Run the generator
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this diff-view skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 node "$SKILL_DIR/scripts/gen-diff.js" <sourceA> <sourceB> [sourceC] \
   --title "Short descriptive title" \
   --label "Column A label" --label "Column B label" [--label "Column C label"] \
@@ -114,8 +114,8 @@ If a screenshot looks clipped/padded and only Chrome was available, suggest inst
 **Two near-identical functions (PHP), screenshot for a PR:**
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this diff-view skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 node "$SKILL_DIR/scripts/gen-diff.js" /tmp/collab-tools/tag.php /tmp/collab-tools/untag.php \
   --title "TagSubscribersByFilter vs UnTagSubscribersByFilter" \
   --label "Tag (orig)" --label "UnTag (orig)" --lang php --screenshot
@@ -124,8 +124,8 @@ node "$SKILL_DIR/scripts/gen-diff.js" /tmp/collab-tools/tag.php /tmp/collab-tool
 **Before / after / extracted-shared (3-way) with sublabels:**
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this diff-view skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 node "$SKILL_DIR/scripts/gen-diff.js" a.php b.php shared.php \
   --title "Tag / UnTag / applyTagOperationByFilter" \
   --label "Tag()"   --sublabel "original — INSERT path" \
@@ -137,8 +137,8 @@ node "$SKILL_DIR/scripts/gen-diff.js" a.php b.php shared.php \
 **One file across two git revisions:**
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this diff-view skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 node "$SKILL_DIR/scripts/gen-diff.js" \
   --git "HEAD~1:src/Subscribers.php" --git "HEAD:src/Subscribers.php" \
   --title "Subscribers.php — last commit" --label "before" --label "after" --screenshot

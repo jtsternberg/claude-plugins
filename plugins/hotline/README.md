@@ -16,7 +16,7 @@ claude plugin marketplace add jtsternberg/claude-plugins
 claude plugin install hotline@jtsternberg
 ```
 
-This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`) as slash commands in Claude Code.
+This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`). Invoke them as `/hotline:<skill-name>` in Claude Code—for example, `/hotline:hotline-dial`—or `$<skill-name>` in Codex. Bare names are prose identifiers only.
 
 ---
 
@@ -58,7 +58,7 @@ Use `hotline-add-contact` to register a workspace so other agents can find it:
 
 Or with explicit arguments:
 
-> "/hotline-add-contact blog /Users/me/Code/my-blog"
+> "/hotline:hotline-add-contact blog /Users/me/Code/my-blog"
 
 If `dirmap` is in PATH, it uses `dirmap add`. Otherwise, it edits `~/.dirmap.json` directly.
 
@@ -66,7 +66,7 @@ If `dirmap` is in PATH, it uses `dirmap add`. Otherwise, it edits `~/.dirmap.jso
 
 Use `hotline-whoami` to find out what a workspace is called in dirmap:
 
-> "/hotline-whoami"
+> "/hotline:hotline-whoami"
 
 Returns the dirmap slug for the current workspace, or suggests registering it if it's not found.
 
@@ -118,8 +118,8 @@ When a call routes through `cmux`, Hotline opens the callee **side-by-side with 
 Two opt-outs, passed as flags on the dial command:
 
 ```
-/hotline-dial --detached dotfiles run the full test suite   # disconnected new-workspace tab (pre-0.13 behavior)
-/hotline-dial --window lindris backend tests, please        # group callees in a specific window (find-or-create)
+/hotline:hotline-dial --detached dotfiles run the full test suite   # disconnected new-workspace tab (pre-0.13 behavior)
+/hotline:hotline-dial --window lindris backend tests, please        # group callees in a specific window (find-or-create)
 ```
 
 - **`--detached`** (alias `--new-workspace`) restores the original placement: a new workspace tab, auto-closed once the response is captured.
@@ -172,7 +172,7 @@ By default, dial picks `cmux` when it's available (free interactive usage) and f
 **Per call** — pass `--headless` as a flag in the dial slash command:
 
 ```
-/hotline-dial --headless dotfiles what branch are you on?
+/hotline:hotline-dial --headless dotfiles what branch are you on?
 ```
 
 The flag is parsed by the dial skill and stripped from the args before workspace resolution. Forces just that one dial through the headless transport.
@@ -241,7 +241,7 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
                                 │
               First contact (no --resume):
                 <launch script> --prompt \
-                  "/hotline-ringing [MODE: ...] \
+                  "/hotline:hotline-ringing [MODE: ...] \
                    [CALLER: ...] [SESSION: ...] \
                    <the actual prompt>"
 
@@ -257,7 +257,7 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
 │                                                                     │
 │                 ┌─────────────────┐                                 │
 │                 │ hotline-ringing │  (SKILL.md loaded via           │
-│                 │    skill        │   /hotline-ringing in prompt)   │
+│                 │    skill        │   /hotline:hotline-ringing in prompt)   │
 │                 └────────┬────────┘                                 │
 │                          │                                          │
 │            Parses: MODE, CALLER, SESSION                            │
@@ -357,7 +357,7 @@ resolve-workspace.sh "<user's words>"
 ### The Skills
 
 - **`hotline-dial`** — The caller side. Orchestrates the entire flow above: resolve target, discover session, select transport, make the call, relay the response. Forks by default when dialing someone else's session ID.
-- **`hotline-ringing`** — The receiver-side handshake. Loaded via the `/hotline-ringing` prefix in the prompt. Tells Agent B what's happening, how to respond, and how to signal completion. Enforces workspace isolation.
+- **`hotline-ringing`** — The receiver-side handshake. Loaded via the `/hotline:hotline-ringing` prefix in the prompt. Tells Agent B what's happening, how to respond, and how to signal completion. Enforces workspace isolation.
 - **`hotline-pickup`** — Workspace identity introspection. Runs `gather-workspace-info.sh` to examine CLAUDE.md, package files, git history, then caches a concise identity to `~/.agents-hotline/identities/`. Used by workspace resolution for fuzzy matching.
 - **`hotline-add-contact`** — Register a workspace in dirmap so other agents can find it. Uses `dirmap add` if available, edits `~/.dirmap.json` directly otherwise.
 - **`hotline-whoami`** — Reverse-lookup the current workspace's dirmap slug. Caller ID for the hotline.
@@ -395,7 +395,7 @@ What you get:
 - **Call board** — every call from the sessions registry, grouped **live** (activity < 15 min), **recent** (< 24h), and **stale**, with mode, age, and exchange count.
 - **Both ends of the line** — click a call to see the caller and callee transcripts rendered side-by-side.
 - **Real-time** — the server tails the Claude Code transcript JSONL files (`~/.claude/projects/*/<session-id>.jsonl`) from byte offsets and streams new entries to the browser over SSE as the conversations evolve. Unlike `claude --resume`, the view stays current.
-- **Discovery scan** — calls the registry never recorded are reconstructed from the ringing handshake at the top of each callee transcript (`/hotline-ringing [MODE:…] [CALLER:…] [SESSION:…]`) and shown with a `traced` stamp. Registry entries win on conflicts.
+- **Discovery scan** — calls the registry never recorded are reconstructed from the ringing handshake at the top of each callee transcript (`/hotline:hotline-ringing [MODE:…] [CALLER:…] [SESSION:…]`) and shown with a `traced` stamp. Registry entries win on conflicts.
 
 Registration is also now script-level on the dial side: `wait-for-session.sh` records each call in the sessions registry the moment the remote session ID is known, so future calls appear on the board without relying on the dialing agent to cache them.
 

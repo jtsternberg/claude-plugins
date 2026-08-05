@@ -242,7 +242,7 @@ CALL_ID=$(
 )
 echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
 
-# Follow-ups never re-wrap with /hotline-ringing (the ringing skill is already
+# Follow-ups never re-wrap with /hotline:hotline-ringing (the ringing skill is already
 # loaded in the remote session), so PROMPT is always a raw message — just prefix
 # the nonce. The receiver echoes it back as `STATUS: <signal> call_id=<nonce>`.
 MSG="[CALL_ID: $CALL_ID] $PROMPT"

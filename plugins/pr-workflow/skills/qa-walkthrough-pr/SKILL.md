@@ -68,8 +68,8 @@ Set `QA_LABEL="PR #<number>"`.
 
 ```bash
 # Get the diff summary and changes
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this qa-walkthrough-pr skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/extract-test-plan.sh" --from-diff[=<base-ref>]
 ```
 
@@ -92,8 +92,8 @@ In all modes: if a HANDOFF.md exists in the working directory, read it and extra
 Try the bundled extraction script first:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this qa-walkthrough-pr skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/extract-test-plan.sh" <number>
 ```
 
@@ -136,8 +136,8 @@ Create a beads epic and individual tasks with dependencies.
 Build a JSON test plan array and pipe it to the script:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this qa-walkthrough-pr skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 echo '[
   {"name": "Pre-setup: ...", "description": "...", "depends_on_index": null},
   {"name": "Admin UI: ...", "description": "...", "depends_on_index": 0},
@@ -241,8 +241,8 @@ Once all QA tasks and any punted bugs are resolved:
 2. Ask the user: "All tests passed. Want me to delete the testing epic and tasks? They don't add historical value since there are no code changes."
 3. If confirmed:
    ```bash
-   # Codex: replace the fallback with the directory containing this SKILL.md.
-   SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this qa-walkthrough-pr skill directory>}"
+   # Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+   SKILL_DIR="${CLAUDE_SKILL_DIR}"
    bash "$SKILL_DIR/scripts/qa-cleanup.sh" <epic-id>
    ```
 

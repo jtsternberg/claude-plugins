@@ -20,8 +20,8 @@ operations use the currently active gws account
 ## Prerequisites
 
 ```!
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
@@ -41,8 +41,8 @@ Parse the user's request and run the matching script. All scripts live in
 ### List events (default subcommand)
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/calendar-list-events.sh" \
   [--calendar=ID] [--query=TEXT] \
   [--from=SPEC] [--to=SPEC] [--max=N] [--tz=IANA] [--json]
@@ -64,8 +64,8 @@ Examples:
 By id:
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/calendar-get-event.sh" <event-id> \
   [--calendar=ID] [--json] [--tz=IANA]
 ```
@@ -73,8 +73,8 @@ bash "$PLUGIN_ROOT/scripts/calendar-get-event.sh" <event-id> \
 By fuzzy title match within a window (default: today through +7 days):
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/calendar-get-event.sh" \
   --match "title fragment" [--from=SPEC] [--to=SPEC] [--json]
 ```
@@ -86,8 +86,8 @@ Surfaces the specific instance of a recurring event, not the series id.
 When the user asks "what's the link for X" or "get the meet/zoom link":
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # Today's links
 bash "$PLUGIN_ROOT/scripts/calendar-links.sh"
 
@@ -110,8 +110,8 @@ silently omit.
 ### List accessible calendars
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/calendar-list-calendars.sh" \
   [--writable] [--json]
 ```
@@ -125,8 +125,8 @@ Before writing to a shared or group calendar, check the role directly instead
 of listing everything:
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/calendar-list-calendars.sh" \
   --id "<calendarId>" [--json]
 ```
@@ -140,8 +140,8 @@ explanation when the calendar isn't in the account's calendar list — usually
 Timed event:
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/calendar-create-event.sh" \
   --title "Title" --start "2026-05-08T14:00" --end "2026-05-08T15:00" \
   [--calendar=ID] [--description=TEXT] [--location=TEXT] \

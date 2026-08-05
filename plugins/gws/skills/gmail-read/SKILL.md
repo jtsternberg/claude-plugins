@@ -19,8 +19,8 @@ deletes. For composing, see the sibling `gmail-draft-from-markdown` skill.
 ## Prerequisites
 
 ```!
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
@@ -29,8 +29,8 @@ bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 Run the entrypoint script, passing all arguments through:
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this gmail-read skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 bash "$SKILL_DIR/scripts/read.sh" $ARGUMENTS
 ```
 
@@ -91,8 +91,8 @@ block with `--pretty`.
 ## Examples
 
 ```bash
-# Codex: replace the fallback with the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this gmail-read skill directory>}"
+# Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 # Find the Ollama 0.31 announcement
 bash "$SKILL_DIR/scripts/read.sh" "Ollama 0.31 Gemma 4 MTP"
 

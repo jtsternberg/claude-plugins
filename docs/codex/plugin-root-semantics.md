@@ -2,6 +2,11 @@
 
 Probed 2026-07-27 against **codex-cli 0.144.6** (`gpt-5.6-sol`). Reproducible; see Method.
 
+> **Superseded Claude-side conclusion (2026-08-05):** Claude Code 2.1.221
+> performs exact-token textual substitution in plugin Markdown; it does not
+> export these variables or replace `${VAR:-fallback}`. The fallback pattern
+> below is retained as historical Codex evidence and is not current guidance.
+
 ## Answer
 
 **Codex provides no variable for a skill's own location — not `CLAUDE_SKILL_DIR`, and not `CLAUDE_PLUGIN_ROOT` either.** Of the three hypotheses, (b) is confirmed:

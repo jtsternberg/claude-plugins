@@ -122,7 +122,7 @@ Invoke `qa-walkthrough-pr` with an optional PR number or URL.
 
 ## Example Usage
 
-Use the canonical skill names above when describing the workflow to either harness. In Codex, prefix a name with `$` for explicit invocation, such as `$address-pr-comments` or `$qa-walkthrough-pr`; the dollar sign is invocation syntax, not part of the skill name.
+Use the canonical skill names above when describing the workflow to either harness. For explicit invocation, use `/pr-workflow:address-pr-comments` or `/pr-workflow:qa-walkthrough-pr` in Claude Code, and `$address-pr-comments` or `$qa-walkthrough-pr` in Codex. The slash and dollar-sign forms are harness syntax, not part of the skill names.
 
 ## Additional Documentation
 

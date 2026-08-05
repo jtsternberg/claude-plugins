@@ -28,8 +28,8 @@ The skill automatically triggers when you mention:
 ### Direct Script Usage
 
 ```bash
-# Under Codex, replace the fallback with the absolute path to the git-tree plugin root.
-GIT_TREE_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to the git-tree plugin root>}"
+# Under Codex, replace ${CLAUDE_PLUGIN_ROOT} below with the absolute path to the git-tree plugin root.
+GIT_TREE_ROOT="${CLAUDE_PLUGIN_ROOT}"
 "$GIT_TREE_ROOT/scripts/git-tree.sh" <branch-name> [--repo <path>] [--create]
 ```
 

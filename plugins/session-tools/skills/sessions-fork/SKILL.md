@@ -36,8 +36,8 @@ One positional: the session to read — id, id-prefix, slug, or title. If it's m
 ## 1. Read it
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this session-tools plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 node "$PLUGIN_ROOT/scripts/export-session.mjs" "<target>" --format digest
 ```
 

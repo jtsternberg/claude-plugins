@@ -11,9 +11,9 @@ Create git worktrees in parallel directories with automatic symlinks to vendor, 
 ## Quick Reference
 
 ```bash
-# Resolve this once. Under Codex, replace the fallback with the absolute path
+# Resolve this once. Under Codex, replace ${CLAUDE_PLUGIN_ROOT} below with the absolute path
 # to this git-tree plugin root, which contains this skill's parent skills/ directory.
-GIT_TREE_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to the git-tree plugin root>}"
+GIT_TREE_ROOT="${CLAUDE_PLUGIN_ROOT}"
 "$GIT_TREE_ROOT/scripts/git-tree.sh" <branch-name> [--repo <path>] [--create]
 ```
 

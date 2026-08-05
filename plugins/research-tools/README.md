@@ -32,7 +32,7 @@ brew install node      # if npx isn't already on PATH
 
 ## Usage
 
-Once installed, invoke the skill with `/fetch-docs <url>` or let Claude trigger it when you ask for the raw page. Behind the scenes it runs the bundled `scripts/fetch-docs.sh`:
+Once installed, invoke the skill with `/research-tools:fetch-docs <url>` or let Claude trigger it when you ask for the raw page. Behind the scenes it runs the bundled `scripts/fetch-docs.sh`:
 
 ```bash
 # Raw HTML (default)

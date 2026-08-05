@@ -99,7 +99,7 @@ Common failure modes and how to recover from them.
 - Recovery: Run `hotline-pickup` with `--fresh` on the target workspace to regenerate:
   ```bash
   bash "$HOTLINE_DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
-    --prompt "/hotline-pickup --fresh"
+    --prompt "/hotline:hotline-pickup --fresh"
   ```
 
 ## General Principles

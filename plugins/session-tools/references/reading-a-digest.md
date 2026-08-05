@@ -4,8 +4,8 @@ Shared by `sessions-catch-up` and `sessions-fork`. Both run the same command and
 the same output; they differ only in what they do with it.
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this session-tools plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 node "$PLUGIN_ROOT/scripts/export-session.mjs" "<target>" --format digest --fast
 ```
 

@@ -1,13 +1,13 @@
 # Cron Management (macOS launchd)
 
-This document covers how `/sessions-weekly-recap` wraps `scripts/install_cron.sh` to manage a weekly launchd job. Load this file only when the user passes a cron flag (`--install-cron`, `--uninstall-cron`, `--cron-status`, `--cron-logs`, `--cron-run-now`). Otherwise ignore.
+This document covers how `/session-tools:sessions-weekly-recap` wraps `scripts/install_cron.sh` to manage a weekly launchd job. Load this file only when the user passes a cron flag (`--install-cron`, `--uninstall-cron`, `--cron-status`, `--cron-logs`, `--cron-run-now`). Otherwise ignore.
 
 ## What the cron does
 
 Fires on a weekly schedule (default: Monday 09:00) and runs:
 
 ```
-claude -p "/sessions-weekly-recap --weekly --output-dir \"<path>\"" --dangerously-skip-permissions
+claude -p "/session-tools:sessions-weekly-recap --weekly --output-dir \"<path>\"" --dangerously-skip-permissions
 ```
 
 `--dangerously-skip-permissions` is required because there's no TTY to approve tool calls. The job runs as your user with your existing Claude Code auth.
@@ -16,13 +16,16 @@ claude -p "/sessions-weekly-recap --weekly --output-dir \"<path>\"" --dangerousl
 
 When a cron flag is present, **skip the recap workflow in SKILL.md entirely**. Route to the installer script, run it, and report its stdout directly.
 
+Under Codex, replace `${CLAUDE_SKILL_DIR}` in the commands below with the
+directory containing the sessions-weekly-recap SKILL.md.
+
 | Skill flag | Script invocation |
 |---|---|
-| `--install-cron --output-dir "<path>" [--day <d>] [--time <t>]` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" install --output-dir "<path>" [--day <d>] [--time <t>]` |
-| `--uninstall-cron` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" uninstall` |
-| `--cron-status` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" status` |
-| `--cron-logs` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" logs` |
-| `--cron-run-now` | `SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this sessions-weekly-recap skill directory>}"; bash "$SKILL_DIR/scripts/install_cron.sh" run-now` |
+| `--install-cron --output-dir "<path>" [--day <d>] [--time <t>]` | `SKILL_DIR="${CLAUDE_SKILL_DIR}"; bash "$SKILL_DIR/scripts/install_cron.sh" install --output-dir "<path>" [--day <d>] [--time <t>]` |
+| `--uninstall-cron` | `SKILL_DIR="${CLAUDE_SKILL_DIR}"; bash "$SKILL_DIR/scripts/install_cron.sh" uninstall` |
+| `--cron-status` | `SKILL_DIR="${CLAUDE_SKILL_DIR}"; bash "$SKILL_DIR/scripts/install_cron.sh" status` |
+| `--cron-logs` | `SKILL_DIR="${CLAUDE_SKILL_DIR}"; bash "$SKILL_DIR/scripts/install_cron.sh" logs` |
+| `--cron-run-now` | `SKILL_DIR="${CLAUDE_SKILL_DIR}"; bash "$SKILL_DIR/scripts/install_cron.sh" run-now` |
 
 Rules:
 
@@ -76,4 +79,4 @@ Same actions, same behavior. Useful for CI scripts, dotfiles, or invocation from
 
 ## Platform support
 
-launchd is macOS-only. On Linux, `install_cron.sh` will fail at `launchctl`. If a user asks to install on Linux, tell them this and point them at `cron` / `systemd --user` as manual alternatives. The underlying `claude -p "/sessions-weekly-recap --weekly ..." --dangerously-skip-permissions` command works on any platform with Claude Code installed.
+launchd is macOS-only. On Linux, `install_cron.sh` will fail at `launchctl`. If a user asks to install on Linux, tell them this and point them at `cron` / `systemd --user` as manual alternatives. The underlying `claude -p "/session-tools:sessions-weekly-recap --weekly ..." --dangerously-skip-permissions` command works on any platform with Claude Code installed.

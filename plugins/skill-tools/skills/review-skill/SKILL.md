@@ -13,7 +13,9 @@ Look for the skill at the provided path, or in `.claude/skills/$ARGUMENTS/` or `
 
 ## Current Skills Documentation
 
-Skills docs cached at: !`SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this review-skill directory>}"; bash "$SKILL_DIR/scripts/fetch-docs.sh"`
+Codex: replace `${CLAUDE_SKILL_DIR}` below with the directory containing this SKILL.md.
+
+Skills docs cached at: !`SKILL_DIR="${CLAUDE_SKILL_DIR}"; bash "$SKILL_DIR/scripts/fetch-docs.sh"`
 
 Read the docs from that path. If the path doesn't exist or the file is empty, tell the user the docs URL is unreachable and stop.
 

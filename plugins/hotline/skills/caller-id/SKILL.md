@@ -13,8 +13,8 @@ Discover your own Claude Code session ID. Claude Code doesn't expose this native
 Resolve plugin paths first:
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this hotline plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 ```
 
@@ -27,8 +27,8 @@ This is a **two-step process** that requires **two separate Bash tool calls**. T
 ### Step 1: Check Cache or Plant Fingerprint
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this hotline plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")" && \
 bash "$HOTLINE_SCRIPTS/session-init.sh"
 ```
@@ -44,8 +44,8 @@ Parse the JSON output:
 **This MUST be a separate Bash tool call** — the transcript needs to flush between steps.
 
 ```bash
-# Codex: replace the fallback with the directory containing this plugin.
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this hotline plugin directory>}"
+# Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")" && \
 bash "$HOTLINE_SCRIPTS/session-init.sh" discover "<fingerprint>"
 ```

@@ -312,7 +312,7 @@ fi
 DISC_SID="eeeeeeee-1234-5678-9abc-def012345678"
 mkdir -p "$PROJECTS_ROOT/-tmp-discovered-ws"
 cat > "$PROJECTS_ROOT/-tmp-discovered-ws/${DISC_SID}.jsonl" <<'EOF'
-{"type":"user","cwd":"/tmp/discovered-ws","timestamp":"2026-07-02T11:00:00Z","message":{"role":"user","content":"/hotline-ringing [CALL_ID: abc123] [MODE: work_order] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] Please do the thing"}}
+{"type":"user","cwd":"/tmp/discovered-ws","timestamp":"2026-07-02T11:00:00Z","message":{"role":"user","content":"/hotline:hotline-ringing [CALL_ID: abc123] [MODE: work_order] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] Please do the thing"}}
 {"type":"assistant","cwd":"/tmp/discovered-ws","message":{"role":"assistant","content":[{"type":"text","text":"On it."}]}}
 EOF
 
@@ -329,6 +329,19 @@ if [[ $(echo "$DISC" | jq -r '.mode') == "work_order" && $(echo "$DISC" | jq -r 
   pass "discovery: mode/caller/callee parsed from handshake tags"
 else
   fail "discovery: mode/caller/callee parsed from handshake tags (got: $DISC)"
+fi
+
+# Existing transcripts may use Claude Code's legacy bare shorthand. Keep them
+# discoverable even though new Hotline prompts emit the canonical namespaced form.
+LEGACY_DISC_SID="dddddddd-1234-5678-9abc-def012345678"
+cat > "$PROJECTS_ROOT/-tmp-discovered-ws/${LEGACY_DISC_SID}.jsonl" <<'EOF'
+{"type":"user","cwd":"/tmp/discovered-ws","timestamp":"2026-07-02T10:00:00Z","message":{"role":"user","content":"/hotline-ringing [CALL_ID: legacy123] [MODE: quick_call] [CALLER: /tmp/legacy-caller] [SESSION: bbbbbbbb-1111-2222-3333-444444444444] Legacy call"}}
+EOF
+LEGACY_DISC=$(curl -sf "$BASE/api/calls" | jq -r --arg sid "$LEGACY_DISC_SID" '.calls[] | select(.callee.session_id==$sid)')
+if [[ -n "$LEGACY_DISC" && $(echo "$LEGACY_DISC" | jq -r '.caller.path') == "/tmp/legacy-caller" ]]; then
+  pass "discovery: legacy bare ringing handshake remains supported"
+else
+  fail "discovery: legacy bare ringing handshake remains supported"
 fi
 
 # Registry entries must NOT be duplicated by discovery (callee sid already known)
@@ -354,7 +367,7 @@ fi
 
 DIAL_SCRIPTS_DIR="$SCRIPT_DIR/../skills/dial/scripts"
 META_DIR=$(mktemp -d "$SANDBOX/callmeta.XXXX")
-RING_PROMPT="/hotline-ringing [CALL_ID: xyz] [MODE: quick_call] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] hello"
+RING_PROMPT="/hotline:hotline-ringing [CALL_ID: xyz] [MODE: quick_call] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] hello"
 bash "$DIAL_SCRIPTS_DIR/persist-call-meta.sh" "$META_DIR" "/tmp/reg-target-ws" "$RING_PROMPT"
 if [[ $(cat "$META_DIR/mode.txt" 2>/dev/null) == "quick_call" \
    && $(cat "$META_DIR/caller_session.txt" 2>/dev/null) == "aaaaaaaa-1111-2222-3333-444444444444" \

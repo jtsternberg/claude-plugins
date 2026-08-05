@@ -30,17 +30,19 @@ skill-loader change.
 - Ship Codex workflows as skills, not slash commands.
 - Keep hook paths anchored to `${CLAUDE_PLUGIN_ROOT}`; that variable is a hook
   contract, not a skill-body contract.
-- For a skill that runs a bundled script, use the Claude variable when it is
-  available and give Codex the absolute directory containing the current
-  `SKILL.md` as the fallback:
+- For a skill that runs a bundled script, keep Claude's exact substitution
+  token in executable text and tell Codex, in adjacent prose, to replace it
+  with the absolute directory containing the current `SKILL.md`:
 
   ```bash
-  SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute directory containing this SKILL.md>}"
+  # Codex: replace ${CLAUDE_SKILL_DIR} below with the directory containing this SKILL.md.
+  SKILL_DIR="${CLAUDE_SKILL_DIR}"
   bash "$SKILL_DIR/scripts/example.sh"
   ```
 
-  The fallback is resolved by the model from the installed file path, so it is
-  behaviorally testable but not a shell-provided variable.
+  Claude Code substitutes only the exact token; it does not export the variable
+  or substitute a compound `${VAR:-fallback}` expression. Codex substitutes
+  nothing, so the adjacent instruction preserves its model-resolved path.
 - Keep the highest-signal invocation terms in `description:`. Do not assume
   that supplemental frontmatter fields participate in Codex implicit matching.
 
