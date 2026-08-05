@@ -19,6 +19,7 @@ node_modules/
 # Temporary files
 *.tmp
 *.temp
+.env
 HANDOFF*.md
 .claude/settings.local.json
 .beads/backup
