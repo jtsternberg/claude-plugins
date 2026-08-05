@@ -73,7 +73,7 @@ Invoke the official skill-creator: `skill-creator:skill-creator` from the claude
 
 **Fallback:** if the `Skill` tool returns a concrete refusal error, switch to inline execution:
 
-1. Read `~/.claude/plugins/cache/claude-plugins-official/skill-creator/*/skills/skill-creator/SKILL.md` (glob the version segment).
+1. Locate the installed official `skill-creator` SKILL.md using the current harness's exposed skill catalog or installed-skill roots; do not assume a Claude-specific cache path.
 2. Follow its instructions directly in this conversation.
 
 Run skill-creator in **lightweight mode**: draft the skill and stop. The test-case / benchmark / description-optimization loops can be invoked separately when the user asks for them — review-skill (Step 3) handles the quality pass in this flow.
@@ -91,7 +91,7 @@ Record the final skill path — Step 3 needs it.
 
 `skill-tools:review-skill` has `disable-model-invocation: true`, which means the `Skill` tool cannot invoke it programmatically. Execute its flow inline instead — the orchestration still belongs to this wrapper.
 
-1. Read the review-skill instructions: `${CLAUDE_SKILL_DIR}/../review-skill/SKILL.md` (or resolve the absolute path under `plugins/skill-tools/skills/review-skill/SKILL.md`).
+1. Read the sibling `../review-skill/SKILL.md`, resolving it from the directory containing this SKILL.md (or resolve the absolute path under `plugins/skill-tools/skills/review-skill/SKILL.md`).
 2. Follow review-skill's Step 1 (fetch docs, read the new skill, note key areas).
 3. Follow review-skill's Step 2 — use `ultrathink` — and write the review to `/tmp/skill-review-{skill-name}.md`.
 4. Follow review-skill's Step 3 — use `ultrathink` — to challenge and refine the review.

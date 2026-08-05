@@ -2,7 +2,7 @@
 name: paperclip
 description: "Operate a locally-running Paperclip instance via the paperclipai CLI."
 disable-model-invocation: true
-allowed-tools: "Bash(paperclipai *), Bash(ls ~/.paperclip/instances/default/companies/*), Bash(find ~/.paperclip/instances/default/companies/*), Bash(${CLAUDE_SKILL_DIR}/scripts/*), Read, Edit"
+allowed-tools: "Bash(paperclipai *), Bash(ls ~/.paperclip/instances/default/companies/*), Bash(find ~/.paperclip/instances/default/companies/*), Bash(*/scripts/*), Read, Edit"
 ---
 
 # Paperclip Skill

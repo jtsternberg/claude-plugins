@@ -41,7 +41,15 @@ Sections, in order:
    - Written: <date -u +%Y-%m-%dT%H:%M:%SZ>
    ```
 
-8. **Session** — run `bash ${CLAUDE_SKILL_DIR}/scripts/session-info.sh`. If it prints JSON, include the `session_id` and `transcript_path` values here (they let the next agent grep this session's transcript). If it prints nothing, errors, or the script doesn't exist, omit this section silently — no placeholder, no apology.
+8. **Session** — run:
+
+   ```bash
+   # Codex: replace the fallback with the directory containing this SKILL.md.
+   SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this handoff skill directory>}"
+   bash "$SKILL_DIR/scripts/session-info.sh"
+   ```
+
+   If it prints JSON, include the `session_id` and `transcript_path` values here (they let the next agent grep this session's transcript). If it prints nothing, errors, or the script doesn't exist, omit this section silently — no placeholder, no apology.
 
 ## To resume (end every run with this)
 
