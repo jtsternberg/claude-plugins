@@ -42,11 +42,15 @@
 # in-pane claude REPL — only the raw byte via the text path clears it.) Callers
 # still route multi-line follow-ups to the fresh-surface fallback (which uses a
 # launch script); the single-line reuse path is the common case.
+#
+# NOTE: `cmux send` interprets the two-character sequences \n, \r and \t in its
+# text argument, and offers no way to escape a backslash — so the payload is
+# SPLIT so that no single argument ever contains one (claude-plugins-nofy).
 # =============================================================================
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
@@ -70,6 +74,38 @@ done
 fallback_fresh() {
   jq -n --arg reason "$1" '{fallback: "fresh", reason: $reason}'
   exit 0
+}
+
+# --- Delivering a payload through `cmux send` without escape mangling --------
+# `cmux send` documents "Escape sequences: \n and \r send Enter, \t sends Tab",
+# and there is NO backslash escape to opt out with. Verified live on cmux
+# 0.64.20 against a `cat > file` probe: `\\` arrives as TWO backslashes and
+# `\\n` arrives as one backslash + Enter, so doubling backslashes makes the
+# corruption worse rather than fixing it. What DOES work is denying the scanner
+# the two-character sequence in the first place: split the payload just after
+# each backslash that precedes n/r/t and send the pieces back to back. Each
+# `send` is its own bracketed paste appending at the cursor, so the box
+# accumulates the exact bytes (verified: send 'a\' then send 'nb' lands `a\nb`).
+#
+# `cmux set-buffer` + `paste-buffer` also delivers verbatim, but its --surface
+# resolution differs from `send`'s (a bare `surface:N` ref that `send` accepts
+# fails there with "Surface is not a terminal" unless --window is also passed),
+# so it would change targeting semantics for every caller. Splitting keeps the
+# proven targeting. (claude-plugins-nofy)
+CMUX_SEND_CHUNKS=()
+split_for_cmux_send() {
+  local rest="$1" head
+  CMUX_SEND_CHUNKS=()
+  while [[ "$rest" == *\\[nrt]* ]]; do
+    # %% strips the longest matching suffix, i.e. leaves the prefix up to the
+    # FIRST \n/\r/\t. The backslash goes out at the end of this chunk; the n/r/t
+    # starts the next one.
+    head="${rest%%\\[nrt]*}"
+    CMUX_SEND_CHUNKS+=("${head}\\")
+    rest="${rest:${#head}+1}"
+  done
+  [[ -n "$rest" ]] && CMUX_SEND_CHUNKS+=("$rest")
+  return 0
 }
 
 [[ -z "$SURFACE_REF" ]] && fallback_fresh "no surface_ref provided"
@@ -126,12 +162,21 @@ sleep 0.2
 # the input field, not a submit: the text lands but Enter never registers. So we
 # send the text and the Enter as two distinct steps, with a short settle so the
 # REPL finishes ingesting the paste before the submit key arrives (claude-plugins-5zhp).
-# On failure the surface likely died between the check and now — clean up and
-# fall back to a fresh surface.
-if ! SEND_OUTPUT=$(cmux send --surface "$SURFACE_REF" "$MSG" 2>&1); then
-  rm -rf "$CALL_DIR"
-  fallback_fresh "cmux send into surface $SURFACE_REF failed: $SEND_OUTPUT"
-fi
+#
+# The text goes out in one `send` per chunk (usually exactly one — the split only
+# kicks in for payloads containing a literal \n / \r / \t). `--` guards against a
+# payload that starts with a dash. On failure the surface likely died between the
+# check and now — clean up and fall back to a fresh surface.
+split_for_cmux_send "$MSG"
+for CHUNK in "${CMUX_SEND_CHUNKS[@]}"; do
+  if ! SEND_OUTPUT=$(cmux send --surface "$SURFACE_REF" -- "$CHUNK" 2>&1); then
+    rm -rf "$CALL_DIR"
+    fallback_fresh "cmux send into surface $SURFACE_REF failed: $SEND_OUTPUT"
+  fi
+  # Let the REPL ingest each paste before the next one appends to it. Skipped
+  # entirely in the single-chunk common case so the fast path stays fast.
+  if [[ ${#CMUX_SEND_CHUNKS[@]} -gt 1 ]]; then sleep 0.1; fi
+done
 sleep 0.2
 if ! SEND_OUTPUT=$(cmux send-key --surface "$SURFACE_REF" Enter 2>&1); then
   rm -rf "$CALL_DIR"
