@@ -319,9 +319,11 @@ REMOTE_SESSION_ID=$(jq -r '.session_id' "$CALL_DIR/response.json")
 RESPONSE=$(jq -r '.response' "$CALL_DIR/response.json")
 ```
 
-`wait-for-response.sh` stdout is guaranteed to be valid, compact JSON on exit 0 — or a non-zero exit with a clear error on stderr. Callers do not need to re-validate.
+`wait-for-response.sh` stdout is guaranteed to be valid, compact JSON on exit 0 **and on exit 4** — or, on any other non-zero exit, a clear error on stderr. Callers do not need to re-validate.
 
 **Exit 3 means the callee was reassigned**, not that it failed. A cmux call lands in a visible surface, so the user can type into that session — and the moment they give it another task, the STATUS line for your nonce is never coming. Rather than sit out the remaining timeout, the script bails immediately and writes `error.txt` naming the preempting prompt and the surface. Report that to the user plainly, and note that the work you asked for may well have completed anyway — read the callee's transcript or look at the surface before re-dialing. Do NOT silently re-issue the call.
+
+**Exit 4 means the reply is ready but the work order is not finished.** The callee emitted `STATUS: AWAITING_REVIEW` — it reported a checkpoint and is now idle waiting for your review or your next instruction. Read `.response` exactly as you would on exit 0; the JSON also carries `"awaiting_review": true`, which is the durable form of this signal since `$?` is gone by the time you read `response.json`. The surface and session are deliberately left **live** (whatever `keep_workspace.txt` says), so relay the report to the user and send the follow-up back into that same surface via `cmux-reuse-surface.sh` — do NOT open a new surface, and do NOT treat it as a failure or re-dial.
 
 **⚠️ Do not do this** — under zsh (the default shell on macOS, and the shell Claude Code's Bash tool runs in) the `echo`-pipe pattern corrupts any JSON with backslash escapes (`\n`, `\f`, `\u001b`, ...):
 
