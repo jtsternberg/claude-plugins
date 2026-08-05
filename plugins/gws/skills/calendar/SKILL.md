@@ -19,8 +19,15 @@ operations use the currently active gws account
 ## Prerequisites
 
 ```!
-gws auth status 2>&1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Authenticated as: {d.get(\"user\",\"unknown\")}')" 2>/dev/null || echo "NOT AUTHENTICATED — run: gws auth login"
+bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
 ```
+
+Trust this over a hand-rolled `gws auth status` check. `gws` prints
+`Using keyring backend: keyring` to **stderr on every call**, so the older
+`gws auth status 2>&1 | python3 -c '...json.load...'` form always hit a parse
+error and reported `NOT AUTHENTICATED` for perfectly good accounts. The script
+also distinguishes "no account selected" from "no credentials" — different
+problems with different fixes.
 
 ## Task
 
@@ -99,7 +106,23 @@ bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-list-calendars.sh \
 Marks the primary calendar with `★`. Use `--writable` to filter to
 calendars the active account can write to (owner/writer roles).
 
+### Check access to one calendar
+
+Before writing to a shared or group calendar, check the role directly instead
+of listing everything:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-list-calendars.sh \
+  --id "<calendarId>" [--json]
+```
+
+Prints `[accessRole] Summary (writable | READ-ONLY)`. Exits 1 with an
+explanation when the calendar isn't in the account's calendar list — usually
+"shared with a different account", not "doesn't exist".
+
 ### Create an event (optional)
+
+Timed event:
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-create-event.sh \
@@ -108,9 +131,53 @@ bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-create-event.sh \
   [--attendees=a@x.com,b@y.com] [--meet] [--tz=America/New_York] [--json]
 ```
 
+All-day event — pass **date-only** `--start` (no `--all-day` flag needed,
+though it exists for explicitness):
+
+```bash
+# Single day
+... --title "Offsite" --start 2026-09-28
+
+# Multi-day, inclusive last day (the human way)
+... --title "Conference" --start 2026-09-28 --through 2026-09-30
+
+# Multi-day, exclusive end (what the API itself takes)
+... --title "Conference" --start 2026-09-28 --end 2026-10-01
+```
+
+All-day and timed bounds cannot be mixed — Google rejects a `date` start with
+a `dateTime` end, and the script refuses it up front rather than letting the
+API return an opaque 400. `--tz` is ignored for all-day events (they carry no
+timezone by design). Google's `end` is **exclusive**; `--through` exists so you
+don't have to remember that.
+
 `--meet` auto-generates a Google Meet link. When `--attendees` is set, the
 event is sent with `sendUpdates=all`. Confirm with the user before running
 this — event creation is a write operation.
+
+### When the helper can't express what you need
+
+The scripts cover the common cases; `gws` reaches the whole API. For anything
+they don't model — recurrence (`RRULE`), reminder overrides, extended
+properties, guest permissions, transparency/visibility — build the body
+yourself and call the CLI directly:
+
+```bash
+gws calendar events insert \
+  --params '{"calendarId":"<id>"}' \
+  --json '{"summary":"...","start":{"date":"2026-09-28"},"end":{"date":"2026-09-29"},
+           "recurrence":["RRULE:FREQ=WEEKLY;COUNT=4"]}'
+```
+
+`gws calendar --help` and `gws calendar events --help` list every subcommand.
+
+Expect malformed bodies to come back as a bare
+`{"code":400,"message":"Bad Request","reason":"badRequest"}` with no field
+detail. Nothing surfaces more: `GOOGLE_WORKSPACE_CLI_LOG=gws=trace` and
+`GOOGLE_WORKSPACE_CLI_LOG_FILE` both log the same reduced object, so re-read
+your body shape rather than hunting for a better message. (Whether Google sent
+richer detail that gws dropped is untested — a raw-token comparison against the
+REST endpoint would settle it.)
 
 ## Example output
 
@@ -130,9 +197,12 @@ so the user can decide whether to attend.
 
 ## Edge cases
 
-- **No active account / not authenticated.** The script exits with an
-  instruction to run `gws auth login` or to switch accounts via the
-  gws-account skill.
+- **No active account vs. not authenticated.** Two different problems.
+  `auth-preflight.sh` names which one it is: no `.active` file with other
+  authed accounts present means *select* one (`account-switch.sh <label>`),
+  not re-run OAuth. It also warns when calls are silently going to the
+  default config because nothing is selected — the usual cause of "I created
+  that event on the wrong account."
 - **Recurring events.** List output surfaces the specific instance id
   (`<series>_<UTC-stamp>`), not the series. Use that instance id with
   `calendar-get-event.sh`.
@@ -141,6 +211,17 @@ so the user can decide whether to attend.
   `--json` output and filter on the `declined` field.
 - **Events with no conference link.** Output says `(no conference link)`
   so it's obvious why a link wasn't returned.
+- **Deleted events still resolve by id.** `events.get` returns a deleted event
+  with `status: "cancelled"` rather than a 404, so a `get` after a delete looks
+  like the delete failed. Output flags these `[CANCELLED]` (`cancelled: true`
+  in `--json`). To confirm a deletion, check that flag — not the absence of
+  output. A second `delete` on the same id returns `410 deleted`, which is also
+  confirmation, not an error to fix.
+- **`gws calendar events delete` writes a stray `download.html`.** The API
+  answers with `204 No Content`; gws treats the empty body as a download and
+  saves it into the current working directory, reporting
+  `{"saved_file": "download.html", "status": "success"}`. The delete itself
+  works. Remove the file afterward, or `cd` somewhere disposable first.
 - **Different account needed.** If the calendar belongs to another
   Google account, switch first via the gws-account skill, then re-run.
 
