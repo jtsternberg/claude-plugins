@@ -56,4 +56,3 @@ The current six patterns name a runtime-variable path. Under Codex, the fallback
 ### Safety judgment
 
 **Blocked pending that matcher probe.** The `.3` migration cannot safely proceed with the current six patterns: their compatibility with expanded runtime variables is undocumented, and replacing them with path-generic wildcards broadens the pre-approved `Bash` scope. Any implementation would need the applicable `allowed-tools` changes in the same change, followed by a real Claude Code permission test of the exact emitted commands.
-
