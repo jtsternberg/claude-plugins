@@ -104,6 +104,121 @@ RESP=$(bash "$SCRIPT" "$F" "$NONCE" 2>/dev/null | jq -r '.response' 2>/dev/null)
   || fail "correlates on our nonce only" "resp=$RESP"
 rm -f "$F"
 
+# ---- queued follow-ups (claude-plugins-1jpz) ---------------------------------
+# A message sent into a REPL that is mid-turn is ENQUEUED, and claude then
+# delivers it one of two ways. Record shapes below are copied from a live
+# 2.1.221 transcript (only the prompt text and ids are substituted), because
+# neither path writes a `type:"user"` record at delivery time in path (a).
+#
+#   (a) tool-boundary injection — the queued text is handed to the model INSIDE
+#       the busy turn as an `attachment` record whose `.attachment.type` is
+#       "queued_command". No user record is ever written, yet the model answers.
+#   (b) turn-end flush — the queue drains after the turn ends as a genuine
+#       `type:"user"` record (already covered by the cases above).
+ENQUEUE='{"type":"queue-operation","operation":"enqueue","timestamp":"2026-08-04T22:14:36.125Z","sessionId":"sess-1","content":"[CALL_ID: '"$NONCE"'] please help"}'
+DEQUEUE='{"type":"queue-operation","operation":"remove","timestamp":"2026-08-04T22:14:38.681Z","sessionId":"sess-1","content":"[CALL_ID: '"$NONCE"'] please help"}'
+QUEUED_ATTACH='{"parentUuid":"cf341cc5-f248-4a10-abee-e89efca05220","isSidechain":false,"attachment":{"type":"queued_command","prompt":"[CALL_ID: '"$NONCE"'] please help","commandMode":"prompt","origin":{"kind":"human"},"timestamp":"2026-08-04T22:14:36.125Z"},"type":"attachment","uuid":"7b3e5d13-7ca1-4f8b-8be2-99bc9d5f5f64","timestamp":"2026-08-04T22:14:36.125Z","session_id":"sess-1","userType":"external","entrypoint":"cli","cwd":"/tmp/ws","sessionId":"sess-1","version":"2.1.221","gitBranch":"HEAD"}'
+
+# Case 8: path (a) end to end — enqueue, mid-turn injection, answer. Never a
+# user record, so this used to report exit 11 (never submitted) for a call the
+# receiver had already ANSWERED.
+F=$(mkf "$ENQUEUE
+$DEQUEUE
+$QUEUED_ATTACH
+$WIP
+$BODY")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
+RESP=$(printf '%s' "$OUT" | jq -r '.response' 2>/dev/null)
+SID=$(printf '%s' "$OUT" | jq -r '.session_id' 2>/dev/null)
+[[ $RC -eq 0 && "$RESP" == *"the real answer line 1"* ]] \
+  && pass "queued_command injection (no user record) → exit 0 with the body" \
+  || fail "queued_command injection → exit 0 with the body" "rc=$RC out=$OUT"
+[[ "$SID" == "sess-1" ]] && pass "session_id read from the queued-command path" \
+  || fail "session_id read from the queued-command path" "sid=$SID"
+rm -f "$F"
+
+# Case 9: enqueued but not yet delivered → submitted, still working (exit 10).
+# The enqueue record lands the instant the REPL accepts the keystrokes, so it is
+# proof of submit even before either delivery path resolves.
+F=$(mkf "$ENQUEUE")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1
+[[ $? -eq 10 ]] && pass "queue-operation enqueue alone → exit 10 (submitted, queued)" \
+  || fail "queue-operation enqueue alone → exit 10" "got exit $?"
+rm -f "$F"
+
+# Case 10: injected mid-turn, no answer yet → exit 10.
+F=$(mkf "$ENQUEUE
+$QUEUED_ATTACH")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1
+[[ $? -eq 10 ]] && pass "queued_command with no answer yet → exit 10" \
+  || fail "queued_command with no answer yet → exit 10" "got exit $?"
+rm -f "$F"
+
+# Case 11: the receiver's own STATUS for our call_id is itself proof the message
+# arrived — a completed answer must never be reported as never-submitted, even
+# if every submit record is missing (truncated/rotated transcript).
+F=$(mkf "$BODY")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
+RESP=$(printf '%s' "$OUT" | jq -r '.response' 2>/dev/null)
+[[ $RC -eq 0 && "$RESP" == *"the real answer line 1"* ]] \
+  && pass "assistant STATUS for our call_id alone → exit 0 (never 'not submitted')" \
+  || fail "assistant STATUS for our call_id alone → exit 0" "rc=$RC out=$OUT"
+rm -f "$F"
+
+# Case 12: only the prose from OUR injection point onward counts. The busy turn
+# that swallowed our message keeps emitting its own prose after the enqueue, and
+# that prose belongs to the previous task.
+PRIOR='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"prior-turn prose that must NOT leak"}]}}'
+F=$(mkf "$ENQUEUE
+$PRIOR
+$QUEUED_ATTACH
+$BODY")
+RESP=$(bash "$SCRIPT" "$F" "$NONCE" 2>/dev/null | jq -r '.response' 2>/dev/null)
+[[ "$RESP" == *"the real answer line 1"* && "$RESP" != *"prior-turn prose"* ]] \
+  && pass "prose before the injection point does not leak into the body" \
+  || fail "prose before the injection point does not leak" "resp=$RESP"
+rm -f "$F"
+
+# Case 13: a SIBLING call's queued command is not our submission.
+OTHER_ATTACH='{"isSidechain":false,"attachment":{"type":"queued_command","prompt":"[CALL_ID: ffff0000ffff0000] different call","commandMode":"prompt","origin":{"kind":"human"}},"type":"attachment","sessionId":"sess-1"}'
+F=$(mkf "$OTHER_ATTACH")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1
+[[ $? -eq 11 ]] && pass "another call's queued_command is not our submission" \
+  || fail "another call's queued_command is not our submission" "got exit $?"
+rm -f "$F"
+
+# Case 14: a sidechain (subagent) attachment is not the main REPL accepting our
+# message — the same exclusion the response body already applies.
+SIDE_ATTACH='{"isSidechain":true,"attachment":{"type":"queued_command","prompt":"[CALL_ID: '"$NONCE"'] please help","commandMode":"prompt"},"type":"attachment","sessionId":"sess-1"}'
+F=$(mkf "$SIDE_ATTACH")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1
+[[ $? -eq 11 ]] && pass "sidechain queued_command is not counted as submission" \
+  || fail "sidechain queued_command is not counted as submission" "got exit $?"
+rm -f "$F"
+
+# Case 15: preemption still fires on the queued path — a human prompt after our
+# injection means our STATUS is never coming.
+F=$(mkf "$ENQUEUE
+$QUEUED_ATTACH
+{\"type\":\"assistant\",\"isSidechain\":false,\"sessionId\":\"sess-1\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}
+{\"type\":\"user\",\"isSidechain\":false,\"sessionId\":\"sess-1\",\"message\":{\"content\":\"forget that, do the PSR4 migration\"}}")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>/dev/null); RC=$?
+[[ $RC -eq 12 && "$OUT" == *"PSR4"* ]] \
+  && pass "preemption still detected after a queued-command injection" \
+  || fail "preemption still detected after a queued-command injection" "rc=$RC out=$OUT"
+rm -f "$F"
+
+# Case 16: tool_result user records inside the swallowing turn are not preemption
+# (path (a) injects at a tool boundary, so these always surround our record).
+F=$(mkf "$ENQUEUE
+{\"type\":\"user\",\"isSidechain\":false,\"sessionId\":\"sess-1\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t0\",\"content\":\"file1\"}]}}
+$QUEUED_ATTACH
+$WIP")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1
+[[ $? -eq 10 ]] && pass "tool_result records around the injection are not preemption" \
+  || fail "tool_result records around the injection are not preemption" "got exit $?"
+rm -f "$F"
+
 echo ""
 echo "transcript-extract: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then printf '  - %s\n' "${FAILED[@]}"; exit 1; fi

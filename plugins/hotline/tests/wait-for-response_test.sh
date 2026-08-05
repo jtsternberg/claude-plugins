@@ -600,6 +600,69 @@ else
 fi
 rm -rf "$H5" "$CD5" "$SD5" "$H6" "$CD6" "$SD6"
 
+# ---- queued follow-ups (claude-plugins-1jpz) -------------------------------
+# A follow-up sent while the callee is mid-turn is ENQUEUED, and claude delivers
+# it one of two ways: (a) injected into the SAME turn at the next tool boundary
+# as an `attachment` record of type "queued_command" — no user record is EVER
+# written, yet the model answers it; or (b) flushed after turn end as a genuine
+# user record. Correlating on user records only made path (a) look like a
+# never-submitted message the receiver had already answered.
+echo ""
+echo "Queued follow-up delivery:"
+
+# Record shapes copied from a live 2.1.221 transcript.
+Q_ENQ='{"type":"queue-operation","operation":"enqueue","timestamp":"2026-08-04T22:14:36.125Z","sessionId":"sess-tcm","content":"[CALL_ID: '"$TNONCE"'] do the thing"}'
+Q_ATT='{"parentUuid":"cf341cc5-f248-4a10-abee-e89efca05220","isSidechain":false,"attachment":{"type":"queued_command","prompt":"[CALL_ID: '"$TNONCE"'] do the thing","commandMode":"prompt","origin":{"kind":"human"},"timestamp":"2026-08-04T22:14:36.125Z"},"type":"attachment","uuid":"7b3e5d13-7ca1-4f8b-8be2-99bc9d5f5f64","timestamp":"2026-08-04T22:14:36.125Z","sessionId":"sess-tcm","version":"2.1.221","gitBranch":"HEAD"}'
+
+# CASE 4 — path (a) end to end: the answer must come back on exit 0, promptly,
+# with no user record anywhere in the transcript.
+CT4=$(setup_transcript_call \
+"$Q_ENQ
+$Q_ATT
+{\"type\":\"assistant\",\"isSidechain\":false,\"sessionId\":\"sess-tcm\",\"message\":{\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"STATUS: WORK_IN_PROGRESS call_id=$TNONCE\nqueued-injection answer\nSTATUS: DONE call_id=$TNONCE\"}]}}")
+H7=${CT4%%|*}; r7=${CT4#*|}; CD7=${r7%%|*}; SD7=${r7#*|}
+START7=$SECONDS
+set +e
+OUT7=$(HOME="$H7" PATH="$SD7:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD7" --timeout 20 --submit-deadline 4 2>/dev/null)
+RC7=$?
+set -e
+EL7=$((SECONDS - START7))
+if [[ $RC7 -eq 0 && $EL7 -lt 15 ]] && [[ "$(printf '%s' "$OUT7" | jq -r .response 2>/dev/null)" == *"queued-injection answer"* ]]; then
+  pass "mid-turn injection with no user record → returns the answer (${EL7}s)"
+else
+  fail "mid-turn injection with no user record → returns the answer" "rc=$RC7 elapsed=${EL7}s out=$OUT7"
+fi
+rm -rf "$H7" "$CD7" "$SD7"
+
+# CASE 5 — a queued message is RENDERED on the callee's screen while it waits,
+# so the input-box discriminator would call it "unsubmitted" if the enqueue
+# record didn't already prove otherwise. It must stay patient and never blame
+# the transport.
+D4=$(setup_discrim_call "$Q_ENQ" \
+"╭──────────────────────────────────────╮
+│ >                                    │
+╰──────────────────────────────────────╯
+  ⏵⏵ queued: [CALL_ID: $TNONCE] do the thing" true)
+H8=${D4%%|*}; r8=${D4#*|}; CD8=${r8%%|*}; SD8=${r8#*|}
+START8=$SECONDS
+set +e
+ERR8=$(HOME="$H8" PATH="$SD8:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD8" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
+RC8=$?
+set -e
+EL8=$((SECONDS - START8))
+if printf '%s' "$ERR8" | grep -qi "input box"; then
+  fail "queued-and-visible → must not be blamed on the input box" "err=$ERR8"
+else
+  pass "queued-and-visible → not blamed on the input box"
+fi
+if [[ $RC8 -ne 0 && $EL8 -ge 10 ]]; then
+  pass "queued-and-visible → waits out the timeout as submitted work (${EL8}s of 12s)"
+else
+  fail "queued-and-visible → waits out the timeout as submitted work" \
+    "rc=$RC8 elapsed=${EL8}s err=$ERR8"
+fi
+rm -rf "$H8" "$CD8" "$SD8"
+
 # ---- summary ---------------------------------------------------------------
 
 echo ""

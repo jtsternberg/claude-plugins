@@ -20,16 +20,19 @@
 #   - `.isSidechain == true` marks subagent turns — excluded so a spawned
 #     agent's chatter never pollutes the response.
 #   - `.sessionId` is on every event.
+#   - A message typed into a REPL that is mid-turn is QUEUED, and claude records
+#     that as `type:"queue-operation"` (`operation:"enqueue"`, text in
+#     `.content`). See the two delivery paths below.
 # The receiver still brackets its answer with the ringing protocol's
 # `STATUS: WORK_IN_PROGRESS call_id=<nonce>` … `STATUS: <terminal> call_id=<nonce>`
 # sentinels; we apply that same bracketing to the structured text.
 #
 # Exit codes (the contract wait-for-response.sh polls on):
 #   0  — turn complete: prints {"session_id":"…","response":"…"} (compact JSON)
-#   10 — submitted (a user event carries the nonce) but no terminal STATUS yet
+#   10 — submitted (see SUBMIT EVIDENCE) but no terminal STATUS yet
 #        → caller keeps waiting patiently (model is working)
-#   11 — not submitted yet (no user event carries the nonce)
-#        → caller fails fast once its submit-deadline passes
+#   11 — no submit evidence for the nonce anywhere in the transcript
+#        → caller consults the callee's input box before concluding anything
 #   12 — PREEMPTED: no terminal STATUS, and a genuine human prompt arrived after
 #        our turn, so it is never coming. The preempting prompt (200 chars) goes
 #        to stdout. → caller stops waiting instead of sitting out its timeout.
@@ -47,6 +50,32 @@
 # commands (/model, /clear) are type:"system" subtype:"local_command" rather than
 # user records, so they are out of scope for free — right for /model, a known miss
 # for /clear, which the timeout still catches.
+#
+# SUBMIT EVIDENCE — WHY A `user` RECORD IS NOT THE ONLY PROOF (claude-plugins-1jpz)
+# A message typed into a REPL that is already mid-turn does NOT produce a user
+# record at submit time. It is enqueued, and claude then delivers it one of two
+# ways (both observed live on 2.1.221):
+#   (a) TOOL-BOUNDARY INJECTION — if the busy turn hits another tool call, the
+#       queued text is handed to the model INSIDE that same turn as
+#       `type:"attachment"` with `.attachment.type == "queued_command"` and the
+#       text in `.attachment.prompt` (parentUuid = the tool_result). NO
+#       `type:"user"` record is EVER written for it, yet the model reads and
+#       answers it — measured 8ms after the boundary.
+#   (b) TURN-END FLUSH — if the turn makes no further tool call, the queue drains
+#       after it ends as a genuine `type:"user"` record (+5.5s measured).
+# Correlating on user records alone therefore reported "never submitted" for
+# path (a) messages the receiver had already ANSWERED. So four things count as
+# proof, in this precedence order (the winner also anchors where the response
+# body starts, so prose from the swallowed prior task cannot leak in):
+#   1. a `user` record carrying the nonce            (paths: idle send, and (b))
+#   2. a `queued_command` attachment carrying it     (path (a) delivery)
+#   3. the receiver's own `STATUS: … call_id=<nonce>` — an answer in hand is
+#      proof of receipt no matter which records are missing
+#   4. the `enqueue` record — written the instant the REPL accepts the
+#      keystrokes, so it proves submit before either path resolves
+# 3 is deliberately ranked above 4: it is the later, tighter anchor. The enqueue
+# lands mid-prior-turn, so anchoring there would splice that turn's tail onto our
+# response body.
 #
 # WHY THIS STAYS jq AND SELF-CONTAINED (claude-plugins-wn09)
 # The obvious-looking cleanup is to retire this in favour of session-tools'
@@ -76,22 +105,53 @@ NONCE="${2:-}"
 }
 [[ -r "$TRANSCRIPT" ]] || { echo "transcript not readable: $TRANSCRIPT" >&2; exit 1; }
 
-# One jq slurp pass: locate the first user event carrying the nonce, then gather
-# every non-sidechain assistant TEXT block at or after it, in order, joined with
-# newlines. Emits a small JSON object we finish parsing in bash.
-#   .submitted  — did any user event carry the nonce?
-#   .session_id — the nonce user event's session (fallback: last seen)
-#   .text       — concatenated assistant prose after the nonce user event
+# One jq slurp pass: locate the record that proves our message reached the
+# callee (see SUBMIT EVIDENCE in the header), then gather every non-sidechain
+# assistant TEXT block from there on, in order, joined with newlines. Emits a
+# small JSON object we finish parsing in bash.
+#   .submitted  — does ANY submit evidence carry the nonce?
+#   .session_id — the anchor record's session (fallback: last seen)
+#   .text       — concatenated assistant prose from the anchor record onward
 PARSED=$(jq -s -c --arg nonce "$NONCE" '
-  (map(.type == "user"
-       and ((.message.content | tostring) | test("CALL_ID: " + $nonce)))
-   | index(true)) as $ui
+  ("CALL_ID: " + $nonce) as $tag
+  | ("call_id=" + $nonce) as $stag
+  # (1) a genuine user record carrying the nonce — an idle-REPL send, or a
+  #     queued follow-up flushed after the busy turn ended (delivery path (b)).
+  | (map(.type == "user"
+         and ((.message.content | tostring) | test($tag)))
+     | index(true)) as $ui
+  # (2) a queued follow-up injected into the busy turn at a tool boundary
+  #     (delivery path (a)). No user record accompanies this one, ever.
+  | (map(.type == "attachment"
+         and ((.isSidechain // false) != true)
+         and (((.attachment // {}) | if type == "object" then . else {} end)
+              | (.type == "queued_command")
+                and (((.prompt // "") | tostring) | test($tag))))
+     | index(true)) as $qi
+  # (3) the receiver naming our call_id in its own STATUS line. An answer in hand
+  #     outranks any missing bookkeeping record.
+  | (map(.type == "assistant"
+         and ((.isSidechain // false) != true)
+         and (([.message.content[]? | select(.type == "text") | .text] | join("\n"))
+              | test("STATUS: [A-Z_]+ " + $stag)))
+     | index(true)) as $ai
+  # (4) the enqueue record — the REPL accepted the keystrokes, delivery pending.
+  | (map(.type == "queue-operation"
+         and (.operation == "enqueue")
+         and (((.content // "") | tostring) | test($tag)))
+     | index(true)) as $ei
+  | ([$ui, $qi] | map(select(. != null)) | min) as $di
+  | ($di // $ai // $ei) as $ui
   | if $ui == null then
       {submitted: false, session_id: "", text: "", preempt: ""}
     else
       {submitted: true,
        session_id: (.[$ui].sessionId // (map(.sessionId // empty) | last) // ""),
-       text: ([ .[$ui + 1:][]
+       # From the anchor INCLUSIVE: when the anchor is the receivers own STATUS
+       # record (evidence 3) the answer lives in that record. Anchors of the
+       # other three kinds are not assistant records, so including them is a
+       # no-op here.
+       text: ([ .[$ui:][]
                 | select(.type == "assistant" and (.isSidechain != true))
                 | .message.content[]?
                 | select(.type == "text")
@@ -99,8 +159,9 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
               | join("\n")),
        # First genuine human prompt after our turn, if any — see the preemption
        # note in the header. tool_result records contribute no text blocks, so
-       # they drop out here without a special case.
-       preempt: ([ .[$ui + 1:][]
+       # they drop out here without a special case. Our own anchor record is
+       # excluded by the nonce test below.
+       preempt: ([ .[$ui:][]
                    | select(.type == "user")
                    | select((.isMeta // false) != true)
                    | select((.isSidechain // false) != true)

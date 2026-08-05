@@ -38,8 +38,9 @@
 # Exit codes:
 #   0 — response received (valid JSON on stdout)
 #   1 — error (timeout, remote failure, unparseable response.json, or — in
-#       transcript mode — no user event carrying the nonce within
-#       --submit-deadline, i.e. the message never submitted; message on stderr)
+#       transcript mode — no submit evidence for the nonce within
+#       --submit-deadline while the text sits visibly in the callee's input box;
+#       message on stderr)
 #   3 — PREEMPTED: the callee was handed a different task mid-call, so its STATUS
 #       for this nonce is never coming. error.txt names the preempting prompt and
 #       the surface to look at. The work may have completed anyway.
@@ -57,10 +58,12 @@ TRANSCRIPT_PATH_SH="$SELF_DIR/../../../scripts/transcript-path.sh"
 CALL_DIR="${1:-}"
 TIMEOUT=""
 POLL_INTERVAL=2
-# Transcript mode: how long to wait for a `user` event carrying the nonce before
-# concluding the message never submitted. The event appears within ~1-2s of a
-# real submit, so this is deliberately short — it separates "never submitted"
-# (fast-fail) from "submitted, model working" (patient until --timeout).
+# Transcript mode: how long to wait for the transcript to show ANY evidence the
+# nonce reached the callee (user record, queued-command injection, enqueue, or a
+# STATUS naming our call_id — see transcript-extract.sh) before asking the input
+# box what happened. Evidence appears within ~1-2s of a real submit, so this is
+# deliberately short — it separates "sitting in the prompt box" (fast-fail) from
+# "submitted, model working" (patient until --timeout).
 SUBMIT_DEADLINE=15
 
 if [[ -z "$CALL_DIR" || ! -d "$CALL_DIR" ]]; then
@@ -181,9 +184,12 @@ if $CMUX_MODE; then
   # mid-turn is QUEUED and its event only lands when that turn ends. A callee
   # working a long task therefore has no upper bound worth hard-coding.
   #
-  # We only ever ask this when NO user event carries the nonce, which is what
-  # makes the check sound: a submitted message renders into the transcript, so
-  # if the nonce is on screen with no user event, it is still in the prompt box.
+  # We only ever ask this when the transcript shows NO submit evidence at all,
+  # which is what makes the check sound: a submitted message renders into the
+  # transcript, so if the nonce is on screen with nothing behind it, it is still
+  # in the prompt box. Note a QUEUED message is also drawn on screen while it
+  # waits — that used to read here as "unsubmitted", and the enqueue record now
+  # rules it out before we ever look. (claude-plugins-1jpz)
   # Returns 0 = visibly unsubmitted, 1 = not visible, 2 = could not look.
   nonce_visible_in_input_box() {
     [[ -z "$CALL_ID" ]] && return 2
@@ -241,7 +247,7 @@ if $CMUX_MODE; then
           cat "$CALL_DIR/error.txt" >&2
           exit 3
           ;;
-        11)                       # no user event carries the nonce yet
+        11)                       # nothing in the transcript carries the nonce yet
           if ! $T_SUBMITTED && [[ $T_ELAPSED -ge $SUBMIT_DEADLINE ]]; then
             # The deadline alone proves nothing (mo8m). Ask the input box, which
             # is the only thing that can actually tell the two cases apart.
@@ -250,10 +256,12 @@ if $CMUX_MODE; then
             BOX_RC=$?
             set -e
             if [[ $BOX_RC -eq 0 ]]; then
-              # EVIDENCE: our text is on the callee's screen and no user event
-              # exists for it, so it is sitting in the prompt box unsubmitted.
+              # EVIDENCE: our text is on the callee's screen and the transcript
+              # holds no record of it arriving — not a user record, not a
+              # queued-command injection, not even an enqueue — so it is sitting
+              # in the prompt box unsubmitted.
               {
-                echo "Message is still sitting UNSUBMITTED in the callee's input box after ${SUBMIT_DEADLINE}s — call_id=$CALL_ID is visible on screen but no user event carries it ($TRANSCRIPT_PATH)."
+                echo "Message is still sitting UNSUBMITTED in the callee's input box after ${SUBMIT_DEADLINE}s — call_id=$CALL_ID is visible on screen but nothing in the transcript carries it: no user record, no queued-command injection, no enqueue ($TRANSCRIPT_PATH)."
                 echo "This is a transport failure, not a problem with your message content — escaping/quoting is almost never the cause."
                 echo "Send Enter to the surface (cmux send-key --surface $WS_REF Enter) rather than re-sending the text, which would append to what is already in the box. Or re-dial via a fresh surface."
               } >&2
@@ -262,9 +270,9 @@ if $CMUX_MODE; then
               exit 1
             fi
             # Not visible, or we could not look: a follow-up sent while the callee
-            # was mid-turn is QUEUED and its user event only lands when that turn
-            # ends, so this is indistinguishable from a slow submit. Do not assert
-            # a cause and do not give up — stay patient until --timeout.
+            # was mid-turn is QUEUED, and if the enqueue record has not landed yet
+            # this is indistinguishable from a slow submit. Do not assert a cause
+            # and do not give up — stay patient until --timeout.
             if ! $SUBMIT_UNCONFIRMED; then
               SUBMIT_UNCONFIRMED=true
               if [[ $BOX_RC -eq 2 ]]; then
@@ -288,7 +296,7 @@ if $CMUX_MODE; then
         # transport either. Report both live possibilities and how to settle it,
         # rather than picking one the script cannot observe (mo8m).
         {
-          echo "Timed out after ${TIMEOUT}s in transcript mode with NO submit confirmation — no user event ever carried call_id=$CALL_ID ($TRANSCRIPT_PATH)."
+          echo "Timed out after ${TIMEOUT}s in transcript mode with NO submit confirmation — nothing in the transcript ever carried call_id=$CALL_ID: no user record, no queued-command injection, no enqueue ($TRANSCRIPT_PATH)."
           echo "Could not confirm whether the message submitted: it may still be queued behind a long turn, or it may never have submitted. The script cannot tell these apart from timing alone."
           echo "To check: cmux read-screen --surface $WS_REF — if your text is sitting in the input box it never submitted; if the callee is mid-turn it was queued. Do NOT blindly re-dial; that risks double-queueing the same work."
         } > "$CALL_DIR/error.txt"
