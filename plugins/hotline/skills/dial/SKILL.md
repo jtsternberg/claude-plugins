@@ -147,7 +147,7 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 - **Exit 0**: CMUX is available. Use it for every mode.
 - **Exit 1**: CMUX not available (or `HOTLINE_FORCE_HEADLESS=1` is set in the env). Fall back to headless for every mode.
 
-> **Tip:** If the `/cmux-cli:using-cmux-cli` skill is available in this session, invoke it before firing a CMUX-routed call. It documents the workspace/surface/tty semantics, the `cmux send` escape rules (`\n` = Enter), and the focus-required-to-spawn-tty quirk that this transport depends on — using it helps you reason about connection failures rather than guessing.
+> **Tip:** If the `/cmux-cli:using-cmux-cli` skill is available in this session, invoke it before firing a CMUX-routed call. It documents the workspace/surface/tty semantics, the `cmux send` escape rules (`\n` = Enter **against a shell only** — never into a live claude REPL, and a literal `\n` inside a payload gets rewritten in transit), and the focus-required-to-spawn-tty quirk that this transport depends on — using it helps you reason about connection failures rather than guessing.
 
 > **Architecture note:** Under cmux's default `access_mode=cmuxOnly`, a detached background process (reparented to PID 1) cannot talk to cmux — every `cmux read-screen` call returns "Broken pipe". So `cmux-call-async.sh` does NOT run its own background poller. Instead, the polling lives in `wait-for-session.sh` and `wait-for-response.sh` — those scripts run as direct children of your bash (which is cmux-spawned), so they keep cmux access. The contract is: launcher returns `call_dir` immediately; you call `wait-for-session.sh` to confirm the receiver REPL booted; you call `wait-for-response.sh` to wait for STATUS and get the response back. Both scripts auto-detect cmux vs. headless mode via the presence of `workspace_ref.txt` in the call_dir.
 
@@ -352,7 +352,7 @@ bash "$HOTLINE_DIAL_SCRIPTS/check-cmux.sh"
 
 ##### Reuse the existing surface (preferred, cmux only)
 
-If cmux is up (`check-cmux.sh` exit 0) **and** you parsed a non-empty `surface_ref` **and** `$YOUR_MESSAGE` is a single logical line, route this message INTO the surface the session already occupies — don't open a new one. The surface holds a live, idle claude REPL for that exact session, so we just type the next message into it. (For a multi-line message, skip straight to the fresh-surface path below — it hands the prompt to a launch script as an argument, so newlines never go through keystroke simulation at all. See the note under the snippet for why.)
+If cmux is up (`check-cmux.sh` exit 0) **and** you parsed a non-empty `surface_ref` **and** `$YOUR_MESSAGE` is a single logical line, route this message INTO the surface the session already occupies — don't open a new one. The surface holds a live claude REPL for that exact session, so we just type the next message into it. The REPL does **not** have to be idle: a message typed into a busy REPL is enqueued, not lost (see below). (For a multi-line message, skip straight to the fresh-surface path below — it hands the prompt to a launch script as an argument, so newlines never go through keystroke simulation at all. See the note under the snippet for why.)
 
 ```bash
 # $REMOTE_SESSION_ID and $SURFACE_REF come from Step 4's session-cache.sh get JSON.
@@ -369,17 +369,34 @@ if [[ -n "$CALL_DIR" ]]; then
   # (its fresh call_id nonce ignores the prior turn's STATUS lines in scrollback).
   :
 else
-  # {"fallback":"fresh"} — the surface was closed/gone. Fall through to the
-  # open-a-new-surface path below.
+  # {"fallback":"fresh"} — the surface is gone, OR it isn't accepting the
+  # message right now: parked text in the input box while the REPL is busy, a
+  # post-interrupt screen, or a Ctrl-C clear that didn't take. Read `.reason`.
+  # Fall through to the open-a-new-surface path below.
   :
 fi
 ```
 
-Keep follow-up messages to a single logical line when reusing. Note what an embedded newline does **not** do: it does not submit early. A newline bundled into a `cmux send` payload reaches claude's Ink REPL through bracketed paste, so it lands as a **literal line break in the input box and no submit ever registers** — which is exactly why `cmux-reuse-surface.sh` sends the text and `cmux send-key Enter` as two separate steps with a settle between them (claude-plugins-5zhp, verified live on claude v2.1.216).
+**The script never interrupts the callee to make room for your message.** Leftover text in the box would prepend to what we type, so a clear still exists — but it is conditional: empty box (idle *or* busy) → no Ctrl-C, send and submit; parked text + provably quiet REPL → Ctrl-C, then **re-read** and require an empty box before typing; parked text + busy, or a post-interrupt screen → send nothing, return `{"fallback":"fresh"}`. The old unconditional `0x03` was harmful three verified ways: mid-tool-call it destroys the callee's in-flight tool call, during the pre-tool thinking phase it restores the just-submitted prompt into the box (so the follow-up welds onto its tail and resubmits as one corrupted turn), and at an idle prompt it does not reliably empty the box anyway. Sending text + Enter into a *busy* REPL, by contrast, is safe — claude enqueues it.
 
-The single-line rule survives for a different reason: that settle is a fixed `sleep 0.2`, verified sufficient for a one-line paste and never verified for a long multi-line one. If Enter lands mid-paste the failure mode is a *partial* submit — half a message runs as a real turn, which is harder to notice than a message that plainly never submitted. The fresh-surface path has no such race, so route multi-line follow-ups there.
+Keep follow-up messages to a single logical line when reusing. Note what an embedded newline does **not** do: it does not submit early. A newline bundled into a `cmux send` payload reaches claude's Ink REPL through bracketed paste, so it lands as a **literal line break in the input box and no submit ever registers** — stored as CR (`0x0D`), not LF. That is why `cmux-reuse-surface.sh` sends the text and `cmux send-key Enter` as two separate steps with a settle between them, and the two-step is confirmed rather than inferred: a ~124 B two-line payload with a trailing `\n` produced zero user events for 10 s, and a separate `send-key Enter` then submitted it complete (claude-plugins-5zhp / -8bfd, verified on claude 2.1.221 / cmux 0.64.20).
 
-**If a reused-surface follow-up seems to vanish** — no reply, and no new user turn in the callee's transcript — suspect the transport, not your message content. Escaping/quoting of the message body is almost never the cause. Check with `cmux read-screen --surface "$SURFACE_REF"`: an unsubmitted message is sitting visibly in the REPL's input box.
+The single-line rule survives for reasons that have nothing to do with payload size. **There is no size threshold** — 12 controlled sends from 507 B to 16 KB, including 66-line multi-line payloads, each landed as exactly one complete turn. What goes wrong is sporadic and unpredictable:
+
+- the settle is a fixed `sleep 0.2`, verified sufficient for a one-line paste and never for a long multi-line one; an Enter landing mid-paste submits *half* a message as a real turn, which is harder to notice than one that plainly never submitted;
+- a send has been observed **fragmenting into 3–7 separately submitted turns** in real traffic, while refusing to reproduce across those 12 controlled trials;
+- and one of those 12 **silently lost 2,538 contiguous middle bytes** from a 3,045 B payload — one user event, no error, the bytes provably absent from the entire transcript (a separate ~16 KB single-line trial lost 3,066).
+
+None of that is size-gated, the trigger is unknown, and the rate isn't bounded by the data we have. So treat exit 0 as "bytes reached the PTY" and nothing more: the proof of delivery is the call's nonce turning up in the callee's transcript or on its screen, which is exactly what `wait-for-response.sh` correlates on. Route multi-line follow-ups through the fresh-surface path — it passes the prompt to a launch script as an argument, so no keystroke simulation is involved at all.
+
+A payload that *contains* the literal two characters `\n`, `\r`, or `\t` is a separate hazard: `cmux send` interprets those sequences in its argument and offers no backslash escape (`\\` arrives as two backslashes), so prose about escape handling or a snippet carrying one is rewritten in transit. `cmux-reuse-surface.sh` defends against this by splitting the payload just after each backslash that precedes `n`/`r`/`t` and sending the pieces back to back — each `send` appends at the cursor, so the box accumulates the exact bytes.
+
+**If a reused-surface follow-up seems to vanish** — no reply, and no new user turn in the callee's transcript — suspect the transport, not your quoting. For **plain text**, escaping/quoting of the message body is never the cause; the one real content hazard is the literal `\n`/`\r`/`\t` sequence above, and the reuse script already handles it. Two things that are also **not** proof of a failed send:
+
+- **A missing user record.** A message typed into a busy REPL is enqueued, and claude may deliver it *inside* the running turn at its next tool boundary as a `queued_command` attachment — which writes no user record at all, even though the callee reads and answers it. (`transcript-extract.sh` counts that, the receiver's own `STATUS:` line, and the `enqueue` record as delivery evidence for this reason.)
+- **Text visible in the input box.** A queued message is drawn there while it waits, alongside `Press up to edit queued messages`.
+
+So check with `cmux read-screen --surface "$SURFACE_REF"` and read the whole screen: text in the box with a *quiet* REPL and no queued-message line is genuinely unsubmitted — send `send-key Enter`, don't re-send the text (it appends). Text in the box with a live spinner is a queued message that already landed; pressing Enter there risks a double submit.
 
 ##### Open a new surface / session (fallback)
 

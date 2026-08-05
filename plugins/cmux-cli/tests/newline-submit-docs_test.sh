@@ -15,6 +15,16 @@
 # So this is deliberately a canary at string altitude: it catches the claim
 # being reversed or the diagnostic being dropped. It does not simulate cmux.
 # Keep it that way — the behavior test is the other file's job.
+#
+# It has since grown to pin the three corrections that followed, because each
+# one replaced a WRONG-but-plausible sentence and could plausibly come back:
+#   - no ~269-byte fragmentation threshold: fragmentation and silent byte loss
+#     are sporadic and not size-gated, so delivery must be verified (-8bfd)
+#   - `cmux send` rewrites a literal \n/\r/\t in the payload and has no
+#     backslash escape, so "escaping is never the cause" must be scoped to
+#     plain text (-nofy)
+#   - a busy REPL enqueues the message, so neither a missing user record nor
+#     text sitting in the input box proves a failed send (-1jpz)
 # =============================================================================
 set -u
 
@@ -71,16 +81,29 @@ done
 
 # --- 3. The symptom + the diagnostic (what cost session e1df4967 time) ------
 # Escaping is the wrong conclusion an outside caller reaches; both docs must say
-# so, and both must name read-screen as the check.
+# so, and both must name read-screen as the check. But the claim has to be
+# SCOPED: `cmux send` really does rewrite a literal \n/\r/\t in the payload
+# (claude-plugins-nofy, commit 896e860), so a blanket "escaping is almost never
+# the cause" is now false. Require every such sentence to say "plain text".
 for f in "$CMUX_DOC" "$DIAL_DOC"; do
   rel="${f#$ROOT/}"
-  # Phrasing-tolerant on purpose: the two docs word this differently
-  # ("Escaping is almost never…" vs "Escaping/quoting of the message body is…").
+  # Phrasing-tolerant on purpose: the two docs word this differently.
   # Assert the claim is present, not how it reads.
-  grep -qiE 'escap[a-z]*.*almost never the cause' "$f" \
-    && pass "$rel rules out escaping as the cause" \
-    || fail "$rel rules out escaping as the cause" \
-            "expected an explicit 'escaping is almost never the cause'"
+  CAUSE_LINES=$(grep -niE 'never the cause' "$f" || true)
+  if printf '%s' "$CAUSE_LINES" | grep -qiE 'escap'; then
+    pass "$rel rules out escaping as the cause"
+  else
+    fail "$rel rules out escaping as the cause" \
+      "expected an explicit 'escaping … never the cause'"
+  fi
+
+  UNSCOPED=$(printf '%s' "$CAUSE_LINES" | grep -iE 'escap' | grep -viE 'plain text' || true)
+  if [[ -z "$UNSCOPED" ]]; then
+    pass "$rel scopes that claim to plain text"
+  else
+    fail "$rel scopes that claim to plain text" \
+      "cmux DOES rewrite a literal \\n/\\r/\\t in the payload:"$'\n'"$UNSCOPED"
+  fi
 
   grep -q 'read-screen' "$f" \
     && pass "$rel names read-screen as the check" \
@@ -95,6 +118,13 @@ grep -qiE 'unconditional' "$CMUX_DOC" \
   && pass "cmux-cli doc names the inlined help's unconditional claim" \
   || fail "cmux-cli doc names the inlined help's unconditional claim" \
           "the override must contradict the inlined --help, not merely sit next to it"
+
+# Naming it is not enough — the prose has to say cmux's sentence is WRONG for a
+# REPL, so a reader who sees both in one page knows which one loses.
+grep -qiE '(is|are) (wrong|false|incorrect|not true) for a' "$CMUX_DOC" \
+  && pass "cmux-cli doc declares the inlined help wrong for a TUI/Ink REPL" \
+  || fail "cmux-cli doc declares the inlined help wrong for a TUI/Ink REPL" \
+          "expected prose stating cmux's own sentence is wrong/false for a REPL target"
 
 grep -qE '^#### Gotcha: a trailing' "$CMUX_DOC" \
   && pass "cmux-cli doc has the canonical gotcha heading" \
@@ -126,6 +156,105 @@ else
   fail "gotcha heading slug matches the anchor the links use" \
     "heading slugifies to '$DERIVED' but links point at '$GOTCHA_ANCHOR'"
 fi
+
+# --- 6. No size threshold may come back (claude-plugins-8bfd) ---------------
+# An intermediate reading of the forensics claimed multi-line payloads over
+# ~269 bytes FRAGMENT into many submitted turns. A controlled run refuted it: 0
+# fragmentation in 12 sends, 507B-16KB. ~269 was just the label of the smallest
+# failing rung, with size and line count confounded. The docs must frame both
+# fragmentation and byte loss as SPORADIC and not size-gated, and must tell the
+# reader to verify delivery rather than trust exit 0.
+for f in "$CMUX_DOC" "$DIAL_DOC"; do
+  rel="${f#$ROOT/}"
+
+  THRESHOLD=$(grep -niE '(~|over |above |than )269|269[ -]?(byte|b\b)' "$f" || true)
+  if [[ -z "$THRESHOLD" ]]; then
+    pass "$rel encodes no ~269-byte threshold"
+  else
+    fail "$rel encodes no ~269-byte threshold" \
+      "refuted by 12 controlled sends (507B-16KB, 0 fragmentation):"$'\n'"$THRESHOLD"
+  fi
+
+  grep -qiE 'no size threshold|(never|not|no|neither|nor|isn.t|aren.t)[^.]*size[- ]gated' "$f" \
+    && pass "$rel says the failure is not size-gated" \
+    || fail "$rel says the failure is not size-gated" \
+            "expected 'no size threshold' / 'not size-gated'"
+
+  grep -qi 'sporadic' "$f" \
+    && pass "$rel frames the failure as sporadic, not deterministic" \
+    || fail "$rel frames the failure as sporadic, not deterministic"
+
+  grep -qiE 'fragment' "$f" \
+    && pass "$rel documents the fragmentation-into-multiple-turns mode" \
+    || fail "$rel documents the fragmentation-into-multiple-turns mode"
+
+  grep -qiE '(lost|loss of|silent[a-z]* lost) [0-9,]* ?(contiguous )?(middle )?bytes|byte loss' "$f" \
+    && pass "$rel documents the silent byte-loss mode" \
+    || fail "$rel documents the silent byte-loss mode"
+
+  grep -qi 'nonce' "$f" \
+    && pass "$rel tells the caller to verify delivery with a nonce" \
+    || fail "$rel tells the caller to verify delivery with a nonce"
+done
+
+# --- 7. The literal \n/\r/\t payload hazard (claude-plugins-nofy) ------------
+# `cmux send` interprets those two-char sequences in its argument and has NO
+# backslash escape, so a payload CONTAINING one is mangled by design. Both docs
+# must say so, and cmux-cli must carry the canonical block the others point at.
+for f in "$CMUX_DOC" "$DIAL_DOC"; do
+  rel="${f#$ROOT/}"
+  grep -qE 'no backslash escape|offers NO backslash|two backslashes' "$f" \
+    && pass "$rel states there is no backslash escape" \
+    || fail "$rel states there is no backslash escape" \
+            "expected the '\\\\ arrives as two backslashes' fact"
+
+  grep -qiE 'split[a-z]* the payload' "$f" \
+    && pass "$rel names the split-the-payload workaround" \
+    || fail "$rel names the split-the-payload workaround"
+done
+
+BS_ANCHOR="gotcha-cmux-rewrites-a-literal-backslash-n-in-your-payload"
+grep -qE '^#### Gotcha: cmux rewrites a literal backslash-n' "$CMUX_DOC" \
+  && pass "cmux-cli doc has the canonical backslash-rewrite gotcha heading" \
+  || fail "cmux-cli doc has the canonical backslash-rewrite gotcha heading"
+
+BS_DERIVED=$(grep -E '^#### Gotcha: cmux rewrites a literal backslash-n' "$CMUX_DOC" \
+  | head -1 \
+  | sed -e 's/^#*[[:space:]]*//' \
+        -e 's/[`\\]//g' \
+        -e 's/[^[:alnum:][:space:]-]//g' \
+        -e 's/[[:space:]]\{1,\}/-/g' \
+  | tr '[:upper:]' '[:lower:]')
+if [[ "$BS_DERIVED" == "$BS_ANCHOR" ]]; then
+  pass "backslash-rewrite heading slug matches the anchor the links use"
+else
+  fail "backslash-rewrite heading slug matches the anchor the links use" \
+    "heading slugifies to '$BS_DERIVED' but links point at '$BS_ANCHOR'"
+fi
+
+BS_LINKS=$(grep -c "#$BS_ANCHOR" "$CMUX_DOC" || true)
+if [[ "$BS_LINKS" -ge 2 ]]; then
+  pass "cmux-cli doc cross-references the backslash-rewrite gotcha ($BS_LINKS)"
+else
+  fail "cmux-cli doc cross-references the backslash-rewrite gotcha" \
+    "found $BS_LINKS links to #$BS_ANCHOR, expected >= 2"
+fi
+
+# --- 8. Queued delivery: absence of a user record proves nothing -------------
+# A message sent into a BUSY repl is enqueued and may be injected into the
+# running turn as a queued_command attachment — no user record is ever written
+# (claude-plugins-1jpz / commit 5a1e6dc). Both docs must stop treating "no user
+# event" and "text in the box" as proof of a failed send.
+for f in "$CMUX_DOC" "$DIAL_DOC"; do
+  rel="${f#$ROOT/}"
+  grep -qE 'queued_command' "$f" \
+    && pass "$rel names the queued_command attachment path" \
+    || fail "$rel names the queued_command attachment path"
+
+  grep -qiE 'Press up to edit queued|queued message is (also )?drawn|drawn (there|in the box)' "$f" \
+    && pass "$rel warns a queued message renders in the input box too" \
+    || fail "$rel warns a queued message renders in the input box too"
+done
 
 echo ""
 echo "newline-submit-docs: $PASS passed, $FAIL failed"

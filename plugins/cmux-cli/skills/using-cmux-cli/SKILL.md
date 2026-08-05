@@ -239,13 +239,13 @@ printf '%s\n' "$out" | grep -qF 'Press up to edit queued'   && echo "QUEUED — 
 cmux send --help
 ```
 
-Escape sequences matter: `\n` and `\r` send Enter; `\t` sends Tab. **Against a shell**, if a command should actually execute, append `\n` — otherwise you're just typing into the prompt. **Against a live TUI/Ink REPL (`claude`) the `\n` does not submit at all** — see [a trailing `\n` does not submit into a TUI/Ink REPL](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl) below before sending into one.
+Escape sequences matter: `\n` and `\r` send Enter; `\t` sends Tab. **Against a shell**, if a command should actually execute, append `\n` — otherwise you're just typing into the prompt. **Against a live TUI/Ink REPL (`claude`) the `\n` does not submit at all** — see [a trailing `\n` does not submit into a TUI/Ink REPL](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl) below before sending into one. And because that interpretation runs on your argument regardless of target, a payload whose *content* carries the two characters `\n`, `\r`, or `\t` is rewritten in transit — see [cmux rewrites a literal backslash-n in your payload](#gotcha-cmux-rewrites-a-literal-backslash-n-in-your-payload).
 
 **Always `read-screen` after `send` to confirm execution started — not just that the send succeeded.** `cmux send` returns success when bytes are delivered to the PTY; it has no opinion about whether the remote shell did anything with them. Concrete failure mode: if you `send` into a freshly-created surface before its shell has finished initializing, the trailing `\n` gets swallowed by the shell's startup output and the command sits at the prompt unexecuted. Exit code 0, nothing happened. (That is a *shell-startup* race, fixed by waiting for the PTY. A live TUI REPL produces the identical "exit 0, nothing happened" symptom from a different cause that waiting will never fix — see the [gotcha below](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl).) The only way to know is to read the screen back and look for evidence the command ran (output, new prompt line, process spinning). See the [default recipe](#default-principle-make-new-work-visible-to-the-user) for the wait-for-PTY pattern, and Troubleshooting for the `Terminal surface not found` variant. **Caveat:** the read-back only proves anything if it reflects the *live* bottom — if the user has scrolled the surface up, your capture is stale (see [read-screen returns the scrolled viewport](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom) before concluding nothing happened).
 
 #### Gotcha: a trailing `\n` does not submit into a TUI/Ink REPL
 
-**The inlined `cmux send --help` above states the rule unconditionally — "Escape sequences: `\n` and `\r` send Enter." That holds for a shell and is false for a live TUI/Ink REPL** (Claude Code, and anything else reading input via bracketed paste). cmux is describing the bytes it writes to the PTY, not what the program on the other end does with them. A shell reads the PTY byte-by-byte, so CR is a submit. An Ink REPL receives the whole payload wrapped in a bracketed paste and treats everything inside it as *content* — so your `\n` lands as a **literal line break in the input box, and nothing submits**. Verified live against Claude Code v2.1.216.
+**The inlined `cmux send --help` above states the rule unconditionally — "Escape sequences: `\n` and `\r` send Enter." That sentence is wrong for a TUI/Ink REPL** (Claude Code, and anything else reading input via bracketed paste); it holds only against a shell. Trust this section over the inlined help when the target is a REPL. cmux is describing the bytes it writes to the PTY, not what the program on the other end does with them. A shell reads the PTY byte-by-byte, so CR is a submit. An Ink REPL receives the whole payload wrapped in a bracketed paste and treats everything inside it as *content* — so your `\n` lands as a **literal line break in the input box, and nothing submits** (stored as CR, `0x0D`, not LF). Verified live against Claude Code v2.1.216 and re-verified on 2.1.221 / cmux 0.64.20: a ~124 B two-line payload with a trailing `\n` produced **zero** user events for 10 s, and a separate `send-key Enter` then submitted it complete.
 
 Split the rule by target:
 
@@ -261,7 +261,9 @@ cmux send-key --surface "$SID" Enter     # a real key event, outside the paste �
 
 `send-key Enter` works precisely because it arrives as a key event rather than paste content. Keep the settle: an Enter landing mid-paste submits a *partial* message, which is worse than not submitting at all — you get a real answer to a truncated question.
 
-**The symptom, and why it misleads.** An unsubmitted message is invisible from outside the surface. `cmux send` exits 0 (the bytes *were* delivered), and since the REPL never started a turn, **no user event appears in the target session's transcript at all**. From the caller's side that looks exactly like the message was mangled in transit — which reads as an escaping/quoting bug in your content (backticks, `$`, quotes). It isn't; the text arrived intact. Escaping is almost never the cause. Suspect the transport first.
+**The symptom, and why it misleads.** An unsubmitted message is invisible from outside the surface. `cmux send` exits 0 (the bytes *were* delivered), and since the REPL never started a turn, no user event appears in the target session's transcript. From the caller's side that looks like the message was mangled in transit — which reads as an escaping/quoting bug in your content (backticks, `$`, quotes). For **plain text it is never the cause**: the bytes arrive intact. The one real content hazard is narrow and different — a payload containing the literal two-character sequences `\n`/`\r`/`\t`, which cmux rewrites before delivery ([next gotcha](#gotcha-cmux-rewrites-a-literal-backslash-n-in-your-payload)). Anything else: suspect the transport.
+
+**A missing user event is not proof of non-submission either.** Text sent into a REPL that is mid-turn is *enqueued*, not dropped, and claude 2.1.221 then delivers it one of two ways: injected into the running turn at its next tool boundary as an `attachment` with `.attachment.type == "queued_command"` — in which case **no user record is ever written, even though the model reads and answers it** — or flushed as a genuine user record after that turn ends. So the transcript can show nothing for a message that already got an answer.
 
 **How to check** — `read-screen` after the send, before concluding anything:
 
@@ -270,7 +272,30 @@ cmux send --surface "$SID" "$MSG"
 cmux read-screen --surface "$SID"   # text still in the input box, or did a turn start?
 ```
 
-If the text is sitting in the prompt box and the REPL is idle, it never submitted: send `Enter` via `send-key`. Do **not** re-send the text — it appends to what's already in the box (clear it first per the `C-c` gotcha below).
+Text in the box **plus a quiet REPL** (no live spinner, no `Press up to edit queued messages`) is the unsubmitted case: send `Enter` via `send-key`. Do **not** re-send the text — it appends to what's already in the box (and see the `C-c` gotcha below before trying to clear it). Text in the box with a spinner running is the *queued* case — a waiting message is drawn in the box exactly like an unsubmitted one, so screen text alone never proves non-submission, and pressing Enter there risks a double submit.
+
+**Delivery is sporadically lossy — verify anything that matters.** Two failure modes are forensically confirmed on claude 2.1.221 / cmux 0.64.20, and **neither is size-gated**, so there is no payload size below which the check is safe to skip:
+
+- **Fragmentation.** A single text-then-Enter send has arrived as 3–7 separately submitted turns in real traffic. It is not predictable: 12 controlled sends from 507 B to 16 KB, including 66-line multi-line payloads, fragmented **zero** times.
+- **Silent byte loss.** One of those same 12 sends lost 2,538 contiguous bytes out of the middle of a 3,045 B payload — one user event, no error, the bytes provably absent from the whole transcript. A separate ~16 KB single-line send lost 3,066 bytes.
+
+The trigger is unknown and the rate is unbounded by the data we have. `send` exiting 0 means bytes reached the PTY and nothing more, so put a nonce in anything that matters and confirm the nonce landed in the target's transcript or on its screen before acting as though it did.
+
+#### Gotcha: cmux rewrites a literal backslash-n in your payload
+
+The escape scanner runs on your argument whatever the target is, so a payload whose *content* includes the two characters backslash-n — prose about escape handling, a code snippet, a Windows path — does not arrive intact. Verified byte-for-byte on cmux 0.64.20 by piping a probe into `cat > file` and diffing:
+
+| sent | arrives as |
+|---|---|
+| `\n` / `\r` | Enter |
+| `\t` | Tab |
+| `\\` | **two** backslashes — there is no backslash escape |
+| `\\n` | one backslash + Enter |
+| `\qj` | literally `\qj` (only `n`/`r`/`t` are special) |
+
+So doubling the backslash makes the corruption worse, and `--` only stops a leading dash being read as a flag. What works is denying the scanner the two-character sequence: **split the payload just after each backslash that precedes `n`, `r`, or `t`, and send the pieces back to back.** Each `send` is its own bracketed paste appending at the cursor, so the box accumulates the exact bytes (`send 'a\'` then `send 'nb'` lands `a\nb`).
+
+`set-buffer` + `paste-buffer` also delivers verbatim, but its `--surface` resolution differs from `send`'s — a bare `surface:N` ref that `send` accepts fails there with "Surface is not a terminal" unless `--window` is also passed — so it changes targeting semantics for every caller. hotline's `cmux-reuse-surface.sh` uses the split.
 
 ### Send a single key (modifiers, arrows, ctrl-combos)
 
@@ -290,7 +315,20 @@ To clear or interrupt a claude REPL's prompt box, send the raw Ctrl-C byte (`0x0
 cmux send --surface "$SID" --workspace "$WS" $'\003'
 ```
 
-This reliably clears whatever is half-typed in the input box regardless of cursor position or multi-line content. This matters whenever you type a command into a live claude REPL (e.g. a slash command or a follow-up): if the box already holds leftover input, your text gets prepended to it and the intended command silently never runs. Send `$'\003'` first, then type. (Note: this quirk is specific to Claude Code's Ink/bracketed-paste REPL — for an ordinary shell, `send-key C-c` works fine.)
+That is the only path that gets a Ctrl-C into the REPL at all. (The quirk is specific to Claude Code's Ink/bracketed-paste REPL — for an ordinary shell, `send-key C-c` works fine.)
+
+**But it is neither a reliable clear nor a safe one.** Verified on claude 2.1.221:
+
+- At an **idle** prompt it usually clears the box — not always. It registered ("Press Ctrl-C again to exit" appeared) while leaving the previous text on screen, and in another trial a single `0x03` *restored* an earlier input into a box that had just been typed into. If you clear, **re-read the screen and require an empty box before typing.** Never assume the clear took.
+- **Mid-tool-call it destroys the callee's in-flight tool call** (forensically confirmed: an interrupt record landed 82 s into a running 300 s `Bash` call).
+- During the pre-tool **thinking** phase it writes no interrupt record but restores the just-submitted prompt back into the input box, so anything you then type welds onto its tail and resubmits as one corrupted turn (2/2 trials).
+
+**Withhold the interrupt, not the message.** Sending text + `send-key Enter` into a *busy* REPL is safe — claude enqueues it and delivers it at the next tool boundary or after the turn ends. So the clear is only worth it when the box holds parked text **and** the REPL is provably quiet; parked text on a busy REPL means do something else (hotline's `cmux-reuse-surface.sh` returns a fresh-surface fallback). An empty box needs no clear at all, busy or idle.
+
+Two things that make those judgements possible off `read-screen`:
+
+- **Busy needs two signals**, because neither holds alone: "esc to interrupt" is absent in claude 2.1.221, and the spinner's wording changes between releases — but a *running* spinner always carries a live elapsed-time parenthetical (`✶ Dilly-dallying… (5s · ↓ 124 tokens · …)`) where a finished one does not (`✻ Baked for 12s`). Corroborate with screen-byte-identity across a short window (~0.6 s) when the cost is justified. Bias both signals toward "busy" — a needless fallback beats a destroyed turn.
+- **Reading the input box** has a precise discriminator: the box pads its `❯` with a NO-BREAK SPACE (U+00A0), while the transcript echoes of earlier user turns above it use a plain space. Fall back to "last `❯` line wins" on versions that don't. An untouched REPL's greyed placeholder (`Try "how does …"`) renders *inside an empty box* and `read-screen` strips the colour, so match it by shape and treat it as empty.
 
 ### Split the current pane
 
