@@ -98,7 +98,7 @@ message naming which rungs were tried and why each failed.
 ## Prerequisites (rung 1)
 
 ```!
-gws auth status 2>&1 || echo "NOT AUTHENTICATED — run: gws auth login"
+bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
 ```
 
 ## Task (rung 1)

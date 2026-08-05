@@ -39,7 +39,10 @@ if [[ ! -f "$FILE" ]]; then
 fi
 
 # Check gws auth
-if ! gws auth status >/dev/null 2>&1; then
+GWS_PREFLIGHT="$SCRIPT_DIR/../../../scripts/auth-preflight.sh"
+if [[ -f "$GWS_PREFLIGHT" ]]; then
+  bash "$GWS_PREFLIGHT" --quiet || exit 1
+elif ! gws auth status >/dev/null 2>&1; then
   echo "ERROR: gws not authenticated. Run: gws auth login" >&2
   exit 1
 fi
