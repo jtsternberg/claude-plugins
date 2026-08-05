@@ -104,7 +104,7 @@ function readHead(file, bytes) {
 function parseRingingHandshake(file, sessionId) {
   let head;
   try { head = readHead(file, HEAD_BYTES); } catch { return null; }
-  if (!/\/(?:hotline:)?hotline-ringing\b/.test(head)) return null;
+  if (!/\/(?:hotline-ringing|hotline:(?:hotline-ringing|ringing))\b/.test(head)) return null;
   const mode = (head.match(/\[MODE: ([a-z_]+)\]/) || [])[1];
   const callerPath = (head.match(/\[CALLER: ([^\]]+)\]/) || [])[1];
   const callerSid = (head.match(/\[SESSION: ([A-Za-z0-9-]+)\]/) || [])[1];

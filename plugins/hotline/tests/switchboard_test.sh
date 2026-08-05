@@ -344,6 +344,18 @@ else
   fail "discovery: legacy bare ringing handshake remains supported"
 fi
 
+# Claude Code also accepts the plugin namespace plus the skill directory name.
+DIRECTORY_DISC_SID="cccccccc-1234-5678-9abc-def012345678"
+cat > "$PROJECTS_ROOT/-tmp-discovered-ws/${DIRECTORY_DISC_SID}.jsonl" <<'EOF'
+{"type":"user","cwd":"/tmp/discovered-ws","timestamp":"2026-07-02T09:00:00Z","message":{"role":"user","content":"/hotline:ringing [CALL_ID: directory123] [MODE: quick_call] [CALLER: /tmp/directory-caller] [SESSION: cccccccc-1111-2222-3333-444444444444] Directory-name call"}}
+EOF
+DIRECTORY_DISC=$(curl -sf "$BASE/api/calls" | jq -r --arg sid "$DIRECTORY_DISC_SID" '.calls[] | select(.callee.session_id==$sid)')
+if [[ -n "$DIRECTORY_DISC" && $(echo "$DIRECTORY_DISC" | jq -r '.caller.path') == "/tmp/directory-caller" ]]; then
+  pass "discovery: plugin namespace plus skill directory name remains supported"
+else
+  fail "discovery: plugin namespace plus skill directory name remains supported"
+fi
+
 # Registry entries must NOT be duplicated by discovery (callee sid already known)
 DUP_COUNT=$(echo "$DISC_CALLS" | jq --arg sid "$CALLEE_SID" '[.calls[] | select(.callee.session_id==$sid)] | length')
 if [[ "$DUP_COUNT" == "1" ]]; then
@@ -354,7 +366,7 @@ fi
 
 # Non-hotline transcripts are ignored
 PLAIN_SID="ffffffff-0000-1111-2222-333333333333"
-echo '{"type":"user","cwd":"/tmp/discovered-ws","message":{"role":"user","content":"just a normal session"}}' \
+echo '{"type":"user","cwd":"/tmp/discovered-ws","message":{"role":"user","content":"/ringing [MODE: quick_call] [CALLER: /tmp/not-hotline] [SESSION: 11111111-2222-3333-4444-555555555555] must not match"}}' \
   > "$PROJECTS_ROOT/-tmp-discovered-ws/${PLAIN_SID}.jsonl"
 FOUND_PLAIN=$(curl -sf "$BASE/api/calls" | jq -r --arg sid "$PLAIN_SID" '[.calls[] | select(.callee.session_id==$sid)] | length')
 if [[ "$FOUND_PLAIN" == "0" ]]; then
