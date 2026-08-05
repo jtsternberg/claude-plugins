@@ -25,6 +25,8 @@
 #
 # Output (stdout, both modes):
 #   {"session_id":"...","response":"..."}
+# plus, on exit 4 only, an additive `"awaiting_review":true` — every other status
+# emits byte-identical JSON to before.
 #
 # The emitted JSON is compact (single line) and re-validated via jq before
 # being written to stdout — so stdout is guaranteed to be parseable JSON on
@@ -36,14 +38,29 @@
 # call_dir/response.json file directly.
 #
 # Exit codes:
-#   0 — response received (valid JSON on stdout)
+#   0 — response received, call finished (valid JSON on stdout)
 #   1 — error (timeout, remote failure, unparseable response.json, or — in
-#       transcript mode — no user event carrying the nonce within
-#       --submit-deadline, i.e. the message never submitted; message on stderr)
+#       transcript mode — no submit evidence for the nonce within
+#       --submit-deadline while the text sits visibly in the callee's input box;
+#       message on stderr)
 #   3 — PREEMPTED: the callee was handed a different task mid-call, so its STATUS
 #       for this nonce is never coming. error.txt names the preempting prompt and
 #       the surface to look at. The work may have completed anyway.
 #       (claude-plugins-dvjo)
+#   4 — AWAITING_REVIEW: response received, but the work order is NOT finished —
+#       the callee reported a checkpoint and is idle waiting for your review or
+#       follow-up. Same valid JSON on stdout as exit 0, plus
+#       `"awaiting_review": true`; the surface/session is deliberately left LIVE
+#       (never closed, whatever keep_workspace.txt says) so you can reply into it
+#       via cmux-reuse-surface.sh. Not a failure. (claude-plugins-n4vy)
+#
+# Why 4 exists: "is the work finished" and "is the reply ready" are separate
+# facts, and the protocol used to have one word for both. A callee doing step 1
+# of 3 with a report-and-hold instruction could only honestly say
+# WORK_IN_PROGRESS — which is exactly what this script treats as "keep polling".
+# Observed live: the waiter blocked past its 600s tool timeout, was backgrounded,
+# and had to be killed while the finished report sat complete in the callee's
+# transcript. WORK_IN_PROGRESS still means keep polling, unchanged.
 #
 # Usage:
 #   wait-for-response.sh <call_dir> [--timeout <seconds>] [--submit-deadline <seconds>]
@@ -57,10 +74,12 @@ TRANSCRIPT_PATH_SH="$SELF_DIR/../../../scripts/transcript-path.sh"
 CALL_DIR="${1:-}"
 TIMEOUT=""
 POLL_INTERVAL=2
-# Transcript mode: how long to wait for a `user` event carrying the nonce before
-# concluding the message never submitted. The event appears within ~1-2s of a
-# real submit, so this is deliberately short — it separates "never submitted"
-# (fast-fail) from "submitted, model working" (patient until --timeout).
+# Transcript mode: how long to wait for the transcript to show ANY evidence the
+# nonce reached the callee (user record, queued-command injection, enqueue, or a
+# STATUS naming our call_id — see transcript-extract.sh) before asking the input
+# box what happened. Evidence appears within ~1-2s of a real submit, so this is
+# deliberately short — it separates "sitting in the prompt box" (fast-fail) from
+# "submitted, model working" (patient until --timeout).
 SUBMIT_DEADLINE=15
 
 if [[ -z "$CALL_DIR" || ! -d "$CALL_DIR" ]]; then
@@ -136,6 +155,13 @@ if $CMUX_MODE; then
     STATUS_TAIL_AWK="[[:space:]]*$"
   fi
 
+  # AWAITING_REVIEW leaves the surface alone: a follow-up is expected, so closing
+  # it would destroy the very session the caller is about to reply into. This is
+  # the one path that overrides keep_workspace.txt=false. (claude-plugins-n4vy)
+  cleanup_script_only() {
+    rm -f "$LAUNCH_SCRIPT" 2>/dev/null || true
+  }
+
   cleanup_workspace_and_script() {
     rm -f "$LAUNCH_SCRIPT" 2>/dev/null || true
     if [[ "$KEEP" != "true" ]]; then
@@ -172,10 +198,39 @@ if $CMUX_MODE; then
     TRANSCRIPT_PATH=$(bash "$TRANSCRIPT_PATH_SH" --cwd "$RECV_CWD" --session "$SESSION_ID" 2>/dev/null || true)
   fi
 
+  # Is the nonce sitting unsubmitted in the callee's input box? That is the only
+  # thing that actually distinguishes "never submitted" from "submitted, queued
+  # behind the callee's current turn" — the submit deadline cannot (mo8m).
+  #
+  # Measured: a user event lands 0.35-1.0s after Enter on an idle REPL, and
+  # 3.1-4.2s when the REPL has anything in flight, because a follow-up sent
+  # mid-turn is QUEUED and its event only lands when that turn ends. A callee
+  # working a long task therefore has no upper bound worth hard-coding.
+  #
+  # We only ever ask this when the transcript shows NO submit evidence at all,
+  # which is what makes the check sound: a submitted message renders into the
+  # transcript, so if the nonce is on screen with nothing behind it, it is still
+  # in the prompt box. Note a QUEUED message is also drawn on screen while it
+  # waits — that used to read here as "unsubmitted", and the enqueue record now
+  # rules it out before we ever look. (claude-plugins-1jpz)
+  # Returns 0 = visibly unsubmitted, 1 = not visible, 2 = could not look.
+  nonce_visible_in_input_box() {
+    [[ -z "$CALL_ID" ]] && return 2
+    [[ ${#READ_TARGET[@]} -eq 0 ]] && return 2
+    local scr
+    scr=$(cmux read-screen "${READ_TARGET[@]}" 2>/dev/null) || return 2
+    [[ -z "$scr" ]] && return 2
+    printf '%s' "$scr" | grep -qF "$CALL_ID" && return 0
+    return 1
+  }
+
   if [[ -n "$TRANSCRIPT_PATH" ]]; then
     T_ELAPSED=0
     T_SUBMITTED=false
     FELL_BACK=false
+    # Set once the submit deadline passes with no confirmation, so the final
+    # timeout message can say submit was never confirmed without asserting why.
+    SUBMIT_UNCONFIRMED=false
     FILE_GRACE=10   # transcript appears ~instantly for a live session; else fall back
     while [[ $T_ELAPSED -lt $TIMEOUT ]]; do
       if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
@@ -197,6 +252,16 @@ if $CMUX_MODE; then
           emit_response_json
           exit 0
           ;;
+        13)  # checkpoint reached — reply ready, work order unfinished, session live.
+          # Same delivery as exit 0 (response.json + done + stdout JSON, and T_OUT
+          # already carries awaiting_review:true from the extractor) minus the
+          # close: the caller replies into this same surface next.
+          printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
+          touch "$CALL_DIR/done"
+          cleanup_script_only
+          emit_response_json
+          exit 4
+          ;;
         10) T_SUBMITTED=true ;;   # submitted, model working — be patient
         12)                       # …but only while the receiver is still OURS.
           # The extractor found a new human prompt after our turn, so our STATUS is
@@ -215,12 +280,40 @@ if $CMUX_MODE; then
           cat "$CALL_DIR/error.txt" >&2
           exit 3
           ;;
-        11)                       # not submitted yet
+        11)                       # nothing in the transcript carries the nonce yet
           if ! $T_SUBMITTED && [[ $T_ELAPSED -ge $SUBMIT_DEADLINE ]]; then
-            echo "No user event carrying call_id=$CALL_ID in the callee's transcript within ${SUBMIT_DEADLINE}s ($TRANSCRIPT_PATH) — the message never submitted into the REPL. Re-dial via a fresh surface. (claude-plugins-0pwc)" >&2
-            touch "$CALL_DIR/done" 2>/dev/null || true
-            cleanup_workspace_and_script
-            exit 1
+            # The deadline alone proves nothing (mo8m). Ask the input box, which
+            # is the only thing that can actually tell the two cases apart.
+            set +e
+            nonce_visible_in_input_box
+            BOX_RC=$?
+            set -e
+            if [[ $BOX_RC -eq 0 ]]; then
+              # EVIDENCE: our text is on the callee's screen and the transcript
+              # holds no record of it arriving — not a user record, not a
+              # queued-command injection, not even an enqueue — so it is sitting
+              # in the prompt box unsubmitted.
+              {
+                echo "Message is still sitting UNSUBMITTED in the callee's input box after ${SUBMIT_DEADLINE}s — call_id=$CALL_ID is visible on screen but nothing in the transcript carries it: no user record, no queued-command injection, no enqueue ($TRANSCRIPT_PATH)."
+                echo "This is a transport failure, not a problem with your message content — escaping/quoting is almost never the cause."
+                echo "Send Enter to the surface (cmux send-key --surface $WS_REF Enter) rather than re-sending the text, which would append to what is already in the box. Or re-dial via a fresh surface."
+              } >&2
+              touch "$CALL_DIR/done" 2>/dev/null || true
+              cleanup_workspace_and_script
+              exit 1
+            fi
+            # Not visible, or we could not look: a follow-up sent while the callee
+            # was mid-turn is QUEUED, and if the enqueue record has not landed yet
+            # this is indistinguishable from a slow submit. Do not assert a cause
+            # and do not give up — stay patient until --timeout.
+            if ! $SUBMIT_UNCONFIRMED; then
+              SUBMIT_UNCONFIRMED=true
+              if [[ $BOX_RC -eq 2 ]]; then
+                echo "hotline: no submit confirmation within ${SUBMIT_DEADLINE}s and the callee's screen could not be read, so slow-vs-never-submitted is undecidable — still waiting (up to ${TIMEOUT}s)." >&2
+              else
+                echo "hotline: no submit confirmation within ${SUBMIT_DEADLINE}s, but the text is not in the callee's input box either — it may be queued behind the callee's current turn. Still waiting (up to ${TIMEOUT}s)." >&2
+              fi
+            fi
           fi
           ;;
         *)  FELL_BACK=true; break ;;   # extractor usage/read error → fall back
@@ -231,8 +324,19 @@ if $CMUX_MODE; then
     if ! $FELL_BACK; then
       # Ran the full TIMEOUT in transcript mode while merely working → a genuine
       # timeout, not a reason to re-scrape. Report it and stop.
-      echo "Timed out waiting for the callee to finish (transcript mode, ${TIMEOUT}s) — $TRANSCRIPT_PATH" \
-        > "$CALL_DIR/error.txt"
+      if $SUBMIT_UNCONFIRMED; then
+        # Never got submit confirmation, and the box check did not incriminate the
+        # transport either. Report both live possibilities and how to settle it,
+        # rather than picking one the script cannot observe (mo8m).
+        {
+          echo "Timed out after ${TIMEOUT}s in transcript mode with NO submit confirmation — nothing in the transcript ever carried call_id=$CALL_ID: no user record, no queued-command injection, no enqueue ($TRANSCRIPT_PATH)."
+          echo "Could not confirm whether the message submitted: it may still be queued behind a long turn, or it may never have submitted. The script cannot tell these apart from timing alone."
+          echo "To check: cmux read-screen --surface $WS_REF — if your text is sitting in the input box it never submitted; if the callee is mid-turn it was queued. Do NOT blindly re-dial; that risks double-queueing the same work."
+        } > "$CALL_DIR/error.txt"
+      else
+        echo "Timed out waiting for the callee to finish (transcript mode, ${TIMEOUT}s) — $TRANSCRIPT_PATH" \
+          > "$CALL_DIR/error.txt"
+      fi
       touch "$CALL_DIR/done"
       cleanup_workspace_and_script
       cat "$CALL_DIR/error.txt" >&2
@@ -282,7 +386,7 @@ if $CMUX_MODE; then
     [[ -z "$LATEST_STATUS" ]] && continue
     [[ "$LATEST_STATUS" =~ ^STATUS:\ WORK_IN_PROGRESS ]] && continue
 
-    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE) ]]; then
+    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) ]]; then
       # Strip terminal chrome before extracting the response. Aggressive
       # prefix match strips lines starting with claude's box-drawing
       # characters (the REPL renders its idle prompt as a multi-line box
@@ -300,7 +404,7 @@ if $CMUX_MODE; then
       # every terminal STATUS, emit the LAST saved buffer — matches the
       # LATEST_STATUS we chose for detection.
       WIP_RE="STATUS: WORK_IN_PROGRESS${STATUS_TAIL_AWK}"
-      TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE)${STATUS_TAIL_AWK}"
+      TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)${STATUS_TAIL_AWK}"
       RESPONSE=$(echo "$CLEAN" \
         | grep -v "^bash /tmp/hotline-launch" \
         | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
@@ -311,6 +415,19 @@ if $CMUX_MODE; then
             {buf = buf $0 ORS}
             END {printf "%s", result}
           ')
+
+      # Scrape path mirrors the transcript path's AWAITING_REVIEW contract, or a
+      # callee that checkpoints would hang here exactly as it used to: the status
+      # matched neither the WIP `continue` nor the terminal branch, so the loop ran
+      # to timeout with the report on screen. (claude-plugins-n4vy)
+      if [[ "$LATEST_STATUS" =~ ^STATUS:\ AWAITING_REVIEW ]]; then
+        jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
+          '{session_id: $sid, response: $resp, awaiting_review: true}' > "$CALL_DIR/response.json"
+        touch "$CALL_DIR/done"
+        cleanup_script_only
+        emit_response_json
+        exit 4
+      fi
 
       jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
         '{session_id: $sid, response: $resp}' > "$CALL_DIR/response.json"

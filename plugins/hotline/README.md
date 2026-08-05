@@ -276,7 +276,8 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
 │             B's workspace-isolation rule forbids touching)          │
 │                          │                                          │
 │            Response + STATUS signal                                 │
-│            (DONE / WORK_COMPLETE / WORK_IN_PROGRESS / OUT_OF_SCOPE) │
+│            (DONE / WORK_COMPLETE / WORK_IN_PROGRESS /               │
+│             AWAITING_REVIEW / OUT_OF_SCOPE)                          │
 │            + optional HOTLINE_NOTE for protocol issues               │
 │                          │                                          │
 └──────────────────────────┼──────────────────────────────────────────┘

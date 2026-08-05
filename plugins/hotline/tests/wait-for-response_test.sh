@@ -320,10 +320,23 @@ ERR2=$(HOME="$H2" PATH="$SD2:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$
 RC2=$?
 set -e
 EL2=$((SECONDS - START))
-if [[ $RC2 -ne 0 && $EL2 -lt 30 ]] && printf '%s' "$ERR2" | grep -q "never submitted"; then
-  pass "fast-fails as never-submitted when no nonce user event appears (${EL2}s)"
+# CONTRACT CHANGED (mo8m). This used to assert a fast-fail claiming "the message
+# never submitted into the REPL". That cause is not observable from a timer: a
+# follow-up sent while the callee is mid-turn is queued and its user event only
+# lands when that turn ends, so the old assertion pinned a guess. This fixture's
+# cmux stub is a bare `exit 0`, so read-screen yields nothing and the box check
+# is inconclusive — the script must now stay patient and report uncertainty.
+# The evidence-backed fast-fail is covered under "Submit discrimination" below.
+if [[ $RC2 -ne 0 ]] && printf '%s' "$ERR2" | grep -qiE "could not confirm|no submit confirmation"; then
+  pass "no nonce user event + unreadable screen → reports uncertainty, not a cause (${EL2}s)"
 else
-  fail "fast-fails as never-submitted" "rc=$RC2 elapsed=${EL2}s err=$ERR2"
+  fail "no nonce user event + unreadable screen → reports uncertainty, not a cause" \
+    "rc=$RC2 elapsed=${EL2}s err=$ERR2"
+fi
+if printf '%s' "$ERR2" | grep -qiE "the message never submitted|never submitted into the REPL"; then
+  fail "no longer asserts the unobservable 'never submitted' cause" "err=$ERR2"
+else
+  pass "no longer asserts the unobservable 'never submitted' cause"
 fi
 rm -rf "$H2" "$CD2" "$SD2"
 
@@ -445,6 +458,303 @@ else
   fail "wait-for-response exits 3 on preemption" "rc=$RC3 elapsed=${EL3}s err=$ERR3"
 fi
 rm -rf "$H3" "$CD3" "$SD3"
+
+# ---- submit discrimination (claude-plugins-mo8m) ---------------------------
+# The submit deadline expiring is NOT evidence the message never submitted. A
+# follow-up sent to a REPL that is mid-turn is queued, and its user event only
+# lands when that turn ends — measured at 3.1-4.2s for short turns, and bounded
+# only by the callee's current turn in principle. So a bare timer cannot tell
+# "never submitted" from "submitted, still queued".
+#
+# What CAN tell them apart is the input box. If no user event carries the nonce
+# and the nonce is nonetheless visible on the callee's screen, the text is
+# sitting unsubmitted in the prompt box — that is real evidence. If it is not
+# visible, we do not know, and must not assert a cause.
+echo ""
+echo "Submit discrimination:"
+
+# Same fixture shape as setup_transcript_call, but the cmux stub can render a
+# screen and the surface ref is optional.
+setup_discrim_call() {  # $1=transcript body  $2=screen text  $3=with_surface(true/false)
+  local body="$1" screen="$2" with_surface="${3:-true}"
+  local h cd sd cwd enc
+  h=$(mktemp -d); cd=$(mktemp -d /tmp/hotline-disc-XXXXX); sd=$(mktemp -d)
+  cwd="/fake/callee/ws"
+  enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
+  mkdir -p "$h/.claude/projects/$enc"
+  printf '%s\n' "$body" > "$h/.claude/projects/$enc/sess-tcm.jsonl"
+  echo "$cwd"     > "$cd/cwd.txt"
+  echo "sess-tcm" > "$cd/session_id.txt"
+  echo "$TNONCE"  > "$cd/call_id.txt"
+  echo "true"     > "$cd/keep_workspace.txt"
+  [[ "$with_surface" == "true" ]] && echo "w1:s1" > "$cd/surface_ref.txt"
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'if [[ "$1" == "read-screen" ]]; then'
+    printf '  cat <<%s\n' "'SCREENEOF'"
+    printf '%s\n' "$screen"
+    echo "SCREENEOF"
+    echo '  exit 0'
+    echo 'fi'
+    echo 'exit 0'
+  } > "$sd/cmux"
+  chmod +x "$sd/cmux"
+  echo "$h|$cd|$sd"
+}
+
+# Same, but `cmux read-screen` fails outright (surface gone).
+setup_discrim_call_broken_screen() {  # $1=transcript body
+  local body="$1" h cd sd cwd enc
+  h=$(mktemp -d); cd=$(mktemp -d /tmp/hotline-disc-XXXXX); sd=$(mktemp -d)
+  cwd="/fake/callee/ws"
+  enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
+  mkdir -p "$h/.claude/projects/$enc"
+  printf '%s\n' "$body" > "$h/.claude/projects/$enc/sess-tcm.jsonl"
+  echo "$cwd"     > "$cd/cwd.txt"
+  echo "sess-tcm" > "$cd/session_id.txt"
+  echo "$TNONCE"  > "$cd/call_id.txt"
+  echo "true"     > "$cd/keep_workspace.txt"
+  echo "w1:s1"    > "$cd/surface_ref.txt"
+  {
+    echo '#!/usr/bin/env bash'
+    echo '[[ "$1" == "read-screen" ]] && { echo "Error: internal_error" >&2; exit 1; }'
+    echo 'exit 0'
+  } > "$sd/cmux"
+  chmod +x "$sd/cmux"
+  echo "$h|$cd|$sd"
+}
+
+NO_EVENT_BODY='{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unrelated chatter"}}'
+
+# CASE 1 — nonce visible in the input box, no user event: a real non-submit.
+# The script has evidence, so it may fast-fail AND name the cause.
+D1=$(setup_discrim_call "$NO_EVENT_BODY" \
+"╭──────────────────────────────────────╮
+│ > [CALL_ID: $TNONCE] do the thing    │
+╰──────────────────────────────────────╯
+  ? for shortcuts" true)
+H4=${D1%%|*}; r4=${D1#*|}; CD4=${r4%%|*}; SD4=${r4#*|}
+START4=$SECONDS
+set +e
+ERR4=$(HOME="$H4" PATH="$SD4:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD4" --timeout 60 --submit-deadline 4 2>&1 >/dev/null)
+RC4=$?
+set -e
+EL4=$((SECONDS - START4))
+if [[ $RC4 -ne 0 && $EL4 -lt 30 ]] && printf '%s' "$ERR4" | grep -qi "input box"; then
+  pass "unsubmitted text visible in the box → fast-fail naming the real cause (${EL4}s)"
+else
+  fail "unsubmitted text visible in the box → fast-fail naming the real cause" \
+    "rc=$RC4 elapsed=${EL4}s err=$ERR4"
+fi
+rm -rf "$H4" "$CD4" "$SD4"
+
+# CASE 2 — nonce NOT on screen, no user event: indistinguishable from a queued
+# submit behind a long turn. The script must NOT claim it never submitted, and
+# must NOT give up at the submit deadline — it stays patient until --timeout.
+D2=$(setup_discrim_call "$NO_EVENT_BODY" \
+"╭──────────────────────────────────────╮
+│ >                                    │
+╰──────────────────────────────────────╯
+  ? for shortcuts" true)
+H5=${D2%%|*}; r5=${D2#*|}; CD5=${r5%%|*}; SD5=${r5#*|}
+START5=$SECONDS
+set +e
+ERR5=$(HOME="$H5" PATH="$SD5:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD5" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
+RC5=$?
+set -e
+EL5=$((SECONDS - START5))
+# Match the ASSERTIVE claim, not the words — the correct hedge legitimately
+# contains "may never have submitted", which a naive grep would flag.
+if printf '%s' "$ERR5" | grep -qiE "the message never submitted|never submitted into the REPL"; then
+  fail "empty box → must not assert 'never submitted'" "err=$ERR5"
+else
+  pass "empty box → does not assert 'never submitted'"
+fi
+if [[ $EL5 -ge 10 ]]; then
+  pass "empty box → stays patient past the submit deadline (${EL5}s of 12s)"
+else
+  fail "empty box → stays patient past the submit deadline" \
+    "gave up after ${EL5}s with a 4s submit-deadline and a 12s timeout; rc=$RC5 err=$ERR5"
+fi
+
+# CASE 3 — the surface ref exists but read-screen FAILS (surface died between
+# the send and now), so the discriminator is unavailable. Transcript mode only
+# runs in CMUX mode, which requires a surface/workspace ref — a call_dir with no
+# ref is headless and never reaches the submit deadline at all, so an unreadable
+# surface is the real "cannot discriminate" case, not a missing one.
+D3=$(setup_discrim_call_broken_screen "$NO_EVENT_BODY")
+H6=${D3%%|*}; r6=${D3#*|}; CD6=${r6%%|*}; SD6=${r6#*|}
+set +e
+ERR6=$(HOME="$H6" PATH="$SD6:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD6" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
+RC6=$?
+set -e
+if printf '%s' "$ERR6" | grep -qiE "the message never submitted|never submitted into the REPL"; then
+  fail "unreadable surface → must not assert 'never submitted'" "err=$ERR6"
+else
+  pass "unreadable surface → does not assert 'never submitted'"
+fi
+if printf '%s' "$ERR6" | grep -qiE "could not confirm|no submit confirmation|may (still )?be"; then
+  pass "unreadable surface → reports the uncertainty instead of a cause"
+else
+  fail "unreadable surface → reports the uncertainty instead of a cause" "err=$ERR6"
+fi
+rm -rf "$H5" "$CD5" "$SD5" "$H6" "$CD6" "$SD6"
+
+# ---- queued follow-ups (claude-plugins-1jpz) -------------------------------
+# A follow-up sent while the callee is mid-turn is ENQUEUED, and claude delivers
+# it one of two ways: (a) injected into the SAME turn at the next tool boundary
+# as an `attachment` record of type "queued_command" — no user record is EVER
+# written, yet the model answers it; or (b) flushed after turn end as a genuine
+# user record. Correlating on user records only made path (a) look like a
+# never-submitted message the receiver had already answered.
+echo ""
+echo "Queued follow-up delivery:"
+
+# Record shapes copied from a live 2.1.221 transcript.
+Q_ENQ='{"type":"queue-operation","operation":"enqueue","timestamp":"2026-08-04T22:14:36.125Z","sessionId":"sess-tcm","content":"[CALL_ID: '"$TNONCE"'] do the thing"}'
+Q_ATT='{"parentUuid":"cf341cc5-f248-4a10-abee-e89efca05220","isSidechain":false,"attachment":{"type":"queued_command","prompt":"[CALL_ID: '"$TNONCE"'] do the thing","commandMode":"prompt","origin":{"kind":"human"},"timestamp":"2026-08-04T22:14:36.125Z"},"type":"attachment","uuid":"7b3e5d13-7ca1-4f8b-8be2-99bc9d5f5f64","timestamp":"2026-08-04T22:14:36.125Z","sessionId":"sess-tcm","version":"2.1.221","gitBranch":"HEAD"}'
+
+# CASE 4 — path (a) end to end: the answer must come back on exit 0, promptly,
+# with no user record anywhere in the transcript.
+CT4=$(setup_transcript_call \
+"$Q_ENQ
+$Q_ATT
+{\"type\":\"assistant\",\"isSidechain\":false,\"sessionId\":\"sess-tcm\",\"message\":{\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"STATUS: WORK_IN_PROGRESS call_id=$TNONCE\nqueued-injection answer\nSTATUS: DONE call_id=$TNONCE\"}]}}")
+H7=${CT4%%|*}; r7=${CT4#*|}; CD7=${r7%%|*}; SD7=${r7#*|}
+START7=$SECONDS
+set +e
+OUT7=$(HOME="$H7" PATH="$SD7:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD7" --timeout 20 --submit-deadline 4 2>/dev/null)
+RC7=$?
+set -e
+EL7=$((SECONDS - START7))
+if [[ $RC7 -eq 0 && $EL7 -lt 15 ]] && [[ "$(printf '%s' "$OUT7" | jq -r .response 2>/dev/null)" == *"queued-injection answer"* ]]; then
+  pass "mid-turn injection with no user record → returns the answer (${EL7}s)"
+else
+  fail "mid-turn injection with no user record → returns the answer" "rc=$RC7 elapsed=${EL7}s out=$OUT7"
+fi
+rm -rf "$H7" "$CD7" "$SD7"
+
+# CASE 5 — a queued message is RENDERED on the callee's screen while it waits,
+# so the input-box discriminator would call it "unsubmitted" if the enqueue
+# record didn't already prove otherwise. It must stay patient and never blame
+# the transport.
+D4=$(setup_discrim_call "$Q_ENQ" \
+"╭──────────────────────────────────────╮
+│ >                                    │
+╰──────────────────────────────────────╯
+  ⏵⏵ queued: [CALL_ID: $TNONCE] do the thing" true)
+H8=${D4%%|*}; r8=${D4#*|}; CD8=${r8%%|*}; SD8=${r8#*|}
+START8=$SECONDS
+set +e
+ERR8=$(HOME="$H8" PATH="$SD8:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD8" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
+RC8=$?
+set -e
+EL8=$((SECONDS - START8))
+if printf '%s' "$ERR8" | grep -qi "input box"; then
+  fail "queued-and-visible → must not be blamed on the input box" "err=$ERR8"
+else
+  pass "queued-and-visible → not blamed on the input box"
+fi
+if [[ $RC8 -ne 0 && $EL8 -ge 10 ]]; then
+  pass "queued-and-visible → waits out the timeout as submitted work (${EL8}s of 12s)"
+else
+  fail "queued-and-visible → waits out the timeout as submitted work" \
+    "rc=$RC8 elapsed=${EL8}s err=$ERR8"
+fi
+rm -rf "$H8" "$CD8" "$SD8"
+
+# ---- AWAITING_REVIEW (claude-plugins-n4vy) ---------------------------------
+# A checkpointed work order — do step 1, report, hold for the lead's review — had
+# no honest terminal STATUS. WORK_IN_PROGRESS was the only truthful thing to emit
+# ("the work order is not finished"), and that is exactly what this script treats
+# as "keep polling", so the waiter blocked past its 600s tool timeout while the
+# callee's finished report sat complete in its transcript and had to be scraped by
+# hand. AWAITING_REVIEW returns the body like a terminal status does, but on
+# exit 4 and with `awaiting_review: true` in the JSON — and it must NEVER close
+# the surface, because the whole point is that a follow-up is coming.
+echo ""
+echo "AWAITING_REVIEW checkpoint:"
+
+# Same shape as setup_transcript_call, but keep_workspace=false and the cmux stub
+# logs every invocation, so we can prove the live surface was left alone.
+setup_await_call() {  # $1 = transcript body → echoes "HOME|CALL_DIR|STUBDIR|LOG"
+  local body="$1" h cd sd cwd enc log
+  h=$(mktemp -d); cd=$(mktemp -d /tmp/hotline-await-XXXXX); sd=$(mktemp -d)
+  log="$sd/cmux.log"
+  cwd="/fake/callee/ws"
+  enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
+  mkdir -p "$h/.claude/projects/$enc"
+  printf '%s\n' "$body" > "$h/.claude/projects/$enc/sess-tcm.jsonl"
+  echo "$cwd"     > "$cd/cwd.txt"
+  echo "sess-tcm" > "$cd/session_id.txt"
+  echo "$TNONCE"  > "$cd/call_id.txt"
+  echo "w1:s1"    > "$cd/surface_ref.txt"
+  echo "false"    > "$cd/keep_workspace.txt"   # would normally close the surface
+  {
+    echo '#!/usr/bin/env bash'
+    echo "printf '%s\\n' \"\$*\" >> '$log'"
+    echo 'exit 0'
+  } > "$sd/cmux"
+  chmod +x "$sd/cmux"
+  : > "$log"
+  echo "$h|$cd|$sd|$log"
+}
+
+AW=$(setup_await_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] task 1 of 3, report and hold"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\ntask 1 done, holding for review\nSTATUS: AWAITING_REVIEW call_id='"$TNONCE"'"}]}}')
+H9=${AW%%|*}; r9=${AW#*|}; CD9=${r9%%|*}; r9b=${r9#*|}; SD9=${r9b%%|*}; LOG9=${r9b#*|}
+START9=$SECONDS
+set +e
+OUT9=$(HOME="$H9" PATH="$SD9:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD9" --timeout 40 --submit-deadline 6 2>/dev/null)
+RC9=$?
+set -e
+EL9=$((SECONDS - START9))
+if [[ $RC9 -eq 4 && $EL9 -lt 20 ]]; then
+  pass "AWAITING_REVIEW returns instead of polling, exit 4 (${EL9}s)"
+else
+  fail "AWAITING_REVIEW returns instead of polling, exit 4" "rc=$RC9 elapsed=${EL9}s out=$OUT9"
+fi
+if [[ "$(printf '%s' "$OUT9" | jq -r .response 2>/dev/null)" == *"holding for review"* ]]; then
+  pass "AWAITING_REVIEW delivers the response body like a terminal status"
+else
+  fail "AWAITING_REVIEW delivers the response body" "out=$OUT9"
+fi
+if [[ "$(printf '%s' "$OUT9" | jq -r '.awaiting_review // false' 2>/dev/null)" == "true" ]]; then
+  pass "stdout JSON carries awaiting_review:true"
+else
+  fail "stdout JSON carries awaiting_review:true" "out=$OUT9"
+fi
+if [[ "$(jq -r '.awaiting_review // false' "$CD9/response.json" 2>/dev/null)" == "true" ]]; then
+  pass "response.json carries awaiting_review:true for a file-reading caller"
+else
+  fail "response.json carries awaiting_review:true" "$(cat "$CD9/response.json" 2>/dev/null)"
+fi
+if grep -qE "close-surface|close-workspace" "$LOG9" 2>/dev/null; then
+  fail "AWAITING_REVIEW must leave the surface live for the follow-up" "cmux calls: $(cat "$LOG9")"
+else
+  pass "AWAITING_REVIEW leaves the surface live even with keep_workspace=false"
+fi
+rm -rf "$H9" "$CD9" "$SD9"
+
+# WORK_IN_PROGRESS semantics unchanged: a WIP-only transcript is still "keep
+# polling", so the waiter must sit out the timeout rather than resolving early.
+AW2=$(setup_await_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] task 1 of 3"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nstill grinding"}]}}')
+HA=${AW2%%|*}; rA=${AW2#*|}; CDA=${rA%%|*}; rAb=${rA#*|}; SDA=${rAb%%|*}; LOGA=${rAb#*|}
+STARTA=$SECONDS
+set +e
+ERRA=$(HOME="$HA" PATH="$SDA:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDA" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
+RCA=$?
+set -e
+ELA=$((SECONDS - STARTA))
+if [[ $RCA -eq 1 && $ELA -ge 10 ]]; then
+  pass "WORK_IN_PROGRESS still means keep polling (${ELA}s of 12s, then timeout)"
+else
+  fail "WORK_IN_PROGRESS still means keep polling" "rc=$RCA elapsed=${ELA}s err=$ERRA"
+fi
+rm -rf "$HA" "$CDA" "$SDA"
 
 # ---- summary ---------------------------------------------------------------
 
