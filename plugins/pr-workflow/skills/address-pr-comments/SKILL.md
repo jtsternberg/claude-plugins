@@ -1,13 +1,15 @@
 ---
+name: address-pr-comments
 description: Address all PR comments by reviewing, fixing, committing, and replying (auto push and post)
 argument-hint: <pr-number-or-comment-url>
+disable-model-invocation: true
 ---
 
 # Address PR Comments
 
 ## Argument Parsing
 
-Parse `$ARGUMENTS` to determine the mode:
+Parse invocation text after the skill name to determine the mode. If unavailable, infer the PR number or comment URL from the current request.
 
 - **Specific comment URL** — matches pattern `https://github.com/{owner}/{repo}/pull/{number}#discussion_r{id}` or `#pullrequestreview-{id}`
   - Extract: `owner`, `repo`, `pr_number`, and `comment_anchor` (the fragment after `#`)
@@ -59,8 +61,11 @@ Use GraphQL to get the true resolution status of every thread. Do NOT guess reso
    - **SKIP** threads where `isResolved == true` — these are already resolved in GitHub
    - **SKIP** your own comments (not replies to others)
    - **INCLUDE** all unresolved review threads — from human reviewers and bots alike (Copilot, sentry[bot], etc. can surface real issues)
+   - **INCLUDE** general issue-style PR comments from other authors that request a change or response
    - **INCLUDE** top-level reviews with state `CHANGES_REQUESTED` that have not been superseded by a newer `APPROVED` or `DISMISSED` review from the same author
    - **INCLUDE** unresolved review threads even if you previously replied — a reply does NOT mean resolved
+
+Classify each actionable item as `review_thread_comment`, `issue_comment`, or `top_level_review`. Retain its author, URL, database ID, and any file/line metadata. Do not assume every item has a pull-request review comment ID.
 
 ## Step 2: Create Beads Tasks
 
@@ -96,7 +101,10 @@ For each task (one at a time, in order):
    - If fixed: draft a reply explaining what you changed
    - If low priority / deferred: draft a reply acknowledging the feedback, explaining why it's being deferred, and note any follow-up plans (e.g., "Good catch — this is lower priority so we'll track it separately")
    - If not valid: draft a respectful explanation of why no change is needed
-   - Post immediately using `gh api repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies -f body="<reply>"`
+   - Write the exact reply body to a uniquely named temporary file, represented below as `<reply-file>`.
+   - For a `review_thread_comment`, post a threaded reply: `gh api --method POST repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies -F body=@<reply-file>`
+   - For an `issue_comment` or `top_level_review`, post a new PR conversation comment: `gh api --method POST repos/{owner}/{repo}/issues/{pr_number}/comments -F body=@<reply-file>`. Begin the reply by mentioning the author and linking the original item so the context is unambiguous.
+   - Verify the API response before closing the task. Never interpolate an arbitrary reply directly into a shell argument.
 6. Mark the task complete: `bd close <task-id>`
 
 ## Step 5: Final Summary

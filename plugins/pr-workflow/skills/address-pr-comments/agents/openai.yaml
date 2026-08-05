@@ -1,0 +1,5 @@
+interface:
+  display_name: Address PR Comments
+  short_description: Resolve PR feedback and automatically push and reply
+policy:
+  allow_implicit_invocation: false

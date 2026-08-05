@@ -1,0 +1,5 @@
+interface:
+  display_name: Update PR Description
+  short_description: Revise a pull request description from recent changes
+policy:
+  allow_implicit_invocation: false

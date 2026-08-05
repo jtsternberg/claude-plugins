@@ -1,0 +1,5 @@
+interface:
+  display_name: Address PR Comments with Review
+  short_description: Draft PR feedback fixes for approval before push and reply
+policy:
+  allow_implicit_invocation: false
