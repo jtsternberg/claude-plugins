@@ -75,8 +75,12 @@ emit_tree() {
 
 case "$1" in
   identify)
-    jq -n '{caller: {pane_ref:"pane:3", workspace_ref:"workspace:7",
-                     window_ref:"window:1", surface_ref:"surface:11"}}'
+    if [[ -n "${CMUX_FAKE_IDENTIFY_EMPTY:-}" ]]; then
+      jq -n '{caller: null}'
+    else
+      jq -n '{caller: {pane_ref:"pane:3", workspace_ref:"workspace:7",
+                       window_ref:"window:1", surface_ref:"surface:11"}}'
+    fi
     ;;
   tree) emit_tree ;;
   new-pane|new-surface)
@@ -141,7 +145,39 @@ else
 fi
 rm -rf "$tmp"
 
-# Case 2 — no --title: the surface is still created (hotline and other callers
+# Case 2 — a non-tty Bash-tool shell can get caller:null from identify. The
+# stable CMUX_SURFACE_ID still names the caller, so resolve its live placement
+# from tree instead of failing (which made Hotline silently open a detached
+# workspace and lose reusable-surface bookkeeping).
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/cmux-naming-XXXXXX"); make_shim "$tmp"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+      CMUX_FAKE_IDENTIFY_EMPTY=1 CMUX_SURFACE_ID="SURF-OLD" \
+      bash "$OPENER" --json 2>"$tmp/err.txt")
+rc=$?
+if [[ $rc -eq 0 && "$(jq -r '.surface_ref' <<<"$out")" == "surface:258" ]]; then
+  pass "caller:null falls back through CMUX_SURFACE_ID tree lookup"
+else
+  fail "caller:null falls back through CMUX_SURFACE_ID tree lookup" \
+       "rc=$rc out=$out err=$(cat "$tmp/err.txt")"
+fi
+rm -rf "$tmp"
+
+# The fallback is best-effort: a stale UUID must still reach the normal,
+# diagnostic context error rather than exiting early under `set -e`.
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/cmux-naming-XXXXXX"); make_shim "$tmp"
+PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  CMUX_FAKE_IDENTIFY_EMPTY=1 CMUX_SURFACE_ID="SURF-NOT-IN-TREE" \
+  bash "$OPENER" --json >"$tmp/out.txt" 2>"$tmp/err.txt"
+rc=$?
+if [[ $rc -eq 2 ]] && grep -q 'could not resolve caller' "$tmp/err.txt"; then
+  pass "stale CMUX_SURFACE_ID fails with the normal context diagnostic"
+else
+  fail "stale CMUX_SURFACE_ID fails with the normal context diagnostic" \
+       "rc=$rc err=$(cat "$tmp/err.txt")"
+fi
+rm -rf "$tmp"
+
+# Case 3 — no --title: the surface is still created (hotline and other callers
 # rely on that), but stderr says the tab is unfindable and how to name it.
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/cmux-naming-XXXXXX"); make_shim "$tmp"
 out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
@@ -169,7 +205,7 @@ else
 fi
 rm -rf "$tmp"
 
-# Case 3 — rename failure is surfaced, not swallowed. A silently-failed rename is
+# Case 4 — rename failure is surfaced, not swallowed. A silently-failed rename is
 # how you end up reporting a generic title in good faith.
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/cmux-naming-XXXXXX"); make_shim "$tmp"
 out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" CMUX_FAKE_RENAME_FAILS=1 \
@@ -191,7 +227,7 @@ else
 fi
 rm -rf "$tmp"
 
-# Case 4 — text (non-JSON) output carries the names too, since that's the mode a
+# Case 5 — text (non-JSON) output carries the names too, since that's the mode a
 # human reads.
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/cmux-naming-XXXXXX"); make_shim "$tmp"
 out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
@@ -206,7 +242,7 @@ rm -rf "$tmp"
 
 echo "SKILL.md naming/reporting requirement:"
 
-# Case 5 — the instruction itself. It was absent once; these assert the two
+# Case 6 — the instruction itself. It was absent once; these assert the two
 # obligations and the concrete failure are still stated.
 if grep -q '### Name it, then report it by name (required)' "$SKILL_MD"; then
   pass "SKILL.md has the required naming/reporting section"

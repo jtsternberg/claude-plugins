@@ -136,13 +136,35 @@ for attempt in 1 2 3 4 5; do
   [[ $attempt -lt 5 ]] && sleep 0.4
 done
 
+# Bash-tool shells are not attached to a tty. If identify returns `caller:null`
+# while cmux's stable surface UUID is still available, use that stronger signal.
+# A moved surface can also leave CMUX_WORKSPACE_ID stale. In either case the
+# surface UUID is enough: resolve its CURRENT pane/workspace/window from one
+# live tree snapshot instead of falling back to a detached workspace.
+if [[ "$SUBJECT" == "caller" && ( -z "$subject_pane" || -z "$subject_ws" ) \
+      && -n "${CMUX_SURFACE_ID:-}" ]]; then
+  caller_tree=$(cmux tree --all --json --id-format both 2>/dev/null || true)
+  if [[ -n "$caller_tree" ]]; then
+    IFS=$'\t' read -r subject_pane subject_ws subject_win subject_surf < <(
+      printf '%s' "$caller_tree" | jq -r --arg sid "$CMUX_SURFACE_ID" '
+        .windows[] as $win
+        | $win.workspaces[] as $ws
+        | $ws.panes[] as $pane
+        | $pane.surfaces[]
+        | select(.id == $sid)
+        | [$pane.ref, $ws.ref, $win.ref, .ref]
+        | @tsv' 2>/dev/null | head -1
+    ) || true
+  fi
+fi
+
 if [[ -z "${identify_json:-}" ]]; then
   echo "open-side-surface: 'cmux identify' failed — are you inside cmux? is the socket reachable?" >&2
   exit 2
 fi
 
 if [[ -z "$subject_pane" || -z "$subject_ws" ]]; then
-  echo "open-side-surface: could not resolve $SUBJECT.pane_ref / workspace_ref from identify (retried 5×; caller surface not registered?)" >&2
+  echo "open-side-surface: could not resolve $SUBJECT.pane_ref / workspace_ref from identify or CMUX_SURFACE_ID (retried 5×; caller surface not registered?)" >&2
   exit 2
 fi
 
