@@ -6,7 +6,7 @@ argument-hint: "[describe what you want to do]"
 allowed-tools:
   - "Bash(cmux *)"
   - "Bash(which cmux)"
-  - "Bash(${CLAUDE_SKILL_DIR}/scripts/*)"
+  - "Bash(*/scripts/*)"
   - "Bash(jq *)"
 ---
 
@@ -129,7 +129,9 @@ The one-call recipe:
 #    what makes the tab findable (see "Name it, then report it by name" below);
 #    --wait-ready handles both the focus-pane attach step and a round-trip
 #    probe, exiting 3 with a diagnostic rather than returning a non-ready ref.
-OUT=$(${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh \
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this using-cmux-cli skill directory>}"
+OUT=$("$SKILL_DIR/scripts/open-side-surface.sh" \
         --wait-ready --title "dev server :3000" --json)
 SID=$(jq -r '.surface_id'     <<<"$OUT")   # target commands with this
 TITLE=$(jq -r '.surface_title' <<<"$OUT")  # tell the user this
@@ -165,8 +167,10 @@ Visibility isn't just "the surface is on screen" — it's "the user can *find* t
 **1. Give it a meaningful human-visible title.** A fresh surface inherits a generic auto-title — `zsh`, the cwd basename, or the workspace's own name — which is indistinguishable from every other tab. Name it for the activity, 2–5 words, no trailing punctuation (`dev server :3000`, `ssh prod-web1`, `tail nginx logs`, `pytest watch`). Never leave it as the tool (`zsh`, `node`, `claude`) or as a placeholder word like `workspace` or `test`. The companion `auto-rename` skill has the full naming rubric.
 
 ```bash
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this using-cmux-cli skill directory>}"
 # Preferred — one call, title applied at creation:
-${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh --wait-ready --title "dev server :3000" --json
+"$SKILL_DIR/scripts/open-side-surface.sh" --wait-ready --title "dev server :3000" --json
 
 # Any other creation path — name it immediately afterward:
 cmux rename-tab --workspace <ws-uuid> --tab <surface-uuid> "dev server :3000"
@@ -452,7 +456,9 @@ Reach for these when work takes more than a few seconds and the user might look 
 This is the mechanics behind the [default visibility principle](#default-principle-make-new-work-visible-to-the-user) above. Use it for any "open / start / ssh / run" request that doesn't explicitly ask for a separate workspace. The bundled helper handles the decision tree (split vs. add-to-adjacent-pane) so you don't have to hand-roll it:
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/open-side-surface.sh [OPTIONS]
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this using-cmux-cli skill directory>}"
+"$SKILL_DIR/scripts/open-side-surface.sh" [OPTIONS]
 ```
 
 Requires `jq` (macOS: `brew install jq`). The script fails fast with a clear message if missing.
@@ -503,7 +509,9 @@ One of the most common agent tasks: the user says *"read what's happening in the
 **When the user names a surface, just pass the name as a bare query — don't reach for `read-screen` or list everything.** The script picks the strategy:
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/find-surface.sh "✳ hotline: claude-plugins → Automating (quick_call)" --json
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this using-cmux-cli skill directory>}"
+"$SKILL_DIR/scripts/find-surface.sh" "✳ hotline: claude-plugins → Automating (quick_call)" --json
 ```
 
 A bare query (no flag) matches by **title first** — one `cmux tree` call, no screen reads — and only falls back to a content scan if the title pass is dry. Paste the tab label **verbatim**: leading status glyphs (`✳`, spinners) and surrounding whitespace are stripped from both sides before comparing, so the match holds even if the glyph has since changed. An **exact** (normalized) title match wins over substring matches — if exactly one surface's title equals the query, only that one is returned; for path-shaped titles the query may also equal just the **basename** (final path segment), so a query like `lindris-monorepo` resolves to the `~/Sites/lindris-monorepo` workspace tab rather than also matching a hotline tab that merely contains it. A unique hit is your answer; act on it immediately.
@@ -516,7 +524,9 @@ Reach for an explicit flag only when the bare query isn't the right shape:
 Use the bundled helper rather than hand-parsing `cmux tree --all`:
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/find-surface.sh [OPTIONS]
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this using-cmux-cli skill directory>}"
+"$SKILL_DIR/scripts/find-surface.sh" [OPTIONS]
 ```
 
 Requires `jq` (macOS: `brew install jq`). The script fails fast with a clear message if missing.
@@ -541,7 +551,9 @@ Under the hood, the script uses `cmux tree --all --json` for discovery. If you n
 Grab the target's UUIDs from the finder's JSON and target by those:
 
 ```bash
-match=$(${CLAUDE_SKILL_DIR}/scripts/find-surface.sh -w cmux -c "500 error" --json | jq -r '.[0]')
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this using-cmux-cli skill directory>}"
+match=$("$SKILL_DIR/scripts/find-surface.sh" -w cmux -c "500 error" --json | jq -r '.[0]')
 WS_ID=$(jq -r '.workspace_id' <<<"$match")
 SURF_ID=$(jq -r '.surface_id' <<<"$match")
 
