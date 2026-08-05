@@ -312,7 +312,7 @@ else
   # attached). On any readiness failure we close the surface we created rather
   # than leave a wedged surface behind.
   READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-8}"
-  SURF_REF=""; SURF_PANE=""
+  SURF_REF=""; SURF_ID=""; SURF_HANDLE=""; SURF_PANE=""; SURF_PANE_ID=""; SURF_PANE_HANDLE=""
   if [[ "$PLACEMENT" == "window" ]]; then
     # open-window-surface.sh is hotline-net-new (cmux-cli only opens side-by-side,
     # not arbitrary-window placement). It emits JSON even on a readiness timeout
@@ -323,7 +323,9 @@ else
       --json 2>"$CALL_DIR/surface_err.txt") \
       || fail_async "open-window-surface.sh failed: $(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
     SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
+    SURF_ID=$(printf '%s' "$SURF_JSON" | jq -r '.surface_id // empty')
     SURF_PANE=$(printf '%s' "$SURF_JSON" | jq -r '.pane_ref // empty')
+    SURF_PANE_ID=$(printf '%s' "$SURF_JSON" | jq -r '.pane_id // empty')
     [[ -z "$SURF_REF" ]] && fail_async "open-window-surface returned no surface_ref: $SURF_JSON"
     if [[ "$(printf '%s' "$SURF_JSON" | jq -r '.ready // empty')" == "timeout" ]]; then
       cmux close-surface --surface "$SURF_REF" >/dev/null 2>&1 || true
@@ -336,7 +338,9 @@ else
     if SURF_JSON=$("$OPEN_SIDE_SURFACE" --caller --wait-ready \
         --wait-ready-timeout "$READY_TIMEOUT" --json 2>"$CALL_DIR/surface_err.txt"); then
       SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
+      SURF_ID=$(printf '%s' "$SURF_JSON" | jq -r '.surface_id // empty')
       SURF_PANE=$(printf '%s' "$SURF_JSON" | jq -r '.pane_ref // empty')
+      SURF_PANE_ID=$(printf '%s' "$SURF_JSON" | jq -r '.pane_id // empty')
       [[ -z "$SURF_REF" ]] && fail_async "open-side-surface returned no surface_ref: $SURF_JSON"
     else
       rc=$?
@@ -365,12 +369,18 @@ else
   # SEND_TARGET / workspace_ref.txt — skip the surface-mode bookkeeping (it would
   # clobber SEND_TARGET with an empty --surface ref).
   if [[ "$PLACEMENT" != "detached" ]]; then
+    # Persist stable UUID handles when the opener provides them. Positional
+    # surface:N / pane:N refs can retarget after tabs move or siblings close;
+    # the file names stay for compatibility, but consumers treat their contents
+    # as opaque cmux handles.
+    SURF_HANDLE="${SURF_ID:-$SURF_REF}"
+    SURF_PANE_HANDLE="${SURF_PANE_ID:-$SURF_PANE}"
     # surface_ref.txt is the cmux-SURFACE-mode signal to the wait-for-* scripts
     # (mirrors how workspace_ref.txt signals workspace mode). pane_ref.txt lets
     # them re-attach the PTY if a read-screen ever races.
-    echo "$SURF_REF" > "$CALL_DIR/surface_ref.txt"
-    [[ -n "$SURF_PANE" ]] && echo "$SURF_PANE" > "$CALL_DIR/pane_ref.txt"
-    SEND_TARGET=(--surface "$SURF_REF")
+    echo "$SURF_HANDLE" > "$CALL_DIR/surface_ref.txt"
+    [[ -n "$SURF_PANE_HANDLE" ]] && echo "$SURF_PANE_HANDLE" > "$CALL_DIR/pane_ref.txt"
+    SEND_TARGET=(--surface "$SURF_HANDLE")
     # Surface placements live in the caller's own window — keep them visible after
     # the call instead of auto-closing (the whole point is to SEE the call). The
     # caller closes the surface when done.

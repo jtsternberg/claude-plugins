@@ -194,7 +194,7 @@ mkdir -p "$tmp/bin" "$tmp/cwd"
 cat > "$tmp/open-side.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "invoked: $*" >> "${SIDE_STUB_LOG:?}"
-printf '%s\n' '{"surface_ref":"surface:777","pane_ref":"pane:55","workspace_ref":"workspace:5","ready":"ready"}'
+printf '%s\n' '{"surface_ref":"surface:777","surface_id":"SURFACE-UUID-777","pane_ref":"pane:55","pane_id":"PANE-UUID-55","workspace_ref":"workspace:5","ready":"ready"}'
 EOF
 chmod +x "$tmp/open-side.sh"
 cat > "$tmp/bin/cmux" <<'EOF'
@@ -231,16 +231,18 @@ fi
 
 send_calls=$(cat "$tmp/send_calls" 2>/dev/null || true)
 assert_contains "side-by-side sends launch script to the SURFACE (not a workspace)" \
-  "$send_calls" "send --surface surface:777 bash /tmp/hotline-cmux-launch-"
+  "$send_calls" "send --surface SURFACE-UUID-777 bash /tmp/hotline-cmux-launch-"
 
 placement=$(jq -r '.placement // empty' "$tmp/out.json" 2>/dev/null || true)
 surf_ref=$(jq -r '.surface_ref // empty' "$tmp/out.json" 2>/dev/null || true)
+surf_id=$(jq -r '.surface_id // empty' "$tmp/out.json" 2>/dev/null || true)
 ws_ref=$(jq -r '.workspace_ref // "null"' "$tmp/out.json" 2>/dev/null || true)
-if [[ "$placement" == "surface" && "$surf_ref" == "surface:777" && "$ws_ref" == "null" ]]; then
-  pass "side-by-side reports placement=surface with surface_ref and null workspace_ref"
+if [[ "$placement" == "surface" && "$surf_ref" == "surface:777" \
+      && "$surf_id" == "SURFACE-UUID-777" && "$ws_ref" == "null" ]]; then
+  pass "side-by-side reports display ref plus stable surface ID"
 else
-  fail "side-by-side reports placement=surface with surface_ref and null workspace_ref" \
-       "placement=$placement surface_ref=$surf_ref workspace_ref=$ws_ref"
+  fail "side-by-side reports display ref plus stable surface ID" \
+       "placement=$placement surface_ref=$surf_ref surface_id=$surf_id workspace_ref=$ws_ref"
 fi
 ls=$(printf '%s' "$send_calls" | sed -E 's/.*bash (\/tmp\/hotline-cmux-launch-[^\\[:space:]]+).*/\1/' | tail -1)
 rm -f "$ls" 2>/dev/null || true

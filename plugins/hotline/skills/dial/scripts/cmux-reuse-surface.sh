@@ -23,7 +23,7 @@
 # inside it would nest a second REPL.
 #
 # Usage:
-#   cmux-reuse-surface.sh --surface <ref> --session <id> --prompt <text>
+#   cmux-reuse-surface.sh --surface <uuid-or-ref> --session <id> --prompt <text>
 #                         [--cwd <path>] [--keep-workspace]
 #   # → {"call_dir": "/tmp/hotline-call-XXXXX"}   (reused)
 #   # → {"fallback": "fresh", "reason": "..."}     (surface gone / send failed)
@@ -50,6 +50,10 @@
 #   • The input-box clear is a raw Ctrl-C byte, which is a real interrupt. It is
 #     now sent only when the box demonstrably holds unsent text AND the REPL
 #     shows no sign of an active turn (claude-plugins-06ws).
+#
+# New call caches pass a stable surface UUID. Positional surface:N refs can
+# silently retarget after a tab move or sibling close; they remain accepted only
+# for backward compatibility with caches written by older plugin versions.
 # =============================================================================
 set -euo pipefail
 

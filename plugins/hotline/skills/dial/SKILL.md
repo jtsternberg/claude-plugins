@@ -207,7 +207,7 @@ eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID"
 ```
 
-- **Exit 0**: Active session found. Parse the JSON for `session_id`, `mode`, and `surface_ref` (present only when the session lives in a visible cmux surface). Set `REMOTE_SESSION_ID` and `SURFACE_REF` from it for the Follow-Up step:
+- **Exit 0**: Active session found. Parse the JSON for `session_id`, `mode`, and `surface_ref` (present only when the session lives in a visible cmux surface). The `surface_ref` key is legacy naming: treat its value as an opaque cmux handle. Side-by-side entries store a stable UUID when cmux exposes one, not a positional `surface:N` label. Set `REMOTE_SESSION_ID` and `SURFACE_REF` from it for the Follow-Up step:
   ```bash
 # Codex: replace ${CLAUDE_PLUGIN_ROOT} below with the Hotline plugin directory.
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
@@ -382,7 +382,7 @@ Clean up: `rm -rf "$CALL_DIR"`
 
 #### Follow-Up (Existing Session from Our Cache)
 
-Use the `mode` field you parsed from Step 4's session-cache.sh JSON (it's one of `quick_call`, `work_order`, or `conference_call`). Also parse **`surface_ref`** from that same JSON — it's present when the session already lives in a visible cmux surface, and it's the key to reusing that surface instead of stacking a new one.
+Use the `mode` field you parsed from Step 4's session-cache.sh JSON (it's one of `quick_call`, `work_order`, or `conference_call`). Also parse **`surface_ref`** from that same JSON — it's present when the session already lives in a visible cmux surface, and it's the key to reusing that surface instead of stacking a new one. Pass the value through unchanged; despite the key name, side-by-side launchers store a stable surface UUID when available because positional refs can retarget after a move.
 
 **Important: follow-ups never re-wrap with `/hotline:hotline-ringing`.** The remote session already invoked that slash command on first contact — the ringing skill is in its context, including the STATUS protocol. Sending raw `$YOUR_MESSAGE` keeps the conversation going naturally; re-invoking `/hotline:hotline-ringing` would re-trigger the skill's first-contact setup and confuse the receiver. Every transport below passes `$YOUR_MESSAGE` raw, matching what `headless-call.sh` already does.
 
