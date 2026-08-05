@@ -20,7 +20,9 @@ will never send an email directly.
 ## Prerequisites
 
 ```!
-bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
+# Codex: replace the fallback with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
 Also requires a markdown→HTML converter. The script prefers
@@ -33,7 +35,9 @@ installed.
 Run the entrypoint script, passing all arguments through:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh $ARGUMENTS
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this gmail-draft-from-markdown skill directory>}"
+bash "$SKILL_DIR/scripts/draft.sh" $ARGUMENTS
 ```
 
 If no arguments were provided, ask the user for the markdown file path and
@@ -117,17 +121,19 @@ are signed in. Always relay the account email to the user along with the URL.
 ## Examples
 
 ```bash
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this gmail-draft-from-markdown skill directory>}"
 # Email address known
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./coaching-followup.md alice@example.com --subject "Session recap"
+bash "$SKILL_DIR/scripts/draft.sh" ./coaching-followup.md alice@example.com --subject "Session recap"
 
 # Look up recipient by name (most recent correspondent wins)
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./coaching-followup.md "Alice Smith"
+bash "$SKILL_DIR/scripts/draft.sh" ./coaching-followup.md "Alice Smith"
 
 # Subject embedded in markdown as a leading "Subject: ..." line
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./note.md alice@example.com
+bash "$SKILL_DIR/scripts/draft.sh" ./note.md alice@example.com
 
 # Reply draft — thread onto an existing conversation (subject/threading auto-derived)
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./reply.md alice@example.com --reply-to 19f3de2c4f9ee065
+bash "$SKILL_DIR/scripts/draft.sh" ./reply.md alice@example.com --reply-to 19f3de2c4f9ee065
 ```
 
 ## Troubleshooting

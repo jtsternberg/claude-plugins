@@ -25,9 +25,11 @@ mode 0600 (plaintext, matching the gws plugin's bash-script convention).
 Confirm the user is authenticated for YouTube on the active account:
 
 ```bash
-test -f "$(jq -r '.' <(bash ${CLAUDE_SKILL_DIR}/../../scripts/account-current.sh --json) 2>/dev/null | jq -r '.config_dir // empty')/youtube_credentials.json" \
+# Codex: replace the fallback with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
+test -f "$(jq -r '.' <(bash "$PLUGIN_ROOT/scripts/account-current.sh" --json) 2>/dev/null | jq -r '.config_dir // empty')/youtube_credentials.json" \
   && echo "youtube credentials present" \
-  || echo "NOT AUTHENTICATED — run: bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-login.sh"
+  || echo "NOT AUTHENTICATED — run youtube-login.sh from the resolved plugin root"
 ```
 
 If not authenticated, run `youtube-login.sh` first (PKCE + loopback flow,
@@ -65,12 +67,14 @@ Mutating scripts (`add`, `remove`) additionally support:
 ### Auth lifecycle
 
 ```bash
+# Codex: replace the fallback with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
 # Authenticate (writes <account-dir>/youtube_credentials.json mode 0600)
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-login.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-login.sh" \
   [--account=LABEL] [--force] [--json] [--no-browser]
 
 # Clear credentials when done with YouTube ops (idempotent)
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-logout.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-logout.sh" \
   [--account=LABEL | --all-accounts] [--json]
 ```
 
@@ -81,13 +85,15 @@ suggest this when wrapping up a multi-step workflow.
 ### Read primitives
 
 ```bash
+# Codex: replace the fallback with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
 # List playlists owned by the authenticated user
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-list-playlists.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-list-playlists.sh" \
   [--account=LABEL] [--json] [--max=N] [--force-refresh]
 # Returns: id, title, itemCount, privacyStatus, publishedAt
 
 # List items in a playlist
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-list-items.sh <playlist-id> \
+bash "$PLUGIN_ROOT/scripts/youtube-list-items.sh" <playlist-id> \
   [--account=LABEL] [--json] [--max=N] [--force-refresh]
 # Returns: playlistItemId, videoId, title, position, publishedAt
 ```
@@ -98,15 +104,17 @@ pagination correctness when listing items.
 ### Mutating primitives
 
 ```bash
+# Codex: replace the fallback with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
 # Add a video to a playlist (dedupe-aware by default)
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-add-item.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-add-item.sh" \
   <playlist-id> <video-id> \
   [--yes] [--dry-run] [--allow-duplicate] [--json]
 # Returns status: "added" | "skipped_duplicate" | "dry_run"
 # On "added": JSON includes playlistItemId (capture for later removal)
 
 # Remove an item from a playlist by playlistItemId (NOT videoId)
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-remove-item.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-remove-item.sh" \
   <playlist-item-id> \
   [--yes] [--dry-run] [--json]
 # Returns status: "deleted" | "already_absent" | "dry_run"
@@ -126,12 +134,14 @@ Before suggesting any destructive operation, build a complete picture in
 JSON. This costs one quota unit per playlist plus one per page of items:
 
 ```bash
+# Codex: replace the fallback with the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this gws plugin directory>}"
 # 1. Snapshot all playlists
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-list-playlists.sh --json > /tmp/yt_playlists.json
+bash "$PLUGIN_ROOT/scripts/youtube-list-playlists.sh" --json > /tmp/yt_playlists.json
 
 # 2. Snapshot items for each playlist (loop in jq + bash)
 jq -r '.[].id' /tmp/yt_playlists.json | while read -r pid; do
-  bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-list-items.sh "$pid" --json \
+  bash "$PLUGIN_ROOT/scripts/youtube-list-items.sh" "$pid" --json \
     | jq --arg pid "$pid" 'map(. + {playlistId: $pid})'
 done | jq -s 'add' > /tmp/yt_items.json
 ```
