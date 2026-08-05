@@ -17,7 +17,7 @@ Generate a concise identity for this workspace so other agents can find and unde
 
 ## Script Paths
 
-!`bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh`
+!`PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this hotline plugin directory>}"; bash "$PLUGIN_ROOT/scripts/paths.sh"`
 
 The above sets `HOTLINE_PICKUP_SCRIPTS` (and others).
 

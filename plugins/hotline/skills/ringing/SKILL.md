@@ -39,7 +39,7 @@ STATUS: OUT_OF_SCOPE
 
 ## Script Paths
 
-!`bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh`
+!`PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this hotline plugin directory>}"; bash "$PLUGIN_ROOT/scripts/paths.sh"`
 
 The above sets `HOTLINE_SCRIPTS`, `HOTLINE_DIAL_SCRIPTS`, and `HOTLINE_PICKUP_SCRIPTS`.
 

@@ -22,9 +22,11 @@ A local dashboard that shows every hotline call — who dialed whom, live/recent
 All via one script:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/switchboard.sh start [--port=4160] [--no-open]
-bash ${CLAUDE_SKILL_DIR}/scripts/switchboard.sh stop
-bash ${CLAUDE_SKILL_DIR}/scripts/switchboard.sh status
+# Codex: replace the fallback with the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR:-<absolute path to this switchboard skill directory>}"
+bash "$SKILL_DIR/scripts/switchboard.sh" start [--port=4160] [--no-open]
+bash "$SKILL_DIR/scripts/switchboard.sh" stop
+bash "$SKILL_DIR/scripts/switchboard.sh" status
 ```
 
 Each prints a JSON status line. `start` backgrounds the server (pidfile at `~/.agents-hotline/switchboard.pid`, log at `~/.agents-hotline/switchboard.log`) and opens the browser unless `--no-open` is passed. `start` always replaces any prior switchboard instance on the port (pidfile-tracked or ad-hoc) so it serves fresh code — it doubles as a restart.

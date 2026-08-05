@@ -39,7 +39,7 @@ If `$0` is provided (after stripping `--headless`), use it as `USER_REFERENCE` i
 
 ## Script Paths
 
-!`bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh`
+!`PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this hotline plugin directory>}"; bash "$PLUGIN_ROOT/scripts/paths.sh"`
 
 The above sets `HOTLINE_SCRIPTS`, `HOTLINE_DIAL_SCRIPTS`, and `HOTLINE_PICKUP_SCRIPTS`.
 

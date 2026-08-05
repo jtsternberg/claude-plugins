@@ -10,7 +10,7 @@ bash "$HOTLINE_SCRIPTS/dirmap-fallback.sh" list
 bash "$HOTLINE_SCRIPTS/dirmap-fallback.sh" get <id>
 ```
 
-(Requires `eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)"` to have been run first.)
+(Requires `PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-<absolute path to this hotline plugin directory>}"; eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"` to have been run first.)
 
 These read from `~/.dirmap.json`. To set up dirmap for the first time, create `~/.dirmap.json`:
 
