@@ -206,6 +206,42 @@ The source session is never resumed, forked, or written to.
 
 ---
 
+### ⏸ note-to-self
+
+Breadcrumbs for the conversation you're about to walk away from.
+
+```
+/note-to-self Waiting on final PR review, then will pick this up again
+/note-to-self                 # no note of your own — the state snapshot is the note
+```
+
+When several conversations run in parallel, coming back to one means reconstructing both
+*why you stopped* and *where the work stands*. So the skill records both, as two separate
+lines: your sentence, verbatim, plus the agent's snapshot. Neither is paraphrased into the
+other.
+
+```
+⏸  Paused — 2026-08-06 14:32
+   Waiting on final PR review, then will pick this up again
+   ↳ note-to-self-skill @ 9265612: SKILL.md written, plugin version bumped. Next: add the README section and commit.
+```
+
+It prints into the conversation — exactly where you'll be when you return, since resuming
+puts it back in front of both of you. The timestamp and the sha are the load-bearing parts,
+and they're for the *agent*: with no clock of its own it would answer a two-day-old thread
+in the tense of ten minutes ago, and `git log <sha>..HEAD --oneline` is the exact list of
+what moved while you were gone — still true across a rebase that a branch name would hide.
+
+So the other half of the skill is what happens when you come back: check the gap, check
+whether the state the block claims still holds, and surface only what's different. Nothing
+moved, nothing extra said.
+
+**Not a handoff.** `handoff` writes for a fresh agent inheriting the work; this writes for
+*you*, returning to this same conversation. `sessions-catch-up` is the third neighbor —
+it reconstructs a session you left no note in.
+
+---
+
 ## Shared machinery (why it lives at the plugin root)
 
 Three skills read transcripts — `sessions-catch-up`, `sessions-fork`, and
@@ -217,8 +253,10 @@ plugins/session-tools/
 ├── scripts/            ← shared: lib/, export-session.mjs, nudge.mjs, install-wrapper.sh
 ├── references/         ← shared prose: reading-a-digest.md
 ├── tests/              ← transcript.test.mjs
-└── skills/             ← sessions-catch-up, sessions-fork, sessions-weekly-recap
+└── skills/             ← sessions-catch-up, sessions-fork, sessions-weekly-recap, note-to-self
 ```
+
+`note-to-self` is the exception: it reads no transcripts and ships no scripts, just prose.
 
 Skills reach it with `${CLAUDE_PLUGIN_ROOT}` — the documented variable for a plugin's
 install directory, which keeps working after a marketplace install:
