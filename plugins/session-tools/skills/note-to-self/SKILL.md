@@ -8,7 +8,7 @@ when_to_use: |
   Not a handoff: the audience is the user returning to THIS conversation, not a
   fresh agent inheriting the work. For that, use the `handoff` skill.
 disable-model-invocation: true
-allowed-tools: "Bash(git *) Bash(date *) Read Grep"
+allowed-tools: "Bash(git *) Bash(date) Bash(date *)"
 argument-hint: "<what you want to remember>"
 ---
 
