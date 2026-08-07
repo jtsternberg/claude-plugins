@@ -13,7 +13,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.claude-plugi
 
 test('packages the walkthrough as a versioned pr-workflow skill', () => {
 	assert.equal(manifest.name, 'pr-workflow');
-	assert.equal(manifest.version, '1.8.0');
+	assert.equal(manifest.version, '1.8.1');
 	assert.match(manifest.description, /history walkthroughs/);
 	assert.match(skill, /^---\nname: walk-through-work-history\ndescription: .+\n---\n/);
 	assert.match(skill, /Ready to \*\*turn the page\*\*\?/);
