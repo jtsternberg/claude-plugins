@@ -2,8 +2,8 @@
 
 Plugin versions are release identifiers and Codex cache keys. Every plugin
 change must bump the version in that plugin's manifest. A Codex-visible change
-without a version bump is not acceptable: an installed client can continue to
-use the old versioned cache even after its marketplace snapshot refreshes.
+without a version bump is not acceptable: it defeats an auditable cache
+transition and relies on undocumented in-place refresh behavior.
 
 ## 1. Identify the published surfaces
 
@@ -53,21 +53,26 @@ codex plugin add <plugin-name>@jtsternberg
 ```
 
 After the release reaches the configured Git ref, refresh the marketplace
-snapshot and reinstall the plugin:
+snapshot:
 
 ```bash
 codex plugin marketplace upgrade jtsternberg
-codex plugin add <plugin-name>@jtsternberg
 ```
 
-`marketplace upgrade` updates the checked-out catalog and plugin sources. It
-does not, by itself, prove that an already installed plugin moved to the new
-versioned cache. Reinstall the plugin, verify the command reports the expected
-version and installed path, and inspect only the cache directory names:
+On Codex CLI 0.147.0, `marketplace upgrade` also reconciles installed plugins:
+it removes the prior versioned cache and materializes the new version. Verify
+that transition by inspecting only the cache directory names:
 
 ```bash
 find "$CODEX_HOME/plugins/cache/jtsternberg/<plugin-name>" \
   -maxdepth 1 -mindepth 1 -type d -print
+```
+
+If the expected version is absent, reinstall explicitly and verify the version
+and installed path reported by the command:
+
+```bash
+codex plugin add <plugin-name>@jtsternberg
 ```
 
 Start a new Codex session before exercising changed skills, hooks, MCP servers,
@@ -86,7 +91,8 @@ Codex-native-only plugins have no Claude release step.
 On 2026-08-07, Codex CLI 0.147.0 was tested with a clean `CODEX_HOME` against a
 real GitHub branch of this repository. The client installed `codex@jtsternberg`
 at 0.1.2 into `plugins/cache/jtsternberg/codex/0.1.2`. The branch was then
-updated to 0.1.3 and the same client ran marketplace upgrade and plugin add
-again. The observed refresh and cache transition are recorded in the commit
-that introduced this guide.
-
+updated to 0.1.3. `codex plugin marketplace upgrade jtsternberg` reported the
+marketplace root as upgraded and, before any reinstall, replaced the 0.1.2
+cache with 0.1.3. The cached README contained the newly published content. A
+subsequent `codex plugin add codex@jtsternberg` returned the same 0.1.3 path,
+and a second marketplace upgrade reported no upgraded roots.
