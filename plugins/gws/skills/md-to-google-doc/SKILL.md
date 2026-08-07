@@ -1,6 +1,6 @@
 ---
 name: md-to-google-doc
-description: "Upload markdown to Google Drive as a Google Doc. Three source rungs: gws CLI (full create/update/tab support), gcloud ADC (create + update-in-place via a state file, for accounts gws can't reach), or the claude.ai Google Drive connector (zero setup, create-only, no update/no pageless/no table-cell emphasis). Strips frontmatter and Obsidian callouts. Triggers on \"upload to google docs\", \"push to drive\", \"sync to gdoc\", \"create a google doc\", \"gws upload\", or requests to push markdown to a work/other Google account."
+description: "Upload or sync local markdown to Google Drive as a Google Doc, via gws CLI, gcloud ADC, or the Drive connector."
 disable-model-invocation: true
 argument-hint: '[file.md] [folder-id-or-url | --folder <id-or-url> | doc-id-or-url] [--title "Title"]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) mcp__claude_ai_Google_Drive__create_file'
@@ -38,8 +38,10 @@ produced which doc ID, so reruns update instead of duplicating. Sets
 PAGELESS via a `batchUpdate` after create, same as `gws`.
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/adc-check.sh   # fast preflight; exit 0 = configured
-bash ${CLAUDE_SKILL_DIR}/scripts/adc-create.sh <file.md> [folder-id-or-url] [--title "Title"] [--new]
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/adc-check.sh"   # fast preflight; exit 0 = configured
+bash "$SKILL_DIR/scripts/adc-create.sh" <file.md> [folder-id-or-url] [--title "Title"] [--new]
 ```
 
 `--new` forces a fresh doc even if the state file has a prior entry for this
@@ -63,7 +65,9 @@ the connector's write path, not its read path.
 
 1. Clean the markdown (same as rung 1/2):
    ```bash
-   bash ${CLAUDE_SKILL_DIR}/scripts/clean.sh <file.md> /tmp/cleaned-$$.md
+   # Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+   SKILL_DIR="${CLAUDE_SKILL_DIR}"
+   bash "$SKILL_DIR/scripts/clean.sh" <file.md> /tmp/cleaned-$$.md
    ```
 2. Derive the title if `--title` wasn't given (H1 heading, else filename).
 3. Call `mcp__claude_ai_Google_Drive__create_file`:
@@ -98,7 +102,9 @@ message naming which rungs were tried and why each failed.
 ## Prerequisites (rung 1)
 
 ```!
-bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
 ## Task (rung 1)
@@ -108,7 +114,9 @@ create vs update based on whether the destination looks like a doc URL/ID
 or a folder ID:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/gdoc.sh $ARGUMENTS
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/gdoc.sh" $ARGUMENTS
 ```
 
 If no arguments were provided, ask the user for the file path and destination.
@@ -120,22 +128,28 @@ Optional flags: `--title "Custom Title"` overrides the auto-derived title.
 ### Creating a New Google Doc
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/upload.sh ./file.md FOLDER_ID
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/upload.sh" ./file.md FOLDER_ID
 ```
 
 The folder may be a bare ID or a full Drive folder URL, and may be passed
 positionally or via `--folder`. All of these are equivalent:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/upload.sh ./file.md FOLDER_ID
-bash ${CLAUDE_SKILL_DIR}/scripts/upload.sh ./file.md "https://drive.google.com/drive/u/0/folders/FOLDER_ID"
-bash ${CLAUDE_SKILL_DIR}/scripts/upload.sh ./file.md --folder "https://drive.google.com/drive/u/0/folders/FOLDER_ID"
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/upload.sh" ./file.md FOLDER_ID
+bash "$SKILL_DIR/scripts/upload.sh" ./file.md "https://drive.google.com/drive/u/0/folders/FOLDER_ID"
+bash "$SKILL_DIR/scripts/upload.sh" ./file.md --folder "https://drive.google.com/drive/u/0/folders/FOLDER_ID"
 ```
 
 With a custom title:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/upload.sh ./file.md FOLDER_ID --title "My Document"
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/upload.sh" ./file.md FOLDER_ID --title "My Document"
 ```
 
 The script handles: frontmatter stripping, Obsidian callout cleanup, title
@@ -160,13 +174,17 @@ When no `--title` is given, the script:
 ### Updating an Existing Google Doc
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/update.sh ./file.md DOC_ID
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/update.sh" ./file.md DOC_ID
 ```
 
 Also accepts a full Google Doc URL instead of a bare doc ID:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/update.sh ./file.md "https://docs.google.com/document/d/DOC_ID/edit"
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/update.sh" ./file.md "https://docs.google.com/document/d/DOC_ID/edit"
 ```
 
 ### Updating a Single Tab (multi-tab docs)
@@ -178,8 +196,10 @@ run against a multi-tab doc unless you pass `--force`.
 To publish markdown into one tab while preserving the others:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/tab-update.sh ./file.md DOC_ID --tab "Tab Title"
-bash ${CLAUDE_SKILL_DIR}/scripts/tab-update.sh ./file.md DOC_ID --tab t.abc123
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/tab-update.sh" ./file.md DOC_ID --tab "Tab Title"
+bash "$SKILL_DIR/scripts/tab-update.sh" ./file.md DOC_ID --tab t.abc123
 ```
 
 How it works: the markdown is converted server-side via a throwaway temp doc
@@ -196,8 +216,10 @@ matching section heading in another tab (e.g. a "Next Steps" tab linking into
 the main findings tab):
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/link-sections.sh DOC_ID
-bash ${CLAUDE_SKILL_DIR}/scripts/link-sections.sh DOC_ID --target-tab "Findings" --from-tab "Next Steps"
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/link-sections.sh" DOC_ID
+bash "$SKILL_DIR/scripts/link-sections.sh" DOC_ID --target-tab "Findings" --from-tab "Next Steps"
 ```
 
 By default the target is the tab with the most numbered-section headings and
@@ -207,10 +229,12 @@ all other tabs are scanned. Idempotent — safe to re-run after edits. Run it
 ### Managing Tabs
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/tabs.sh list DOC_ID
-bash ${CLAUDE_SKILL_DIR}/scripts/tabs.sh add DOC_ID "Next Steps" --emoji "⭐" --index 1
-bash ${CLAUDE_SKILL_DIR}/scripts/tabs.sh rename DOC_ID "Next Steps" "Action Items"
-bash ${CLAUDE_SKILL_DIR}/scripts/tabs.sh delete DOC_ID t.abc123 --yes
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/tabs.sh" list DOC_ID
+bash "$SKILL_DIR/scripts/tabs.sh" add DOC_ID "Next Steps" --emoji "⭐" --index 1
+bash "$SKILL_DIR/scripts/tabs.sh" rename DOC_ID "Next Steps" "Action Items"
+bash "$SKILL_DIR/scripts/tabs.sh" delete DOC_ID t.abc123 --yes
 ```
 
 ## Batch Uploads
@@ -219,8 +243,10 @@ When uploading multiple files to the same folder, run upload commands in
 parallel for efficiency:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/upload.sh ./file1.md FOLDER_ID &
-bash ${CLAUDE_SKILL_DIR}/scripts/upload.sh ./file2.md FOLDER_ID &
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/upload.sh" ./file1.md FOLDER_ID &
+bash "$SKILL_DIR/scripts/upload.sh" ./file2.md FOLDER_ID &
 wait
 ```
 

@@ -1,6 +1,8 @@
 ---
 name: hotline-switchboard
-description: "Serves a live, read-only HTML dashboard of all hotline conversations — the switchboard. Use when the user asks to 'open the switchboard', 'watch the hotline calls', 'show hotline conversations', 'monitor the calls', or wants a live view of cross-workspace Claude conversations. Also handles 'stop the switchboard' and 'is the switchboard running?'."
+description: "Live read-only HTML dashboard of hotline conversations — 'open/stop the switchboard', 'watch the hotline calls', 'is the switchboard running?'"
+when_to_use: |
+  Also 'show hotline conversations', 'monitor the calls', or any request for a live view of cross-workspace Claude conversations.
 allowed-tools: Bash
 ---
 
@@ -11,7 +13,7 @@ A local dashboard that shows every hotline call — who dialed whom, live/recent
 ## How it works
 
 - Call registry: `~/.agents-hotline/sessions/*.json` (caller, callees, session IDs, modes).
-- Discovery scan: calls missing from the registry are reconstructed from the `/hotline-ringing` handshake in each callee transcript's head and shown with a `traced` stamp.
+- Discovery scan: calls missing from the registry are reconstructed from the `/hotline:hotline-ringing` handshake in each callee transcript's head and shown with a `traced` stamp.
 - Transcripts: each session ID maps to `~/.claude/projects/*/<session-id>.jsonl`, which Claude Code appends to live. The server tails these from byte offsets and streams new entries to the browser over SSE.
 - Zero dependencies: single-file Node server, inline HTML/JS UI, no build step.
 
@@ -20,9 +22,11 @@ A local dashboard that shows every hotline call — who dialed whom, live/recent
 All via one script:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/switchboard.sh start [--port=4160] [--no-open]
-bash ${CLAUDE_SKILL_DIR}/scripts/switchboard.sh stop
-bash ${CLAUDE_SKILL_DIR}/scripts/switchboard.sh status
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/switchboard.sh" start [--port=4160] [--no-open]
+bash "$SKILL_DIR/scripts/switchboard.sh" stop
+bash "$SKILL_DIR/scripts/switchboard.sh" status
 ```
 
 Each prints a JSON status line. `start` backgrounds the server (pidfile at `~/.agents-hotline/switchboard.pid`, log at `~/.agents-hotline/switchboard.log`) and opens the browser unless `--no-open` is passed. `start` always replaces any prior switchboard instance on the port (pidfile-tracked or ad-hoc) so it serves fresh code — it doubles as a restart.

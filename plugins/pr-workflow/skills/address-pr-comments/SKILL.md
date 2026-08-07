@@ -1,20 +1,22 @@
 ---
-description: Address PR comments with human review before push and reply (draft then approve)
+name: address-pr-comments
+description: Address all PR comments by reviewing, fixing, committing, and replying (auto push and post)
 argument-hint: <pr-number-or-comment-url>
+disable-model-invocation: true
 ---
 
-# Address PR Comments (Human-in-the-Loop)
+# Address PR Comments
 
 ## Argument Parsing
 
-Parse `$ARGUMENTS` to determine the mode:
+Parse `$ARGUMENTS` to determine the mode.
+
+Codex: if the invocation text above is not populated, use the text after the skill name. If unavailable, infer the PR number or comment URL from the current request.
 
 - **Specific comment URL** — matches pattern `https://github.com/{owner}/{repo}/pull/{number}#discussion_r{id}` or `#pullrequestreview-{id}`
   - Extract: `owner`, `repo`, `pr_number`, and `comment_anchor` (the fragment after `#`)
   - This is **single-comment mode**: only address the targeted comment/review
 - **PR number** (plain numeric) — address all unresolved comments on the PR
-
-Do NOT push commits or post replies until the user approves. Write drafts first, then after approval: push and post.
 
 ## Step 1: Gather PR Comments
 
@@ -61,8 +63,11 @@ Use GraphQL to get the true resolution status of every thread. Do NOT guess reso
    - **SKIP** threads where `isResolved == true` — these are already resolved in GitHub
    - **SKIP** your own comments (not replies to others)
    - **INCLUDE** all unresolved review threads — from human reviewers and bots alike (Copilot, sentry[bot], etc. can surface real issues)
+   - **INCLUDE** general issue-style PR comments from other authors that request a change or response
    - **INCLUDE** top-level reviews with state `CHANGES_REQUESTED` that have not been superseded by a newer `APPROVED` or `DISMISSED` review from the same author
    - **INCLUDE** unresolved review threads even if you previously replied — a reply does NOT mean resolved
+
+Classify each actionable item as `review_thread_comment`, `issue_comment`, or `top_level_review`. Retain its author, URL, database ID, and any file/line metadata. Do not assume every item has a pull-request review comment ID.
 
 ## Step 2: Create Beads Tasks
 
@@ -93,43 +98,21 @@ For each task (one at a time, in order):
 4. **If a fix was made**:
    - Stage only the affected files
    - Commit with a message referencing the PR comment (e.g., `Fix: address review feedback on <file> — <what changed>`)
-   - Do NOT push yet
+   - Push the commit: `git push`
 5. **Reply to the reviewer** — every comment MUST get a reply, regardless of outcome:
    - If fixed: draft a reply explaining what you changed
    - If low priority / deferred: draft a reply acknowledging the feedback, explaining why it's being deferred, and note any follow-up plans (e.g., "Good catch — this is lower priority so we'll track it separately")
    - If not valid: draft a respectful explanation of why no change is needed
-   - Write the draft to `human-in-loop-drafts/pr-{number}/comment-{comment_id}.md`. Do NOT post via `gh api`.
-   - Draft file format:
-     ```
-     # Comment by @{author}
-     **File:** {file}:{line}
-     **Comment:** {comment text}
-     **Link:** {html_url}
-
-     ## Code Changes
-     {`git show --stat` output for the commit, or "No changes — explanation only"}
-
-     ## Commit Message
-     {full commit message}
-
-     ## Proposed Reply
-     {the reply you would post}
-     ```
+   - Write the exact reply body to a uniquely named temporary file, represented below as `<reply-file>`.
+   - For a `review_thread_comment`, post a threaded reply: `gh api --method POST repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies -F body=@<reply-file>`
+   - For an `issue_comment` or `top_level_review`, post a new PR conversation comment: `gh api --method POST repos/{owner}/{repo}/issues/{pr_number}/comments -F body=@<reply-file>`. Begin the reply by mentioning the author and linking the original item so the context is unambiguous.
+   - Verify the API response before closing the task. Never interpolate an arbitrary reply directly into a shell argument.
 6. Mark the task complete: `bd close <task-id>`
 
-## Step 5: Present for Approval
+## Step 5: Final Summary
 
 1. Run `bd dolt push`
-2. Present the user with:
-   - Path to `human-in-loop-drafts/pr-{number}/`
-   - Summary table: comment ID, author, file, resolution type (fix/explanation)
-   - Full commit log: `git log --oneline origin/HEAD..HEAD`
-3. Ask the user to review the drafts and confirm before proceeding.
-
-## Step 6: After User Approves
-
-When the user approves (or asks you to proceed):
-
-1. Run `git push`
-2. Post all replies using the drafted content: `gh api repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies -f body="<reply>"`
-3. Delete the `human-in-loop-drafts/` directory
+2. Summarize what was done:
+   - How many comments were addressed (with links to each comment)
+   - How many resulted in code changes vs. explanations
+   - List each comment and its resolution

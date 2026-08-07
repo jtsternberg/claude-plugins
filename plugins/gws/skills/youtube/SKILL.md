@@ -1,12 +1,13 @@
 ---
 name: gws-youtube
-description: "This skill should be used when the user asks to \"clean up my youtube playlists\", \"list my youtube playlists\", \"dedupe my playlists\", \"remove video from playlist\", \"add video to playlist\", \"youtube cleanup\", \"youtube channel playlists\", \"merge playlists\", \"find duplicate playlists\", or mentions YouTube playlist management. Manages YouTube playlists (list, dedupe analysis, add/remove items) via the gws plugin's bash primitives, reusing the active gws account's OAuth client. Reach for this instead of constructing raw YouTube Data API calls or writing one-off Python scripts."
+description: "Manage the user's own YouTube playlists via gws — list, add/remove videos, dedupe, merge, find duplicates, cleanup workflows. Use instead of raw YouTube Data API calls."
 when_to_use: |
   Use whenever the user wants to inspect or modify YouTube playlists they
   own — listing playlists, listing items, adding a video, removing an item,
   or building a higher-level cleanup workflow (dedupe by name, find
   cross-playlist overlap, consolidate singletons, delete empties). Respects
   the active gws account set by the gws-account skill.
+  Triggers on 'clean up my youtube playlists', 'merge playlists', 'youtube cleanup'.
 argument-hint: "<login|logout|playlists|items|add|remove> [flags]"
 allowed-tools: 'Bash(bash *) Bash(jq *) Bash(curl *) Bash(python3 *)'
 ---
@@ -24,9 +25,11 @@ mode 0600 (plaintext, matching the gws plugin's bash-script convention).
 Confirm the user is authenticated for YouTube on the active account:
 
 ```bash
-test -f "$(jq -r '.' <(bash ${CLAUDE_SKILL_DIR}/../../scripts/account-current.sh --json) 2>/dev/null | jq -r '.config_dir // empty')/youtube_credentials.json" \
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+test -f "$(jq -r '.' <(bash "$PLUGIN_ROOT/scripts/account-current.sh" --json) 2>/dev/null | jq -r '.config_dir // empty')/youtube_credentials.json" \
   && echo "youtube credentials present" \
-  || echo "NOT AUTHENTICATED — run: bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-login.sh"
+  || echo "NOT AUTHENTICATED — run youtube-login.sh from the resolved plugin root"
 ```
 
 If not authenticated, run `youtube-login.sh` first (PKCE + loopback flow,
@@ -64,12 +67,14 @@ Mutating scripts (`add`, `remove`) additionally support:
 ### Auth lifecycle
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # Authenticate (writes <account-dir>/youtube_credentials.json mode 0600)
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-login.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-login.sh" \
   [--account=LABEL] [--force] [--json] [--no-browser]
 
 # Clear credentials when done with YouTube ops (idempotent)
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-logout.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-logout.sh" \
   [--account=LABEL | --all-accounts] [--json]
 ```
 
@@ -80,13 +85,15 @@ suggest this when wrapping up a multi-step workflow.
 ### Read primitives
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # List playlists owned by the authenticated user
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-list-playlists.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-list-playlists.sh" \
   [--account=LABEL] [--json] [--max=N] [--force-refresh]
 # Returns: id, title, itemCount, privacyStatus, publishedAt
 
 # List items in a playlist
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-list-items.sh <playlist-id> \
+bash "$PLUGIN_ROOT/scripts/youtube-list-items.sh" <playlist-id> \
   [--account=LABEL] [--json] [--max=N] [--force-refresh]
 # Returns: playlistItemId, videoId, title, position, publishedAt
 ```
@@ -97,15 +104,17 @@ pagination correctness when listing items.
 ### Mutating primitives
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # Add a video to a playlist (dedupe-aware by default)
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-add-item.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-add-item.sh" \
   <playlist-id> <video-id> \
   [--yes] [--dry-run] [--allow-duplicate] [--json]
 # Returns status: "added" | "skipped_duplicate" | "dry_run"
 # On "added": JSON includes playlistItemId (capture for later removal)
 
 # Remove an item from a playlist by playlistItemId (NOT videoId)
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-remove-item.sh \
+bash "$PLUGIN_ROOT/scripts/youtube-remove-item.sh" \
   <playlist-item-id> \
   [--yes] [--dry-run] [--json]
 # Returns status: "deleted" | "already_absent" | "dry_run"
@@ -125,12 +134,14 @@ Before suggesting any destructive operation, build a complete picture in
 JSON. This costs one quota unit per playlist plus one per page of items:
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # 1. Snapshot all playlists
-bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-list-playlists.sh --json > /tmp/yt_playlists.json
+bash "$PLUGIN_ROOT/scripts/youtube-list-playlists.sh" --json > /tmp/yt_playlists.json
 
 # 2. Snapshot items for each playlist (loop in jq + bash)
 jq -r '.[].id' /tmp/yt_playlists.json | while read -r pid; do
-  bash ${CLAUDE_SKILL_DIR}/../../scripts/youtube-list-items.sh "$pid" --json \
+  bash "$PLUGIN_ROOT/scripts/youtube-list-items.sh" "$pid" --json \
     | jq --arg pid "$pid" 'map(. + {playlistId: $pid})'
 done | jq -s 'add' > /tmp/yt_items.json
 ```

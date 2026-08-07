@@ -1,6 +1,6 @@
 ---
 name: gws-account
-description: "Check, add, list, or switch the active Google account. This skill is the ONLY way to manage Google accounts — there is no standalone CLI command for account management."
+description: "Check, add, list, or switch the active Google account. The only way to manage gws accounts — the CLI has no `account` subcommand."
 when_to_use: |
   Use when the user asks anything about Google accounts: "which google account am I using?",
   "switch google account", "add google account", "what account is active?",
@@ -20,7 +20,9 @@ is stored in its own config directory under `~/.config/gws-accounts/<label>/`.
 ## Prerequisites
 
 ```!
-bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
 Read that output carefully — it distinguishes three states that a plain
@@ -52,7 +54,9 @@ the appropriate script.
 ### Add a new account
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/account-add.sh <label>
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/account-add.sh" <label>
 ```
 
 This opens a browser for OAuth login. The `<label>` is a short name like
@@ -64,19 +68,25 @@ will open and they need to complete the login.
 ### List all accounts
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/account-list.sh
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/account-list.sh"
 ```
 
 For programmatic use:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/account-list.sh --json
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/account-list.sh" --json
 ```
 
 ### Switch active account
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/account-switch.sh <label>
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/account-switch.sh" <label>
 ```
 
 This persists the choice to `~/.config/gws-accounts/.active`. All
@@ -84,25 +94,33 @@ subsequent account-aware scripts will use that account. To switch
 back to the default account:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/account-switch.sh default
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/account-switch.sh" default
 ```
 
 ### Check current account
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/account-current.sh
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/account-current.sh"
 ```
 
 For programmatic use:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/account-current.sh --json
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/account-current.sh" --json
 ```
 
 Just the email:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/account-current.sh --email
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/account-current.sh" --email
 ```
 
 ## How It Works

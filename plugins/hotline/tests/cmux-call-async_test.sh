@@ -339,7 +339,7 @@ make_side_stub() {
   cat > "$1" <<'EOF'
 #!/usr/bin/env bash
 echo "open-side-surface invoked: $*" >> "${SIDE_STUB_LOG:?}"
-printf '%s\n' '{"surface_ref":"surface:777","pane_ref":"pane:55","workspace_ref":"workspace:5","mode":"new-surface","ready":"ready"}'
+printf '%s\n' '{"surface_ref":"surface:777","surface_id":"SURFACE-UUID-777","pane_ref":"pane:55","pane_id":"PANE-UUID-55","workspace_ref":"workspace:5","mode":"new-surface","ready":"ready"}'
 EOF
   chmod +x "$1"
 }
@@ -376,10 +376,10 @@ else
   fail "side-by-side async resolves and calls cmux-cli's opener with --wait-ready" \
        "side_log=$(cat "$tmp/side_log" 2>/dev/null || echo NONE) stderr=$(cat "$tmp/stderr.txt")"
 fi
-if [[ -n "$call_dir" && -f "$call_dir/surface_ref.txt" && "$(cat "$call_dir/surface_ref.txt")" == "surface:777" ]]; then
-  pass "side-by-side async writes surface_ref.txt (surface-mode signal)"
+if [[ -n "$call_dir" && -f "$call_dir/surface_ref.txt" && "$(cat "$call_dir/surface_ref.txt")" == "SURFACE-UUID-777" ]]; then
+  pass "side-by-side async writes stable surface UUID handle"
 else
-  fail "side-by-side async writes surface_ref.txt (surface-mode signal)" \
+  fail "side-by-side async writes stable surface UUID handle" \
        "call_dir=$call_dir stderr=$(cat "$tmp/stderr.txt")"
 fi
 if [[ -n "$call_dir" && ! -f "$call_dir/workspace_ref.txt" ]]; then
@@ -387,10 +387,10 @@ if [[ -n "$call_dir" && ! -f "$call_dir/workspace_ref.txt" ]]; then
 else
   fail "side-by-side async does NOT write workspace_ref.txt"
 fi
-if [[ -n "$call_dir" && "$(cat "$call_dir/pane_ref.txt" 2>/dev/null)" == "pane:55" ]]; then
-  pass "side-by-side async records pane_ref.txt for PTY re-attach"
+if [[ -n "$call_dir" && "$(cat "$call_dir/pane_ref.txt" 2>/dev/null)" == "PANE-UUID-55" ]]; then
+  pass "side-by-side async records stable pane UUID for PTY re-attach"
 else
-  fail "side-by-side async records pane_ref.txt" "got: $(cat "$call_dir/pane_ref.txt" 2>/dev/null)"
+  fail "side-by-side async records stable pane UUID" "got: $(cat "$call_dir/pane_ref.txt" 2>/dev/null)"
 fi
 if [[ -n "$call_dir" && "$(cat "$call_dir/keep_workspace.txt" 2>/dev/null)" == "true" ]]; then
   pass "side-by-side async keeps the surface (keep_workspace.txt=true)"
@@ -398,10 +398,16 @@ else
   fail "side-by-side async keeps the surface (keep_workspace.txt=true)" \
        "got: $(cat "$call_dir/keep_workspace.txt" 2>/dev/null)"
 fi
-if grep -q "send --surface surface:777 bash /tmp/hotline-launch" "$tmp/send_calls" 2>/dev/null; then
-  pass "side-by-side async sends launch script to the surface"
+if grep -q "send --surface SURFACE-UUID-777 bash /tmp/hotline-launch" "$tmp/send_calls" 2>/dev/null; then
+  pass "side-by-side async sends launch script by stable surface UUID"
 else
-  fail "side-by-side async sends launch script to the surface" \
+  fail "side-by-side async sends launch script by stable surface UUID" \
+       "send_calls=$(cat "$tmp/send_calls" 2>/dev/null)"
+fi
+if [[ "$(grep -c '^send ' "$tmp/send_calls" 2>/dev/null || true)" -eq 1 ]]; then
+  pass "first-contact launch script is delivered exactly once"
+else
+  fail "first-contact launch script is delivered exactly once" \
        "send_calls=$(cat "$tmp/send_calls" 2>/dev/null)"
 fi
 [[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"

@@ -1,6 +1,6 @@
 ---
 name: localwp-shell
-description: "Wraps WP-CLI, PHP, MySQL, and Composer commands through LocalWP's sandboxed environment. Use when working inside a LocalWP site directory. Triggers on wp/php/mysql/composer commands in WordPress context, 'command not found' errors, wrong PHP version errors, opcache/xdebug loading failures, or MySQL socket errors."
+description: "Run wp/php/mysql/composer through LocalWP's sandboxed environment when inside a LocalWP site — fixes 'command not found', wrong PHP version, opcache/xdebug load failures, MySQL socket errors."
 ---
 
 # LocalWP Shell
@@ -11,30 +11,33 @@ Run commands through LocalWP's sandboxed environment (PHP, MySQL, WP-CLI, Compos
 
 ## Usage
 
-All scripts live in this skill's directory, referenced at runtime via `${CLAUDE_SKILL_DIR}`. Run them with `bash`:
+All scripts live in this skill's directory. Resolve that directory at every independent shell block, then run them with `bash`:
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+
 # WP-CLI (most common) — silent by default
-bash ${CLAUDE_SKILL_DIR}/scripts/wplocal plugin list
-bash ${CLAUDE_SKILL_DIR}/scripts/wplocal search-replace 'old.test' 'new.test'
-bash ${CLAUDE_SKILL_DIR}/scripts/wplocal db export backup.sql
+bash "$SKILL_DIR/scripts/wplocal" plugin list
+bash "$SKILL_DIR/scripts/wplocal" search-replace 'old.test' 'new.test'
+bash "$SKILL_DIR/scripts/wplocal" db export backup.sql
 
 # PHP, Composer, MySQL — full env with version info
-bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell php -v
-bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell composer install
-bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell mysql -e "SHOW DATABASES;"
+bash "$SKILL_DIR/scripts/localwpshell" php -v
+bash "$SKILL_DIR/scripts/localwpshell" composer install
+bash "$SKILL_DIR/scripts/localwpshell" mysql -e "SHOW DATABASES;"
 
 # Silent mode — only command output, no env info
-bash ${CLAUDE_SKILL_DIR}/scripts/silentlocalwpshell php -r 'echo PHP_VERSION;'
+bash "$SKILL_DIR/scripts/silentlocalwpshell" php -r 'echo PHP_VERSION;'
 ```
 
 ### Commands
 
 | Command | Purpose |
 |---------|---------|
-| `${CLAUDE_SKILL_DIR}/scripts/localwpshell [cmd]` | Load LocalWP env, show versions, optionally run a command |
-| `${CLAUDE_SKILL_DIR}/scripts/silentlocalwpshell [cmd]` | Same as above but suppresses info output |
-| `${CLAUDE_SKILL_DIR}/scripts/wplocal [wp-args]` | Shorthand for `silentlocalwpshell wp ...` |
+| `$SKILL_DIR/scripts/localwpshell [cmd]` | Load LocalWP env, show versions, optionally run a command |
+| `$SKILL_DIR/scripts/silentlocalwpshell [cmd]` | Same as above but suppresses info output |
+| `$SKILL_DIR/scripts/wplocal [wp-args]` | Shorthand for `silentlocalwpshell wp ...` |
 
 ## When to Use
 
@@ -54,8 +57,10 @@ bash ${CLAUDE_SKILL_DIR}/scripts/silentlocalwpshell php -r 'echo PHP_VERSION;'
 **WordPress Multisite: always pass `--url=`.** On a multisite install, WP-CLI without `--url` targets the network's primary site — pages, options, and plugin changes land on the WRONG site silently. Find the right URL first (`wp site list`), then include it in every command:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/wplocal site list
-bash ${CLAUDE_SKILL_DIR}/scripts/wplocal post list --post_type=page --url=https://wp.wpengine/coaching
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/wplocal" site list
+bash "$SKILL_DIR/scripts/wplocal" post list --post_type=page --url=https://wp.wpengine/coaching
 ```
 
 ### Error Patterns That Mean "Use This Skill"
@@ -70,8 +75,10 @@ bash ${CLAUDE_SKILL_DIR}/scripts/wplocal post list --post_type=page --url=https:
 ### Recovery
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 # Instead of:        Use:
-wp plugin list       bash ${CLAUDE_SKILL_DIR}/scripts/wplocal plugin list
-php -v               bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell php -v
-composer install     bash ${CLAUDE_SKILL_DIR}/scripts/localwpshell composer install
+wp plugin list       bash "$SKILL_DIR/scripts/wplocal" plugin list
+php -v               bash "$SKILL_DIR/scripts/localwpshell" php -v
+composer install     bash "$SKILL_DIR/scripts/localwpshell" composer install
 ```

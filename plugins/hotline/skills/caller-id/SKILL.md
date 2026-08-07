@@ -1,6 +1,6 @@
 ---
 name: hotline-caller-id
-description: "Discovers and returns the current Claude Code session ID. Use when the user asks 'what is your session ID?', 'what session is this?', 'give me your session ID', or any variation of asking for the current conversation's session identifier."
+description: "Return the current Claude Code session ID — 'what is your/this session ID?'"
 allowed-tools: Bash
 ---
 
@@ -13,7 +13,9 @@ Discover your own Claude Code session ID. Claude Code doesn't expose this native
 Resolve plugin paths first:
 
 ```bash
-eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)"
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 ```
 
 This sets `HOTLINE_SCRIPTS` (and others). Use `$HOTLINE_SCRIPTS` in all script references below.
@@ -25,7 +27,9 @@ This is a **two-step process** that requires **two separate Bash tool calls**. T
 ### Step 1: Check Cache or Plant Fingerprint
 
 ```bash
-eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)" && \
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")" && \
 bash "$HOTLINE_SCRIPTS/session-init.sh"
 ```
 
@@ -40,7 +44,9 @@ Parse the JSON output:
 **This MUST be a separate Bash tool call** — the transcript needs to flush between steps.
 
 ```bash
-eval "$(bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh)" && \
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")" && \
 bash "$HOTLINE_SCRIPTS/session-init.sh" discover "<fingerprint>"
 ```
 

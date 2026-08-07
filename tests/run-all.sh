@@ -29,7 +29,12 @@ run() {          # run <label> <command...>
 	if "$@"; then
 		PASS=$((PASS + 1)); printf '\033[32m✓ %s\033[0m\n' "$label"
 	else
-		FAIL=$((FAIL + 1)); FAILED+=("$label"); printf '\033[31m✗ %s\033[0m\n' "$label"
+		local status=$?
+		if [[ $status -eq 77 ]]; then
+			SKIP=$((SKIP + 1)); printf '\033[33m− SKIP %s (suite opted out)\033[0m\n' "$label"
+		else
+			FAIL=$((FAIL + 1)); FAILED+=("$label"); printf '\033[31m✗ %s\033[0m\n' "$label"
+		fi
 	fi
 }
 

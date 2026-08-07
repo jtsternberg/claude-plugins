@@ -1,6 +1,6 @@
 ---
 name: hotline-whoami
-description: "Identifies the current workspace's dirmap slug. Use when the agent needs caller ID for hotline calls, or to check if a workspace is registered in the directory map."
+description: "Report this workspace's dirmap slug (hotline caller ID)."
 disable-model-invocation: true
 argument-hint: "[path]"
 allowed-tools: Bash
@@ -15,8 +15,8 @@ Find out what this workspace is called in dirmap — your caller ID on the hotli
 Run with no arguments to identify the current workspace, or pass a path:
 
 ```bash
-/hotline-whoami
-/hotline-whoami /path/to/some/workspace
+/hotline:hotline-whoami
+/hotline:hotline-whoami /path/to/some/workspace
 ```
 
 ## Steps
@@ -48,4 +48,4 @@ If found:
 > This workspace is registered as **$SLUG** in dirmap.
 
 If not found:
-> This workspace isn't registered in dirmap. Use `/hotline-add-contact <slug>` to register it so other agents can find it.
+> This workspace isn't registered in dirmap. Use `/hotline:hotline-add-contact <slug>` to register it so other agents can find it.

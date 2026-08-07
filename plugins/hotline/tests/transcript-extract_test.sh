@@ -219,6 +219,19 @@ bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1
   || fail "tool_result records around the injection are not preemption" "got exit $?"
 rm -f "$F"
 
+# Case 17: Claude's local-command wrappers can be type:"user" without isMeta.
+# They report client-side command output and must not look like a human handed
+# the receiver another task. This is the exact shape that caused a live caller
+# to exit 3 while the receiver continued and answered normally.
+F=$(mkf "$USER_NONCE
+$WIP
+{\"type\":\"user\",\"sessionId\":\"sess-1\",\"message\":{\"content\":\"<local-command-stderr>Error: dynamic skill command failed</local-command-stderr>\"}}
+{\"type\":\"user\",\"sessionId\":\"sess-1\",\"message\":{\"content\":\"<local-command-caveat>Caveat: generated while running a local command</local-command-caveat>\"}}")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1
+[[ $? -eq 10 ]] && pass "local-command wrapper records are not preemption" \
+  || fail "local-command wrapper records are not preemption" "got exit $?"
+rm -f "$F"
+
 # ---- AWAITING_REVIEW (claude-plugins-n4vy) -----------------------------------
 # A multi-step work order with review checkpoints has a state the protocol had no
 # word for: THIS STEP's reply is complete and the callee is now idle waiting for
@@ -230,7 +243,7 @@ rm -f "$F"
 # the payload, so the caller knows the session is still live and owes a follow-up.
 AWAIT='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"step 1 report line 1\nstep 1 report line 2\n\nSTATUS: AWAITING_REVIEW call_id='"$NONCE"'"}]}}'
 
-# Case 17: AWAITING_REVIEW resolves the extract with its own exit code + marker.
+# Case 18: AWAITING_REVIEW resolves the extract with its own exit code + marker.
 F=$(mkf "$USER_NONCE
 $AWAIT")
 OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
@@ -247,7 +260,7 @@ AWFLAG=$(printf '%s' "$OUT" | jq -r '.awaiting_review // false' 2>/dev/null)
   || fail "awaiting_review:true marks the payload" "out=$OUT"
 rm -f "$F"
 
-# Case 18: WORK_IN_PROGRESS then AWAITING_REVIEW — the checkpoint shape from the
+# Case 19: WORK_IN_PROGRESS then AWAITING_REVIEW — the checkpoint shape from the
 # live incident. Resolves, and only the prose after the last WIP counts.
 F=$(mkf "$USER_NONCE
 $WIP
@@ -259,7 +272,7 @@ RESP=$(printf '%s' "$OUT" | jq -r '.response' 2>/dev/null)
   || fail "WORK_IN_PROGRESS then AWAITING_REVIEW resolves" "rc=$RC out=$OUT"
 rm -f "$F"
 
-# Case 19: WORK_IN_PROGRESS semantics are UNCHANGED — still "keep polling".
+# Case 20: WORK_IN_PROGRESS semantics are UNCHANGED — still "keep polling".
 F=$(mkf "$USER_NONCE
 $WIP")
 bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
@@ -267,7 +280,7 @@ bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
   || fail "WORK_IN_PROGRESS alone still exits 10" "got exit $RC"
 rm -f "$F"
 
-# Case 20: the existing statuses stay byte-compatible — no marker field appears.
+# Case 21: the existing statuses stay byte-compatible — no marker field appears.
 F=$(mkf "$USER_NONCE
 $WIP
 $BODY")
@@ -279,7 +292,7 @@ else
 fi
 rm -f "$F"
 
-# Case 21: a sibling call's AWAITING_REVIEW must not resolve our wait.
+# Case 22: a sibling call's AWAITING_REVIEW must not resolve our wait.
 OTHER_AWAIT='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"other step report\nSTATUS: AWAITING_REVIEW call_id=ffff0000ffff0000"}]}}'
 F=$(mkf "$USER_NONCE
 $OTHER_AWAIT")

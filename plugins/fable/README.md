@@ -2,6 +2,8 @@
 
 Skills for working with — and like — the Fable model (`claude-fable-5`).
 
+> **Claude Code only.** This plugin depends on Claude-specific skill paths and runtime behavior and is not supported under Codex.
+
 Both skills can install themselves as durable rules in your `~/.claude/CLAUDE.md` (with your approval) via the shared `scripts/install-claude-md-rule.sh` — a managed, idempotent block per rule, with a timestamped backup before any write:
 
 ```bash

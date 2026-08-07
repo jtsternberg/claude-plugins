@@ -38,7 +38,7 @@ You don't need to remember a command. Just ask naturally:
 
 Claude will download the page and tell you where it saved it. Then ask follow-up questions like *"what does it say about authentication?"* or *"summarize the 'getting started' section"* and Claude will read the file and answer.
 
-You can also type `/fetch-docs <url>` if you prefer slash commands.
+You can also type `/research-tools:fetch-docs <url>` if you prefer slash commands.
 
 ## Getting a cleaner markdown version
 

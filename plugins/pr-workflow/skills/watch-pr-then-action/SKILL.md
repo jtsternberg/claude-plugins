@@ -1,6 +1,6 @@
 ---
 name: watch-pr-then-action
-description: "Polls a GitHub PR for a specific condition, then executes a follow-up action. Conditions include waiting for Copilot to finish work, waiting for a draft PR to be marked ready for review, or waiting for someone to submit a review. Use when the user says things like \"watch copilot\", \"wait for copilot\", \"watch this PR\", \"let me know when the PR is ready\", or \"notify me when it's reviewed\"."
+description: "Poll a GitHub PR until a condition (Copilot done, marked ready, review submitted), then run a follow-up action."
 disable-model-invocation: true
 ---
 
@@ -11,18 +11,18 @@ Poll a GitHub PR until a condition is met, then execute a follow-up action.
 ## Arguments
 
 ```
-/watch-pr-then-action <pr-number-or-url> [for <condition>] [then <action>]
+watch-pr-then-action <pr-number-or-url> [for <condition>] [then <action>]
 ```
 
 - **`<pr-number-or-url>`** (required) — A PR number (e.g., `2165`) or full URL
 - **`for <condition>`** (optional) — What to wait for. See [Conditions](#conditions). Defaults to `copilot`.
-- **`then <action>`** (optional) — Follow-up prompt or slash command. Defaults to `/review-pr <number>`.
+- **`then <action>`** (optional) — Follow-up prompt. Defaults to `review PR <number>`.
 
 Examples:
-- `/watch-pr-then-action 2165` — wait for Copilot to finish, then review
-- `/watch-pr-then-action 2165 for ready` — wait for PR to leave draft, then review
-- `/watch-pr-then-action 2165 for copilot then merge it` — wait for Copilot, then merge
-- `/watch-pr-then-action https://github.com/org/repo/pull/99 for ready then /address-pr-comments`
+- `watch-pr-then-action 2165` — wait for Copilot to finish, then review
+- `watch-pr-then-action 2165 for ready` — wait for PR to leave draft, then review
+- `watch-pr-then-action 2165 for copilot then merge it` — wait for Copilot, then merge
+- `watch-pr-then-action https://github.com/org/repo/pull/99 for ready then address the PR comments`
 
 ## Conditions
 
@@ -76,7 +76,7 @@ Store the initial count on first check. Done when the count increases.
 ### Step 1: Parse Input
 
 1. Split input on ` for ` and ` then ` (case-insensitive) to extract: PR identifier, condition, and action
-2. Defaults: condition → `copilot`, action → `/review-pr <number>`
+2. Defaults: condition → `copilot`, action → `review PR <number>`
 3. Accept PR number or full URL. For a number, detect repo via `gh repo view --json nameWithOwner -q .nameWithOwner`. For a URL, extract owner/repo/number from the path.
 4. If no argument provided, prompt for a PR number or URL.
 

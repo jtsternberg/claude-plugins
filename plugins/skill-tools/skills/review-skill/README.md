@@ -16,14 +16,14 @@ Fetches and caches the latest skills documentation from code.claude.com so recom
 ## Usage
 
 ```
-/review-skill <skill-name-or-path>
+/skill-tools:review-skill <skill-name-or-path>
 ```
 
 Examples:
 ```
-/review-skill deploy
-/review-skill ~/.claude/skills/my-skill/SKILL.md
-/review-skill /path/to/skill-directory/SKILL.md
+/skill-tools:review-skill deploy
+/skill-tools:review-skill ~/.claude/skills/my-skill/SKILL.md
+/skill-tools:review-skill /path/to/skill-directory/SKILL.md
 ```
 
 ## What it checks

@@ -1,6 +1,8 @@
 ---
 name: gmail-read
-description: "Search and read Gmail messages via the gws CLI. Runs a Gmail search query, returns structured results (id, subject, from, date, snippet), and optionally fetches full message bodies with HTML stripped to plain text. Triggers on \"find email about\", \"read the email from\", \"search my inbox for\", \"show me the message where\", \"pull that email about X\"."
+description: "Search and read Gmail via gws — 'find the email about X', 'search my inbox for', read a message's full body as plain text."
+when_to_use: |
+  Also 'read the email from <sender>', 'show me the message where …', 'pull that email about X'.
 argument-hint: '["<gmail search query>"] [--id <messageId>] [--limit N] [--body] [--account LABEL|EMAIL] [--pretty]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *)'
 ---
@@ -17,7 +19,9 @@ deletes. For composing, see the sibling `gmail-draft-from-markdown` skill.
 ## Prerequisites
 
 ```!
-bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
 ## Task
@@ -25,7 +29,9 @@ bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
 Run the entrypoint script, passing all arguments through:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/read.sh $ARGUMENTS
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/read.sh" $ARGUMENTS
 ```
 
 If no arguments were provided, ask the user what to search for (subject
@@ -85,20 +91,22 @@ block with `--pretty`.
 ## Examples
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 # Find the Ollama 0.31 announcement
-bash ${CLAUDE_SKILL_DIR}/scripts/read.sh "Ollama 0.31 Gemma 4 MTP"
+bash "$SKILL_DIR/scripts/read.sh" "Ollama 0.31 Gemma 4 MTP"
 
 # Same, but also pull the body so you can quote it back
-bash ${CLAUDE_SKILL_DIR}/scripts/read.sh "Ollama 0.31" --body --pretty
+bash "$SKILL_DIR/scripts/read.sh" "Ollama 0.31" --body --pretty
 
 # Fetch one specific message
-bash ${CLAUDE_SKILL_DIR}/scripts/read.sh --id 19f1c3e1f903f72f --pretty
+bash "$SKILL_DIR/scripts/read.sh" --id 19f1c3e1f903f72f --pretty
 
 # Standard Gmail operators work
-bash ${CLAUDE_SKILL_DIR}/scripts/read.sh "from:hello@ollama.com newer_than:60d" --limit 20
+bash "$SKILL_DIR/scripts/read.sh" "from:hello@ollama.com newer_than:60d" --limit 20
 
 # Read from a specific account (not the active one)
-bash ${CLAUDE_SKILL_DIR}/scripts/read.sh "invoice" --account me@jtsternberg.com
+bash "$SKILL_DIR/scripts/read.sh" "invoice" --account me@jtsternberg.com
 ```
 
 ## Troubleshooting

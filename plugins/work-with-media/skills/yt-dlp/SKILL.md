@@ -1,6 +1,6 @@
 ---
 name: yt-dlp
-description: "Extracts text, captions, descriptions, chapters, and audio from YouTube, Vimeo, and any yt-dlp-supported URL on macOS or Linux. Leads with a subs-first strategy (description + chapters + auto-captions in one yt-dlp call, no audio download), and falls back to audio download + the macwhisper-cli skill only when captions are missing or insufficient. Also produces transposed (pitch-shifted) MP3s from a URL via ffmpeg."
+description: "Extract transcripts, captions, descriptions, chapters, or audio from YouTube, Vimeo, or any video URL — 'transcribe/summarize/TLDR this video'. Subs-first, no download; falls back to audio + the macwhisper-cli skill. Also transposed/pitch-shifted MP3s via ffmpeg."
 when_to_use: |
   Use for any URL-based text/transcript request — "transcribe this video",
   "transcribe this YouTube link", "TLDR of this video",

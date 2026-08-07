@@ -1,6 +1,6 @@
 ---
 name: sessions-weekly-recap
-description: "Generate daily or weekly recap notes from Claude Code session transcripts. Extracts session data, synthesizes human-readable summaries grouped by theme, and writes them as markdown files. Supports incremental merge into existing notes. JT's fork — adds --weekly mode, --output-dir override, and launchd cron management (macOS only)."
+description: "Generate daily/weekly recap notes from session transcripts; supports incremental merge and launchd cron."
 disable-model-invocation: true
 allowed-tools: "Bash(python3 *), Bash(bash *), Read, Write, Edit"
 argument-hint: "[--weekly] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--output-dir PATH] [--all]"
@@ -48,7 +48,9 @@ If any cron flag is present, **load `references/CRON.md` and follow its instruct
 Run the extraction script, passing through `--weekly`, `--since`, `--until`, `--all`:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/extract_sessions.py [--weekly] [--since ...] [--until ...] [--all]
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+python3 "$SKILL_DIR/scripts/extract_sessions.py" [--weekly] [--since ...] [--until ...] [--all]
 ```
 
 **Do not pass `--output-dir` to the script** — that flag is handled by this SKILL.md, not the extractor.
@@ -83,12 +85,14 @@ Resolution order:
 2. Otherwise, inject the bundled generic default (`references/EXAMPLE-WEEKLY.md`).
 
 ```!
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 if [ -n "${SESSIONS_RECAP_EXAMPLE:-}" ] && [ -r "${SESSIONS_RECAP_EXAMPLE:-}" ]; then
   echo "<!-- style anchor: user override (\$SESSIONS_RECAP_EXAMPLE=$SESSIONS_RECAP_EXAMPLE) -->"
   cat "$SESSIONS_RECAP_EXAMPLE"
 else
   echo "<!-- style anchor: bundled default -->"
-  cat "${CLAUDE_SKILL_DIR}/references/EXAMPLE-WEEKLY.md"
+  cat "$SKILL_DIR/references/EXAMPLE-WEEKLY.md"
 fi
 ```
 

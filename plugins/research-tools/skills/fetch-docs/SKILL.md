@@ -1,6 +1,6 @@
 ---
 name: fetch-docs
-description: "Pulls a URL's raw content into a local file so Claude reads the authoritative source instead of WebFetch's summary. Use when the user wants docs, a page, or an API reference grounded in what the source actually says — not what a small-model pass thinks the page says. Works on any http/https URL; optional HTML→markdown conversion."
+description: "Pull a URL's raw content into a local file (optional HTML→markdown) so the authoritative source gets read instead of WebFetch's summary — docs pages, API references, READMEs, changelogs."
 when_to_use: |
   Use when the user says any of:
   "fetch the docs", "fetch this URL raw", "fetch this page",
@@ -10,7 +10,7 @@ when_to_use: |
   Also use proactively whenever you're about to call WebFetch on a docs
   page, API reference, README, or changelog — fetch-docs is strictly more
   grounded because the full source lands in a file you can Read.
-allowed-tools: "Bash(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh *) Bash(curl *) Bash(npx *) Read"
+allowed-tools: "Bash(bash */scripts/fetch-docs.sh *) Bash(curl *) Bash(npx *) Read"
 ---
 
 # fetch-docs
@@ -24,7 +24,9 @@ When Claude Code calls WebFetch, a small-model pass filters the page through the
 ## Prerequisites
 
 ```!
-bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh --check
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/fetch-docs.sh" --check
 ```
 
 (The check runs through the script rather than an inline `(cmd && echo) || echo` one-liner — a compound command like that trips Claude Code's shell-operator permission gate, whereas the script invocation is covered by this skill's `allowed-tools`.)
@@ -34,7 +36,9 @@ bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh --check
 ## The default: raw HTML
 
 ```bash
-file=$(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>")
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>")
 ```
 
 Outputs `/tmp/fetch-docs-<slug>.html`. Claude reads HTML natively — no conversion needed to extract exact flag names, enum values, or code fences. This is the purest "bypass WebFetch" path and the one to prefer when fidelity matters more than readability.
@@ -53,7 +57,9 @@ Either way, the file is saved as `.md` and the conversion pipeline is skipped. `
 When the source is HTML and you want markdown:
 
 ```bash
-file=$(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --md)
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --md)
 ```
 
 Pipeline: `readability-cli` extracts the article body (strips `<script>`, `<style>`, navbar, footer, sidebar), then `turndown-cli` converts the cleaned HTML to markdown. The script prefers PATH-installed binaries and falls back to `npx -y` — so there's nothing required to `npm install`, but `npx` adds ~3s of overhead per call (even with a warm cache).
@@ -91,8 +97,10 @@ The reader-mode extraction is opinionated — it removes page chrome by design. 
 `--render` closes that gap. It fetches through a real headless browser ([`agent-browser`](https://github.com/vercel-labs/agent-browser)) instead of `curl`, waits for the page to settle, then captures the fully-rendered DOM:
 
 ```bash
-file=$(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --render)
-file=$(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --render --md)   # render, then convert to markdown
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --render)
+file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --render --md)   # render, then convert to markdown
 ```
 
 This is a **fallback tier, not the default.** Reach for it only when the cheaper paths come up empty:
@@ -124,7 +132,9 @@ This is a **fallback tier, not the default.** Reach for it only when the cheaper
 ## Custom slug
 
 ```bash
-file=$(bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --slug=my-name)
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+file=$(bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --slug=my-name)
 ```
 
 Defaults to a 12-char hash of the URL (`/tmp/fetch-docs-4dc77b8f88a3.md`). Override with `--slug=<name>` for readable paths (`/tmp/fetch-docs-my-name.md`) when you'll reference the file across multiple turns.
@@ -134,8 +144,10 @@ Defaults to a 12-char hash of the URL (`/tmp/fetch-docs-4dc77b8f88a3.md`). Overr
 Default TTL is 24h. A second call with the same URL within 24h returns the cached path instantly without refetching. Override:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --ttl=0       # force refetch
-bash ${CLAUDE_SKILL_DIR}/scripts/fetch-docs.sh "<url>" --ttl=3600    # 1h cache
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --ttl=0       # force refetch
+bash "$SKILL_DIR/scripts/fetch-docs.sh" "<url>" --ttl=3600    # 1h cache
 ```
 
 Raw, converted, and rendered outputs cache separately: a plain fetch writes `<slug>.html`; `--md` writes `<slug>.md`; `--render` writes `<slug>.rendered.html` (and `--render --md` writes `<slug>.rendered.md`). They coexist in `/tmp/` and never overwrite each other — so a cheap curl fetch of a URL can't satisfy a later `--render` of the same URL with its stale empty shell.

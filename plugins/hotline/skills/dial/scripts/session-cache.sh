@@ -11,9 +11,11 @@
 #   session-cache.sh update <target-path> --caller-session <id>
 #   session-cache.sh list --caller-session <id>
 #
-# --surface (set only) records the cmux surface_ref the callee's session lives
-# in, so a follow-up can route its message INTO that surface instead of opening
-# a new one. Optional — absent for headless/detached calls (no visible surface).
+# --surface (set only) records the opaque cmux surface handle the callee's
+# session lives in, so a follow-up can route its message INTO that surface
+# instead of opening a new one. The JSON key remains surface_ref for backward
+# compatibility, but side-by-side launchers pass a stable UUID when available.
+# Optional — absent for headless/detached calls (no visible surface).
 # =============================================================================
 set -euo pipefail
 

@@ -1,8 +1,8 @@
 ---
 name: diff-view
-description: "Generate a rich, self-contained HTML code-diff view (2-way side-by-side or 3-way) from files, pasted code, or git refs — with syntax highlighting, word-level intra-line marks, and optional full-page PNG screenshots for dropping into a PR or Slack."
+description: "Generate a self-contained HTML code diff (2-way side-by-side or 3-way) from files, pasted code, or git refs — word-level highlights, optional PNG screenshots for a PR or Slack."
 when_to_use: "Use when the user wants a shareable visual diff of code — comparing two versions of a file, two similar functions, or three variants (e.g. before / after / refactored-shared). Triggers on 'diff these', 'side-by-side', 'compare these two/three', 'show the diff as HTML', 'screenshot the diff', or when a plain text/unified diff would be hard to read. Not for applying patches or routine git diffs the user just wants to read in the terminal."
-allowed-tools: "Bash(node *) Bash(${CLAUDE_SKILL_DIR}/scripts/*) Bash(eval *) Bash(git show *) Bash(mkdir *) Read Write Edit"
+allowed-tools: "Bash(node *) Bash(*/scripts/*) Bash(eval *) Bash(git show *) Bash(mkdir *) Read Write Edit"
 ---
 
 # diff-view
@@ -54,7 +54,9 @@ You need exactly **2 or 3** sources. Each can come from:
 ### 2. Run the generator
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/gen-diff.js" <sourceA> <sourceB> [sourceC] \
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+node "$SKILL_DIR/scripts/gen-diff.js" <sourceA> <sourceB> [sourceC] \
   --title "Short descriptive title" \
   --label "Column A label" --label "Column B label" [--label "Column C label"] \
   --lang php \
@@ -112,7 +114,9 @@ If a screenshot looks clipped/padded and only Chrome was available, suggest inst
 **Two near-identical functions (PHP), screenshot for a PR:**
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/gen-diff.js" /tmp/collab-tools/tag.php /tmp/collab-tools/untag.php \
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+node "$SKILL_DIR/scripts/gen-diff.js" /tmp/collab-tools/tag.php /tmp/collab-tools/untag.php \
   --title "TagSubscribersByFilter vs UnTagSubscribersByFilter" \
   --label "Tag (orig)" --label "UnTag (orig)" --lang php --screenshot
 ```
@@ -120,7 +124,9 @@ node "${CLAUDE_SKILL_DIR}/scripts/gen-diff.js" /tmp/collab-tools/tag.php /tmp/co
 **Before / after / extracted-shared (3-way) with sublabels:**
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/gen-diff.js" a.php b.php shared.php \
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+node "$SKILL_DIR/scripts/gen-diff.js" a.php b.php shared.php \
   --title "Tag / UnTag / applyTagOperationByFilter" \
   --label "Tag()"   --sublabel "original — INSERT path" \
   --label "UnTag()" --sublabel "original — DELETE path" \
@@ -131,7 +137,9 @@ node "${CLAUDE_SKILL_DIR}/scripts/gen-diff.js" a.php b.php shared.php \
 **One file across two git revisions:**
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/gen-diff.js" \
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+node "$SKILL_DIR/scripts/gen-diff.js" \
   --git "HEAD~1:src/Subscribers.php" --git "HEAD:src/Subscribers.php" \
   --title "Subscribers.php — last commit" --label "before" --label "after" --screenshot
 ```

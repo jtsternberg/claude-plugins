@@ -1,6 +1,6 @@
 ---
 name: caffeinate-computer
-description: "Keep a Mac awake while long-running Claude Code agents, builds, or commands run, using macOS's built-in `caffeinate`. Triggers on \"keep mac awake\", \"don't sleep\", \"stay awake\", \"caffeinate\", \"overnight run\", \"long-running agent\", \"running while afk\", \"leave this running\", or any setup where the user is about to start a task expected to outlast the lid being closed or the display sleeping. macOS-only — explains and exits on Linux."
+description: "Keep the Mac awake during long-running agents, builds, or commands via macOS caffeinate."
 disable-model-invocation: true
 ---
 

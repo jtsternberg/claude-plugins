@@ -312,7 +312,7 @@ fi
 DISC_SID="eeeeeeee-1234-5678-9abc-def012345678"
 mkdir -p "$PROJECTS_ROOT/-tmp-discovered-ws"
 cat > "$PROJECTS_ROOT/-tmp-discovered-ws/${DISC_SID}.jsonl" <<'EOF'
-{"type":"user","cwd":"/tmp/discovered-ws","timestamp":"2026-07-02T11:00:00Z","message":{"role":"user","content":"/hotline-ringing [CALL_ID: abc123] [MODE: work_order] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] Please do the thing"}}
+{"type":"user","cwd":"/tmp/discovered-ws","timestamp":"2026-07-02T11:00:00Z","message":{"role":"user","content":"/hotline:hotline-ringing [CALL_ID: abc123] [MODE: work_order] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] Please do the thing"}}
 {"type":"assistant","cwd":"/tmp/discovered-ws","message":{"role":"assistant","content":[{"type":"text","text":"On it."}]}}
 EOF
 
@@ -331,6 +331,31 @@ else
   fail "discovery: mode/caller/callee parsed from handshake tags (got: $DISC)"
 fi
 
+# Existing transcripts may use Claude Code's legacy bare shorthand. Keep them
+# discoverable even though new Hotline prompts emit the canonical namespaced form.
+LEGACY_DISC_SID="dddddddd-1234-5678-9abc-def012345678"
+cat > "$PROJECTS_ROOT/-tmp-discovered-ws/${LEGACY_DISC_SID}.jsonl" <<'EOF'
+{"type":"user","cwd":"/tmp/discovered-ws","timestamp":"2026-07-02T10:00:00Z","message":{"role":"user","content":"/hotline-ringing [CALL_ID: legacy123] [MODE: quick_call] [CALLER: /tmp/legacy-caller] [SESSION: bbbbbbbb-1111-2222-3333-444444444444] Legacy call"}}
+EOF
+LEGACY_DISC=$(curl -sf "$BASE/api/calls" | jq -r --arg sid "$LEGACY_DISC_SID" '.calls[] | select(.callee.session_id==$sid)')
+if [[ -n "$LEGACY_DISC" && $(echo "$LEGACY_DISC" | jq -r '.caller.path') == "/tmp/legacy-caller" ]]; then
+  pass "discovery: legacy bare ringing handshake remains supported"
+else
+  fail "discovery: legacy bare ringing handshake remains supported"
+fi
+
+# Claude Code also accepts the plugin namespace plus the skill directory name.
+DIRECTORY_DISC_SID="cccccccc-1234-5678-9abc-def012345678"
+cat > "$PROJECTS_ROOT/-tmp-discovered-ws/${DIRECTORY_DISC_SID}.jsonl" <<'EOF'
+{"type":"user","cwd":"/tmp/discovered-ws","timestamp":"2026-07-02T09:00:00Z","message":{"role":"user","content":"/hotline:ringing [CALL_ID: directory123] [MODE: quick_call] [CALLER: /tmp/directory-caller] [SESSION: cccccccc-1111-2222-3333-444444444444] Directory-name call"}}
+EOF
+DIRECTORY_DISC=$(curl -sf "$BASE/api/calls" | jq -r --arg sid "$DIRECTORY_DISC_SID" '.calls[] | select(.callee.session_id==$sid)')
+if [[ -n "$DIRECTORY_DISC" && $(echo "$DIRECTORY_DISC" | jq -r '.caller.path') == "/tmp/directory-caller" ]]; then
+  pass "discovery: plugin namespace plus skill directory name remains supported"
+else
+  fail "discovery: plugin namespace plus skill directory name remains supported"
+fi
+
 # Registry entries must NOT be duplicated by discovery (callee sid already known)
 DUP_COUNT=$(echo "$DISC_CALLS" | jq --arg sid "$CALLEE_SID" '[.calls[] | select(.callee.session_id==$sid)] | length')
 if [[ "$DUP_COUNT" == "1" ]]; then
@@ -341,7 +366,7 @@ fi
 
 # Non-hotline transcripts are ignored
 PLAIN_SID="ffffffff-0000-1111-2222-333333333333"
-echo '{"type":"user","cwd":"/tmp/discovered-ws","message":{"role":"user","content":"just a normal session"}}' \
+echo '{"type":"user","cwd":"/tmp/discovered-ws","message":{"role":"user","content":"/ringing [MODE: quick_call] [CALLER: /tmp/not-hotline] [SESSION: 11111111-2222-3333-4444-555555555555] must not match"}}' \
   > "$PROJECTS_ROOT/-tmp-discovered-ws/${PLAIN_SID}.jsonl"
 FOUND_PLAIN=$(curl -sf "$BASE/api/calls" | jq -r --arg sid "$PLAIN_SID" '[.calls[] | select(.callee.session_id==$sid)] | length')
 if [[ "$FOUND_PLAIN" == "0" ]]; then
@@ -354,7 +379,7 @@ fi
 
 DIAL_SCRIPTS_DIR="$SCRIPT_DIR/../skills/dial/scripts"
 META_DIR=$(mktemp -d "$SANDBOX/callmeta.XXXX")
-RING_PROMPT="/hotline-ringing [CALL_ID: xyz] [MODE: quick_call] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] hello"
+RING_PROMPT="/hotline:hotline-ringing [CALL_ID: xyz] [MODE: quick_call] [CALLER: /tmp/caller-ws] [SESSION: aaaaaaaa-1111-2222-3333-444444444444] hello"
 bash "$DIAL_SCRIPTS_DIR/persist-call-meta.sh" "$META_DIR" "/tmp/reg-target-ws" "$RING_PROMPT"
 if [[ $(cat "$META_DIR/mode.txt" 2>/dev/null) == "quick_call" \
    && $(cat "$META_DIR/caller_session.txt" 2>/dev/null) == "aaaaaaaa-1111-2222-3333-444444444444" \

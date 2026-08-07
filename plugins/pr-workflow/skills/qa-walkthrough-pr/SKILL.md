@@ -1,10 +1,10 @@
 ---
 name: qa-walkthrough-pr
-description: "Guided manual QA walkthrough for PRs, branch changes, or ad-hoc testing. Generates a test plan, builds a beads epic, and walks the user through each test interactively."
+description: "Guided manual QA walkthrough of a PR or branch — test plan as a beads epic, stepped interactively."
 disable-model-invocation: true
 when_to_use: "Use when the user says \"QA this PR\", \"qa walkthrough\", \"manual testing\", \"walk me through testing\", \"QA my changes\", \"test my changes\", or wants to manually verify work before merging or pushing."
 argument-hint: "[<pr-number> | --branch | --describe \"...\"]"
-allowed-tools: "Bash(gh *) Bash(git *) Bash(bd *) Bash(bash \"${CLAUDE_SKILL_DIR}/scripts/*\")"
+allowed-tools: "Bash(gh *) Bash(git *) Bash(bd *) Bash(bash \"*/scripts/*\")"
 effort: high
 ---
 
@@ -19,9 +19,9 @@ Guided manual QA walkthrough that generates a test plan from a PR, branch diff, 
 ## Arguments
 
 ```
-/qa-walkthrough-pr [<pr-number-or-url>]
-/qa-walkthrough-pr --branch [--base=<ref>]
-/qa-walkthrough-pr --describe "<what to test>"
+qa-walkthrough-pr [<pr-number-or-url>]
+qa-walkthrough-pr --branch [--base=<ref>]
+qa-walkthrough-pr --describe "<what to test>"
 ```
 
 - **`<pr-number-or-url>`** (optional) — A PR number or full URL. If omitted with no flags, use the current branch's PR.
@@ -68,7 +68,9 @@ Set `QA_LABEL="PR #<number>"`.
 
 ```bash
 # Get the diff summary and changes
-bash "${CLAUDE_SKILL_DIR}/scripts/extract-test-plan.sh" --from-diff[=<base-ref>]
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/extract-test-plan.sh" --from-diff[=<base-ref>]
 ```
 
 Set `QA_LABEL` to the branch name (`git branch --show-current`).
@@ -90,7 +92,9 @@ In all modes: if a HANDOFF.md exists in the working directory, read it and extra
 Try the bundled extraction script first:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/scripts/extract-test-plan.sh" <number>
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/extract-test-plan.sh" <number>
 ```
 
 This parses the PR description for common test plan headings (`## Testing`, `## Test Plan`, `## How to Test`, etc.). If the script finds a section, use it as the starting point.
@@ -132,11 +136,13 @@ Create a beads epic and individual tasks with dependencies.
 Build a JSON test plan array and pipe it to the script:
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 echo '[
   {"name": "Pre-setup: ...", "description": "...", "depends_on_index": null},
   {"name": "Admin UI: ...", "description": "...", "depends_on_index": 0},
   {"name": "Checkout flow: ...", "description": "...", "depends_on_index": 1}
-]' | bash "${CLAUDE_SKILL_DIR}/scripts/build-qa-epic.sh" "$QA_LABEL" "<short description>"
+]' | bash "$SKILL_DIR/scripts/build-qa-epic.sh" "$QA_LABEL" "<short description>"
 ```
 
 The script creates the epic, all tasks, and wires up dependencies in one shot. It returns JSON with the epic and task IDs.
@@ -235,7 +241,9 @@ Once all QA tasks and any punted bugs are resolved:
 2. Ask the user: "All tests passed. Want me to delete the testing epic and tasks? They don't add historical value since there are no code changes."
 3. If confirmed:
    ```bash
-   bash "${CLAUDE_SKILL_DIR}/scripts/qa-cleanup.sh" <epic-id>
+   # Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+   SKILL_DIR="${CLAUDE_SKILL_DIR}"
+   bash "$SKILL_DIR/scripts/qa-cleanup.sh" <epic-id>
    ```
 
 If the user decides to stop before all bugs are resolved, do NOT close the epic. Leave it open with a note summarizing the remaining failures so the next session can pick up where this one left off:
@@ -252,4 +260,4 @@ bd update <epic-id> --notes="QA incomplete — <N> bugs remain open: <bug-id-1>,
 - **Don't over-test.** If a test is essentially the same code path as another with different input, suggest combining or skipping with user approval.
 - **Pre-setup is a real task.** Environment requirements (webhook forwarding, test data creation, etc.) should be their own task — don't assume the user has everything running.
 - **Handle surprises gracefully.** If the user reports behavior that is correct but differs from the test plan's assumptions (e.g., a field being hidden in a certain state), acknowledge it and adjust the test accordingly rather than treating it as a failure.
-- **Compaction resilience.** If context compresses mid-walkthrough, run `bd ready` to recover state. The beads epic and task structure persist independently of the conversation. Re-invoke `/qa-walkthrough-pr` if the skill instructions feel absent after compaction.
+- **Compaction resilience.** If context compresses mid-walkthrough, run `bd ready` to recover state. The beads epic and task structure persist independently of the conversation. Re-invoke `qa-walkthrough-pr` if the skill instructions feel absent after compaction.

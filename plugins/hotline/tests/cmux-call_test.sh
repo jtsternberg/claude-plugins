@@ -84,7 +84,7 @@ env -u HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS \
   --cwd "$tmp/cwd" \
   --name "hotline test" \
   --tools "Bash(git *) Edit" \
-  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hello there" \
+  --prompt "/hotline:hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hello there" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
 rc=$?
 
@@ -103,7 +103,7 @@ LAUNCH_SCRIPTS+=("$launch_script")
 launch_body=$(cat "$launch_script" 2>/dev/null || true)
 assert_contains "first-contact launch script runs claude" "$launch_body" "claude"
 assert_contains "first-contact pre-sets session id" "$launch_body" "--session-id"
-assert_contains "first-contact launch script contains conference prompt" "$launch_body" "/hotline-ringing"
+assert_contains "first-contact launch script contains conference prompt" "$launch_body" "/hotline:hotline-ringing"
 assert_contains "first-contact preserves conference mode" "$launch_body" "conference_call"
 
 # Regression: --allowedTools is variadic — must be terminated with `--` before
@@ -211,7 +211,7 @@ mkdir -p "$tmp/bin" "$tmp/cwd"
 cat > "$tmp/open-side.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "invoked: $*" >> "${SIDE_STUB_LOG:?}"
-printf '%s\n' '{"surface_ref":"surface:777","pane_ref":"pane:55","workspace_ref":"workspace:5","ready":"ready"}'
+printf '%s\n' '{"surface_ref":"surface:777","surface_id":"SURFACE-UUID-777","pane_ref":"pane:55","pane_id":"PANE-UUID-55","workspace_ref":"workspace:5","ready":"ready"}'
 EOF
 chmod +x "$tmp/open-side.sh"
 cat > "$tmp/bin/cmux" <<'EOF'
@@ -230,7 +230,7 @@ env -u HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS \
   HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
   bash "$SCRIPT_UNDER_TEST" \
   --cwd "$tmp/cwd" --name "sbs test" \
-  --prompt "/hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hi" \
+  --prompt "/hotline:hotline-ringing [MODE: conference_call] [CALLER: /caller] [SESSION: abc] hi" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
 rc=$?
 if [[ $rc -eq 0 ]]; then
@@ -248,16 +248,18 @@ fi
 
 send_calls=$(cat "$tmp/send_calls" 2>/dev/null || true)
 assert_contains "side-by-side sends launch script to the SURFACE (not a workspace)" \
-  "$send_calls" "send --surface surface:777 bash /tmp/hotline-cmux-launch-"
+  "$send_calls" "send --surface SURFACE-UUID-777 bash /tmp/hotline-cmux-launch-"
 
 placement=$(jq -r '.placement // empty' "$tmp/out.json" 2>/dev/null || true)
 surf_ref=$(jq -r '.surface_ref // empty' "$tmp/out.json" 2>/dev/null || true)
+surf_id=$(jq -r '.surface_id // empty' "$tmp/out.json" 2>/dev/null || true)
 ws_ref=$(jq -r '.workspace_ref // "null"' "$tmp/out.json" 2>/dev/null || true)
-if [[ "$placement" == "surface" && "$surf_ref" == "surface:777" && "$ws_ref" == "null" ]]; then
-  pass "side-by-side reports placement=surface with surface_ref and null workspace_ref"
+if [[ "$placement" == "surface" && "$surf_ref" == "surface:777" \
+      && "$surf_id" == "SURFACE-UUID-777" && "$ws_ref" == "null" ]]; then
+  pass "side-by-side reports display ref plus stable surface ID"
 else
-  fail "side-by-side reports placement=surface with surface_ref and null workspace_ref" \
-       "placement=$placement surface_ref=$surf_ref workspace_ref=$ws_ref"
+  fail "side-by-side reports display ref plus stable surface ID" \
+       "placement=$placement surface_ref=$surf_ref surface_id=$surf_id workspace_ref=$ws_ref"
 fi
 ls=$(printf '%s' "$send_calls" | sed -E 's/.*bash (\/tmp\/hotline-cmux-launch-[^\\[:space:]]+).*/\1/' | tail -1)
 rm -f "$ls" 2>/dev/null || true

@@ -80,6 +80,7 @@ fi
 # target; PLACE_REF + PLACE_KIND describe it for the returned JSON.
 SEND_TARGET=()
 PLACE_REF=""
+PLACE_ID=""
 PLACE_KIND=""
 if [[ "$PLACEMENT" == "detached" ]]; then
   # --focus true is REQUIRED: without it cmux does not spawn a real tty for the
@@ -102,9 +103,10 @@ elif [[ "$PLACEMENT" == "window" ]]; then
     ${CWD:+--working-directory "$CWD"} --wait-ready --wait-ready-timeout "$READY_TIMEOUT" --json 2>&1) \
     || { jq -n --arg e "open-window-surface failed: $SURF_JSON" '{error: $e}'; exit 1; }
   SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
+  SURF_ID=$(printf '%s' "$SURF_JSON" | jq -r '.surface_id // empty')
   [[ -z "$SURF_REF" ]] && { jq -n --arg e "surface opener returned no ref: $SURF_JSON" '{error: $e}'; exit 1; }
-  SEND_TARGET=(--surface "$SURF_REF")
-  PLACE_REF="$SURF_REF"; PLACE_KIND="surface"
+  SEND_TARGET=(--surface "${SURF_ID:-$SURF_REF}")
+  PLACE_REF="$SURF_REF"; PLACE_ID="$SURF_ID"; PLACE_KIND="surface"
 else
   # Side-by-side via cmux-cli's canonical opener. On a --wait-ready timeout it
   # exits 3 (no JSON); surface its stderr as the error.
@@ -116,9 +118,10 @@ else
   fi
   rm -f /tmp/hotline-side-err.$$
   SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
+  SURF_ID=$(printf '%s' "$SURF_JSON" | jq -r '.surface_id // empty')
   [[ -z "$SURF_REF" ]] && { jq -n --arg e "surface opener returned no ref: $SURF_JSON" '{error: $e}'; exit 1; }
-  SEND_TARGET=(--surface "$SURF_REF")
-  PLACE_REF="$SURF_REF"; PLACE_KIND="surface"
+  SEND_TARGET=(--surface "${SURF_ID:-$SURF_REF}")
+  PLACE_REF="$SURF_REF"; PLACE_ID="$SURF_ID"; PLACE_KIND="surface"
 fi
 
 # Session ID for the callee. See cmux-call-async.sh for the full rationale:
@@ -205,9 +208,10 @@ fi
 # backward compatibility; surface placements populate surface_ref instead.
 WS_OUT=""; SURF_OUT=""
 if [[ "$PLACE_KIND" == "surface" ]]; then SURF_OUT="$PLACE_REF"; else WS_OUT="$PLACE_REF"; fi
-jq -n --arg ws "$WS_OUT" --arg surf "$SURF_OUT" --arg cwd "$CWD" \
+jq -n --arg ws "$WS_OUT" --arg surf "$SURF_OUT" --arg surf_id "$PLACE_ID" --arg cwd "$CWD" \
   --arg sid "${SESSION_ID_PRESET:-new}" --arg kind "$PLACE_KIND" \
   '{workspace_ref: (if $ws == "" then null else $ws end),
     surface_ref:   (if $surf == "" then null else $surf end),
+    surface_id:    (if $surf_id == "" then null else $surf_id end),
     placement: $kind, cwd: $cwd, session_id: $sid,
     message: "CMUX \($kind) opened with Claude session"}'

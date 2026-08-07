@@ -1,6 +1,8 @@
 ---
 name: chestertons-fence
-description: "This skill should be used when about to remove, refactor, or significantly change existing code, configuration, processes, or systems whose purpose is not fully understood. Triggers on concerns about unintended side-effects, confusion about why something exists, requests to delete or simplify \"unnecessary\" code, or when someone says \"Chesterton's Fence.\" Prevents the classic mistake of tearing down a fence before understanding why it was built."
+description: "Use before removing, refactoring, or 'simplifying' code, config, or processes whose purpose isn't fully understood — or when someone says 'Chesterton's Fence'. Understand why it was built before tearing it down."
+when_to_use: |
+  Triggers on concerns about unintended side-effects, confusion about why something exists, or requests to delete or simplify 'unnecessary' code.
 ---
 
 # Chesterton's Fence

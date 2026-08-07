@@ -64,7 +64,10 @@
 # nonce turn or a replay of it, and anything BEFORE our nonce turn. Client-side
 # commands (/model, /clear) are type:"system" subtype:"local_command" rather than
 # user records, so they are out of scope for free — right for /model, a known miss
-# for /clear, which the timeout still catches.
+# for /clear, which the timeout still catches. Claude's local-command wrapper
+# records can arrive as type:"user" without isMeta; those begin with
+# <local-command-stderr>, <local-command-stdout>, <local-command-caveat>, or
+# <task-notification> and are synthetic harness output, not human reassignment.
 #
 # SUBMIT EVIDENCE — WHY A `user` RECORD IS NOT THE ONLY PROOF (claude-plugins-1jpz)
 # A message typed into a REPL that is already mid-turn does NOT produce a user
@@ -190,6 +193,7 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
                    | select(. != null)
                    | gsub("^\\s+|\\s+$"; "")
                    | select(length > 0)
+                   | select(test("^<(local-command-(stderr|stdout|caveat)|task-notification)>") | not)
                  ] | first // "")}
     end
 ' "$TRANSCRIPT") || { echo "jq failed parsing $TRANSCRIPT" >&2; exit 1; }

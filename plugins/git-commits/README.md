@@ -10,49 +10,45 @@ claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
 claude plugin install git-commits@jtsternberg
+
+# Codex
+codex plugin add git-commits@jtsternberg
 ```
 
 ## Description
 
-Provides commands for creating commits from staged or unstaged files with automatically generated conventional commit messages.
+Provides skills for creating commits from staged or unstaged files with automatically generated conventional commit messages. The workflows work in Claude Code and Codex.
 
-## Commands
+## Skills
 
-### `/commit-staged`
+### `commit-staged`
 
 Create a commit from currently staged files.
 
-```
-/commit-staged [optional commit message]
-```
-
-If you provide a commit message, it will be used. Otherwise, Claude analyzes the staged changes and generates an appropriate conventional commit message.
+If you provide a commit message in your request, it will be used. Otherwise, the skill analyzes the staged changes and generates an appropriate conventional commit message.
 
 **Example:**
 ```
-/commit-staged
+Invoke the `commit-staged` skill.
 ```
 
-### `/commit-unstaged`
+### `commit-unstaged`
 
-Stage all unstaged files and create a commit.
+Review, stage, and commit the intended unstaged changes.
 
-```
-/commit-unstaged [optional commit message]
-```
-
-Automatically stages all modified files, then creates a commit with either your provided message or an AI-generated one.
+The skill reviews and stages each intended file explicitly, then creates a commit with either your provided message or an AI-generated one.
 
 **Example:**
 ```
-/commit-unstaged fix: resolve navigation bug
+Invoke the `commit-unstaged` skill with the message `fix: resolve navigation bug`.
 ```
 
 ## How It Works
 
 1. Reviews the changes (staged or unstaged)
-2. Generates a conventional commit message following best practices
-3. Creates the commit with proper formatting
+2. Stages intended files explicitly for the unstaged workflow
+3. Generates a conventional commit message following best practices
+4. Creates the commit with proper formatting
 
 ## Message Format
 

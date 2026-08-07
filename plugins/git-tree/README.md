@@ -28,8 +28,9 @@ The skill automatically triggers when you mention:
 ### Direct Script Usage
 
 ```bash
-SKILL_DIR="$HOME/.claude/skills/create-git-tree"
-$SKILL_DIR/scripts/git-tree.sh <branch-name> [--repo <path>] [--create]
+# Codex: this path resolves under Claude Code; substitute the absolute path to the git-tree plugin root.
+GIT_TREE_ROOT="${CLAUDE_PLUGIN_ROOT}"
+"$GIT_TREE_ROOT/scripts/git-tree.sh" <branch-name> [--repo <path>] [--create]
 ```
 
 **Flags:**

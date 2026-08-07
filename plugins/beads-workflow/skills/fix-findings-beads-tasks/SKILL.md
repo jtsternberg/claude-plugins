@@ -1,6 +1,8 @@
 ---
+name: fix-findings-beads-tasks
 description: Fix a list of issues one-by-one, each with its own beads task, commit, and push
 argument-hint: "--push"
+disable-model-invocation: true
 ---
 
 Fix the issues/findings from this conversation, each tracked with a beads task and committed individually.
@@ -9,6 +11,8 @@ Fix the issues/findings from this conversation, each tracked with a beads task a
 ❌ DO NOT CREATE ONE BIG COMMIT.
 
 $ARGUMENTS
+
+Codex: if the invocation text above is not populated, use the text after the skill name. If none is available, infer the findings and optional `--push` flag from the current request.
 
 ## Workflow
 
@@ -23,7 +27,7 @@ $ARGUMENTS
    - `bd update [id] --status=in_progress`
    - Re-read files fresh (prior fixes may have changed them)
    - Apply focused fix
-   - Lint changed files per project CLAUDE.md
+   - Lint changed files per applicable `AGENTS.md`, `CLAUDE.md`, and other repository instructions
    - Commit only files for THIS fix (no `git add .`)
    - `bd close [id]`
    - push to remote if specified with --push

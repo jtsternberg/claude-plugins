@@ -1,6 +1,8 @@
 ---
 name: handoff
-description: Write or update a handoff so a next agent with fresh context can continue the current work. Use when the user asks to "hand off", "write a handoff", "wrap up for the next agent", "save context for later", is ending a work session and wants continuity, or right after context was compacted mid-task. Not for routine note-taking mid-task.
+description: "Write or update a handoff so a next agent with fresh context can continue — 'hand off', 'wrap up for the next agent', session ending, or right after mid-task compaction."
+when_to_use: |
+  Also 'write a handoff', 'save context for later'. Not for routine note-taking mid-task.
 allowed-tools: Bash, Read, Write
 ---
 
@@ -39,7 +41,15 @@ Sections, in order:
    - Written: <date -u +%Y-%m-%dT%H:%M:%SZ>
    ```
 
-8. **Session** — run `bash ${CLAUDE_SKILL_DIR}/scripts/session-info.sh`. If it prints JSON, include the `session_id` and `transcript_path` values here (they let the next agent grep this session's transcript). If it prints nothing, errors, or the script doesn't exist, omit this section silently — no placeholder, no apology.
+8. **Session** — run:
+
+   ```bash
+   # Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+   SKILL_DIR="${CLAUDE_SKILL_DIR}"
+   bash "$SKILL_DIR/scripts/session-info.sh"
+   ```
+
+   If it prints JSON, include the `session_id` and `transcript_path` values here (they let the next agent grep this session's transcript). If it prints nothing, errors, or the script doesn't exist, omit this section silently — no placeholder, no apology.
 
 ## To resume (end every run with this)
 

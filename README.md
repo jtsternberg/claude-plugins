@@ -111,46 +111,50 @@ Skills for working with — and like — the Fable model (`claude-fable-5`). Shi
 #### 🧪 [codex](plugins/codex)
 Codex-native A/B experiments: `codex:sol-delegate` for Sol-led delegation to Terra and other available models, plus `codex:fable-mode` and `codex:sol-mode` for comparing competitive frontier-model stances on Terra.
 
-### Commands
+### Commands and workflows
 
 #### 💬 [git-commits](plugins/git-commits)
-Commands for creating git commits from staged or unstaged files with AI-generated messages.
+Skills for creating git commits from staged or unstaged files with AI-generated messages. Works in Claude Code and Codex.
 
-**Commands:** `/commit-staged`, `/commit-unstaged`
+**Skills:** `commit-staged`, `commit-unstaged`
 
 **Install:** `claude plugin install git-commits@jtsternberg`
 
 #### 🔀 [pr-workflow](plugins/pr-workflow)
-Commands for managing pull requests: addressing comments and updating descriptions.
+Skills for managing pull requests: addressing comments, updating descriptions, watching PRs, and guiding QA.
 
-**Commands:** `/address-pr-comments`, `/address-pr-comments-human`, `/update-pr-description`
+**Skills:** `address-pr-comments`, `address-pr-comments-human`, `update-pr-description`, `watch-pr-then-action`, `qa-walkthrough-pr`
+
+Works in Claude Code and Codex.
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementing fixes or writing PR descriptions.
 
-**Install:** `claude plugin install pr-workflow@jtsternberg`
+**Install:** `claude plugin install pr-workflow@jtsternberg` or `codex plugin add pr-workflow@jtsternberg`
 
 #### 🛠️ [skill-tools](plugins/skill-tools)
-Commands for creating and reviewing Claude Code skills, slash commands, and subagents.
+Skills for creating and reviewing Claude Code skills, slash commands, and subagents.
 
-**Commands:** `/create-slash-command`, `/create-subagent`, `/review-skill`, `/review-slash-command`
+**Skills:** `create-slash-command`, `create-subagent`, `review-skill`, `review-slash-command`
 
 **Install:** `claude plugin install skill-tools@jtsternberg`
 
 #### 📦 [beads-workflow](plugins/beads-workflow)
 Work through beads epics from start to completion with automatic PR creation.
 
-**Commands:** `/tackle-epic`, `/fix-findings-beads-tasks`
+**Skills:** `tackle-epic`, `fix-findings-beads-tasks`
+
+Works in Claude Code and Codex.
 
 **Dependencies:** Requires [beads](https://github.com/steveyegge/beads)
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementation work or fixing findings.
 
-**Install:** `claude plugin install beads-workflow@jtsternberg`
+**Install:** `claude plugin install beads-workflow@jtsternberg` or `codex plugin add beads-workflow@jtsternberg`
 
 #### 🤝 [handoff](plugins/handoff)
 Create handoff documents to preserve context between Claude Code sessions.
 
-**Commands:** `/handoff`
+**Skills:** `handoff`, `pickup-handoff`
 
 **Install:** `claude plugin install handoff@jtsternberg`
 
@@ -239,6 +243,11 @@ plugins/
     ├── hooks/           # Hook scripts (optional)
     └── commands/        # Slash commands / skills (optional)
 ```
+
+For the current Codex support boundary, see the
+[Codex compatibility guide](docs/codex/compatibility.md). Detailed probe logs
+and historical decisions are kept separately in the
+[Codex research archive](docs/codex/README.md).
 
 ---
 

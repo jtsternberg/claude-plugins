@@ -1,6 +1,8 @@
 ---
 name: gmail-draft-from-markdown
-description: "Draft a Gmail message from a local markdown file via the gws CLI. Converts markdown to HTML, saves as a Gmail draft (never sends), and returns a clickable Gmail drafts URL so the user reviews and sends from Gmail's UI. Triggers on \"draft an email from\", \"gmail draft from markdown\", \"create a draft in gmail\", \"draft a follow-up email\", \"turn this note into an email draft\"."
+description: "Turn a local markdown file into a Gmail draft via gws — converts to HTML, never sends, returns the Gmail drafts URL for review."
+when_to_use: |
+  Triggers on 'draft an email from this file/note', 'gmail draft from markdown', 'create a draft in Gmail', 'draft a follow-up email', 'turn this note into an email draft'.
 argument-hint: '[file.md] [recipient-email-or-name] [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) Bash(marked *) Bash(pandoc *)'
 ---
@@ -18,7 +20,9 @@ will never send an email directly.
 ## Prerequisites
 
 ```!
-bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
 Also requires a markdown→HTML converter. The script prefers
@@ -31,7 +35,9 @@ installed.
 Run the entrypoint script, passing all arguments through:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh $ARGUMENTS
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/draft.sh" $ARGUMENTS
 ```
 
 If no arguments were provided, ask the user for the markdown file path and
@@ -115,17 +121,19 @@ are signed in. Always relay the account email to the user along with the URL.
 ## Examples
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
 # Email address known
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./coaching-followup.md alice@example.com --subject "Session recap"
+bash "$SKILL_DIR/scripts/draft.sh" ./coaching-followup.md alice@example.com --subject "Session recap"
 
 # Look up recipient by name (most recent correspondent wins)
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./coaching-followup.md "Alice Smith"
+bash "$SKILL_DIR/scripts/draft.sh" ./coaching-followup.md "Alice Smith"
 
 # Subject embedded in markdown as a leading "Subject: ..." line
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./note.md alice@example.com
+bash "$SKILL_DIR/scripts/draft.sh" ./note.md alice@example.com
 
 # Reply draft — thread onto an existing conversation (subject/threading auto-derived)
-bash ${CLAUDE_SKILL_DIR}/scripts/draft.sh ./reply.md alice@example.com --reply-to 19f3de2c4f9ee065
+bash "$SKILL_DIR/scripts/draft.sh" ./reply.md alice@example.com --reply-to 19f3de2c4f9ee065
 ```
 
 ## Troubleshooting

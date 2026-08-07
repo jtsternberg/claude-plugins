@@ -1,7 +1,7 @@
 {
   "name": "session-tools",
-  "description": "Tools for managing Claude Code session transcripts — read one out of a session, catch up on it, fork new work off it, generate recaps, or leave yourself a breadcrumb before pausing one of your parallel conversations. Shared transcript machinery lives at the plugin root so the skills cannot drift.",
-  "version": "1.4.0",
+  "description": "Tools for managing Claude Code session transcripts \u2014 read one out of a session, catch up on it, fork new work off it, generate recaps, or leave yourself a breadcrumb before pausing one of your parallel conversations. Shared transcript machinery lives at the plugin root so the skills cannot drift.",
+  "version": "1.4.1",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

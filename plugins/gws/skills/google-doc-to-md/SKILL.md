@@ -1,6 +1,6 @@
 ---
 name: google-doc-to-md
-description: "Download a Google Doc as a local markdown file. Three source rungs: gws CLI (native text/markdown export), gcloud ADC (same clean export, different auth — for accounts gws can't reach), or the claude.ai Google Drive connector (works with zero setup, needs de-escaping). Supports native Doc tabs on the gws rung: --list-tabs and per-tab export via --tab. Triggers on \"download google doc\", \"pull from drive\", \"gdoc to markdown\", \"export google doc\", \"gws download\", or requests to pull a doc from a work/other Google account."
+description: "Download a Google Doc (tabs supported) as local markdown, via gws CLI, gcloud ADC, or the Drive connector."
 disable-model-invocation: true
 argument-hint: '<doc-id-or-url> [output.md] [--title] [--list-tabs] [--tab <tab-title-or-id>]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) mcp__claude_ai_Google_Drive__download_file_content mcp__claude_ai_Google_Drive__get_file_metadata'
@@ -38,8 +38,10 @@ instead of `gws`. Use this when the doc's account has ADC set up but not
 login` for).
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/adc-check.sh   # fast preflight; exit 0 = configured
-bash ${CLAUDE_SKILL_DIR}/scripts/adc-export.sh <doc-id-or-url> [output.md]
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/adc-check.sh"   # fast preflight; exit 0 = configured
+bash "$SKILL_DIR/scripts/adc-export.sh" <doc-id-or-url> [output.md]
 ```
 
 If `adc-check.sh` fails, it prints an actionable one-line reason. Only then
@@ -51,8 +53,9 @@ it up isn't worth it right now, fall through to rung 3.
 > backslash-escapes markdown-significant punctuation that appears as
 > literal text in the doc (`Catch up\!`, `\#123`, `(Q2 2026\)`) — verified
 > live 2026-07-16 on a real doc. It's valid CommonMark, but if the raw
-> markdown is for human editing, the same de-escaper works on any rung's
-> output: `python3 ${CLAUDE_SKILL_DIR}/scripts/deescape.py in.md out.md`.
+> markdown is for human editing, the same de-escaper works on any rung. Codex:
+> this path resolves under Claude Code; substitute the directory containing this
+> SKILL.md in `SKILL_DIR="${CLAUDE_SKILL_DIR}"; python3 "$SKILL_DIR/scripts/deescape.py" in.md out.md`.
 > Docs that round-tripped from markdown import export clean; docs with
 > hand-typed punctuation don't. The connector rung *always* needs it.
 
@@ -76,7 +79,9 @@ to prefer, a de-escape pass is required.
    or write to a temp file and `base64 -d`).
 4. De-escape it:
    ```bash
-   python3 ${CLAUDE_SKILL_DIR}/scripts/deescape.py TEMP_INPUT.md CLEANED.md
+   # Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+   SKILL_DIR="${CLAUDE_SKILL_DIR}"
+   python3 "$SKILL_DIR/scripts/deescape.py" TEMP_INPUT.md CLEANED.md
    ```
 5. Write `CLEANED.md`'s content to the output file (same filename-derivation
    rules as rung 1).
@@ -93,7 +98,9 @@ after rung 1.
 ## Prerequisites (rung 1)
 
 ```!
-bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
 ## Task (rung 1)
@@ -101,7 +108,9 @@ bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
 Run the entrypoint script, passing all arguments through:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/download.sh $ARGUMENTS
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/download.sh" $ARGUMENTS
 ```
 
 If no arguments were provided, ask the user for the Google Doc URL or ID
@@ -112,19 +121,25 @@ and optionally the output file path.
 ### Downloading a Google Doc
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_ID_OR_URL
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/download.sh" DOC_ID_OR_URL
 ```
 
 With a custom output path:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_ID_OR_URL ./output.md
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/download.sh" DOC_ID_OR_URL ./output.md
 ```
 
 With `--title` flag to use the doc's title as the filename:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_ID_OR_URL --title
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/download.sh" DOC_ID_OR_URL --title
 ```
 
 ### How It Works
@@ -156,14 +171,18 @@ Google limits exported content from `files.export` to **10 MB**.
 List a doc's tabs (id, index, title — indented by nesting):
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_ID --list-tabs
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/download.sh" DOC_ID --list-tabs
 ```
 
 Export a single tab as markdown (basic fidelity: headings, bold/italic,
 links, lists, tables):
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_ID out.md --tab "Tab Title"
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/download.sh" DOC_ID out.md --tab "Tab Title"
 ```
 
 Note: the default (no `--tab`) Drive export flattens ALL tabs into one
@@ -175,8 +194,10 @@ confusing for multi-tab ones. Use `--list-tabs` first when unsure.
 When downloading multiple docs, run in parallel:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_URL_1 ./doc1.md &
-bash ${CLAUDE_SKILL_DIR}/scripts/download.sh DOC_URL_2 ./doc2.md &
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/download.sh" DOC_URL_1 ./doc1.md &
+bash "$SKILL_DIR/scripts/download.sh" DOC_URL_2 ./doc2.md &
 wait
 ```
 

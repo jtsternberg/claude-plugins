@@ -1,6 +1,6 @@
 ---
 name: hotline-pickup
-description: "Generates and caches a concise identity for the current workspace. Used by hotline-dial for workspace resolution and fuzzy matching. Trigger when a workspace identity is stale, missing, or needs refreshing."
+description: "Generate and cache this workspace's identity for hotline-dial resolution."
 disable-model-invocation: true
 argument-hint: "[--fresh]"
 allowed-tools: Bash
@@ -17,9 +17,10 @@ Generate a concise identity for this workspace so other agents can find and unde
 
 ## Script Paths
 
-!`bash ${CLAUDE_SKILL_DIR}/../../scripts/paths.sh`
-
-The above sets `HOTLINE_PICKUP_SCRIPTS` (and others).
+Every independent shell block below resolves the Hotline plugin path and loads
+`HOTLINE_PICKUP_SCRIPTS` in that same shell. Shell state does not persist across
+tool calls. Codex: these paths resolve under Claude Code; substitute the Hotline
+plugin directory before running a block.
 
 ## Steps
 
@@ -28,6 +29,9 @@ The above sets `HOTLINE_PICKUP_SCRIPTS` (and others).
 Run:
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_PICKUP_SCRIPTS/identity-cache.sh" is-stale
 ```
 
@@ -41,6 +45,9 @@ If the caller passed `--fresh`, skip this check and always proceed to Step 2.
 Run the introspection script to gather project metadata:
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_PICKUP_SCRIPTS/gather-workspace-info.sh"
 ```
 
@@ -59,6 +66,9 @@ From the gathered information, create:
 Build the identity JSON with `jq` (safe for descriptions containing quotes or special characters):
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 jq -n \
   --arg name "<NAME>" \
   --arg desc "<DESCRIPTION>" \
@@ -71,6 +81,9 @@ jq -n \
 Then validate the write succeeded:
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 bash "$HOTLINE_PICKUP_SCRIPTS/identity-cache.sh" read | jq -e '.identity.name and .identity.description' > /dev/null
 ```
 

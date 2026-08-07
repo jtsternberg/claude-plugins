@@ -1,11 +1,12 @@
 ---
 name: gws-calendar
-description: "Query and manage Google Calendar events via the gws CLI for the currently active gws account. Triggers on \"what's on my calendar\", \"today's meetings\", \"what's my schedule\", \"list events tomorrow\", \"find my next meeting with X\", \"get the meet link for [event]\", \"what's the zoom link for my coaching session\", \"create a calendar event\", \"list my calendars\". Use this skill instead of constructing raw `gws calendar events list` invocations."
+description: "Google Calendar via the gws CLI — 'what's on my calendar', today's meetings, schedule, find an event, pull its Meet/Zoom link, create events, list calendars."
 when_to_use: |
   Use whenever the user asks about their Google Calendar — listing events,
   looking up a single meeting, extracting Meet/Zoom links, listing accessible
   calendars, or creating an event. Respects the active gws account set by
   the gws-account skill.
+  Also 'list events tomorrow', 'find my next meeting with X', 'what's the zoom link for my coaching session'. Use instead of constructing raw `gws calendar events list` invocations.
 argument-hint: "<list|get|links|calendars|create> [flags]"
 allowed-tools: 'Bash(bash *) Bash(gws *) Bash(python3 *)'
 ---
@@ -19,7 +20,9 @@ operations use the currently active gws account
 ## Prerequisites
 
 ```!
-bash ${CLAUDE_SKILL_DIR}/../../scripts/auth-preflight.sh
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/auth-preflight.sh"
 ```
 
 Trust this over a hand-rolled `gws auth status` check. `gws` prints
@@ -38,7 +41,9 @@ Parse the user's request and run the matching script. All scripts live in
 ### List events (default subcommand)
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-list-events.sh \
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/calendar-list-events.sh" \
   [--calendar=ID] [--query=TEXT] \
   [--from=SPEC] [--to=SPEC] [--max=N] [--tz=IANA] [--json]
 ```
@@ -59,14 +64,18 @@ Examples:
 By id:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-get-event.sh <event-id> \
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/calendar-get-event.sh" <event-id> \
   [--calendar=ID] [--json] [--tz=IANA]
 ```
 
 By fuzzy title match within a window (default: today through +7 days):
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-get-event.sh \
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/calendar-get-event.sh" \
   --match "title fragment" [--from=SPEC] [--to=SPEC] [--json]
 ```
 
@@ -77,15 +86,17 @@ Surfaces the specific instance of a recurring event, not the series id.
 When the user asks "what's the link for X" or "get the meet/zoom link":
 
 ```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # Today's links
-bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-links.sh
+bash "$PLUGIN_ROOT/scripts/calendar-links.sh"
 
 # Links for matching events in a window
-bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-links.sh \
+bash "$PLUGIN_ROOT/scripts/calendar-links.sh" \
   --match "coaching" [--from=today --to=+3d]
 
 # Links for a single event by id
-bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-links.sh <event-id>
+bash "$PLUGIN_ROOT/scripts/calendar-links.sh" <event-id>
 ```
 
 Detects:
@@ -99,7 +110,9 @@ silently omit.
 ### List accessible calendars
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-list-calendars.sh \
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/calendar-list-calendars.sh" \
   [--writable] [--json]
 ```
 
@@ -112,7 +125,9 @@ Before writing to a shared or group calendar, check the role directly instead
 of listing everything:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-list-calendars.sh \
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/calendar-list-calendars.sh" \
   --id "<calendarId>" [--json]
 ```
 
@@ -125,7 +140,9 @@ explanation when the calendar isn't in the account's calendar list — usually
 Timed event:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/calendar-create-event.sh \
+# Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/calendar-create-event.sh" \
   --title "Title" --start "2026-05-08T14:00" --end "2026-05-08T15:00" \
   [--calendar=ID] [--description=TEXT] [--location=TEXT] \
   [--attendees=a@x.com,b@y.com] [--meet] [--tz=America/New_York] [--json]

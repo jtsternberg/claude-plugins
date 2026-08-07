@@ -1,0 +1,5 @@
+interface:
+  display_name: Tackle Beads Epic
+  short_description: Complete a Beads epic and prepare its pull request
+policy:
+  allow_implicit_invocation: false

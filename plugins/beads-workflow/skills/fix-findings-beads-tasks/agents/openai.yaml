@@ -1,0 +1,5 @@
+interface:
+  display_name: Fix Findings as Beads Tasks
+  short_description: Fix findings with one Beads task and commit per issue
+policy:
+  allow_implicit_invocation: false

@@ -1,6 +1,6 @@
 ---
 name: fable-delegate
-description: Delegation discipline for main agents on the Fable model (claude-fable-5). Use at session start, and again whenever the Fable main agent is about to edit files, run searches, run tests, or perform any mechanical multi-step execution itself.
+description: "Delegation discipline for a main agent on the Fable model — load at session start and before it edits files, searches, runs tests, or does any mechanical multi-step work itself."
 ---
 
 # Fable? Delegate the Doing

@@ -11,6 +11,14 @@
         "path": "./plugins/codex"
       },
       "category": "Coding"
+    },
+    {
+      "name": "pr-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pr-workflow"
+      },
+      "category": "Coding"
     }
   ]
 }
