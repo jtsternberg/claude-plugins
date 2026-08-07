@@ -1,0 +1,36 @@
+{
+  "name": "pr-workflow",
+  "version": "1.8.0",
+  "description": "Skills for managing pull requests: addressing comments, updating descriptions, watching events, QA, and history walkthroughs.",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  },
+  "repository": "https://github.com/jtsternberg/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "code-review",
+    "qa"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "PR Workflow",
+    "shortDescription": "Review, QA, and explain pull requests",
+    "longDescription": "Address review feedback, update PR descriptions, watch PR events, guide manual QA, and explain a pull request's history one page at a time.",
+    "developerName": "JT Sternberg",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/jtsternberg/claude-plugins",
+    "defaultPrompt": [
+      "Use $pr-workflow:address-pr-comments to resolve review feedback.",
+      "Use $pr-workflow:qa-walkthrough-pr to guide manual PR testing.",
+      "Use $pr-workflow:walk-through-work-history to explain how work progressed one page at a time."
+    ]
+  }
+}

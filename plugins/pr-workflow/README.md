@@ -1,6 +1,6 @@
 # PR Workflow Plugin
 
-Skills for managing pull requests: addressing comments, updating descriptions, and watching PRs for events. All workflows work in Claude Code and Codex.
+Skills for managing pull requests: addressing comments, updating descriptions, watching PRs for events, guiding QA, and explaining how work progressed. All workflows work in Claude Code and Codex.
 
 ## Installation
 
@@ -120,9 +120,79 @@ Invoke `qa-walkthrough-pr` with an optional PR number or URL.
 - GitHub CLI (`gh`) must be installed and authenticated
 - [beads](https://github.com/jtsternberg/beads) (`bd`) must be installed
 
+### `walk-through-work-history`
+
+Research a PR's complete progression, divide it into causal chapters, and explain one concise page per user turn.
+
+Claude Code:
+
+```text
+/pr-workflow:walk-through-work-history https://github.com/org/repo/pull/123
+```
+
+Codex invocation:
+
+```text
+$pr-workflow:walk-through-work-history Explain https://github.com/org/repo/pull/123 one page at a time.
+```
+
+**Workflow:**
+1. Collects commits, reviews, comments, inline threads, state changes, checks, and final PR metadata
+2. Reconstructs the full event history before narrating
+3. Groups events into causal chapters instead of dumping a raw timeline
+4. Delivers exactly one adult, ADHD-friendly page per turn
+5. Preserves stale approvals, reversals, wrong diagnoses, and later corrections
+6. Ends each non-final page by asking whether to turn the page
+
+Although optimized for GitHub PRs, the same method can explain issues, branches, incidents, documents, tickets, and other chronological work records.
+
 ## Example Usage
 
-Use the canonical skill names above when describing the workflow to either harness. For explicit invocation, use `/pr-workflow:address-pr-comments` or `/pr-workflow:qa-walkthrough-pr` in Claude Code, and `$pr-workflow:address-pr-comments` or `$pr-workflow:qa-walkthrough-pr` in Codex. The slash and dollar-sign forms are harness syntax, not part of the skill names.
+Use the canonical skill names above when describing the workflow to either harness. The slash and dollar-sign forms below are harness syntax, not part of the skill names.
+
+Claude Code:
+
+```text
+# After making changes based on code review
+/pr-workflow:address-pr-comments
+
+# After adding more commits to your PR
+/pr-workflow:update-pr-description
+
+# Wait for Copilot to finish, then review
+/pr-workflow:watch-pr-then-action 2165
+
+# Wait for a draft PR to be marked ready, then review
+/pr-workflow:watch-pr-then-action 2165 for ready
+
+# QA walkthrough for the current branch's PR
+/pr-workflow:qa-walkthrough-pr
+
+# QA walkthrough for a specific PR
+/pr-workflow:qa-walkthrough-pr 519
+
+# Explain a PR's work history one page at a time
+/pr-workflow:walk-through-work-history https://github.com/org/repo/pull/123
+```
+
+Codex:
+
+```text
+# After making changes based on code review
+$pr-workflow:address-pr-comments
+
+# After adding more commits to your PR
+$pr-workflow:update-pr-description
+
+# Wait for Copilot to finish, then review
+$pr-workflow:watch-pr-then-action 2165
+
+# QA walkthrough for a specific PR
+$pr-workflow:qa-walkthrough-pr 519
+
+# Explain a PR's work history one page at a time
+$pr-workflow:walk-through-work-history Explain https://github.com/org/repo/pull/123.
+```
 
 ## Additional Documentation
 
@@ -131,3 +201,4 @@ Use the canonical skill names above when describing the workflow to either harne
 - [skills/update-pr-description/SKILL.md](skills/update-pr-description/SKILL.md) - Update PR description from changes
 - [skills/watch-pr-then-action/SKILL.md](skills/watch-pr-then-action/SKILL.md) - Watch PR for conditions (Copilot, ready, review)
 - [skills/qa-walkthrough-pr/SKILL.md](skills/qa-walkthrough-pr/SKILL.md) - Guided manual QA walkthrough
+- [skills/walk-through-work-history/SKILL.md](skills/walk-through-work-history/SKILL.md) - Paginated work-history walkthrough
