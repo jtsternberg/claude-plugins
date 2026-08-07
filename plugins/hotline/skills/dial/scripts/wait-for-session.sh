@@ -141,7 +141,7 @@ if $CMUX_MODE; then
       else
         DIAG=" (no banner matched on screen; transcript-file check skipped — cwd.txt absent)"
       fi
-      echo "Timed out waiting for Claude REPL to boot in cmux ${REF} (${TIMEOUT}s).${DIAG} Common causes: launch-script claude invocation is malformed (e.g. --allowedTools without a -- separator before the positional prompt), or the surface/workspace lost its tty." >&2
+      echo "Timed out waiting for Claude REPL to boot in cmux ${REF} (${TIMEOUT}s).${DIAG} Common causes: launch-script claude invocation is malformed (e.g. a missing -- separator before the positional prompt, or --allowedTools split into two argv words instead of --allowedTools=<list>), or the surface/workspace lost its tty." >&2
       exit 1
     fi
 

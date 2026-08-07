@@ -108,11 +108,28 @@ assert_contains "first-contact preserves conference mode" "$launch_body" "confer
 
 # Regression: --allowedTools is variadic — must be terminated with `--` before
 # the positional prompt or claude swallows the prompt as a tool name.
-if printf '%s' "$launch_body" | grep -qE -- "--allowedTools .+ -- "; then
+if printf '%s' "$launch_body" | grep -qE -- "--allowedTools=.+ -- "; then
   pass "first-contact launch script puts -- before the positional prompt"
 else
   fail "first-contact launch script puts -- before the positional prompt" \
        "got: $launch_body"
+fi
+
+# Regression: --allowedTools must be `=`-joined into ONE argv word. cmux's
+# checkpoint recorder treats the flag as an arity-0 boolean and drops the value
+# that follows it in the two-token form, storing a restore command that ends in
+# a bare `'--allowedTools'`; `cmux restore claude <id>` then dies after a cmux
+# restart with "option '--allowedTools' argument missing". The `=` form is
+# preserved byte-for-byte (verified on cmux 0.64.22).
+if printf '%s' "$launch_body" | grep -q -- "--allowedTools="; then
+  pass "launch script uses the =-joined --allowedTools form"
+else
+  fail "launch script uses the =-joined --allowedTools form" "got: $launch_body"
+fi
+if printf '%s' "$launch_body" | grep -qE -- "--allowedTools[[:space:]]"; then
+  fail "launch script avoids the two-token --allowedTools form" "got: $launch_body"
+else
+  pass "launch script avoids the two-token --allowedTools form"
 fi
 
 # HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS is opt-in. Default (unset) must NOT
