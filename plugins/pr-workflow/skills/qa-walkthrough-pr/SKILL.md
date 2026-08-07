@@ -193,7 +193,13 @@ Process tasks one at a time following the dependency order:
    - What data to enter
    - What action to take
    - What the expected result is
-4. **Wait for the user** to confirm (pass/fail/unexpected behavior)
+4. **Collect a verdict.** Prefer an interactive click-to-answer prompt over making the user type: if the harness offers one (`AskUserQuestion` in Claude Code; `request_user_input` in Codex when available), present the checkpoint as a two-option question:
+   - **Option A — "Pass"** (checkpoint behaved as expected, move on)
+   - **Option B — "Something happened"** (the user describes what they saw; routes into step 6's failure flow)
+
+   Selecting A is a pass; selecting B — or the harness's automatic free-text "Other" — is the failure/unexpected-behavior path. When no interactive question tool is available, or the user just types, a typed `p` or `pass` means pass; anything else means something happened, and what they typed is the description.
+
+   Related short checks may be grouped into one prompt with a single verdict (e.g. two quick non-mutating checks presented together). Never batch across a state mutation — each mutating step gets its own verdict.
 5. On pass: `bd close <id> --reason="<brief result summary>"`
 6. On fail: **Create a fix task and let the user decide priority:**
    a. Create a beads bug linked to the failed test:
@@ -256,7 +262,7 @@ bd update <epic-id> --notes="QA incomplete — <N> bugs remain open: <bug-id-1>,
 
 - **One task at a time.** Never move ahead without user confirmation.
 - **Be concise in instructions.** Lead with what to do, not why.
-- **Adapt to user signals.** A thumbs up or brief confirmation means "pass, move on." A screenshot or detailed response means something needs attention.
+- **Adapt to user signals.** A thumbs up, `p`/`pass`, or a "Pass" click means "pass, move on." A screenshot or detailed response means something needs attention.
 - **Don't over-test.** If a test is essentially the same code path as another with different input, suggest combining or skipping with user approval.
 - **Pre-setup is a real task.** Environment requirements (webhook forwarding, test data creation, etc.) should be their own task — don't assume the user has everything running.
 - **Handle surprises gracefully.** If the user reports behavior that is correct but differs from the test plan's assumptions (e.g., a field being hidden in a certain state), acknowledge it and adjust the test accordingly rather than treating it as a failure.
