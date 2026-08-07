@@ -1,0 +1,6 @@
+interface:
+  display_name: "Work History Walkthrough"
+  short_description: "Explain work progress one page at a time"
+  default_prompt: "Use $pr-workflow:walk-through-work-history to explain this work history one page at a time."
+policy:
+  allow_implicit_invocation: true
