@@ -170,7 +170,9 @@ chmod 700 "$LAUNCH_SCRIPT"
   case "${HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS:-}" in
     1|true|TRUE|yes|YES) printf ' --dangerously-skip-permissions' ;;
   esac
-  printf ' --allowedTools %q' "$ALLOWED_TOOLS"
+  # `=`-joined into ONE argv word, not two. See cmux-call-async.sh for why the
+  # two-token `--allowedTools <list>` form breaks `cmux restore claude`.
+  printf ' --allowedTools=%q' "$ALLOWED_TOOLS"
   # `--` is REQUIRED before the positional prompt because --allowedTools is
   # variadic (`<tools...>`) and would otherwise swallow the prompt as an
   # extra "tool" name. See cmux-call-async.sh for the live-reproduced bug.

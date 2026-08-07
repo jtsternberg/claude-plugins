@@ -253,7 +253,15 @@ chmod 700 "$LAUNCH_SCRIPT"
   case "${HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS:-}" in
     1|true|TRUE|yes|YES) printf ' --dangerously-skip-permissions' ;;
   esac
-  printf ' --allowedTools %q' "$ALLOWED_TOOLS"
+  # `=`-joined into ONE argv word (`--allowedTools=Bash\ Read\ …`), never the
+  # two-token `--allowedTools <list>` form. cmux's checkpoint recorder treats
+  # `--allowedTools` as an arity-0 boolean and drops the value that follows it,
+  # so the restore command it stores ends in a bare `'--allowedTools'` and
+  # `cmux restore claude <id>` dies after a cmux restart with
+  # "option '--allowedTools' argument missing". The `=` form keeps flag and
+  # value in one argv element, which the recorder preserves byte-for-byte
+  # (verified on cmux 0.64.22). claude accepts either form.
+  printf ' --allowedTools=%q' "$ALLOWED_TOOLS"
   # `--` is REQUIRED before the positional prompt because --allowedTools is
   # variadic (`<tools...>`) and would otherwise swallow the prompt as an
   # extra "tool" name. Reproduced live: omitting `--` causes claude to start

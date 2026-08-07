@@ -64,7 +64,8 @@ build_launch_script() {
       printf ' --session-id %q' "$session_id_preset"
     $fork_session && printf ' --fork-session'
     [[ -n "$session_name" ]] && printf ' -n %q' "$session_name"
-    printf ' --allowedTools %q' "$allowed_tools"
+    # Mirrors production: `=`-joined single argv word (see cmux-call-async.sh).
+    printf ' --allowedTools=%q' "$allowed_tools"
     printf ' -- %q\n' "$prompt"
   }
 }
@@ -150,11 +151,28 @@ rm -f /tmp/hotline-cmux-test.err
 # lindris-backend hotline-call failure on 2026-05-14. Verified by reproducing
 # the broken arg order live in a cmux workspace.
 script=$(build_launch_script "" "22222222-2222-4222-8222-222222222222" false "name" "Bash Read" "submit me")
-if printf '%s' "$script" | grep -qE -- "--allowedTools .+ -- "; then
+if printf '%s' "$script" | grep -qE -- "--allowedTools=.+ -- "; then
   pass "launch script puts -- between --allowedTools and the positional prompt"
 else
   fail "launch script puts -- between --allowedTools and the positional prompt" \
        "got: $script"
+fi
+
+# Regression: --allowedTools must be `=`-joined into ONE argv word. cmux's
+# checkpoint recorder treats the flag as an arity-0 boolean and drops the value
+# that follows it in the two-token form, storing a restore command that ends in
+# a bare `'--allowedTools'`; `cmux restore claude <id>` then dies after a cmux
+# restart with "option '--allowedTools' argument missing". The `=` form is
+# preserved byte-for-byte (verified on cmux 0.64.22).
+if printf '%s' "$script" | grep -q -- "--allowedTools="; then
+  pass "launch script uses the =-joined --allowedTools form"
+else
+  fail "launch script uses the =-joined --allowedTools form" "got: $script"
+fi
+if printf '%s' "$script" | grep -qE -- "--allowedTools[[:space:]]"; then
+  fail "launch script avoids the two-token --allowedTools form" "got: $script"
+else
+  pass "launch script avoids the two-token --allowedTools form"
 fi
 
 screen=$'partial progress\nSTATUS: WORK_IN_PROGRESS\nfinal answer\nSTATUS: WORK_COMPLETE\n'
