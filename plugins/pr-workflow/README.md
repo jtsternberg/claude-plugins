@@ -1,6 +1,6 @@
 # PR Workflow Plugin
 
-Commands and skills for managing pull requests: addressing comments, updating descriptions, and watching PRs for events.
+Commands and skills for managing pull requests: addressing comments, updating descriptions, watching PRs for events, guiding QA, and explaining how work progressed.
 
 ## Installation
 
@@ -129,6 +129,32 @@ Guided manual QA walkthrough for a PR — extracts a test plan, builds beads tas
 - GitHub CLI (`gh`) must be installed and authenticated
 - [beads](https://github.com/jtsternberg/beads) (`bd`) must be installed
 
+### `walk-through-work-history`
+
+Research a PR's complete progression, divide it into causal chapters, and explain one concise page per user turn.
+
+Claude invocation:
+
+```text
+/pr-workflow:walk-through-work-history https://github.com/org/repo/pull/123
+```
+
+Codex invocation:
+
+```text
+$pr-workflow:walk-through-work-history Explain https://github.com/org/repo/pull/123 one page at a time.
+```
+
+**Workflow:**
+1. Collects commits, reviews, comments, inline threads, state changes, checks, and final PR metadata
+2. Reconstructs the full event history before narrating
+3. Groups events into causal chapters instead of dumping a raw timeline
+4. Delivers exactly one adult, ADHD-friendly page per turn
+5. Preserves stale approvals, reversals, wrong diagnoses, and later corrections
+6. Ends each non-final page by asking whether to turn the page
+
+Although optimized for GitHub PRs, the same method can explain issues, branches, incidents, documents, tickets, and other chronological work records.
+
 ## Example Usage
 
 ```bash
@@ -149,6 +175,12 @@ Guided manual QA walkthrough for a PR — extracts a test plan, builds beads tas
 
 # QA walkthrough for a specific PR
 /qa-walkthrough-pr 519
+
+# Explain a PR's work history one page at a time (Claude)
+/pr-workflow:walk-through-work-history https://github.com/org/repo/pull/123
+
+# Explain a PR's work history one page at a time (Codex)
+$pr-workflow:walk-through-work-history Explain https://github.com/org/repo/pull/123.
 ```
 
 ## Additional Documentation
@@ -158,3 +190,4 @@ Guided manual QA walkthrough for a PR — extracts a test plan, builds beads tas
 - [commands/update-pr-description.md](commands/update-pr-description.md) - Update PR description from changes
 - [skills/watch-pr-then-action/SKILL.md](skills/watch-pr-then-action/SKILL.md) - Watch PR for conditions (Copilot, ready, review)
 - [skills/qa-walkthrough-pr/SKILL.md](skills/qa-walkthrough-pr/SKILL.md) - Guided manual QA walkthrough
+- [skills/walk-through-work-history/SKILL.md](skills/walk-through-work-history/SKILL.md) - Paginated work-history walkthrough
