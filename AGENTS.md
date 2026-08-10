@@ -140,7 +140,11 @@ Markdown files in `commands/` that define slash commands Claude can invoke.
 
 ## Versioning
 
-When making any changes to a plugin (skills, commands, hooks, metadata), always bump the version in its `.claude-plugin/plugin.json` before committing. Use semver: patch for fixes, minor for new features or non-breaking changes, major for breaking changes.
+When a plugin change (skills, commands, hooks, metadata) is ready to ship, bump the version in its `.claude-plugin/plugin.json`. Use semver: patch for fixes, minor for new features or non-breaking changes, major for breaking changes.
+
+Bump **once, at the end of the work session**, for the whole change-set — not on every iteration within a session. Iterate and commit freely while you work; do the single version bump when the change is done and about to be released. One release, one bump.
+
+Manually invoke the `publish-release` skill when a release should be pushed. It is the manual entry point for shipping a plugin change to installers — version bump, validation, merge, and marketplace refresh across both harnesses — and points to the detailed runbook at [`docs/codex/release.md`](docs/codex/release.md).
 
 ## Development Commands
 
