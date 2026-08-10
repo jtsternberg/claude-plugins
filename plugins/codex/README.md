@@ -15,8 +15,3 @@ The Fable A/B condition. Use on Terra or another Codex model to adopt the standa
 ### `sol-mode`
 
 The Sol A/B condition. Use on Terra or another Codex model to adopt a Sol-level operating standard without delegating. Compare it against `fable-mode` on equivalent tasks.
-
-## Maintainers
-
-Use the repository's [dual-harness release checklist](../../docs/codex/release.md)
-when publishing a new plugin version.
