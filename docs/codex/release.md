@@ -36,26 +36,30 @@ mirrors.
    bash tests/run-all.sh
    ```
 
-5. Commit, push, and merge the complete release change. A local working tree is
+5. Before merging, seed an isolated Codex profile from the current `main`
+   release. This creates the old-version cache that the upgrade check must
+   replace:
+
+   ```bash
+   export CODEX_HOME="<SCRATCH>/codex-home"
+   mkdir -p "$CODEX_HOME"
+
+   codex plugin marketplace add jtsternberg/claude-plugins --ref main
+   codex plugin add <plugin-name>@jtsternberg
+   ```
+
+   Record the installed version and confirm it is the version currently on
+   `main`, not the version in the pending release.
+6. Commit, push, and merge the complete release change. A local working tree is
    not evidence of what marketplace users can install.
 
-## 3. Refresh and reinstall in Codex
+## 3. Refresh and verify in Codex
 
-Test with an isolated profile so an existing local marketplace registration or
-plugin cache cannot mask the Git release:
+Continue with the isolated profile seeded before the merge. After the release
+reaches `main`, refresh the marketplace snapshot:
 
 ```bash
 export CODEX_HOME="<SCRATCH>/codex-home"
-mkdir -p "$CODEX_HOME"
-
-codex plugin marketplace add jtsternberg/claude-plugins
-codex plugin add <plugin-name>@jtsternberg
-```
-
-After the release reaches the configured Git ref, refresh the marketplace
-snapshot:
-
-```bash
 codex plugin marketplace upgrade jtsternberg
 ```
 
@@ -74,6 +78,12 @@ and installed path reported by the command:
 ```bash
 codex plugin add <plugin-name>@jtsternberg
 ```
+
+If the old version was not installed before the merge, this procedure can only
+verify a fresh install. It cannot verify cache reconciliation. Create a new
+isolated profile, add the marketplace, and install the plugin to confirm that
+the merged release is available, but do not report that result as an
+old-version-to-new-version cache transition.
 
 Start a new Codex session before exercising changed skills, hooks, MCP servers,
 or app configuration. Existing sessions may retain their previously loaded
