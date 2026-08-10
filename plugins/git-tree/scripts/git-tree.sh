@@ -114,10 +114,11 @@ if [[ "$DRY_RUN" == true ]]; then
 	echo ""
 	if [[ "$BRANCH_EXISTS" == true ]]; then
 		echo "1. Create worktree at: $WORKTREE_PATH (branch exists)"
+		echo "   Command: git worktree add \"$WORKTREE_PATH\" \"$BRANCH\""
 	else
 		echo "1. Create worktree at: $WORKTREE_PATH (creating new branch)"
+		echo "   Command: git worktree add -b \"$BRANCH\" \"$WORKTREE_PATH\""
 	fi
-	echo "   Command: git worktree add \"$WORKTREE_PATH\" \"$BRANCH\""
 	echo ""
 	echo "2. Create symlinks (if sources exist):"
 	[[ -d "$REPO_PATH/vendor" ]] && echo "   - vendor → ../${REPO_NAME}/vendor"
@@ -136,7 +137,11 @@ else
 fi
 
 echo "Creating worktree at: $WORKTREE_PATH"
-git -C "$REPO_PATH" worktree add "$WORKTREE_PATH" "$BRANCH"
+if [[ "$BRANCH_EXISTS" == true ]]; then
+	git -C "$REPO_PATH" worktree add "$WORKTREE_PATH" "$BRANCH"
+else
+	git -C "$REPO_PATH" worktree add -b "$BRANCH" "$WORKTREE_PATH"
+fi
 WORKTREE_CREATED="$WORKTREE_PATH"
 
 # Verify worktree was created
