@@ -1,10 +1,29 @@
-# Repository analysis scripts
+# Repository scripts
 
-These scripts inspect the checked-out repository. They are maintainer tools,
-not plugin runtime dependencies, and they should be run from the repository
-root. They do not contact Codex, a marketplace, or an external API.
+These scripts are repository-level utilities, not plugin runtime dependencies.
+Run them from the repository root. The analysis scripts inspect only the
+checkout and do not contact Codex, a marketplace, or an external API. The
+standalone installer writes only to its selected skill destination.
 
 ## Scripts
+
+### `install-standalone-skill.sh`
+
+Installs one self-contained repository skill for Codex. It accepts an explicit
+`<plugin>:<skill>` name, symlinks into `$HOME/.agents/skills` by default, and
+supports a copy mode, managed refresh, managed uninstall, and a destination
+override for repository-scoped installs or isolated tests.
+
+```bash
+bash scripts/install-standalone-skill.sh research-tools:fetch-docs
+bash scripts/install-standalone-skill.sh --copy research-tools:fetch-docs
+bash scripts/install-standalone-skill.sh --uninstall research-tools:fetch-docs
+```
+
+It rejects malformed skills, plugin-root resource dependencies, and existing
+destinations it does not manage. See the
+[standalone skill guide](../docs/codex/standalone-skills.md) for discovery
+locations, update behavior, and the full safety contract.
 
 ### `measure-skill-descriptions.sh`
 

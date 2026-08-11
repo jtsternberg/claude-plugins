@@ -5,9 +5,10 @@ behaves under Codex. Runtime behavior changes with Codex releases, so treat
 these results as versioned compatibility information, not a permanent API
 guarantee.
 
-**Last reviewed:** 2026-08-05
+**Last reviewed:** 2026-08-11
 
-**Tested on:** codex-cli 0.146.0 for the hook and skill-shell probe; related
+**Tested on:** codex-cli 0.147.0 for standalone skill discovery and bundled
+script execution; 0.146.0 for the hook and skill-shell probe; related
 plugin-surface probes were run on codex-cli 0.145.0.
 
 **Reverify after upgrade:** yes—especially after any Codex plugin, hook, or
@@ -19,6 +20,7 @@ skill-loader change.
 | --- | --- | --- |
 | Legacy `.claude-plugin` manifests and marketplace | Supported for the repository's marketplace and plugins. | 0.145.0 |
 | `skills/<name>/SKILL.md` | Skills are the usable Codex workflow surface. | 0.145.0–0.146.0 |
+| Standalone `.agents/skills` installs | Repository and user scopes are supported; symlinked skill directories are followed. A workspace-installed `fetch-docs` skill ran its bundled script successfully. | 0.147.0 |
 | `commands/*.md` | Files may be cached, but Codex does not list or invoke them as plugin commands. | 0.145.0 |
 | Explicit plugin skill invocation | Use `$<plugin-name>:<skill-name>`; the bare skill name remains the prose identifier. | 0.146.1 |
 | Plugin hook commands | Supported after the user trusts the plugin; `${CLAUDE_PLUGIN_ROOT}` resolves inside the hook process. | 0.145.0–0.146.0 |
@@ -60,6 +62,7 @@ The dated evidence archive contains the underlying probes and limitations:
 - [hook behavior](hooks-under-codex.md)
 - [frontmatter and PATH semantics](frontmatter-and-path-semantics.md)
 - [skill-description budget](skill-description-budget.md)
+- [standalone skill installation](standalone-skills.md)
 
 Those documents are research records. Recheck their stated version before
 using an observation to make a new compatibility claim.

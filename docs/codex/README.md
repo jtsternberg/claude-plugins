@@ -15,6 +15,7 @@ evidence behind it.
 | Area | Contents | Audience |
 | --- | --- | --- |
 | [Compatibility guide](compatibility.md) | Current support boundaries and authoring guidance | Users and plugin authors |
+| [Standalone skill installs](standalone-skills.md) | Discovery locations, one-skill installer, updates, and uninstall | Codex users and maintainers |
 | [Release checklist](release.md) | Version, publish, refresh, and cache-verification procedure | Maintainers |
 | Evidence | `compat-matrix.md`, `*-under-codex.md`, `*-semantics.md`, `install-from-git.md`, and `path-resolution-evidence.md` | Maintainers rechecking behavior |
 | Decisions | `adr-*.md`, `path-resolution-options.md`, and `rename-viability.md` | Maintainers reviewing trade-offs |
