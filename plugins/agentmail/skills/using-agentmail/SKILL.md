@@ -99,7 +99,12 @@ npm install -g agentmail-cli     # official. The npm package is a thin wrapper w
 npx agentmail-cli <args>         # no global install; pays the download on a cold cache
 ```
 
-**No key (exit 11):** either agent self-signup (below) or a human creates one at
+**No key (exit 11):** exit 11 means no key *in this shell* — not that none exists. Before
+signing up, rule out a key that's merely unexported: signup **rotates** any existing key,
+so creating one when the user already has a working key (in their shell profile, a secret
+manager, a prior `~/.config/agentmail/signup-*.json`, or an `AGENTMAIL_API_KEY` in their
+dotfiles) silently breaks the old one. If there's genuinely no key anywhere, then either
+agent self-signup (below) or a human creates one at
 [console.agentmail.to/dashboard/api-keys](https://console.agentmail.to/dashboard/api-keys)
 (that page requires picking a **scope** and an **access** level — see
 [references/onboarding.md](references/onboarding.md) for which to choose). Read

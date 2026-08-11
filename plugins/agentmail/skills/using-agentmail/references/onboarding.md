@@ -14,6 +14,14 @@ automated, and one credential-handling rule that matters more than the commands.
 Self-signup is for **first-time users only**. A human email address already signed up with
 AgentMail will not work through this flow.
 
+**Rule out an existing key before you sign up.** A preflight `exit 11` means no key *in
+this shell* — not that none exists. Because signup **rotates** any existing key, creating
+one when the user already has a working key elsewhere silently invalidates it. So when the
+key is merely unset in the environment, check the likely stashes first: a prior credential
+file at `~/.config/agentmail/signup-*.json`, the user's shell profile or secret manager, or
+an `AGENTMAIL_API_KEY` line in their dotfiles. Found one → export and use it; don't sign
+up. Only take the signup path when there is genuinely no key anywhere.
+
 ## Console key: scope and access
 
 Creating a key at
