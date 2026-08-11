@@ -146,6 +146,22 @@ Bump **once, at the end of the work session**, for the whole change-set — not 
 
 Manually invoke the `publish-release` skill when a release should be pushed. It is the manual entry point for shipping a plugin change to installers — version bump, validation, merge, and marketplace refresh across both harnesses — and points to the detailed runbook at [`docs/codex/release.md`](docs/codex/release.md).
 
+## Keeping Third-Party Docs In Sync
+
+Several skills wrap an external tool (e.g. `work-with-media:macwhisper-cli` wraps
+the MacWhisper `mw` CLI). We vendor a cached copy of each such tool's upstream doc
+under [`docs/third-party/cached/`](docs/third-party/cached/) so we can tell when the
+tool changes and keep our wrapper docs from drifting. Each cached file is
+self-describing: its frontmatter names the upstream `source`, its `last_updated`
+date, and the local skills/docs it informs (`related`).
+
+When the user says **"check for updated third party docs"** (to improve our docs),
+invoke the repo-private `check-third-party-docs` skill
+([`.claude/skills/check-third-party-docs/SKILL.md`](.claude/skills/check-third-party-docs/SKILL.md)).
+It re-fetches each cached doc via `research-tools:fetch-docs`, overwrites the cached
+copy so `git diff` shows exactly what changed upstream, then proposes edits to the
+`related` skills/docs. It surfaces suggestions for review — it does not auto-apply.
+
 ## Development Commands
 
 Repository-wide analysis scripts are documented in
