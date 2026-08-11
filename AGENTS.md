@@ -185,9 +185,9 @@ One command runs every suite in the repo, across all three languages:
 bash tests/run-all.sh
 ```
 
-It exits 0 only when every suite that *could* run passed. A suite whose runtime is
-missing (no `cmux`) is reported as **SKIP**, never silently passed — so read the
-summary, not just the exit code.
+It exits 0 only when every suite that *could* run passed. A suite that cannot run —
+its runtime is absent, or it is opt-in and not enabled — is reported as **SKIP**,
+never silently passed, so read the summary, not just the exit code.
 
 **A skip is only honest if something can actually satisfy it.** The gws suites were
 gated on `import pytest` while CI installed no python packages, so 54 tests were
@@ -199,10 +199,12 @@ CI (`.github/workflows/tests.yml`) runs exactly that script on pushes to `main`,
 pull requests, and on manual dispatch. It runs on **ubuntu-latest** on purpose: these
 suites also have to keep working on the Linux box.
 
-The cmux suites stub `cmux` via `PATH`, so they run on Linux rather than skipping —
-a green CI run currently reports `skipped 0`. `run-all.sh` keeps a skip guard for a
-suite that needs the real binary, but nothing trips it today, so treat any nonzero
-skip count as something to read rather than expected noise.
+A green run reports **`skipped 1`** — `codex: live-plugin`. That suite installs the
+plugin into a scratch `CODEX_HOME` and calls the real API, so it is opt-in: it runs
+only with `CODEX_LIVE=1` plus the `codex` CLI and `OPENAI_API_KEY`, and skips
+everywhere else, CI included. Every other suite runs on every machine — the cmux
+suites stub `cmux` via `PATH` rather than skipping on Linux. Treat a skip count
+above 1 as something to read rather than expected noise.
 
 ### Put a new suite where the runner will find it
 
