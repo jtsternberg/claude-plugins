@@ -4,7 +4,7 @@
 
 ## The Answer: `CLAUDE_CODE_SESSION_ID`
 
-Claude Code exports `CLAUDE_CODE_SESSION_ID` into every Bash subprocess it spawns — tool calls, hook commands, and stdio MCP servers alike — as of **2.1.132**. It matches the resumable session ID and the transcript filename, so a running agent reads its own identity straight out of the environment:
+Claude Code exports `CLAUDE_CODE_SESSION_ID` into every Bash tool call it spawns as of **2.1.132** (per the changelog; the [environment variables reference](https://code.claude.com/docs/en/env-vars#variables) documents it for hook commands and stdio MCP servers too — the Bash path is the one Hotline exercises and has live-verified). It matches the resumable session ID and the transcript filename, so a running agent reads its own identity straight out of the environment:
 
 ```bash
 printf '%s\n' "$CLAUDE_CODE_SESSION_ID"

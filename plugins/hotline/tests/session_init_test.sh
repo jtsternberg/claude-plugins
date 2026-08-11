@@ -32,9 +32,11 @@ SESSION_INIT="$HOTLINE_DIR/scripts/session-init.sh"
 
 FAKE_CLAUDE_PID=990101          # above any real pid, so it can never collide
 STRAY_SESSION_CACHE="/tmp/claude-session-${FAKE_CLAUDE_PID}"
+STRAY_TRANSCRIPT_CACHE="/tmp/claude-session-${FAKE_CLAUDE_PID}.transcript"
 
 SCRATCH=()
-trap 'rm -rf "$STRAY_SESSION_CACHE" ${SCRATCH[@]+"${SCRATCH[@]}"}' EXIT
+trap 'rm -f "$STRAY_SESSION_CACHE" "$STRAY_TRANSCRIPT_CACHE"
+      rm -rf ${SCRATCH[@]+"${SCRATCH[@]}"}' EXIT
 
 pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() {
@@ -66,6 +68,11 @@ si() {  # si <VAR=VALUE>... -- <session-init.sh args>...
 # Fake process ancestry whose claude process is $FAKE_CLAUDE_PID, so the
 # fingerprint cache key is stable and lives at a path no real process owns.
 # Copied in shape from dial_wrapper_test.sh's make_ps.
+#
+# `comm=` deliberately reports the FULL executable path, which is what macOS
+# `ps -o comm=` actually prints (Linux prints the bare name). Both walkers strip
+# it with ${comm##*/}; a stub that echoed a bare "claude" would pass even if that
+# strip were removed, and the whole ancestry walk would then break on macOS only.
 make_ps() {
   mkdir -p "$1"
   cat > "$1/ps" <<'EOF'
@@ -80,7 +87,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$mode" in
-  comm=) [[ "$pid" == "$FAKE" ]] && echo "claude" || echo "bash" ;;
+  comm=) [[ "$pid" == "$FAKE" ]] && echo "/opt/homebrew/bin/claude" || echo "/bin/bash" ;;
   ppid=) [[ "$pid" == "$FAKE" ]] && echo "1" || echo "$FAKE" ;;
 esac
 EOF
@@ -100,7 +107,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$mode" in
-  comm=) echo "bash" ;;
+  comm=) echo "/bin/bash" ;;
   ppid=) echo "1" ;;
 esac
 EOF
@@ -153,31 +160,111 @@ out=$(si "CLAUDE_CODE_SESSION_ID=$UUID_UC" -- 2>/dev/null)
 check "uppercase hex is accepted and returned verbatim" $? "out=$out"
 
 # ===========================================================================
-# 3. Native --expanded reconstructs the transcript path from cwd + $HOME.
+# 3. Native --expanded resolves transcript_path in ACCURACY order:
+#    pid-keyed cache (validated) → glob by session id → cwd convention.
 # ===========================================================================
+# Every case here stubs `ps` so $CLAUDE_PID is $FAKE_CLAUDE_PID, which pins the
+# cache filename to a path no real process owns. Without that the script would
+# read the REAL /tmp/claude-session-<pid>.transcript of the session running this
+# suite, and which rung answered would depend on the developer's machine.
+
+# --- rung 3: nothing to go on but the cwd convention ------------------------
 t=$(new_env); SCRATCH+=("$t")
+make_ps "$t/bin"
+rm -f "$STRAY_TRANSCRIPT_CACHE"
 # Mirror the script's own munge instead of hardcoding it, but compute it from a
 # scratch cwd so the result is deterministic wherever the suite runs from.
 PROJ=$( cd "$t/work" && pwd | sed 's|[^a-zA-Z0-9-]|-|g' )
 EXPECT_PATH="$t/home/.claude/projects/${PROJ}/${UUID_LC}.jsonl"
-out=$( cd "$t/work" && si "HOME=$t/home" "CLAUDE_CODE_SESSION_ID=$UUID_LC" \
+out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
+         "FAKE_CLAUDE_PID=$FAKE_CLAUDE_PID" "CLAUDE_CODE_SESSION_ID=$UUID_LC" \
          -- --expanded 2>/dev/null )
 rc=$?
 
 [[ "$rc" -eq 0 && "$(jq -r .transcript_path <<<"$out")" == "$EXPECT_PATH" ]]
-check "--expanded builds transcript_path from \$HOME + the munged cwd" $? \
+check "--expanded falls back to \$HOME + the munged cwd when nothing else matches" $? \
   "rc=$rc expected=$EXPECT_PATH out=$out"
 
 [[ "$(jq -r .project_dir <<<"$out")" == "$(dirname "$EXPECT_PATH")" ]]
 check "project_dir is the transcript's directory" $? "out=$out"
 
-# claude_pid is best-effort on this rung (native identity never needed the
-# process walk), so the KEY must exist even when the value is empty.
-[[ "$(jq -r 'has("claude_pid")' <<<"$out")" == "true" ]]
-check "--expanded always carries a claude_pid key, empty or not" $? "out=$out"
+# The ancestry walk has to survive `ps -o comm=` printing a full path — the
+# macOS behavior. Asserting the VALUE (not just the key) is what makes the
+# ${comm##*/} strip in find_claude_pid a tested requirement.
+[[ "$(jq -r .claude_pid <<<"$out")" == "$FAKE_CLAUDE_PID" ]]
+check "claude_pid is the pid of a claude found by full executable path" $? "out=$out"
 
 [[ "$(jq -r .caller_kind <<<"$out")" == "native" ]]
 check "--expanded keeps caller_kind=native" $? "out=$out"
+
+# --- rung 2: a real transcript elsewhere outranks the cwd convention --------
+# A session that cd'd away (worktrees) still has its transcript filed under the
+# LAUNCH directory. The filename IS the session id, so a glob match is
+# authoritative and the plausible-but-wrong cwd path must lose to it.
+t=$(new_env); SCRATCH+=("$t")
+make_ps "$t/bin"
+rm -f "$STRAY_TRANSCRIPT_CACHE"
+mkdir -p "$t/home/.claude/projects/some-other-project"
+GLOB_PATH="$t/home/.claude/projects/some-other-project/${UUID_LC}.jsonl"
+printf '{"type":"user"}\n' > "$GLOB_PATH"
+CWD_PROJ=$( cd "$t/work" && pwd | sed 's|[^a-zA-Z0-9-]|-|g' )
+out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
+         "FAKE_CLAUDE_PID=$FAKE_CLAUDE_PID" "CLAUDE_CODE_SESSION_ID=$UUID_LC" \
+         -- --expanded 2>/dev/null )
+
+[[ "$CWD_PROJ" != "some-other-project" ]]
+check "the drift case really does have a mismatched cwd (guards the case itself)" $? \
+  "munged cwd=$CWD_PROJ"
+
+[[ "$(jq -r .transcript_path <<<"$out")" == "$GLOB_PATH" ]]
+check "an existing transcript in ANOTHER project dir beats the cwd convention" $? \
+  "expected=$GLOB_PATH out=$out"
+
+[[ "$(jq -r .project_dir <<<"$out")" == "$(dirname "$GLOB_PATH")" ]]
+check "project_dir follows the globbed transcript, not the cwd" $? "out=$out"
+
+# --- rung 1: the pid-keyed cache wins when it validates ---------------------
+t=$(new_env); SCRATCH+=("$t")
+make_ps "$t/bin"
+mkdir -p "$t/elsewhere" "$t/home/.claude/projects/some-other-project"
+CACHED_PATH="$t/elsewhere/${UUID_LC}.jsonl"
+printf '{"type":"user"}\n' > "$CACHED_PATH"
+# A glob candidate exists too, so this proves ORDER and not merely "found it".
+printf '{"type":"user"}\n' > "$t/home/.claude/projects/some-other-project/${UUID_LC}.jsonl"
+printf '%s\n' "$CACHED_PATH" > "$STRAY_TRANSCRIPT_CACHE"
+out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
+         "FAKE_CLAUDE_PID=$FAKE_CLAUDE_PID" "CLAUDE_CODE_SESSION_ID=$UUID_LC" \
+         -- --expanded 2>/dev/null )
+
+[[ "$(jq -r .transcript_path <<<"$out")" == "$CACHED_PATH" ]]
+check "a validated pid-keyed transcript cache outranks the glob" $? \
+  "expected=$CACHED_PATH out=$out"
+
+# --- rung 1 validation: a cache naming a DIFFERENT session is ignored -------
+# The cache is keyed by pid, not by session, so after /clear or a resume the same
+# pid can point at a previous session's transcript. Handing that back would
+# attribute another conversation's content to this caller.
+OTHER_SID="11111111-2222-4333-8444-555555555555"
+printf '{"type":"user"}\n' > "$t/elsewhere/${OTHER_SID}.jsonl"
+printf '%s\n' "$t/elsewhere/${OTHER_SID}.jsonl" > "$STRAY_TRANSCRIPT_CACHE"
+out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
+         "FAKE_CLAUDE_PID=$FAKE_CLAUDE_PID" "CLAUDE_CODE_SESSION_ID=$UUID_LC" \
+         -- --expanded 2>/dev/null )
+
+[[ "$(jq -r .transcript_path <<<"$out")" \
+   == "$t/home/.claude/projects/some-other-project/${UUID_LC}.jsonl" ]]
+check "a cache whose basename is a DIFFERENT session id is ignored" $? "out=$out"
+
+# ...and the other half of the same guard: right session id, file no longer there.
+printf '%s\n' "$t/elsewhere/deleted/${UUID_LC}.jsonl" > "$STRAY_TRANSCRIPT_CACHE"
+out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
+         "FAKE_CLAUDE_PID=$FAKE_CLAUDE_PID" "CLAUDE_CODE_SESSION_ID=$UUID_LC" \
+         -- --expanded 2>/dev/null )
+
+[[ "$(jq -r .transcript_path <<<"$out")" \
+   == "$t/home/.claude/projects/some-other-project/${UUID_LC}.jsonl" ]]
+check "a cache pointing at a vanished file is ignored" $? "out=$out"
+rm -f "$STRAY_TRANSCRIPT_CACHE"
 
 # ===========================================================================
 # 4. Codex: $CODEX_THREAD_ID is both the signal and the id.
@@ -262,6 +349,18 @@ out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
    && "$(jq -r .session_id <<<"$out")" == "abcdef01-2345-4678-8abc-def012345678" \
    && "$(jq -r 'has("caller_kind")' <<<"$out")" == "false" ]]
 check "a legacy cache hit is cached WITHOUT a caller_kind" $? "out=$out"
+
+# ...and with that same cache still populated, a native id must win. The legacy
+# cache is keyed by pid, so it long outlives the session that filled it: a
+# /clear or a resume leaves a stale id sitting there under the live pid. The
+# native variable is the authority, so the cached id must not shadow it.
+out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
+         "FAKE_CLAUDE_PID=$FAKE_CLAUDE_PID" "CLAUDE_CODE_SESSION_ID=$UUID_LC" \
+         -- 2>/dev/null )
+[[ "$(jq -r .caller_kind <<<"$out")" == "native" \
+   && "$(jq -r .session_id <<<"$out")" == "$UUID_LC" ]]
+check "a native id beats a populated legacy fingerprint cache" $? \
+  "cached=$(cat "$STRAY_SESSION_CACHE" 2>/dev/null) out=$out"
 rm -f "$STRAY_SESSION_CACHE"
 
 # ===========================================================================

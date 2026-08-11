@@ -95,10 +95,35 @@ find_claude_pid() {
 # Like the override, this short-circuits both Step 1 and Step 2.
 if [[ "${CLAUDE_CODE_SESSION_ID:-}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
   if [[ "$EXPANDED" == true ]]; then
-    PROJECT_HASH=$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')
-    TRANSCRIPT_PATH="$HOME/.claude/projects/${PROJECT_HASH}/${CLAUDE_CODE_SESSION_ID}.jsonl"
+    # The transcript lives under the SESSION'S LAUNCH directory, not the
+    # current cwd — a session that cd'd away (worktrees) would get a
+    # wrong-but-plausible path from the cwd convention alone. Resolve in
+    # accuracy order: pid-keyed cache (validated against the known session
+    # ID), then a glob for the ID across all project dirs (the filename IS
+    # the session ID, so a match is authoritative), then the cwd convention.
+    CLAUDE_PID="$(find_claude_pid)"
+    TRANSCRIPT_PATH=""
+    TRANSCRIPT_CACHE="/tmp/claude-session-${CLAUDE_PID}.transcript"
+    if [[ -n "$CLAUDE_PID" && -f "$TRANSCRIPT_CACHE" ]]; then
+      CANDIDATE=$(cat "$TRANSCRIPT_CACHE")
+      if [[ "${CANDIDATE##*/}" == "${CLAUDE_CODE_SESSION_ID}.jsonl" && -f "$CANDIDATE" ]]; then
+        TRANSCRIPT_PATH="$CANDIDATE"
+      fi
+    fi
+    if [[ -z "$TRANSCRIPT_PATH" ]]; then
+      for f in "$HOME/.claude/projects"/*/"${CLAUDE_CODE_SESSION_ID}.jsonl"; do
+        if [[ -f "$f" ]]; then
+          TRANSCRIPT_PATH="$f"
+          break
+        fi
+      done
+    fi
+    if [[ -z "$TRANSCRIPT_PATH" ]]; then
+      PROJECT_HASH=$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')
+      TRANSCRIPT_PATH="$HOME/.claude/projects/${PROJECT_HASH}/${CLAUDE_CODE_SESSION_ID}.jsonl"
+    fi
     jq -nc --arg id "$CLAUDE_CODE_SESSION_ID" --arg path "$TRANSCRIPT_PATH" \
-      --arg pid "$(find_claude_pid)" --arg dir "$(dirname "$TRANSCRIPT_PATH")" \
+      --arg pid "$CLAUDE_PID" --arg dir "$(dirname "$TRANSCRIPT_PATH")" \
       '{status:"cached", session_id:$id, caller_kind:"native", transcript_path:$path, claude_pid:$pid, project_dir:$dir}'
   else
     jq -nc --arg id "$CLAUDE_CODE_SESSION_ID" \
@@ -111,6 +136,11 @@ fi
 # that value IS the current session/thread ID: stable across `codex resume`,
 # present in all launch modes. Its presence is itself the "this is Codex"
 # signal, so no separate detection is needed.
+# Known tradeoff: this rung outranks the legacy fingerprint path, so a
+# pre-2.1.132 Claude launched FROM a Codex shell (inherited CODEX_THREAD_ID,
+# no native var) resolves to the Codex thread instead of the Claude session.
+# Accepted: current Claude is covered by the native rung above, and
+# HOTLINE_CALLER_SESSION_ID overrides for anyone actually in that corner.
 # See skills/dial/references/codex-caller.md.
 if [[ -n "${CODEX_THREAD_ID:-}" ]]; then
   jq -nc --arg id "$CODEX_THREAD_ID" \
