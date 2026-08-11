@@ -1,20 +1,26 @@
-# Claude Code Plugins by JTSternberg
+# Claude Code and Codex Plugins by JTSternberg
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-compatible-blueviolet)](https://claude.com/claude-code)
+[![Codex](https://img.shields.io/badge/Codex-compatible-111827)](https://developers.openai.com/codex/)
 
-A curated collection of Claude Code plugins — skills, commands, hooks, and automation.
+A curated collection of skills, hooks, and automation for Claude Code and
+Codex. The two harnesses use different catalogs in this repository, so check
+the [support matrix](docs/codex/compatibility.md#plugin-support-matrix) before
+installing.
 
 ---
 
 ## Quick Start
 
-Add the marketplace and install any plugin:
+### Claude Code
+
+Add the marketplace and install any of its 27 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
-claude plugin install git-tree@jtsternberg  # Example: install git-tree skill
+claude plugin install git-tree@jtsternberg
 ```
 
 Verify installation:
@@ -22,6 +28,28 @@ Verify installation:
 ```bash
 claude plugin list
 ```
+
+Invoke an installed skill as `/<plugin>:<skill-name>`, using the skill's
+frontmatter `name`. For example: `/pr-workflow:qa-walkthrough-pr`.
+
+### Codex
+
+Codex's native catalog currently offers `codex`, `pr-workflow`, and `hotline`:
+
+```bash
+codex plugin marketplace add jtsternberg/claude-plugins
+codex plugin add codex@jtsternberg
+```
+
+Open `/plugins` in Codex to browse configured marketplaces, or run
+`codex plugin list --available --json` in a terminal. Start a new session after
+installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
+`$codex:fable-mode`.
+
+To install one self-contained repository skill instead of a whole plugin, see
+[standalone Codex skills](docs/codex/standalone-skills.md). For commands,
+updates, catalog scope, and all 28 plugin names, see the
+[Codex compatibility guide](docs/codex/compatibility.md).
 
 ---
 
@@ -74,9 +102,9 @@ Exports HTML slide presentations to PDF or PNG screenshots using browser automat
 **Install:** `claude plugin install export-presentation@jtsternberg`
 
 #### 📞 [hotline](plugins/hotline)
-Cross-workspace communication for Claude Code agents. Dial another workspace to ask questions, delegate work, or collaborate in real-time. Also ships a [standalone session ID discovery utility](plugins/hotline/SESSION-ID-DISCOVERY.md).
+Cross-workspace communication for agent sessions. Claude Code and Codex can place calls; the current launch transport starts Claude Code receivers. Also ships a [standalone session ID discovery utility](plugins/hotline/SESSION-ID-DISCOVERY.md).
 
-**Install:** `claude plugin install hotline@jtsternberg`
+**Install:** `claude plugin install hotline@jtsternberg` or `codex plugin add hotline@jtsternberg`
 
 #### 🧠 [thinking-tools](plugins/thinking-tools)
 Metacognitive reasoning frameworks for careful decision-making. Ships `chestertons-fence` (investigate before removing), `pink-elephant` (rewrite counterproductive prohibitions as positive directives), and `interview-mode` (after two rejected drafts of the same artifact, stop generating variants and interview the user to build from their own wording).
@@ -111,10 +139,12 @@ Skills for working with — and like — the Fable model (`claude-fable-5`). Shi
 #### 🧪 [codex](plugins/codex)
 Codex-native A/B experiments: `codex:sol-delegate` for Sol-led delegation to Terra and other available models, plus `codex:fable-mode` and `codex:sol-mode` for comparing competitive frontier-model stances on Terra.
 
-### Commands and workflows
+**Install:** `codex plugin add codex@jtsternberg`
+
+### Workflow skills
 
 #### 💬 [git-commits](plugins/git-commits)
-Skills for creating git commits from staged or unstaged files with AI-generated messages. Works in Claude Code and Codex.
+Skills for creating git commits from staged or unstaged files with AI-generated messages. The skills are dual-harness compatible, but this repository currently offers the plugin only through its Claude Code catalog.
 
 **Skills:** `commit-staged`, `commit-unstaged`
 
@@ -125,7 +155,7 @@ Skills for managing pull requests: addressing comments, updating descriptions, w
 
 **Skills:** `address-pr-comments`, `address-pr-comments-human`, `update-pr-description`, `watch-pr-then-action`, `qa-walkthrough-pr`
 
-Works in Claude Code and Codex.
+Available in both the Claude Code and Codex-native catalogs.
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementing fixes or writing PR descriptions.
 
@@ -143,13 +173,13 @@ Work through beads epics from start to completion with automatic PR creation.
 
 **Skills:** `tackle-epic`, `fix-findings-beads-tasks`
 
-Works in Claude Code and Codex.
+The skills are dual-harness compatible, but this repository currently offers the plugin only through its Claude Code catalog.
 
 **Dependencies:** Requires [beads](https://github.com/steveyegge/beads)
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementation work or fixing findings.
 
-**Install:** `claude plugin install beads-workflow@jtsternberg` or `codex plugin add beads-workflow@jtsternberg`
+**Install:** `claude plugin install beads-workflow@jtsternberg`
 
 #### 🤝 [handoff](plugins/handoff)
 Create handoff documents to preserve context between Claude Code sessions.
@@ -210,44 +240,53 @@ cd claude-plugins
 
 ### Install the Marketplace Locally
 
-Add the local directory as a marketplace in your `~/.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "jtsternberg": {
-      "source": {
-        "source": "local",
-        "path": "/path/to/claude-plugins"
-      }
-    }
-  }
-}
-```
-
-### Install a Plugin Directly from Local Files
+Claude Code:
 
 ```bash
-claude plugins add /path/to/claude-plugins/plugins/<plugin-name>
+claude plugin marketplace add /path/to/claude-plugins
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add /path/to/claude-plugins
+```
+
+### Install a Plugin from the Local Marketplace
+
+Claude Code plugins:
+
+```bash
+claude plugin install <plugin-name>@jtsternberg
+```
+
+For Codex, choose a plugin that appears in the Codex-native catalog:
+
+```bash
+codex plugin add <plugin-name>@jtsternberg
 ```
 
 ### Repository Structure
 
 ```
 .claude-plugin/
-├── plugin.json          # Plugin metadata
-└── marketplace.json     # Marketplace registry
+└── marketplace.json     # Claude Code catalog
+.agents/plugins/
+└── marketplace.json     # Codex-native catalog
 plugins/
 └── <plugin-name>/       # Each plugin in its own directory
-    ├── manifest.json    # Plugin manifest
+    ├── .claude-plugin/plugin.json  # Claude/shared manifest
+    ├── .codex-plugin/plugin.json   # Codex-native manifest (when published)
+    ├── skills/<skill>/SKILL.md
     ├── hooks/           # Hook scripts (optional)
-    └── commands/        # Slash commands / skills (optional)
+    └── README.md
 ```
 
-For the current Codex support boundary, see the
-[Codex compatibility guide](docs/codex/compatibility.md). Detailed probe logs
-and historical decisions are kept separately in the
-[Codex research archive](docs/codex/README.md).
+For the current install commands, invocation conventions, and per-plugin
+support boundary, see the [Codex compatibility guide](docs/codex/compatibility.md).
+Detailed probe logs and historical decisions are kept separately in the
+[Codex research archive](docs/codex/README.md). Maintainers shipping a plugin
+change should use the [dual-harness release guide](docs/codex/release.md).
 
 ---
 
@@ -257,10 +296,11 @@ Contributions are welcome! To add a new plugin:
 
 1. Fork this repository
 2. Create a new directory under `plugins/`
-3. Add required files (`manifest.json` or `.claude-plugin/plugin.json`, hooks, commands)
-4. Register it in `.claude-plugin/marketplace.json`
-5. Update this README with documentation
-6. Submit a pull request
+3. Add its manifest and reusable workflows under `skills/<name>/SKILL.md`
+4. Register it in the catalog for each harness it supports
+5. Validate every skill against the repository's dual-harness contract
+6. Update this README and the [support matrix](docs/codex/compatibility.md#plugin-support-matrix)
+7. Submit a pull request
 
 ---
 

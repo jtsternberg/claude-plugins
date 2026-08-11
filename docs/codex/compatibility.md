@@ -1,68 +1,153 @@
-# Codex compatibility guide
+# Claude Code and Codex compatibility
 
-This is the maintained, user-facing summary of how this plugin repository
-behaves under Codex. Runtime behavior changes with Codex releases, so treat
-these results as versioned compatibility information, not a permanent API
-guarantee.
+This is the maintained guide for installing and using this repository's
+plugins in Claude Code and Codex. The harnesses deliberately publish different
+catalogs, so install from the column that matches the client you are using.
 
 **Last reviewed:** 2026-08-11
 
-**Tested on:** codex-cli 0.147.0 for standalone skill discovery and bundled
-script execution; 0.146.0 for the hook and skill-shell probe; related
-plugin-surface probes were run on codex-cli 0.145.0.
+**Catalog probes:** Claude Code 2.1.226 and Codex CLI 0.147.0
 
-**Reverify after upgrade:** yes—especially after any Codex plugin, hook, or
-skill-loader change.
+The clean probes found 27 entries in the Claude Code marketplace and exactly
+three entries in the Codex-native marketplace: `codex`, `pr-workflow`, and
+`hotline`. Together those catalogs name 28 plugins. Recheck this guide after a
+client upgrade or a catalog change.
 
-## Current compatibility
+## Install and invoke
 
-| Surface | Current finding | Tested on |
-| --- | --- | --- |
-| Legacy `.claude-plugin` manifests and marketplace | Supported for the repository's marketplace and plugins. | 0.145.0 |
-| `skills/<name>/SKILL.md` | Skills are the usable Codex workflow surface. | 0.145.0–0.146.0 |
-| Standalone `.agents/skills` installs | Repository and user scopes are supported; symlinked skill directories are followed. A workspace-installed `fetch-docs` skill ran its bundled script successfully. | 0.147.0 |
-| `commands/*.md` | Files may be cached, but Codex does not list or invoke them as plugin commands. | 0.145.0 |
-| Explicit plugin skill invocation | Use `$<plugin-name>:<skill-name>`; the bare skill name remains the prose identifier. | 0.146.1 |
-| Plugin hook commands | Supported after the user trusts the plugin; `${CLAUDE_PLUGIN_ROOT}` resolves inside the hook process. | 0.145.0–0.146.0 |
-| Skill-body shell commands | Do not rely on `${CLAUDE_SKILL_DIR}` or `${CLAUDE_PLUGIN_ROOT}` being set. A SessionStart hook export does not persist into a later skill-body shell. | 0.146.0 |
-| Installed plugin `bin/` on `PATH` | Not provided as a general skill-script path solution. | 0.145.0 |
-| Skill descriptions | The current source tree has 60 descriptions totaling 7,700 characters (96.25% of the approximate 8,000-character Codex pool). | 2026-08-05 source-tree measurement |
+### Claude Code
 
-## Authoring guidance
+Add the marketplace, install an **Available** plugin from the matrix, and use
+its skill's frontmatter `name`:
 
-- Ship Codex workflows as skills, not slash commands.
-- Keep hook paths anchored to `${CLAUDE_PLUGIN_ROOT}`; that variable is a hook
-  contract, not a skill-body contract.
-- For a skill that runs a bundled script, keep Claude's exact substitution
-  token in executable text and tell Codex, in adjacent prose, to replace it
-  with the absolute directory containing the current `SKILL.md`:
+```bash
+claude plugin marketplace add jtsternberg/claude-plugins
+claude plugin install pr-workflow@jtsternberg
+```
 
-  Codex: this path resolves under Claude Code; substitute the directory containing
-  this `SKILL.md` in the executable text below.
+```text
+/pr-workflow:qa-walkthrough-pr
+```
 
-  ```bash
-  SKILL_DIR="${CLAUDE_SKILL_DIR}"
-  bash "$SKILL_DIR/scripts/example.sh"
-  ```
+The invocation form is `/<plugin>:<frontmatter-name>`; a skill directory name
+is not necessarily its invocation name.
 
-  Claude Code substitutes only the exact token; it does not export the variable
-  or substitute a compound `${VAR:-fallback}` expression. Codex substitutes
-  nothing, so the adjacent instruction preserves its model-resolved path.
-- Keep the highest-signal invocation terms in `description:`. Do not assume
-  that supplemental frontmatter fields participate in Codex implicit matching.
+### Codex
 
-## Detailed evidence
+Add the marketplace, then choose one of the three **Available** Codex-native
+plugins in the matrix:
 
-The dated evidence archive contains the underlying probes and limitations:
+```bash
+codex plugin marketplace add jtsternberg/claude-plugins
+codex plugin add pr-workflow@jtsternberg
+```
 
-- [plugin and command compatibility](compat-matrix.md)
-- [commands under Codex](commands-under-codex.md)
-- [skill path and environment evidence](path-resolution-evidence.md)
-- [plugin-root semantics](plugin-root-semantics.md)
-- [hook behavior](hooks-under-codex.md)
-- [frontmatter and PATH semantics](frontmatter-and-path-semantics.md)
-- [skill-description budget](skill-description-budget.md)
-- [standalone skill installation](standalone-skills.md)
+Open `/plugins` in Codex to browse configured marketplaces. Start a new Codex
+session after installing or updating a plugin, then invoke a skill with
+`$<plugin>:<frontmatter-name>`:
 
-Those documents are research records. Recheck their stated version before
-using an observation to make a new compatibility claim.
+```text
+$pr-workflow:qa-walkthrough-pr
+```
+
+For example, the `hotline-ringing` frontmatter name is invoked as
+`$hotline:hotline-ringing`, not by its directory name alone.
+
+### Update an installed plugin
+
+Refresh the marketplace and plugin in Claude Code:
+
+```bash
+claude plugin marketplace update jtsternberg
+claude plugin update pr-workflow@jtsternberg
+```
+
+Refresh the Git marketplace snapshot in Codex:
+
+```bash
+codex plugin marketplace upgrade jtsternberg
+codex plugin list --available --json
+```
+
+Codex CLI 0.147.0 reconciled installed versioned caches during marketplace
+upgrade in the repository's release probe. If the expected version is absent,
+run `codex plugin add <plugin>@jtsternberg` again. Start a new session in either
+harness before testing changed skills, hooks, or tools.
+
+### One skill instead of a plugin
+
+If you need a single self-contained skill rather than a whole plugin, follow
+the [standalone skill guide](standalone-skills.md). It covers the supported
+`.agents/skills` locations, the installer, and the boundary for skills that
+depend on plugin-root resources.
+
+Plugin authors and maintainers should use the [release guide](release.md) for
+versioning, catalog refresh, cache verification, and cross-harness checks; it
+is deliberately not repeated here.
+
+## Runtime boundaries
+
+- Reusable workflows are shipped as `skills/<name>/SKILL.md`. Claude Code
+  invokes them with `/`; Codex mentions them with `$`.
+- Codex does not expose cached `commands/*.md` files as plugin commands. This
+  repository has migrated its reusable command workflows to skills.
+- Codex runs plugin hooks only after the user trusts them. Hook path resolution
+  and skill-body shell path resolution are separate contracts.
+- Skill-body commands must not assume Claude path variables exist in Codex.
+  The repository's dual-harness authoring pattern keeps Claude's literal path
+  token and gives Codex adjacent path-substitution instructions.
+
+## Reading the matrix
+
+- **Available** means the plugin appears in that harness's observed catalog and
+  is maintained as a working surface for that harness. Packaging and repository
+  checks support the classification; machine-specific prerequisites remain the
+  user's responsibility.
+- **Not offered** means it does not appear in that harness's observed catalog;
+  it is not a claim that the underlying idea could never work there.
+- **Redirect** means this repository's catalog entry is not the working plugin;
+  it points users to a separately maintained distribution.
+- **Manual setup** means no installable skill/plugin surface is supplied for
+  that use case; follow the linked plugin documentation instead.
+
+Availability is separate from prerequisites. An available plugin can still
+require an operating system, a local executable, authentication, a project
+state, or user configuration. Those constraints are noted in the last column.
+
+## Plugin support matrix
+
+| Plugin | Claude Code | Codex | Requirements and scope |
+| --- | --- | --- | --- |
+| [beads-workflow](../../plugins/beads-workflow) | Available | Not offered | Requires the `bd` CLI for Beads work. |
+| [bible](../../plugins/bible) | Available | Not offered | Requires the configured Bible API access. |
+| [cmux-cli](../../plugins/cmux-cli) | Available | Not offered | macOS only; requires cmux.app and its `cmux` executable. |
+| [codex](../../plugins/codex) | Not offered | Available | Codex-native model-stance and delegation skills. |
+| [collab-tools](../../plugins/collab-tools) | Available | Not offered | No extra platform requirement documented. |
+| [export-presentation](../../plugins/export-presentation) | Available | Not offered | Requires browser automation dependencies. |
+| [fable](../../plugins/fable) | Available | Not offered | Claude Code plugin; the Codex-native `codex` plugin carries its separate A/B skills. |
+| [generating-blog-images](../../plugins/generating-blog-images) | Available | Not offered | Produces prompts; use of an image provider is a separate choice. |
+| [git-commits](../../plugins/git-commits) | Available | Not offered | Requires a Git working tree. |
+| [git-tree](../../plugins/git-tree) | Available | Not offered | Requires Git and local worktree prerequisites. |
+| [gws](../../plugins/gws) | Available | Not offered | Requires the Google Workspace CLI and its authentication/setup. |
+| [handoff](../../plugins/handoff) | Available | Not offered | Uses local session/Beads context as described by the plugin. |
+| [headline-refiner](../../plugins/headline-refiner) | Available | Not offered | No extra platform requirement documented. |
+| [hotline](../../plugins/hotline) | Available | Available | Codex can place calls; the current launch transport starts Claude Code receivers. `cmux` is optional/preferred on macOS; calls need reachable local workspaces and a working Claude launcher. |
+| [localwp-shell](../../plugins/localwp-shell) | Available | Not offered | macOS only; requires LocalWP and its local shell tooling. |
+| [mac-caffeinate](../../plugins/mac-caffeinate) | Available | Not offered | macOS only; uses the system `caffeinate` utility. |
+| [obsidian-cli](../../plugins/obsidian-cli) | Available | Not offered | Requires Obsidian CLI v1.12+ and a local vault. |
+| [paperclip](../../plugins/paperclip) | Available | Not offered | Requires a locally running Paperclip instance and CLI. |
+| [pr-workflow](../../plugins/pr-workflow) | Available | Available | Individual workflows may require an open PR, Git, GitHub CLI authentication, or Beads. |
+| [publish-insights](../../plugins/publish-insights) | Redirect | Not offered | Install from the separately maintained `jtsternberg/claude-usage-data` marketplace; it also requires Git, authenticated `gh`, and a Claude Code insights report. |
+| [research-tools](../../plugins/research-tools) | Available | Not offered | Requires network access for source retrieval. A self-contained skill can instead be installed through the standalone guide. |
+| [session-tools](../../plugins/session-tools) | Available | Not offered | Operates on Claude Code session transcripts. |
+| [skill-tools](../../plugins/skill-tools) | Available | Not offered | Some workflows require their documented local toolchain. |
+| [slack](../../plugins/slack) | Available | Not offered | Requires Slack Web API credentials/configuration. |
+| [slides-presentation](../../plugins/slides-presentation) | Available | Not offered | Requires its documented browser/image-generation tooling as needed. |
+| [thinking-tools](../../plugins/thinking-tools) | Available | Not offered | No extra platform requirement documented. |
+| [work-with-media](../../plugins/work-with-media) | Available | Not offered | macOS support is required for MacWhisper; `yt-dlp` covers supported URL workflows. |
+| [workspace-status](../../plugins/workspace-status) | Manual setup | Not offered | Configure Claude Code's `statusLine` manually as documented; requires PHP (and Git for repository status). |
+
+The matrix describes what each marketplace offers, not a promise that every
+skill can complete every workflow on every machine. For prior probes and
+version-specific implementation evidence, see the [Codex documentation
+index](README.md).
