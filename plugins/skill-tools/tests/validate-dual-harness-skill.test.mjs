@@ -12,6 +12,7 @@ const codexMetadata = fs.readFileSync(path.join(skillRoot, 'agents/openai.yaml')
 const userFacingDocs = [
 	agents,
 	fs.readFileSync(path.join(REPO, 'plugins/beads-workflow/README.md'), 'utf8'),
+	fs.readFileSync(path.join(REPO, 'plugins/git-commits/README.md'), 'utf8'),
 	fs.readFileSync(path.join(REPO, 'plugins/pr-workflow/README.md'), 'utf8'),
 	fs.readFileSync(path.join(REPO, 'plugins/hotline/README.md'), 'utf8'),
 	fs.readFileSync(path.join(REPO, 'plugins/skill-tools/README.md'), 'utf8'),
@@ -45,14 +46,17 @@ test('validator covers the known Claude and Codex divergence points', () => {
 	assert.match(codexMetadata, /allow_implicit_invocation: false/);
 });
 
-test('user-facing Codex examples use plugin-qualified invocation', () => {
+test('user-facing Codex examples distinguish native plugins from standalone skills', () => {
 	assert.doesNotMatch(userFacingDocs, /Codex[^\n]*`?\$<(?:frontmatter-name|skill-name|skill)>/);
 	for (const invocation of [
 		'$skill-tools:validate-dual-harness-skill',
-		'$beads-workflow:tackle-epic',
 		'$pr-workflow:address-pr-comments',
 		'$hotline:<skill-name>',
+		'$tackle-epic',
+		'$commit-staged',
 	]) {
-		assert.ok(userFacingDocs.includes(invocation), `missing namespaced Codex example ${invocation}`);
+		assert.ok(userFacingDocs.includes(invocation), `missing Codex example ${invocation}`);
 	}
+	assert.doesNotMatch(userFacingDocs, /\$beads-workflow:(?:tackle-epic|fix-findings-beads-tasks)/);
+	assert.doesNotMatch(userFacingDocs, /\$git-commits:(?:commit-staged|commit-unstaged)/);
 });

@@ -10,14 +10,20 @@ claude plugin marketplace add jtsternberg/claude-plugins
 
 # Install the plugin
 claude plugin install git-commits@jtsternberg
-
-# Codex
-codex plugin add git-commits@jtsternberg
 ```
+
+`git-commits` is not offered in the Codex-native plugin catalog. From this repository checkout, install one or both self-contained skills instead:
+
+```bash
+bash scripts/install-standalone-skill.sh git-commits:commit-staged
+bash scripts/install-standalone-skill.sh git-commits:commit-unstaged
+```
+
+See the [standalone Codex skill guide](../../docs/codex/standalone-skills.md) for install scopes, copy mode, updates, and uninstalling.
 
 ## Description
 
-Provides skills for creating commits from staged or unstaged files with automatically generated conventional commit messages. The workflows work in Claude Code and Codex.
+Provides skills for creating commits from staged or unstaged files with automatically generated conventional commit messages. Claude Code invokes the plugin skills as `/git-commits:commit-staged` and `/git-commits:commit-unstaged`; standalone Codex installs use `$commit-staged` and `$commit-unstaged`.
 
 ## Skills
 
