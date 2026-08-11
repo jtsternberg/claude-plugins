@@ -31,6 +31,30 @@ else
 	fail 'symlink install preserves and runs bundled scripts'
 fi
 
+VERIFIED_STANDALONE_REFS=(
+	beads-workflow:fix-findings-beads-tasks
+	beads-workflow:tackle-epic
+	git-commits:commit-staged
+	git-commits:commit-unstaged
+)
+VERIFIED_STANDALONE_SKILLS="$TMP/verified-standalone-skills"
+verified_standalone_ok=1
+for skill_ref in "${VERIFIED_STANDALONE_REFS[@]}"; do
+	if ! run_installer "$VERIFIED_STANDALONE_SKILLS" "$skill_ref"; then
+		verified_standalone_ok=0
+		break
+	fi
+done
+if [ "$verified_standalone_ok" -eq 1 ] \
+	&& [ -L "$VERIFIED_STANDALONE_SKILLS/fix-findings-beads-tasks" ] \
+	&& [ -L "$VERIFIED_STANDALONE_SKILLS/tackle-epic" ] \
+	&& [ -L "$VERIFIED_STANDALONE_SKILLS/commit-staged" ] \
+	&& [ -L "$VERIFIED_STANDALONE_SKILLS/commit-unstaged" ]; then
+	pass 'documented Beads and commit workflows install as standalone skills'
+else
+	fail 'documented Beads and commit workflows install as standalone skills'
+fi
+
 RELOCATED_REPO="$TMP/relocated-repo"
 mkdir -p "$RELOCATED_REPO/scripts" "$RELOCATED_REPO/plugins/research-tools/skills"
 cp "$INSTALLER" "$RELOCATED_REPO/scripts/install-standalone-skill.sh"

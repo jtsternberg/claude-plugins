@@ -1,6 +1,6 @@
 {
   "name": "pr-workflow",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Skills for managing pull requests: addressing comments, updating descriptions, watching events, QA, and history walkthroughs.",
   "author": {
     "name": "JT Sternberg",

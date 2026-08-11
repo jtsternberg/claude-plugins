@@ -63,6 +63,20 @@ namespace:
 $fetch-docs
 ```
 
+The following Claude-catalog plugins are not offered as Codex-native plugins,
+but their self-contained workflows are verified for standalone installation:
+
+| Source | Standalone invocation | Requirement |
+| --- | --- | --- |
+| `beads-workflow:tackle-epic` | `$tackle-epic` | Configured `bd` CLI |
+| `beads-workflow:fix-findings-beads-tasks` | `$fix-findings-beads-tasks` | Configured `bd` CLI |
+| `git-commits:commit-staged` | `$commit-staged` | Git working tree |
+| `git-commits:commit-unstaged` | `$commit-unstaged` | Git working tree |
+
+Install each source with the same command form shown above. These unqualified
+invocations are different from plugin-qualified names: a standalone install is
+`$commit-staged`, not `$git-commits:commit-staged`.
+
 Codex detects skill changes automatically. If a newly installed or updated
 skill does not appear, start a fresh Codex session.
 

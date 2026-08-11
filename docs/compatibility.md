@@ -119,7 +119,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | Plugin | Claude Code | Codex | Requirements and scope |
 | --- | --- | --- | --- |
 | [agentmail](../plugins/agentmail) | Available | Not offered | Requires the `agentmail` CLI and an `AGENTMAIL_API_KEY`. |
-| [beads-workflow](../plugins/beads-workflow) | Available | Not offered | Requires the `bd` CLI for Beads work. |
+| [beads-workflow](../plugins/beads-workflow) | Available | Not offered | Both workflows support [standalone skill installation](codex/standalone-skills.md); requires the `bd` CLI for Beads work. |
 | [bible](../plugins/bible) | Available | Not offered | Requires the configured Bible API access. |
 | [cmux-cli](../plugins/cmux-cli) | Available | Not offered | macOS only; requires cmux.app and its `cmux` executable. |
 | [codex](../plugins/codex) | Not offered | Available | Codex-native model-stance and delegation skills. |
@@ -127,7 +127,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | [export-presentation](../plugins/export-presentation) | Available | Not offered | Requires browser automation dependencies. |
 | [fable](../plugins/fable) | Available | Not offered | Claude Code plugin; the Codex-native `codex` plugin carries its separate A/B skills. |
 | [generating-blog-images](../plugins/generating-blog-images) | Available | Not offered | Produces prompts; use of an image provider is a separate choice. |
-| [git-commits](../plugins/git-commits) | Available | Not offered | Requires a Git working tree. |
+| [git-commits](../plugins/git-commits) | Available | Not offered | Both workflows support [standalone skill installation](codex/standalone-skills.md); requires a Git working tree. |
 | [git-tree](../plugins/git-tree) | Available | Not offered | Requires Git and local worktree prerequisites. |
 | [gws](../plugins/gws) | Available | Not offered | Requires the Google Workspace CLI and its authentication/setup. |
 | [handoff](../plugins/handoff) | Available | Not offered | Uses local session/Beads context as described by the plugin. |
