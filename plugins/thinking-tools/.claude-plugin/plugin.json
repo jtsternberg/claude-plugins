@@ -1,7 +1,7 @@
 {
   "name": "thinking-tools",
   "description": "Metacognitive reasoning frameworks for careful decision-making. Includes Chesterton's Fence (investigate before removing), Pink Elephant (rewriting counterproductive negative instructions), Interview Mode (stop guessing after two rejected drafts and extract the user's own words), and room for more thinking tools like pre-mortems, steelmanning, and first principles.",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"
