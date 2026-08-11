@@ -25,14 +25,17 @@ COMMAND_GENERATOR="$SCRIPT_DIR/../../skills/handoff/scripts/generate-command.sh"
 
 render_command() {
   action=$1
-  argument=$2
   # Both markers (or neither) would make the command syntax guesswork. Leave
   # an explicit neutral instruction rather than emitting the wrong client form.
   if { [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -n "${CODEX_THREAD_ID:-}" ]; } || \
     { [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -z "${CODEX_THREAD_ID:-}" ]; }; then
     return 1
   fi
-  "$COMMAND_GENERATOR" --action "$action" "$argument" 2>/dev/null
+  if [ "$#" -eq 1 ]; then
+    "$COMMAND_GENERATOR" --action "$action" 2>/dev/null
+  else
+    "$COMMAND_GENERATOR" --action "$action" "$2" 2>/dev/null
+  fi
 }
 
 json_get() {
@@ -155,8 +158,8 @@ if [ -n "$findings" ]; then
   printf 'Pending handoff(s) found in %s:\n' "$CWD"
   printf '%s' "$findings"
   [ -n "$maybes" ] && printf 'Also open, titled like work ABOUT handoffs rather than a handoff itself:\n%s' "$maybes"
-  if pickup_command=$(render_command pickup-handoff '<id-or-filename>'); then
-    printf 'To resume one, run %s — pass the identifier from the list above so pickup resolves it directly instead of re-searching.\n' "$pickup_command"
+  if pickup_command=$(render_command pickup-handoff); then
+    printf 'To resume one, run %s <id-or-filename> — pass the identifier from the list above so pickup resolves it directly instead of re-searching.\n' "$pickup_command"
   else
     printf "%s\n" "To resume one, invoke the installed handoff pickup skill with <id-or-filename> using this client's skill syntax; the hook could not determine whether this is Claude Code or Codex."
   fi
@@ -165,8 +168,8 @@ elif [ -n "$maybes" ]; then
   # don't stay silent either, in case one was titled by hand without the prefix.
   printf 'No handoff matched the `pending-handoff:` prefix in %s, but these are open:\n' "$CWD"
   printf '%s' "$maybes"
-  if pickup_command=$(render_command pickup-handoff '<id>'); then
-    printf 'If one of those IS the handoff, resume it with %s.\n' "$pickup_command"
+  if pickup_command=$(render_command pickup-handoff); then
+    printf 'If one of those IS the handoff, resume it with %s <id>.\n' "$pickup_command"
   else
     printf "%s\n" "If one of those IS the handoff, invoke the installed handoff pickup skill with <id> using this client's skill syntax; the hook could not determine whether this is Claude Code or Codex."
   fi

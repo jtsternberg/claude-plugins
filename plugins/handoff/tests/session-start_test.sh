@@ -157,8 +157,10 @@ for id in proj-cccc proj-dddd proj-eeee; do
 done
 
 # --- the notice hands over the identifier -----------------------------------
-if grep -Fq '/handoff:pickup-handoff \<id-or-filename\>' <<<"$OUT" && \
-	grep -Fq '$handoff:pickup-handoff \<id-or-filename\>' <<<"$CODEX_OUT"; then
+if grep -Fq '/handoff:pickup-handoff <id-or-filename>' <<<"$OUT" && \
+	grep -Fq '$handoff:pickup-handoff <id-or-filename>' <<<"$CODEX_OUT" && \
+	! grep -Fq '\\<id-or-filename\\>' <<<"$OUT" && \
+	! grep -Fq '\\<id-or-filename\\>' <<<"$CODEX_OUT"; then
 	pass "startup notice uses the harness-specific pickup command"
 else
 	fail "startup notice uses the harness-specific pickup command"
