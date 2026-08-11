@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# session-start_test.sh — tests for the handoff plugin's SessionStart hook.
+# session-start_test.sh — tests for handoff startup and compaction hooks.
 #
 # Focus: which bd issues get announced as pending handoffs. The marker is the
 # `pending-handoff: ` title PREFIX, but `bd --title-contains` matches
@@ -17,6 +17,8 @@ set -uo pipefail
 
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/hooks/scripts/session-start.sh"
 [ -f "$HOOK" ] || { echo "cannot find hook at $HOOK" >&2; exit 1; }
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+POST_COMPACT="$ROOT/hooks/scripts/post-compact-nudge.sh"
 
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
@@ -24,6 +26,55 @@ fail() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$1"; }
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+
+# PostCompact is shared by both harnesses. SessionStart must not also match
+# compact, or each compaction would run the nudge twice.
+HOOK_CONFIG="$ROOT/hooks/hooks.json"
+if node - "$HOOK_CONFIG" <<'NODE'
+const fs = require('node:fs');
+const hooks = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).hooks;
+const sessionStart = hooks.SessionStart || [];
+const postCompact = hooks.PostCompact || [];
+const hasStartupResume = sessionStart.some(({ matcher }) => matcher === 'startup|resume');
+const hasSessionCompact = sessionStart.some(({ matcher = '' }) => matcher.split('|').includes('compact'));
+const hasPostCompact = postCompact.some(({ matcher }) => matcher === 'manual|auto');
+process.exit(hasStartupResume && !hasSessionCompact && hasPostCompact ? 0 : 1);
+NODE
+then
+  pass "hook config uses one PostCompact nudge, not SessionStart compact"
+else
+  fail "hook config uses one PostCompact nudge, not SessionStart compact"
+fi
+
+SESSION_INFO="$ROOT/skills/handoff/scripts/session-info.sh"
+for harness in claude codex; do
+	cp "$(command -v bash)" "$TMP/$harness"
+	if OUT=$("$TMP/$harness" -c '
+		cache="/tmp/claude-handoff/$$.json"
+		mkdir -p /tmp/claude-handoff
+		printf "%s\\n" "{\"session_id\":\"'$harness'-session\"}" >"$cache"
+		bash "$1"
+		status=$?
+		rm -f "$cache"
+		exit "$status"
+	' _ "$SESSION_INFO") && grep -Fxq "{\"session_id\":\"$harness-session\"}" <<<"$OUT"; then
+		pass "session-info reads a cache below a $harness ancestor"
+	else
+		fail "session-info reads a cache below a $harness ancestor"
+	fi
+done
+
+for shape in claude codex; do
+	case "$shape" in
+		claude) INPUT='{"session_id":"claude-session","transcript_path":"/tmp/claude.jsonl","cwd":"/tmp","hook_event_name":"PostCompact","trigger":"manual","compact_summary":"summary"}' ;;
+		codex) INPUT='{"session_id":"codex-session","transcript_path":"/tmp/codex.jsonl","cwd":"/tmp","hook_event_name":"PostCompact","trigger":"auto"}' ;;
+	esac
+	if OUT=$(printf '%s' "$INPUT" | bash "$POST_COMPACT" 2>&1) && grep -q 'Context was just compacted' <<<"$OUT"; then
+		pass "PostCompact nudge accepts the $shape hook input shape"
+	else
+		fail "PostCompact nudge accepts the $shape hook input shape"
+	fi
+done
 
 # --- fixture: a repo with .beads/ and a stubbed `bd` on PATH -----------------
 REPO="$TMP/repo"

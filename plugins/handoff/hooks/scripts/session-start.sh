@@ -50,24 +50,24 @@ TRANSCRIPT=$(json_get transcript_path)
 CWD=$(json_get cwd)
 [ -n "$CWD" ] && [ -d "$CWD" ] || CWD=$(pwd)
 
-# --- cache session info keyed by the claude ancestor PID --------------------
-# (ancestry-walk pattern borrowed from hotline's session-fingerprint.sh)
-CLAUDE_PID=""
+# --- cache session info keyed by the active harness ancestor PID ------------
+# Claude Code and Codex both execute plugin hooks as child processes. Keep the
+# existing cache directory for compatibility, but make its key harness-neutral.
+AGENT_PID=""
 pid=$$
 while [ -n "$pid" ] && [ "$pid" != "1" ] && [ "$pid" != "0" ]; do
   comm=$(ps -o comm= -p "$pid" 2>/dev/null | xargs 2>/dev/null || true)
-  if [ "${comm##*/}" = "claude" ]; then
-    CLAUDE_PID=$pid
-    break
-  fi
+  case "${comm##*/}" in
+    claude|codex) AGENT_PID=$pid; break ;;
+  esac
   pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)
 done
 
-if [ -n "$CLAUDE_PID" ] && [ -n "$SESSION_ID" ]; then
+if [ -n "$AGENT_PID" ] && [ -n "$SESSION_ID" ]; then
   mkdir -p /tmp/claude-handoff 2>/dev/null || true
   printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s"}\n' \
     "$SESSION_ID" "$TRANSCRIPT" "$CWD" \
-    > "/tmp/claude-handoff/${CLAUDE_PID}.json" 2>/dev/null || true
+    > "/tmp/claude-handoff/${AGENT_PID}.json" 2>/dev/null || true
 fi
 
 # --- scan for pending handoffs ----------------------------------------------

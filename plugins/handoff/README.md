@@ -50,10 +50,12 @@ It then reads the handoff once, reconciles it against the actual repo state usin
 
 Installed automatically with the plugin (`hooks/hooks.json`):
 
-- **Session start** (`startup`/`resume`): scans for `HANDOFF*.md` files and open bd issues matching the `pending-handoff` marker, printing one compact line per finding (identifier, age, commits since its anchor) and telling the agent to run `/handoff:pickup-handoff <id-or-filename>` with that identifier. Prints nothing when clean. It also caches the session's ID and transcript path to `/tmp/claude-handoff/<pid>.json`, which is where the handoff skill's Session section comes from.
+- **Session start** (`startup`/`resume`): scans for `HANDOFF*.md` files and open bd issues matching the `pending-handoff` marker, printing one compact line per finding (identifier, age, commits since its anchor) and telling the agent to run `/handoff:pickup-handoff <id-or-filename>` with that identifier. Prints nothing when clean. It also caches the session's ID and transcript path to `/tmp/claude-handoff/<pid>.json` for either Claude Code or Codex, which is where the handoff skill's Session section comes from.
 
   Matches are **sorted, never discarded.** Titles starting with `pending-handoff:` (any casing) are reported as pending handoffs; anything that merely mentions the marker is listed separately as a weaker signal. Dropping a real handoff means a cold start — the exact failure the hook exists to prevent — while labelling an ordinary issue as a handoff trains you to ignore the notice. If *only* weak matches exist, it says so rather than claiming a pending handoff.
-- **Post-compaction** (`compact`): refreshes that cache and prints a one-line reminder that `/handoff:handoff` can bank fresh context before details fade.
+- **Post-compaction** (`PostCompact`, `manual`/`auto`): refreshes that cache and prints a one-line reminder that `/handoff:handoff` can bank fresh context before details fade. It is a dedicated post-compaction event, so the nudge runs once rather than also using `SessionStart`'s `compact` source.
+
+Codex requires a review/trust decision before a newly installed or changed plugin command hook runs. Open `/hooks` and trust the `handoff` hook definition before treating startup or compaction behavior as enabled. Claude Code does not use Codex's hook trust gate.
 
 Hook scripts are pure bash with no hard dependencies and degrade silently on any failure.
 
