@@ -42,7 +42,9 @@
 set -uo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'
+  # Range ends at the header's own closing rule, so editing the header can't
+  # start leaking source lines into --help.
+  sed -n '2,/^# =\{10,\}$/p' "$0" | sed 's/^# \{0,1\}//' | grep -v '^=\{10,\}$'
   exit 0
 fi
 
@@ -52,10 +54,46 @@ PLUGIN_SCRIPTS="$HOTLINE_ROOT/scripts"
 DIAL_SCRIPTS="$SCRIPT_DIR"
 PICKUP_SCRIPTS="$HOTLINE_ROOT/skills/pickup/scripts"
 
-# Where the pending-fingerprint file lives. Overridable so the test suite never
-# writes into a real /tmp slot that a live session might be using.
-PENDING_DIR="${HOTLINE_PENDING_DIR:-/tmp}"
+# Pending-fingerprint state. NOT in /tmp: the file is keyed by the claude PID, so
+# a reused PID would inherit a dead session's fingerprint, and /tmp is
+# world-writable with no GC. ~/.agents-hotline/ is where every other piece of
+# hotline state already lives. Overridable so the test suite stays out of it.
+PENDING_DIR="${HOTLINE_PENDING_DIR:-$HOME/.agents-hotline/pending}"
 MAX_IDENTITY_ATTEMPTS=3
+# A replay round-trip is seconds. Anything older is a leftover from a previous
+# session (or a recycled PID), so it is discarded and the retry budget restarts
+# rather than being inherited.
+PENDING_TTL="${HOTLINE_PENDING_TTL:-600}"
+
+# ---------------------------------------------------------------------------
+# Output helpers. Every exit path goes through one of these, so stdout is always
+# exactly one JSON object — including the argument-parsing errors below, which is
+# why these are defined first.
+# ---------------------------------------------------------------------------
+FALLBACKS=()
+CALL_DIR=""
+
+# fb_json serializes one entry per line, so an entry must never contain a
+# newline. cmux-reuse-surface.sh's refusal reasons can be multi-line, which
+# silently split one fallback into several bogus array entries.
+add_fallback() { FALLBACKS+=("$(printf '%s' "$1" | tr '\n\r\t' '   ')"); }
+
+fb_json() {
+  if [[ ${#FALLBACKS[@]} -eq 0 ]]; then
+    echo '[]'
+  else
+    printf '%s\n' "${FALLBACKS[@]}" | jq -Rsc 'split("\n")[:-1]'
+  fi
+}
+
+emit_error() {  # emit_error <stage> <detail> <recovery>
+  jq -n --arg stage "$1" --arg detail "$2" --arg recovery "$3" \
+        --arg call_dir "$CALL_DIR" --argjson fallbacks "$(fb_json)" \
+    '{status:"error", stage:$stage, detail:$detail, recovery:$recovery,
+      fallbacks:$fallbacks}
+     + (if $call_dir == "" then {} else {call_dir:$call_dir} end)'
+  exit 1
+}
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -75,49 +113,45 @@ CALLER_SESSION_ARG=""
 REFRESH_IDENTITY=false
 BOOT_TIMEOUT=""
 
+# Every flag that consumes a value. A trailing one of these used to hang the
+# script forever: `shift 2` with a single arg left FAILS without shifting, and
+# with no `set -e` the loop just spun on the same $1 at full CPU, emitting no
+# JSON at all. Reachable from a plain `--prompt-file "$VAR"` with an empty VAR.
+VALUE_FLAGS=" --target --mode --prompt-file --prompt --placement --window --tools --resume --caller-session --boot-timeout "
+# --window is applied AFTER parsing (below) so it wins over --placement
+# regardless of the order the two were given in.
+WINDOW_REQUESTED=false
+
 while [[ $# -gt 0 ]]; do
+  if [[ "$VALUE_FLAGS" == *" $1 "* && $# -lt 2 ]]; then
+    emit_error args "$1 needs a value, but nothing followed it" \
+      "Pass a value after $1 — an empty shell variable is the usual cause — or drop the flag."
+  fi
   case "$1" in
-    --target)          TARGET_REF="${2:-}";        shift 2 ;;
-    --mode)            MODE_IN="${2:-}";           shift 2 ;;
-    --prompt-file)     PROMPT_FILE="${2:-}";       HAVE_PROMPT=true; shift 2 ;;
-    --prompt)          PROMPT_INLINE="${2:-}";     HAVE_PROMPT=true; shift 2 ;;
-    --placement)       PLACEMENT="${2:-}";         shift 2 ;;
-    --window)          PLACEMENT="window"; WINDOW_REF="${2:-}"; shift 2 ;;
+    --target)          TARGET_REF="$2";            shift 2 ;;
+    --mode)            MODE_IN="$2";               shift 2 ;;
+    --prompt-file)     PROMPT_FILE="$2";           HAVE_PROMPT=true; shift 2 ;;
+    --prompt)          PROMPT_INLINE="$2";         HAVE_PROMPT=true; shift 2 ;;
+    --placement)       PLACEMENT="$2";             shift 2 ;;
+    --window)          WINDOW_REQUESTED=true; WINDOW_REF="$2"; shift 2 ;;
     --detached|--new-workspace) PLACEMENT="detached"; shift ;;
     --headless)        FORCE_HEADLESS=true;        shift ;;
-    --tools)           TOOLS="${2:-}";             shift 2 ;;
-    --resume)          RESUME_ARG="${2:-}";        shift 2 ;;
+    --tools)           TOOLS="$2";                 shift 2 ;;
+    --resume)          RESUME_ARG="$2";            shift 2 ;;
     --no-fork)         NO_FORK=true;               shift ;;
-    --caller-session)  CALLER_SESSION_ARG="${2:-}"; shift 2 ;;
+    --caller-session)  CALLER_SESSION_ARG="$2";    shift 2 ;;
     --refresh-identity) REFRESH_IDENTITY=true;     shift ;;
-    --boot-timeout)    BOOT_TIMEOUT="${2:-}";      shift 2 ;;
-    *) shift ;;
+    --boot-timeout)    BOOT_TIMEOUT="$2";          shift 2 ;;
+    # Silently ignoring an unrecognized flag turns a typo into a wrong call:
+    # `--prompt-fil /tmp/x` would dial with no message at all.
+    *) emit_error args "Unrecognized argument: $1" \
+         "dial.sh takes flags only, no positionals. Run dial.sh --help for the list." ;;
   esac
 done
 
-# ---------------------------------------------------------------------------
-# Output helpers. Every exit path goes through one of these, so stdout is always
-# exactly one JSON object.
-# ---------------------------------------------------------------------------
-FALLBACKS=()
-CALL_DIR=""
+# --window implies the window placement and outranks --detached, per SKILL.md.
+$WINDOW_REQUESTED && PLACEMENT="window"
 
-fb_json() {
-  if [[ ${#FALLBACKS[@]} -eq 0 ]]; then
-    echo '[]'
-  else
-    printf '%s\n' "${FALLBACKS[@]}" | jq -Rsc 'split("\n")[:-1]'
-  fi
-}
-
-emit_error() {  # emit_error <stage> <detail> <recovery>
-  jq -n --arg stage "$1" --arg detail "$2" --arg recovery "$3" \
-        --arg call_dir "$CALL_DIR" --argjson fallbacks "$(fb_json)" \
-    '{status:"error", stage:$stage, detail:$detail, recovery:$recovery,
-      fallbacks:$fallbacks}
-     + (if $call_dir == "" then {} else {call_dir:$call_dir} end)'
-  exit 1
-}
 
 # ---------------------------------------------------------------------------
 # Validate arguments before doing anything with side effects.
@@ -140,6 +174,11 @@ case "$PLACEMENT" in
   *) emit_error args "Unknown --placement '$PLACEMENT'" \
        "Valid placements: side (default), detached, window." ;;
 esac
+
+if [[ -n "$BOOT_TIMEOUT" && ! "$BOOT_TIMEOUT" =~ ^[0-9]+$ ]]; then
+  emit_error args "--boot-timeout must be a whole number of seconds, got '$BOOT_TIMEOUT'" \
+    "wait-for-session.sh compares it arithmetically; a non-numeric value would break its poll loop."
+fi
 
 if [[ -z "$TARGET_REF" && -n "$RESUME_ARG" ]]; then
   # Dialing a session ID the user handed us: the session ID is itself a
@@ -187,7 +226,10 @@ if [[ -n "$CALLER_SESSION_ARG" ]]; then
 else
   CLAUDE_PID="$(find_claude_pid || true)"
   PENDING_FILE=""
-  [[ -n "$CLAUDE_PID" ]] && PENDING_FILE="${PENDING_DIR}/hotline-pending-${CLAUDE_PID}"
+  if [[ -n "$CLAUDE_PID" ]]; then
+    mkdir -p "$PENDING_DIR" 2>/dev/null
+    PENDING_FILE="${PENDING_DIR}/hotline-pending-${CLAUDE_PID}"
+  fi
 
   # A pending fingerprint means this is the re-run: the previous invocation's
   # output (which carried the fingerprint) is now in the transcript, so
@@ -195,15 +237,28 @@ else
   if [[ -n "$PENDING_FILE" && -s "$PENDING_FILE" ]]; then
     PENDING_FP=$(sed -n '1p' "$PENDING_FILE")
     PENDING_ATTEMPT=$(sed -n '2p' "$PENDING_FILE")
+    PENDING_STAMP=$(sed -n '3p' "$PENDING_FILE")
     [[ "$PENDING_ATTEMPT" =~ ^[0-9]+$ ]] || PENDING_ATTEMPT=1
-    DISC=$(bash "$PLUGIN_SCRIPTS/session-init.sh" discover "$PENDING_FP" 2>/dev/null)
+    [[ "$PENDING_STAMP" =~ ^[0-9]+$ ]] || PENDING_STAMP=0
+    # Too old to be this dial's round-trip → a leftover, or a recycled PID
+    # wearing a dead session's fingerprint. Discard it and start the retry
+    # budget over rather than inheriting somebody else's attempt count.
+    if [[ $(( $(date +%s) - PENDING_STAMP )) -gt $PENDING_TTL ]]; then
+      rm -f "$PENDING_FILE"
+      PENDING_FP=""
+    fi
+    DISC=""
+    [[ -n "$PENDING_FP" ]] && \
+      DISC=$(bash "$PLUGIN_SCRIPTS/session-init.sh" discover "$PENDING_FP" 2>/dev/null)
     if [[ "$(jq -r '.status // empty' <<<"$DISC" 2>/dev/null)" == "discovered" ]]; then
       MY_SESSION_ID=$(jq -r '.session_id' <<<"$DISC")
       CALLER_KIND="discovered"
       rm -f "$PENDING_FILE"
+    elif [[ -z "$PENDING_FP" ]]; then
+      : # expired pending, already removed — plant fresh at attempt 1
     else
-      # Not in the transcript yet (or never will be). Drop the stale pending and
-      # fall through to plant a fresh one — bounded, so we can't ping-pong.
+      # Not in the transcript yet (or never will be). Drop the pending and fall
+      # through to plant a fresh one — bounded, so we can't ping-pong.
       rm -f "$PENDING_FILE"
       IDENTITY_ATTEMPT=$((PENDING_ATTEMPT + 1))
       if [[ $IDENTITY_ATTEMPT -gt $MAX_IDENTITY_ATTEMPTS ]]; then
@@ -224,7 +279,7 @@ else
       planted)
         FP=$(jq -r '.fingerprint' <<<"$INIT")
         if [[ -n "$PENDING_FILE" ]]; then
-          printf '%s\n%s\n' "$FP" "$IDENTITY_ATTEMPT" > "$PENDING_FILE"
+          printf '%s\n%s\n%s\n' "$FP" "$IDENTITY_ATTEMPT" "$(date +%s)" > "$PENDING_FILE"
         fi
         # The fingerprint MUST appear in THIS invocation's output — that is how
         # it reaches the transcript for the re-run's grep to find.
@@ -279,10 +334,13 @@ if bash "$PICKUP_SCRIPTS/identity-cache.sh" is-stale --cwd "$TARGET_PATH" >/dev/
   IDENTITY_STALE=true
 fi
 
-if $IDENTITY_STALE && $REFRESH_IDENTITY; then
+# Unconditional when asked. "Fresh" only means younger than the TTL, and a
+# within-TTL identity can still be wrong — which is exactly the complaint that
+# makes a caller pass this flag in the first place.
+if $REFRESH_IDENTITY; then
   if bash "$DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
-       --prompt "/hotline:hotline-pickup --fresh" >/dev/null 2>&1; then
-    FALLBACKS+=("stale-identity→refreshed")
+       --prompt "/hotline:hotline-pickup --fresh" >/dev/null 2>"$ERR_FILE"; then
+    add_fallback "identity→refreshed"
     # Re-resolve once: a refreshed identity can change what the reference
     # matches (that is the point of the refresh).
     if RERESOLVED=$(resolve_once); then
@@ -291,7 +349,7 @@ if $IDENTITY_STALE && $REFRESH_IDENTITY; then
     bash "$PICKUP_SCRIPTS/identity-cache.sh" is-stale --cwd "$TARGET_PATH" >/dev/null 2>&1 \
       && IDENTITY_STALE=true || IDENTITY_STALE=false
   else
-    FALLBACKS+=("stale-identity→refresh-failed")
+    add_fallback "identity→refresh-failed($(head -c 160 "$ERR_FILE" 2>/dev/null))"
   fi
 fi
 
@@ -303,7 +361,7 @@ if $FORCE_HEADLESS; then
   TRANSPORT="headless"
 elif ! bash "$DIAL_SCRIPTS/check-cmux.sh" >/dev/null 2>&1; then
   TRANSPORT="headless"
-  FALLBACKS+=("cmux-unavailable→headless")
+  add_fallback "cmux-unavailable→headless"
 fi
 
 # ---------------------------------------------------------------------------
@@ -404,7 +462,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" && -n "$SURFACE_REF" && "$MESSA
     emit_connected true
   fi
   # {"fallback":"fresh"} — surface gone, or not accepting the message right now.
-  FALLBACKS+=("surface-reuse→fresh($(jq -r '.reason // "no reason given"' <<<"$REUSE" 2>/dev/null | cut -c1-120))")
+  add_fallback "surface-reuse→fresh($(jq -r '.reason // "no reason given"' <<<"$REUSE" 2>/dev/null | tr '\n' ' ' | cut -c1-140))"
   SURFACE_REF=""
 fi
 
@@ -430,7 +488,7 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
   if [[ "$CONF_FALLBACK" == "headless" ]]; then
     # cmux is up but cmux-cli isn't installed, so side-by-side placement is
     # unavailable. Re-route through headless rather than bouncing to the model.
-    FALLBACKS+=("cmux-cli-missing→headless")
+    add_fallback "cmux-cli-missing→headless"
     TRANSPORT="headless"
   elif [[ -n "$CONF_ERROR" ]]; then
     emit_error fire "$CONF_ERROR" \
@@ -445,6 +503,24 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
     PLACEMENT_EFFECTIVE=$(jq -r '.placement // empty' <<<"$CONF")
     [[ "$PLACEMENT_EFFECTIVE" == "workspace" ]] && PLACEMENT_EFFECTIVE="detached"
     [[ "$PLACEMENT_EFFECTIVE" == "surface" ]] && PLACEMENT_EFFECTIVE="$PLACEMENT"
+
+    # Record the surface the conference session lives in. cmux-call.sh registers
+    # the call itself but has no --surface to pass along, so without this a
+    # conference follow-up finds no surface_ref, skips the reuse guard above, and
+    # opens a SECOND surface resuming the session whose REPL is still live in the
+    # first one. Re-`set` on first contact (the entry was just created, so
+    # exchange_count 1 is right); `update` on a follow-up, whose raw message
+    # carries no tags for cmux-call.sh to register from at all — so without this
+    # last_contact and exchange_count would never move either.
+    if $FIRST_CONTACT; then
+      bash "$DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
+        --caller-session "$MY_SESSION_ID" --session "$REMOTE_SESSION_ID" \
+        --mode "$MODE_TAG" ${SURFACE_REF:+--surface "$SURFACE_REF"} >/dev/null 2>&1
+    else
+      bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
+        --caller-session "$MY_SESSION_ID" \
+        ${SURFACE_REF:+--surface "$SURFACE_REF"} >/dev/null 2>&1
+    fi
     emit_connected false
   fi
 fi
@@ -476,7 +552,7 @@ fire_cmux() {
 if [[ "$TRANSPORT" == "cmux" ]]; then
   CALL_RESULT=$(fire_cmux)
   if [[ "$(jq -r '.fallback // empty' <<<"$CALL_RESULT" 2>/dev/null)" == "headless" ]]; then
-    FALLBACKS+=("cmux-cli-missing→headless")
+    add_fallback "cmux-cli-missing→headless"
     TRANSPORT="headless"
     CALL_RESULT=$(fire_headless)
   fi
@@ -497,7 +573,7 @@ fi
 # workspace_ref.txt instead of surface_ref.txt.
 if [[ "$TRANSPORT" == "cmux" && "$PLACEMENT" == "side" \
       && -f "$CALL_DIR/workspace_ref.txt" && ! -f "$CALL_DIR/surface_ref.txt" ]]; then
-  FALLBACKS+=("surface-context→detached")
+  add_fallback "surface-context→detached"
   PLACEMENT_EFFECTIVE="detached"
 fi
 [[ "$TRANSPORT" == "headless" ]] && PLACEMENT_EFFECTIVE="none"

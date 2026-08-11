@@ -426,6 +426,10 @@ All hotline state lives in `~/.agents-hotline/`:
   100 entries. `dial-history.sh normalize` repairs a legacy pretty-printed or
   half-trimmed file in place (`append` does it automatically)
 - `sessions/` — Outgoing session maps (keyed by caller session ID)
+- `pending/` — In-flight `dial.sh` identity fingerprints, keyed by claude PID.
+  Written on a `replay`, removed the moment discovery succeeds; entries older
+  than `HOTLINE_PENDING_TTL` (default 600s) are discarded as leftovers, since a
+  recycled PID would otherwise inherit a dead session's fingerprint
 - `switchboard.pid` / `switchboard.log` — Switchboard server state
 
 ---

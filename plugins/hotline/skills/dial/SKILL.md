@@ -36,10 +36,14 @@ mapped wrapper flag shown above.
 
 ## Native fast path — Claude Code only (read first)
 
-**Under Claude Code**, before dialing, read `references/native-messaging.md`. It
-decides whether this is a lightweight message to an *already-running* session
-that should go through Claude Code's native `SendMessage` — no launch, no
-surface, no scraping — handles it if so, and otherwise sends you back here.
+**Under Claude Code**, before dialing, read
+`${CLAUDE_PLUGIN_ROOT}/skills/dial/references/native-messaging.md`. It decides
+whether this is a lightweight message to an *already-running* session that should
+go through Claude Code's native `SendMessage` — no launch, no surface, no
+scraping — handles it if so, and otherwise sends you back here.
+
+Codex: substitute the installed Hotline plugin directory for the leading path
+segment above.
 
 **Under Codex, skip it** — `ListAgents`/`SendMessage` are Claude Code only. The
 flow below works from any harness.
@@ -82,7 +86,7 @@ Exactly one JSON object on stdout, always. Read `.status`:
 | `connected` | 0 | The callee is up. `.remote_session_id`, `.workspace`, `.transport`, `.call_dir`, `.surface_ref`, `.first_contact`, `.fallbacks` describe the call. | Report the connection to the user, then wait for the response (below) — unless `.awaiting_response` is `false`. |
 | `replay` | 2 | Identity needed a second pass. `.fingerprint` is now in the transcript. | Run **the identical command again**. Nothing else. Don't explain it to the user. |
 | `needs_disambiguation` | 3 | The reference matched several workspaces; `.candidates` has them. | Ask the user which one, then re-run with `--target <their chosen path>`. |
-| `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`transport`/`fire`/`boot`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user. **Never silently retry.** |
+| `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`fire`/`boot`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user. **Never silently retry.** |
 
 `.fallbacks` lists what the wrapper worked around on its way — e.g.
 `cmux-cli-missing→headless`, `surface-context→detached`,
@@ -130,9 +134,11 @@ doubt, fork.
 
 **A stale-looking candidate list.** If `needs_disambiguation` candidates carry
 empty or obviously outdated `identity` blobs, re-running with
-`--refresh-identity` regenerates the resolved target's identity cache first. It
-costs a real headless `claude` call — tens of seconds and programmatic credit —
-so it is opt-in, not automatic.
+`--refresh-identity` regenerates the resolved target's identity cache before the
+call — always, not only past the cache TTL, because a within-TTL identity can
+still be wrong. It costs a real headless `claude` call, tens of seconds and
+programmatic credit, which is why it is opt-in rather than automatic. The payload
+reports `identity_stale` either way.
 
 ## Then wait for the response
 
@@ -161,7 +167,9 @@ bytes that `jq` then rejects.
 
 Exit codes that are not failures:
 
-- **Exit 3 — the callee was reassigned.** A cmux call sits in a visible surface,
+- **Exit 3 — the callee was reassigned.** (Not to be confused with `dial.sh`'s
+  own exit 3, `needs_disambiguation` — different script, different meaning.) A
+  cmux call sits in a visible surface,
   so the user can type into it; the moment they give it another task, your
   nonce's STATUS is never coming. The script bails immediately and writes
   `error.txt` naming the preempting prompt. Report that plainly, and note the
@@ -226,6 +234,9 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   escape hatch when identity discovery fails.
 - **`HOTLINE_SURFACE_READY_TIMEOUT=<seconds>`** — PTY-readiness budget for a new
   surface (default 8).
+- **`HOTLINE_PENDING_TTL=<seconds>`** — how long a `replay` fingerprint stays
+  valid in `~/.agents-hotline/pending/` (default 600). A round-trip takes
+  seconds; anything older is treated as a leftover and discarded.
 
 If the `/cmux-cli:using-cmux-cli` skill is available and a cmux-routed call
 misbehaves, invoke it — it documents the workspace/surface/tty semantics this
@@ -248,5 +259,10 @@ and make the plugin harder to improve.
 
 ## Error recovery
 
-`references/error-recovery.md` covers specific failure modes per stage — read it
-when `.status` is `error` and `.recovery` isn't enough.
+**Read `${CLAUDE_PLUGIN_ROOT}/skills/dial/references/error-recovery.md`** when
+`.status` is `error` and `.recovery` isn't enough — it covers the specific failure
+modes per stage, and the cmux transport forensics behind a follow-up that appears
+to vanish.
+
+Codex: substitute the installed Hotline plugin directory for the leading path
+segment above.

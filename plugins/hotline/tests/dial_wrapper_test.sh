@@ -518,6 +518,15 @@ check "conference first contact carries the conference_call MODE tag" $? \
 check "conference call is registered by cmux-call.sh" $? \
   "$(ls -R "$t/home/.agents-hotline" 2>/dev/null)"
 
+# ...but cmux-call.sh has no --surface to register, so the wrapper must add it.
+# Without this the next conference turn finds no surface_ref, skips the reuse
+# guard, and opens a SECOND surface resuming a session whose REPL is still live.
+target_real=$(cd "$t/target" && pwd -P)
+[[ "$(jq -r --arg t "$target_real" '.connections[$t].surface_ref' \
+      "$t/home/.agents-hotline/sessions/caller-8888.json" 2>/dev/null)" == "SURFACE-UUID-777" ]]
+check "conference first contact records surface_ref for the next turn" $? \
+  "$(cat "$t/home/.agents-hotline/sessions/caller-8888.json" 2>/dev/null)"
+
 # ===========================================================================
 # 8. Errors carry stage / detail / recovery.
 # ===========================================================================
@@ -565,6 +574,214 @@ for args in "--mode quick --prompt x" "--target /tmp --prompt x" \
   jq -e 'type == "object" and has("status")' <<<"$o" >/dev/null 2>&1
   check "invalid args ($args) still emit one JSON object with a status" $? "out=$o"
 done
+
+# ===========================================================================
+# 10. Argument parsing can't hang, and can't silently misread a typo.
+# ===========================================================================
+# A trailing value flag used to spin the parse loop forever at full CPU with no
+# JSON on stdout: `shift 2` with one arg left fails WITHOUT shifting, and there
+# is no `set -e` to stop it. `--prompt-file "$VAR"` with an empty VAR reaches it.
+t=$(new_env); note_leak "$t"
+for flag in --target --mode --prompt-file --prompt --placement --window \
+            --tools --resume --caller-session --boot-timeout; do
+  o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-cccc" \
+      HOTLINE_PENDING_DIR="$t/pending" \
+      timeout 5 bash "$DIAL" --mode quick --prompt x "$flag" 2>/dev/null)
+  rc=$?
+  [[ "$rc" -eq 1 && "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" == "args" ]]
+  check "trailing bare $flag errors immediately instead of spinning" $? \
+    "rc=$rc (124 = still hanging) out=$o"
+done
+
+o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-cccc" \
+    HOTLINE_PENDING_DIR="$t/pending" \
+    timeout 5 bash "$DIAL" --target /tmp --mode quick --prompt-fil /tmp/x 2>/dev/null)
+[[ "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" == "args" ]] \
+  && grep -q 'prompt-fil' <<<"$o"
+check "a misspelled flag errors and names itself (never silently ignored)" $? "out=$o"
+
+o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-cccc" \
+    HOTLINE_PENDING_DIR="$t/pending" \
+    timeout 5 bash "$DIAL" --target /tmp --mode quick --prompt x --boot-timeout soon 2>/dev/null)
+[[ "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" == "args" ]]
+check "a non-numeric --boot-timeout is rejected before it reaches arithmetic" $? "out=$o"
+
+# --window outranks --placement per SKILL.md, and must do so in EITHER order.
+for order in "--placement detached --window winname" "--window winname --placement detached"; do
+  o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-cccc" \
+      HOTLINE_PENDING_DIR="$t/pending" \
+      timeout 10 bash "$DIAL" --target "$t/nope-not-here" --mode quick --prompt x \
+        $order 2>/dev/null)
+  # Reaching the resolve stage proves placement validated as `window` (a stray
+  # `detached` would too, so pair this with the args-stage check below).
+  [[ "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" == "resolve" ]]
+  check "--window is order-independent ($order)" $? "out=$o"
+done
+# ...and the pairing: an invalid --placement alongside --window is fine, because
+# --window replaces it. Order-dependent code would reject one of these two.
+for order in "--placement bogus --window winname" "--window winname --placement bogus"; do
+  o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-cccc" \
+      HOTLINE_PENDING_DIR="$t/pending" \
+      timeout 10 bash "$DIAL" --target "$t/nope-not-here" --mode quick --prompt x \
+        $order 2>/dev/null)
+  [[ "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" != "args" ]]
+  check "--window overrides an unusable --placement ($order)" $? "out=$o"
+done
+
+# ===========================================================================
+# 11. Conference follow-ups reuse the live surface instead of stacking one.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+printf 'some earlier conference output\n\xe2\x9d\xaf \n' > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-conf" --session "cfcfcfcf-cfcf-4fcf-8fcf-cfcfcfcfcfcf" \
+  --mode conference_call --surface "SURFACE-UUID-777"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-conf" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode conference \
+    --prompt "next thought" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+
+[[ "$(jq -r .status <<<"$out")" == "connected" \
+   && "$(jq -r .first_contact <<<"$out")" == "false" ]]
+check "conference follow-up connects with first_contact=false" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+grep -q 'next thought' "$t/send_calls" 2>/dev/null \
+  && ! grep -q 'hotline-cmux-launch' "$t/send_calls" 2>/dev/null
+check "conference follow-up types into the live surface, opens no second one" $? \
+  "send_calls=$(cat "$t/send_calls" 2>/dev/null)"
+
+target_real=$(cd "$t/target" && pwd -P)
+[[ "$(jq -r --arg t "$target_real" '.connections[$t].exchange_count' \
+      "$t/home/.agents-hotline/sessions/caller-conf.json" 2>/dev/null)" == "2" ]]
+check "conference follow-up bumps exchange_count" $? \
+  "$(cat "$t/home/.agents-hotline/sessions/caller-conf.json" 2>/dev/null)"
+
+# Refused reuse on a conference call: falls back to cmux-call.sh --resume, and
+# the cache still has to move (a raw follow-up carries no tags, so cmux-call.sh
+# registers nothing at all on this path).
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+printf 'Request interrupted by user\nWhat should Claude do instead?\n' > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-conf2" --session "c2c2c2c2-c2c2-42c2-82c2-c2c2c2c2c2c2" \
+  --mode conference_call --surface "SURFACE-UUID-OLD"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-conf2" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode conference \
+    --prompt "carry on" 2>"$t/err.txt")
+conf_launch=$(grep -oE '/tmp/hotline-cmux-launch-[A-Za-z0-9]+' "$t/send_calls" 2>/dev/null | head -1)
+[[ -n "$conf_launch" ]] && note_leak "$conf_launch"
+
+[[ "$(jq -r .status <<<"$out")" == "connected" ]] \
+  && grep -q -- '--resume c2c2c2c2-c2c2-42c2-82c2-c2c2c2c2c2c2' "$conf_launch" 2>/dev/null
+check "a refused conference reuse resumes into a fresh surface" $? \
+  "out=$out launch=$(cat "$conf_launch" 2>/dev/null)"
+
+target_real=$(cd "$t/target" && pwd -P)
+[[ "$(jq -r --arg t "$target_real" '.connections[$t].exchange_count' \
+      "$t/home/.agents-hotline/sessions/caller-conf2.json" 2>/dev/null)" == "2" ]]
+check "the conference fresh-surface path still bumps the cache" $? \
+  "$(cat "$t/home/.agents-hotline/sessions/caller-conf2.json" 2>/dev/null)"
+
+[[ "$(jq -r --arg t "$target_real" '.connections[$t].surface_ref' \
+      "$t/home/.agents-hotline/sessions/caller-conf2.json" 2>/dev/null)" == "SURFACE-UUID-777" ]]
+check "the conference fresh-surface path self-heals surface_ref" $? \
+  "$(cat "$t/home/.agents-hotline/sessions/caller-conf2.json" 2>/dev/null)"
+
+# ===========================================================================
+# 12. A multi-line refusal reason stays ONE fallbacks entry.
+# ===========================================================================
+# fb_json serializes one entry per line, so an embedded newline used to split a
+# single refusal into several bogus array entries.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+# `send` fails with a two-line diagnostic, which lands in the refusal reason.
+cat > "$t/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+ST="${CMUX_FAKE_STATE:?}"
+echo "$*" >> "$ST/cmux_calls"
+case "$1" in
+  ping)        exit 0 ;;
+  read-screen) cat "$ST/screen.txt" 2>/dev/null ;;
+  send)
+    if [[ "$*" == *"--surface SURFACE-UUID-OLD"* ]]; then
+      printf 'cmux: send failed
+second line of the diagnostic
+' >&2
+      exit 9
+    fi
+    echo "$*" >> "$ST/send_calls" ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$t/bin/cmux"
+printf 'idle
+â¯ 
+Claude Code v2.1.221
+' > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-dddd" --session "dddddddd-dddd-4ddd-8ddd-dddddddddddd" \
+  --mode work_order --surface "SURFACE-UUID-OLD"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-dddd" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "reason has newlines" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir" && launch_script_of "$call_dir" >/dev/null
+
+[[ "$(jq -r '.fallbacks | length' <<<"$out" 2>/dev/null)" -eq 1 ]]
+check "a multi-line refusal reason is one fallbacks entry, not several" $? "out=$out"
+
+jq -e '.fallbacks[0] | startswith("surface-reuse→fresh")' <<<"$out" >/dev/null 2>&1
+check "that entry still names the refusal" $? "out=$out"
+
+# ===========================================================================
+# 13. Pending identity state: expiry restarts the retry budget.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_claude "$t/bin"; make_ps "$t/bin"
+mkdir -p "$t/home/.claude/projects/testproj"
+rm -f "$STRAY_SESSION_CACHE"
+
+# An old pending file that already burned the whole budget. It must be discarded
+# as a leftover (or a recycled PID) rather than inherited into an error.
+printf 'SESSION_FINGERPRINT_STALE-NEVER-PLANTED\n3\n1000000000\n' \
+  > "$t/pending/hotline-pending-${FAKE_CLAUDE_PID}"
+out=$( cd "$t/work" && PATH="$t/bin:$PATH" HOME="$t/home" \
+  FAKE_CLAUDE_PID="$FAKE_CLAUDE_PID" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode quick --headless --prompt "hi" 2>/dev/null )
+rc=$?
+[[ "$rc" -eq 2 && "$(jq -r .status <<<"$out")" == "replay" \
+   && "$(jq -r .attempt <<<"$out")" == "1" ]]
+check "an expired pending fingerprint restarts the retry budget at attempt 1" $? \
+  "rc=$rc out=$out"
+
+# A FRESH pending file that has already used the budget must still give up,
+# rather than replaying forever.
+printf 'SESSION_FINGERPRINT_FRESH-BUT-NEVER-PLANTED\n3\n%s\n' "$(date +%s)" \
+  > "$t/pending/hotline-pending-${FAKE_CLAUDE_PID}"
+out=$( cd "$t/work" && PATH="$t/bin:$PATH" HOME="$t/home" \
+  FAKE_CLAUDE_PID="$FAKE_CLAUDE_PID" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode quick --headless --prompt "hi" 2>/dev/null )
+rc=$?
+[[ "$rc" -eq 1 && "$(jq -r .stage <<<"$out")" == "identity" ]]
+check "an exhausted retry budget gives up with an identity error" $? "rc=$rc out=$out"
+
+grep -q 'HOTLINE_CALLER_SESSION_ID' <<<"$out"
+check "the identity error names the escape hatch" $? "out=$out"
+rm -f "$STRAY_SESSION_CACHE"
+
+# Default pending location must be under ~/.agents-hotline, never /tmp.
+grep -q 'HOTLINE_PENDING_DIR:-\$HOME/.agents-hotline/pending' "$DIAL"
+check "pending state defaults into ~/.agents-hotline, not /tmp" $? \
+  "$(grep -n 'PENDING_DIR=' "$DIAL")"
 
 # ===========================================================================
 if [[ -s "$POISON_LOG" ]]; then

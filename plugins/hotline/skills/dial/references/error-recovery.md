@@ -10,7 +10,7 @@ The stage tells you which section below to read:
 | `args` | (a malformed invocation — `.recovery` says which flag) |
 | `identity` | [Session Fingerprint Failures](#session-fingerprint-failures) |
 | `resolve` | [Workspace Resolution Failures](#workspace-resolution-failures), [Identity Cache Issues](#identity-cache-issues) |
-| `transport`, `fire` | [CMUX Failures](#cmux-failures), [Headless Call Failures](#headless-call-failures) |
+| `fire` | [CMUX Failures](#cmux-failures), [Headless Call Failures](#headless-call-failures) |
 | `boot` | [CMUX Failures](#cmux-failures) — the callee's REPL never came up |
 
 ## Session Fingerprint Failures
