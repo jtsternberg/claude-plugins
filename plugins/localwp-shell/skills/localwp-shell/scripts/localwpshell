@@ -43,6 +43,16 @@ same_dir() {
 	[ "$a" = "$b" ]
 }
 
+# Does the command about to run actually talk to MySQL? Used so the socket
+# guard below only fires for DB work and leaves php/composer/wp-non-db alone.
+is_db_command() {
+	case "${1:-}" in
+		mysql|mysqladmin|mysqldump|mysqlcheck|mysqlimport|mysqlshow|mysqlslap) return 0 ;;
+		wp) [[ "${2:-}" == "db" ]] && return 0 ;;
+	esac
+	return 1
+}
+
 # Get the current project path (should be the LocalWP site root, not the WordPress public directory)
 CURRENT_PROJECT_PATH=$(pwd | sed 's|/wp-content.*||' | sed 's|/app/public$||')
 
@@ -169,6 +179,30 @@ if [ -n "$LOCALWP_SHELL" ] && [ -f "$LOCALWP_SHELL" ]; then
 		NEW_PATH=$(printf '%s:' "${PATH_ADDITIONS[@]}")
 		NEW_PATH="${NEW_PATH%:}"
 		export PATH="$NEW_PATH:$PATH"
+	fi
+
+	# Point the mysql client and wp-cli at LocalWP's per-site socket.
+	#
+	# LocalWP's wp-config sets DB_HOST='localhost', so both the mysql client and
+	# wp-cli's internal mysqli resolve to libmysqlclient's compiled-in default
+	# socket (/tmp/mysql.sock) and fail with the cryptic "ERROR 2002 ... can't
+	# connect ... /tmp/mysql.sock" — even though the web stack works, because
+	# PHP-FPM's ini hands it the real socket and the CLI env never gets it.
+	#
+	# The ssh-entry env exports MYSQL_HOME as the *config* dir
+	# (.../run/<id>/conf/mysql); the real socket is a sibling at
+	# .../run/<id>/mysql/mysqld.sock. Exporting MYSQL_UNIX_PORT makes
+	# libmysqlclient use that socket for 'localhost', which fixes `wp db ...`,
+	# the raw mysql client, and wp-cli's mysqli in one shot. (The TCP form
+	# --host=127.0.0.1:<port> does NOT work — it still falls back to /tmp.)
+	if [ -n "${MYSQL_HOME:-}" ]; then
+		LOCALWP_MYSQL_SOCKET="${MYSQL_HOME%/conf/mysql}/mysql/mysqld.sock"
+		if [ -S "$LOCALWP_MYSQL_SOCKET" ]; then
+			export MYSQL_UNIX_PORT="$LOCALWP_MYSQL_SOCKET"
+		elif is_db_command "$@"; then
+			echo "ERROR: LocalWP MySQL socket not found at $LOCALWP_MYSQL_SOCKET — is the site running in LocalWP?" >&2
+			exit 1
+		fi
 	fi
 
 	msg "LocalWP environment loaded:"
