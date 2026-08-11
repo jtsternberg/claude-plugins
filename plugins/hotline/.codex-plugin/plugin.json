@@ -1,0 +1,37 @@
+{
+  "name": "hotline",
+  "version": "0.23.0",
+  "description": "Cross-workspace Claude Code communication. Dial another workspace to ask questions, delegate work, or collaborate in real-time.",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  },
+  "repository": "https://github.com/jtsternberg/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "cross-workspace",
+    "delegation",
+    "multi-agent",
+    "cmux"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Hotline",
+    "shortDescription": "Call another workspace's agent",
+    "longDescription": "Give your agents a phone. Dial another Claude Code workspace to ask a quick question, hand off an autonomous work order, or collaborate back-and-forth — with a live switchboard dashboard of every call.",
+    "developerName": "JT Sternberg",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/jtsternberg/claude-plugins",
+    "defaultPrompt": [
+      "Use $hotline:hotline-dial to call another workspace with a question or work order.",
+      "Use $hotline:hotline-add-contact to register this workspace so others can reach it.",
+      "Use $hotline:hotline-switchboard to watch cross-workspace conversations live."
+    ]
+  }
+}

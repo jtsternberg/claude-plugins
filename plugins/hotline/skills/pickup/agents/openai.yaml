@@ -1,0 +1,5 @@
+interface:
+  display_name: Hotline Pickup
+  short_description: Cache this workspace's identity for hotline-dial resolution
+policy:
+  allow_implicit_invocation: false

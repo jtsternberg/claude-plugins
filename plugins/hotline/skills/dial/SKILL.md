@@ -2,7 +2,7 @@
 name: hotline-dial
 description: "Call another Claude Code workspace — quick calls, work orders, conference calls. 'Call/dial/message/delegate to <workspace or project>'."
 argument-hint: "[--headless] [--detached] [--window <name|ref>] [workspace] [task/question...]"
-allowed-tools: Bash
+allowed-tools: Bash, ListAgents, SendMessage
 ---
 
 # Hotline: Dial
@@ -43,6 +43,18 @@ Every independent shell block below resolves the Hotline plugin path and loads
 `HOTLINE_SCRIPTS`, `HOTLINE_DIAL_SCRIPTS`, and `HOTLINE_PICKUP_SCRIPTS` in that
 same shell. Shell state does not persist across tool calls. Under Codex, replace
 `${CLAUDE_PLUGIN_ROOT}` with the Hotline plugin directory before running a block.
+
+## Native fast path — Claude Code only (read first)
+
+**If you are running under Claude Code**, before starting the launch flow below, read
+`references/native-messaging.md`. It decides whether this call is a lightweight message
+to an *already-running* session that should go through Claude Code's native
+`SendMessage` (no launch, no surface, no scraping), handles it if so, and otherwise
+sends you back to Step 1 to dial normally. Read it before Prerequisites, because the
+native path skips the launch machinery entirely.
+
+**Under Codex, skip it** — `ListAgents`/`SendMessage` are Claude Code only, and the
+launch flow below works from any harness.
 
 ## Prerequisites: Know Thyself
 
