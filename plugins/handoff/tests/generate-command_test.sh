@@ -41,6 +41,20 @@ else
   fail "escaped invocation was: $out"
 fi
 
+out=$(run_clean env CODEX_THREAD_ID=codex-thread bash "$SCRIPT" --action handoff)
+if [ "$out" = "\$handoff:handoff" ]; then
+	pass "Codex emits a no-argument handoff command"
+else
+	fail "Codex handoff invocation was: $out"
+fi
+
+out=$(run_clean env CLAUDE_CODE_SESSION_ID=claude-session bash "$SCRIPT" --action pickup-handoff)
+if [ "$out" = '/handoff:pickup-handoff' ]; then
+  pass "explicit pickup action emits a command base"
+else
+  fail "explicit pickup action was: $out"
+fi
+
 if run_clean bash "$SCRIPT" proj-123 >/dev/null 2>&1; then
   fail "missing harness marker must fail"
 else

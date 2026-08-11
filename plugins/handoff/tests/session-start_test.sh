@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# session-start_test.sh — tests for the handoff plugin's SessionStart hook.
+# session-start_test.sh — tests for handoff startup and compaction hooks.
 #
 # Focus: which bd issues get announced as pending handoffs. The marker is the
 # `pending-handoff: ` title PREFIX, but `bd --title-contains` matches
@@ -17,6 +17,8 @@ set -uo pipefail
 
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/hooks/scripts/session-start.sh"
 [ -f "$HOOK" ] || { echo "cannot find hook at $HOOK" >&2; exit 1; }
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+POST_COMPACT="$ROOT/hooks/scripts/post-compact-nudge.sh"
 
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
@@ -24,6 +26,63 @@ fail() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$1"; }
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+
+# PostCompact is shared by both harnesses. SessionStart must not also match
+# compact, or each compaction would run the nudge twice.
+HOOK_CONFIG="$ROOT/hooks/hooks.json"
+if node - "$HOOK_CONFIG" <<'NODE'
+const fs = require('node:fs');
+const hooks = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')).hooks;
+const sessionStart = hooks.SessionStart || [];
+const postCompact = hooks.PostCompact || [];
+const hasStartupResume = sessionStart.some(({ matcher }) => matcher === 'startup|resume');
+const hasSessionCompact = sessionStart.some(({ matcher = '' }) => matcher.split('|').includes('compact'));
+const hasPostCompact = postCompact.some(({ matcher }) => matcher === 'manual|auto');
+process.exit(hasStartupResume && !hasSessionCompact && hasPostCompact ? 0 : 1);
+NODE
+then
+  pass "hook config uses one PostCompact nudge, not SessionStart compact"
+else
+  fail "hook config uses one PostCompact nudge, not SessionStart compact"
+fi
+
+SESSION_INFO="$ROOT/skills/handoff/scripts/session-info.sh"
+for harness in claude codex; do
+	cp "$(command -v bash)" "$TMP/$harness"
+	if OUT=$("$TMP/$harness" -c '
+		cache="/tmp/claude-handoff/$$.json"
+		mkdir -p /tmp/claude-handoff
+		printf "%s\\n" "{\"session_id\":\"'$harness'-session\"}" >"$cache"
+		bash "$1"
+		status=$?
+		rm -f "$cache"
+		exit "$status"
+	' _ "$SESSION_INFO") && grep -Fxq "{\"session_id\":\"$harness-session\"}" <<<"$OUT"; then
+		pass "session-info reads a cache below a $harness ancestor"
+	else
+		fail "session-info reads a cache below a $harness ancestor"
+	fi
+done
+
+for shape in claude codex; do
+	case "$shape" in
+		claude) INPUT='{"session_id":"claude-session","transcript_path":"/tmp/claude.jsonl","cwd":"/tmp","hook_event_name":"PostCompact","trigger":"manual","compact_summary":"summary"}'; COMMAND='/handoff:handoff'; MARKER='-u CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID=claude-session' ;;
+		codex) INPUT='{"session_id":"codex-session","transcript_path":"/tmp/codex.jsonl","cwd":"/tmp","hook_event_name":"PostCompact","trigger":"auto"}'; COMMAND='$handoff:handoff'; MARKER='-u CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID=codex-thread' ;;
+	esac
+	if OUT=$(printf '%s' "$INPUT" | env $MARKER bash "$POST_COMPACT" 2>&1) && grep -Fq "$COMMAND" <<<"$OUT"; then
+		pass "PostCompact nudge uses the $shape command and input shape"
+	else
+		fail "PostCompact nudge uses the $shape command and input shape"
+	fi
+done
+
+if OUT=$(printf '%s' '{"hook_event_name":"PostCompact","trigger":"manual"}' \
+	| CLAUDE_CODE_SESSION_ID=claude-session CODEX_THREAD_ID=codex-thread bash "$POST_COMPACT" 2>&1) && \
+	grep -Fq "the installed handoff skill using this client's skill syntax" <<<"$OUT"; then
+	pass "PostCompact uses a neutral instruction for ambiguous markers"
+else
+	fail "PostCompact uses a neutral instruction for ambiguous markers"
+fi
 
 # --- fixture: a repo with .beads/ and a stubbed `bd` on PATH -----------------
 REPO="$TMP/repo"
@@ -55,7 +114,9 @@ STUB
 chmod +x "$BIN/bd"
 
 OUT=$(printf '{"session_id":"test-sid","transcript_path":"/tmp/t.jsonl","cwd":"%s"}' "$REPO" \
-  | PATH="$BIN:$PATH" bash "$HOOK" 2>&1)
+  | env -u CODEX_THREAD_ID CLAUDE_CODE_SESSION_ID=claude-session PATH="$BIN:$PATH" bash "$HOOK" 2>&1)
+CODEX_OUT=$(printf '{"session_id":"test-sid","transcript_path":"/tmp/t.jsonl","cwd":"%s"}' "$REPO" \
+  | env -u CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID=codex-thread PATH="$BIN:$PATH" bash "$HOOK" 2>&1)
 
 # --- announced as handoffs: the prefix matches, any casing ------------------
 if grep -q 'proj-aaaa' <<<"$OUT"; then
@@ -96,10 +157,21 @@ for id in proj-cccc proj-dddd proj-eeee; do
 done
 
 # --- the notice hands over the identifier -----------------------------------
-if grep -q 'pickup-handoff <id-or-filename>' <<<"$OUT"; then
-  pass "notice instructs passing the identifier"
+if grep -Fq '/handoff:pickup-handoff <id-or-filename>' <<<"$OUT" && \
+	grep -Fq '$handoff:pickup-handoff <id-or-filename>' <<<"$CODEX_OUT" && \
+	! grep -Fq '\\<id-or-filename\\>' <<<"$OUT" && \
+	! grep -Fq '\\<id-or-filename\\>' <<<"$CODEX_OUT"; then
+	pass "startup notice uses the harness-specific pickup command"
 else
-  fail "notice instructs passing the identifier"
+	fail "startup notice uses the harness-specific pickup command"
+fi
+
+AMBIGUOUS_OUT=$(printf '{"session_id":"test-sid","transcript_path":"/tmp/t.jsonl","cwd":"%s"}' "$REPO" \
+  | CLAUDE_CODE_SESSION_ID=claude-session CODEX_THREAD_ID=codex-thread PATH="$BIN:$PATH" bash "$HOOK" 2>&1)
+if grep -Fq 'could not determine whether this is Claude Code or Codex' <<<"$AMBIGUOUS_OUT"; then
+	pass "ambiguous markers produce a neutral pickup instruction"
+else
+	fail "ambiguous markers produce a neutral pickup instruction"
 fi
 
 # --- mentions only: don't claim a handoff, don't go silent either -----------
