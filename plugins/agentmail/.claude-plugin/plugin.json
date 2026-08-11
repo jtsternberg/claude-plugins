@@ -1,0 +1,9 @@
+{
+  "name": "agentmail",
+  "description": "Give an agent its own email address. Send and receive email through the AgentMail API via the official agentmail CLI: create inboxes, send mail, read incoming messages and threads, reply / reply-all / forward, manage and schedule drafts, and run the agent self-signup and OTP verification flow. Triggers on mentions of AgentMail, agent email, inbox creation, sending or checking email for an agent.",
+  "version": "0.1.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}

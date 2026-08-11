@@ -32,6 +32,7 @@
     { "name": "mac-caffeinate", "source": "./plugins/mac-caffeinate" },
     { "name": "collab-tools", "source": "./plugins/collab-tools" },
     { "name": "slack", "source": "./plugins/slack" },
-    { "name": "fable", "source": "./plugins/fable" }
+    { "name": "fable", "source": "./plugins/fable" },
+    { "name": "agentmail", "source": "./plugins/agentmail" }
   ]
 }

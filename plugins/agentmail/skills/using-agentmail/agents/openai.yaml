@@ -1,0 +1,3 @@
+interface:
+  display_name: AgentMail
+  short_description: Send and receive email for an agent via the AgentMail CLI

@@ -118,6 +118,7 @@ state, or user configuration. Those constraints are noted in the last column.
 
 | Plugin | Claude Code | Codex | Requirements and scope |
 | --- | --- | --- | --- |
+| [agentmail](../plugins/agentmail) | Available | Not offered | Requires the `agentmail` CLI and an `AGENTMAIL_API_KEY`. |
 | [beads-workflow](../plugins/beads-workflow) | Available | Not offered | Requires the `bd` CLI for Beads work. |
 | [bible](../plugins/bible) | Available | Not offered | Requires the configured Bible API access. |
 | [cmux-cli](../plugins/cmux-cli) | Available | Not offered | macOS only; requires cmux.app and its `cmux` executable. |

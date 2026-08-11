@@ -1,0 +1,98 @@
+---
+source: https://docs.agentmail.to/idempotency.md
+cached_from: research-tools:fetch-docs --md
+last_updated: 2026-08-11
+related:
+  - agentmail:using-agentmail
+---
+
+> For clean Markdown content of this page, append .md to this URL. For the complete documentation index, see https://docs.agentmail.to/llms.txt. For full content including API reference and SDK examples, see https://docs.agentmail.to/llms-full.txt.
+
+# Idempotent Requests
+
+> A guide to preventing duplicate resources with client_id and preventing duplicate email sends with the Idempotency-Key header.
+
+## What is Idempotency?
+
+In the context of an API, idempotency is the concept that making the same API request multiple times produces the same result as making it just once. If an idempotent `POST` request to create a resource is sent five times, it only creates the resource on the first call. The next four calls do nothing but return the result of that first successful call.
+
+This is a critical feature for building robust, fault-tolerant systems. Network errors, timeouts, and client-side retries are inevitable. Without idempotency, these events could lead to unwanted duplicate resources, like creating multiple identical inboxes or webhooks.
+
+## How AgentMail Handles Idempotency
+
+AgentMail supports idempotency for all `create` operations via an optional `client_id` parameter.
+
+When you provide a `client_id` with a `create` request, AgentMail checks if a request with that same `client_id` has already been successfully completed.
+
+* **If it's the first time** we've seen this `client_id`, we process the request as normal, create the resource, and store the resulting resource `id` against your `client_id`.
+* **If we have seen this `client_id` before**, we do *not* re-process the request. Instead, we immediately return a `200 OK` response with the data from the *original*, successfully completed request.
+
+This allows you to safely retry requests without the risk of creating duplicate data.
+
+```python
+# The first time this code is run, it creates a new inbox.
+inbox = client.inboxes.create(
+    username="idempotent-test",
+    client_id="user-123-inbox-primary"
+)
+print(f"Created inbox: {inbox.id}")
+
+# If you run this exact same code again, it will NOT create a second
+# inbox. It will return the same inbox object from the first call.
+inbox_again = client.inboxes.create(
+    username="idempotent-test",
+    client_id="user-123-inbox-primary"
+)
+print(f"Retrieved same inbox: {inbox_again.id}")
+# The inbox.id will be identical in both calls.
+```
+
+## Best Practices for `client_id`
+
+To use idempotency effectively, the `client_id` you generate must be unique and deterministic.
+
+* **Deterministic:** The same logical resource on your end should always generate the same `client_id`. For example, a `client_id` for a user's primary inbox could be `inbox-for-user-{{USER_ID}}`.
+* **Unique:** Do not reuse a `client_id` for creating different resources. A `client_id` used to create an inbox should not be used to create a webhook.
+* **No `@` symbol:** The `client_id` value cannot contain the `@` symbol. If you want to use an email address as an identifier, replace `@` with another character (e.g., `user_at_example.com` instead of `user@example.com`).
+
+A common and highly effective pattern is to generate a UUID (like a `UUID v4`) on your client side for a resource you are about to create, save that UUID in your own database, and then use it as the `client_id` in the API call. This gives you a reliable key to use for any retries.
+
+## Idempotent Sends
+
+Sends — `messages.send`, replies, forwards, and `drafts.send` — are idempotent too, but through a different mechanism. A send is **irreversible** (an email actually goes out), so instead of the body `client_id` used for resource creation, you pass an **`Idempotency-Key` HTTP header**.
+
+When a send carries an `Idempotency-Key`:
+
+* **The first time** we see the key, we send the email, record the result against the key, and return the message.
+* **A retry with the same key** returns the original `message_id` and `thread_id` and sends **no second email**.
+* **The same key with a different request** — different message content, a different sending inbox, or a different send endpoint — returns `409 Conflict`, so an accidental key reuse surfaces loudly instead of silently replaying the wrong result.
+* **An explicitly empty `Idempotency-Key` header** is rejected with a `400` rather than silently treated as absent — if you meant to use idempotency, a broken key fails loudly instead of quietly losing protection.
+* Keys are scoped to your organization and **expire 24 hours** after the send completes, after which the key can be reused.
+
+```bash title="cURL"
+curl -X POST https://api.agentmail.to/v0/inboxes/agent@yourdomain.com/messages/send \
+  -H "Authorization: Bearer $AGENTMAIL_API_KEY" \
+  -H "Idempotency-Key: order-4821-receipt" \
+  -H "Content-Type: application/json" \
+  -d '{"to": ["customer@example.com"], "subject": "Your receipt", "text": "Thanks for your order."}'
+```
+
+```python title="Python"
+message = client.inboxes.messages.send(
+    inbox_id="agent@yourdomain.com",
+    to=["customer@example.com"],
+    subject="Your receipt",
+    text="Thanks for your order.",
+    request_options={"additional_headers": {"Idempotency-Key": "order-4821-receipt"}},
+)
+```
+
+```typescript title="TypeScript"
+const message = await client.inboxes.messages.send(
+  "agent@yourdomain.com",
+  { to: ["customer@example.com"], subject: "Your receipt", text: "Thanks for your order." },
+  { headers: { "Idempotency-Key": "order-4821-receipt" } },
+);
+```
+
+Choose a key that is **unique per logical send** — either a random `UUID v4` you generate once and reuse across retries of that one send, or a deterministic key derived from your own data (e.g. `order-{{ORDER_ID}}-receipt`). The character rules match `client_id`: 1–256 characters from `A-Z a-z 0-9 - . _ ~`.

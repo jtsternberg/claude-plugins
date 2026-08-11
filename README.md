@@ -16,7 +16,7 @@ installing.
 
 ### Claude Code
 
-Add the marketplace and install any of its 27 listed plugins:
+Add the marketplace and install any of its 28 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
@@ -48,7 +48,7 @@ installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
 
 To install one self-contained repository skill instead of a whole plugin, see
 [standalone Codex skills](docs/codex/standalone-skills.md). For commands,
-updates, catalog scope, and all 28 plugin names, see the
+updates, catalog scope, and all 29 plugin names, see the
 [compatibility guide](docs/compatibility.md).
 
 ---
@@ -57,7 +57,7 @@ updates, catalog scope, and all 28 plugin names, see the
 
 These are selected plugins and workflows. The
 [support matrix](docs/compatibility.md#plugin-support-matrix) is the complete
-28-name inventory and the authority for harness availability.
+29-name inventory and the authority for harness availability.
 
 ### Skills
 
@@ -144,6 +144,11 @@ Skills for working with — and like — the Fable model (`claude-fable-5`). Shi
 Codex-native A/B experiments: `codex:sol-delegate` for Sol-led delegation to Terra and other available models, plus `codex:fable-mode` and `codex:sol-mode` for comparing competitive frontier-model stances on Terra.
 
 **Install:** `codex plugin add codex@jtsternberg`
+
+#### 📬 [agentmail](plugins/agentmail)
+Give an agent its own email address — send, receive, reply, forward, and draft mail through the AgentMail API via the official `agentmail` CLI.
+
+**Install:** `claude plugin install agentmail@jtsternberg`
 
 ### Workflow skills
 
