@@ -7,6 +7,23 @@ standalone installer writes only to its selected skill destination.
 
 ## Scripts
 
+### `inventory-codex-namespaces.mjs`
+
+Produces a read-only Markdown inventory of duplicate skill names across Codex's
+standalone discovery roots and enabled plugin cache, plus duplicate plugin names
+across every configured marketplace. It calls only the local `codex plugin list`
+and `codex plugin marketplace list` commands by default; use the two `--*-json`
+options with saved command output for a reproducible/offline run.
+
+```bash
+node scripts/inventory-codex-namespaces.mjs > /tmp/codex-namespace-inventory.md
+```
+
+The output redacts the current home and workspace roots. It reads public
+`SKILL.md` frontmatter and marketplace/plugin manifests only; it does not read
+tokens or general Codex configuration. The maintained snapshot and current
+dispositions are in [`docs/codex/namespace-inventory.md`](../docs/codex/namespace-inventory.md).
+
 ### `install-standalone-skill.sh`
 
 Installs one self-contained repository skill for Codex. It accepts an explicit
