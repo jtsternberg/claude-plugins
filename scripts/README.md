@@ -72,7 +72,8 @@ When a script's behavior or output changes:
 
 1. update this README with its input, output, exit behavior, and a minimal
    invocation;
-2. update the relevant report or compatibility guide under `docs/codex/`;
+2. update the relevant report under `docs/codex/` or the maintained
+   `docs/compatibility.md` guide;
 3. record the decision and follow-up in the associated Beads issue; and
 4. add a test under `tests/` if the script is a regression guard rather than a
    one-off report generator.

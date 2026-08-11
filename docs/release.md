@@ -1,4 +1,4 @@
-# Release plugins to Claude Code and Codex
+# Release repository plugins to Claude Code and Codex
 
 Plugin versions are release identifiers and Codex cache keys. Every plugin
 change must bump the version in that plugin's manifest. A Codex-visible change
@@ -14,15 +14,19 @@ Check which catalog offers the plugin before testing the release:
 - `.agents/plugins/marketplace.json` is the Codex-native catalog. It contains a
   deliberately smaller plugin set.
 
-Both catalogs point to plugin directories; neither pins plugin versions. Bump
-the version in the manifest inside the affected plugin directory:
+Both catalogs point to plugin directories; neither pins plugin versions. Each
+catalog reads the manifest for its harness:
 
-- `.claude-plugin/plugin.json` for the repository's shared Claude/Codex plugins;
-- `.codex-plugin/plugin.json` for a Codex-native-only plugin such as `codex`.
+- `.claude-plugin/plugin.json` for a plugin published in the Claude catalog;
+- `.codex-plugin/plugin.json` for a plugin published in the Codex-native catalog.
 
-Do not create or bump a second manifest unless that plugin actually publishes
-both manifest files. The repository currently avoids hand-maintained manifest
-mirrors.
+Some plugins, including `hotline` and `pr-workflow`, publish both manifests.
+When a shared skill or bundled resource changes, bump every published manifest
+whose harness receives that change and keep their release versions aligned.
+For a genuinely harness-specific metadata change, bump only the affected
+manifest and state why the other harness did not receive a release. Do not add
+a second manifest merely to mirror metadata for a harness that does not publish
+the plugin.
 
 ## 2. Prepare and validate the change
 
