@@ -16,10 +16,18 @@ Check whether the file already exists. If it does, read it in full first to unde
 
 ## 3. Pickup banner
 
-The file starts with this banner at the very top, before the Goal — it's the next agent's cold-start path:
+Generate the harness-specific pickup command for the absolute file path:
+
+```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing the handoff SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/generate-command.sh" "<absolute path to this file>"
+```
+
+The file starts with this banner at the very top, before the Goal — it's the next agent's cold-start path. Reproduce the generated command exactly:
 
 ```
-> **Resuming this work?** Run `/handoff:pickup-handoff <absolute path to this file>` (or paste: `Read <absolute path to this file> and continue where we left off`).
+> **Resuming this work?** Run `<generated command>` (or paste: `Read <absolute path to this file> and continue where we left off`).
 ```
 
 Then the contract sections from SKILL.md, in order.

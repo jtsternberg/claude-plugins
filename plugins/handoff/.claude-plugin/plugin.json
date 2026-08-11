@@ -1,7 +1,7 @@
 {
   "name": "handoff",
   "description": "Skills and hooks for creating and picking up handoffs to preserve context between Claude Code sessions — session-start detection, drift-aware pickup, and a beads backend with markdown-file fallback.",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

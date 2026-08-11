@@ -53,17 +53,25 @@ Sections, in order:
 
 ## To resume (end every run with this)
 
-After saving, output:
+After saving, generate the harness-specific pickup command with the identifier just saved:
+
+```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/generate-command.sh" "<identifier>"
+```
+
+Reproduce the generated command exactly in this output:
 
 ```
 Handoff saved: <absolute file path, or beads issue ID>
 
-To resume in a fresh session, run /handoff:pickup-handoff <identifier>
+To resume in a fresh session, run <generated command>
 Fallback: <backend-specific resume line from the reference>
 ```
 
 **`<identifier>` is required, not decorative** — the beads issue ID or the absolute
 file path, whichever backend you just wrote to. You know it at this point; pass it.
-Emitting a bare `/handoff:pickup-handoff` forces the next agent to rediscover what
+Emitting a bare pickup command forces the next agent to rediscover what
 you already had, and that search is guesswork when several handoffs are open. Handing
 it the identifier makes pickup deterministic: one `bd show <id>` / one `Read`.

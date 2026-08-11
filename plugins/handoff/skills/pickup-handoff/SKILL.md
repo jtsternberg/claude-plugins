@@ -9,7 +9,7 @@ argument-hint: "[<beads-issue-id> | <path-to-HANDOFF.md>]"
 
 # Pickup Handoff
 
-Resume work from a handoff written by a previous agent (via the companion `handoff` skill, whose docs point here: `/handoff:pickup-handoff`).
+Resume work from a handoff written by a previous agent. The companion `handoff` skill generates the correct pickup invocation for the active harness.
 
 **Assume the user has NOT read the handoff.** They are handing you a pointer and expecting you to get up to speed and tell *them* what's going on. Don't silently continue — surface your understanding and plan first.
 

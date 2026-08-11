@@ -30,13 +30,17 @@ Create or update a handoff for the current work.
 **Two storage backends**, detected automatically:
 
 - **Beads** (preferred, when the `bd` CLI is installed and the repo has a `.beads/` directory): the handoff is stored as a bd issue titled `pending-handoff: <work-name>`. No file litter, and completion maps to `bd close`. The marker is deliberately an unusual string — a plain `Handoff:` prefix collides with ordinary issues *about* handoffs, and `bd --title-contains` matches case-insensitively and anywhere in the title.
-- **Files** (universal fallback): a `HANDOFF-<work-name>.md` in the working directory, named for the work (branch-based by default, descriptive when the branch name is generic). The file opens with a pickup banner telling the next agent to run `/handoff:pickup-handoff <path>`, and gets added to `.git/info/exclude` so it never pollutes the repo.
+- **Files** (universal fallback): a `HANDOFF-<work-name>.md` in the working directory, named for the work (branch-based by default, descriptive when the branch name is generic). The file opens with a pickup banner containing the harness-specific pickup command, and gets added to `.git/info/exclude` so it never pollutes the repo.
 
-### `/handoff:pickup-handoff [<bd-issue-id> | <path>]`
+### Pickup handoff
+
+Claude Code: `/handoff:pickup-handoff [<bd-issue-id> | <path>]`
+
+Codex: `$handoff:pickup-handoff [<bd-issue-id> | <path>]`
 
 Resume work from a handoff in a fresh session.
 
-**Pass the identifier when you have one** — `/handoff:pickup-handoff myproject-20xu` — and it resolves that handoff in a single lookup. The `handoff` skill prints the identifier when it saves, and the session-start notice lists it per finding, so it's almost always available. Without it, pickup has to search (branch/descriptive `HANDOFF*.md` → open `pending-handoff:` bd issues), which is guesswork once more than one handoff is open.
+**Pass the identifier when you have one** — `/handoff:pickup-handoff myproject-20xu` in Claude Code or `$handoff:pickup-handoff myproject-20xu` in Codex — and it resolves that handoff in a single lookup. The `handoff` skill detects the active harness and prints the correct command when it saves, and the session-start notice lists the identifier per finding, so it's almost always available. Without it, pickup has to search (branch/descriptive `HANDOFF*.md` → open `pending-handoff:` bd issues), which is guesswork once more than one handoff is open.
 
 It then reads the handoff once, reconciles it against the actual repo state using the Anchor SHA ("N commits since the handoff was written; here's what changed"), and — assuming the user hasn't read the doc — plainly reports where things stand and the concrete plan before continuing. It also sweeps for stale leftover handoff files and flags obvious corpses.
 
