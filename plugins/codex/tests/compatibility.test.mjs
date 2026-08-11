@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const PLUGINS = path.join(REPO, 'plugins');
 const COMPONENT_FIELDS = ['skills', 'commands', 'agents', 'apps', 'mcpServers', 'hooks'];
+// Add only deliberately harness-specific release splits, with a concrete rationale.
+const DUAL_PUBLISHED_VERSION_EXCEPTIONS = new Map();
 
 function directories(dir) {
 	return fs.readdirSync(dir, { withFileTypes: true })
@@ -175,6 +177,27 @@ test('catalog guard rejects drift and accepts harness-specific inventories', () 
 
 test('marketplace catalogs match the current manifest-bearing plugin directories', () => {
 	assert.doesNotThrow(() => validateCatalogs(REPO));
+});
+
+test('dual-published plugins keep manifest versions aligned', () => {
+	const legacy = new Set(catalogEntries(path.join(REPO, '.claude-plugin/marketplace.json')));
+	const native = new Set(catalogEntries(path.join(REPO, '.agents/plugins/marketplace.json')));
+	const dualPublished = [...legacy].filter(name => native.has(name));
+
+	for (const [name, rationale] of DUAL_PUBLISHED_VERSION_EXCEPTIONS) {
+		assert.ok(dualPublished.includes(name), `version exception is not dual-published: ${name}`);
+		assert.ok(rationale.trim().length >= 20, `version exception needs a concrete rationale: ${name}`);
+	}
+
+	for (const name of dualPublished) {
+		const claudeVersion = readJson(path.join(PLUGINS, name, '.claude-plugin/plugin.json')).version;
+		const codexVersion = readJson(path.join(PLUGINS, name, '.codex-plugin/plugin.json')).version;
+		if (DUAL_PUBLISHED_VERSION_EXCEPTIONS.has(name)) {
+			assert.notEqual(claudeVersion, codexVersion, `remove stale version exception for ${name}`);
+			continue;
+		}
+		assert.equal(codexVersion, claudeVersion, `${name} shared release versions differ`);
+	}
 });
 
 test('manifest guard rejects unsafe component paths and validates every manifest', () => {
