@@ -109,4 +109,4 @@ Repeat the probe and re-run the audit when any of these changes:
 - OpenAI docs change the `agents/openai.yaml` policy contract.
 - openai/codex#23454, #29989, or #32169 is closed or materially updated.
 - A skill adds or removes `disable-model-invocation`.
-- Handoff compaction behavior changes; p81u.23 builds directly on this policy and must preserve the `handoff` plugin's explicit-only metadata.
+- Long-task or compaction behavior for explicit-only skills changes. This audit covers invocation policy only; the `handoff` plugin is not part of the explicit-only inventory as of this check.
