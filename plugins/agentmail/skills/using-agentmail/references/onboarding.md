@@ -1,0 +1,137 @@
+# Onboarding: agent self-signup, OTP, and key storage
+
+Read this before running signup. The flow has one human-in-the-loop step that cannot be
+automated, and one credential-handling rule that matters more than the commands.
+
+## Which path?
+
+| Situation | Path |
+|---|---|
+| No AgentMail account at all, agent signs itself up | **Agent self-signup** (below) |
+| A human already has an account, or the OTP email never arrives | **Console key**: create one at [console.agentmail.to](https://console.agentmail.to) using the same human email, then `export AGENTMAIL_API_KEY=...` |
+| A working key already exists | Nothing to do. Do **not** sign up again — it rotates the key. |
+
+Self-signup is for **first-time users only**. A human email address already signed up with
+AgentMail will not work through this flow.
+
+## The rule that shapes everything else
+
+`agentmail agent sign-up` returns `{api_key, inbox_id, organization_id}` **on stdout**.
+
+Run bare by an agent, that writes a live API credential into the conversation transcript.
+Transcripts are archived, and in this environment they are also auto-ingested into a local
+searchable index — so "it was only in my terminal" is not true. A key in a transcript is a
+key in a database.
+
+So: **never run `agentmail agent sign-up` directly.** Use the script. It captures the
+response, writes it to a `0600` file outside any repository, and prints only masked values
+plus the path.
+
+## Step 1 — sign up
+
+```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/agentmail-signup.sh" \
+  --human-email you@example.com \
+  --username my-agent
+```
+
+`--username my-agent` creates `my-agent@agentmail.to`. `--human-email` is where the OTP
+goes, and — until verification — the only address the agent can email.
+
+Output is masked: `inbox_id`, `organization_id`, a key fingerprint like `am_us_…a1b2`, and
+the path to the credential file. Exit codes: `0` signed up · `40` refused because
+`AGENTMAIL_API_KEY` is already set · `64` bad arguments · `1` the call failed.
+
+### The rotation guard
+
+The script refuses to run when `AGENTMAIL_API_KEY` is already set, unless you pass
+`--force`. Sign-up is idempotent in the sense that it will not create a second
+organization — but for an email that already signed up it **rotates the API key**, which
+silently invalidates the key in the current environment. Nothing at the call site warns
+you; you find out later when unrelated commands start returning 401.
+
+If a working key already exists, you do not need signup at all.
+
+## Step 2 — the human reads the OTP
+
+A 6-digit code goes to `--human-email`. This step needs a person. Ask the user for the
+code; do not try to fetch it.
+
+Constraints worth stating to the user up front:
+
+- **Expires 24 hours** after issue.
+- **Maximum 10 attempts.**
+- **Attempt exhaustion is worse than it sounds:** while the exhausted code is still live,
+  every submission is rejected — *including the correct one* — until it expires. Only then
+  does `agent sign-up` issue a fresh code with a reset attempt count. If the code has
+  already expired, sign up again immediately.
+- **If the email never arrives**, skip the OTP entirely: the human can create an account
+  at [console.agentmail.to](https://console.agentmail.to) with the same human email and
+  generate a key from the dashboard.
+
+## Step 3 — verify
+
+```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+bash "$SKILL_DIR/scripts/agentmail-verify.sh" --otp-code 123456
+```
+
+The script sources the key from the newest `signup-*.json` (or `--key-file`, or an already
+exported `AGENTMAIL_API_KEY`), exports it only inside its own process, and verifies. It
+validates the code is exactly six digits **before** calling out, because attempts are
+finite and a typo should not cost one.
+
+Exit codes: `0` verified · `41` no key found anywhere · `64` malformed OTP (nothing sent,
+no attempt spent) · `1` verification failed.
+
+On success it records `{"verified": true, "verified_at": ...}` to
+`${XDG_CONFIG_HOME:-$HOME/.config}/agentmail/state.json`.
+
+## Step 4 — the user stores the key
+
+**This is the user's action, not the agent's.** The full key is in the credential file. Do
+not `Read` that file into the conversation — that would undo the whole point of step 1.
+
+Point the user at the path and let them copy it into wherever they keep secrets: shell
+profile, password manager, a secrets store. Then:
+
+```bash
+export AGENTMAIL_API_KEY=...    # value from the credential file
+```
+
+Once it is stored durably the credential file can be deleted. Never commit it. Never write
+it into a project `.env`.
+
+## Why the preflight says "verification: unknown"
+
+Because it cannot know, and guessing would be worse.
+
+The `agent_unverified → agent_verified` transition is real — verifying lifts the send
+allowlist. But **no documented AgentMail GET exposes it.** `organizations get` returns
+counts, limits, billing metadata, and `authentication_*` fields; `GET /v0/auth/me` returns
+scope information. Neither carries a verification flag, and the CLI does not surface an
+`auth` resource at all (there is no `agentmail auth` command in v0.7.14).
+
+So there are exactly two signals:
+
+1. **Local and positive:** `state.json` says `verified: true` because *this machine* ran a
+   successful verify. The preflight surfaces it as a hint.
+2. **Remote and negative:** a send to a non-signup address returns
+   `403 message_rejected`. That is the definitive "still unverified" answer, and you only
+   get it by trying.
+
+Absence of signal 1 means **unknown**, never "unverified" — the user may have verified on
+another machine, or be using a console key that was never in this flow at all.
+
+## First-send checklist after onboarding
+
+1. `agentmail inboxes list --format json` — confirm the auto-created inbox exists.
+2. Send **to the human's own signup address**. On an unverified org it is the only thing
+   that works, which makes it the correct smoke test.
+3. Then `agentmail inboxes:messages list --inbox-id <id> --limit 5 --format json` and
+   confirm the send is recorded.
+4. Only after that, try a third-party recipient. A `403 message_rejected` here means
+   verification is still outstanding — go back to step 2 of this document.
