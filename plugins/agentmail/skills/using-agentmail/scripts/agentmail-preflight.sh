@@ -102,7 +102,9 @@ Two ways to get one:
   1. Agent self-signup (no console needed) — run scripts/agentmail-signup.sh,
      then scripts/agentmail-verify.sh with the 6-digit code emailed to the
      human. See references/onboarding.md.
-  2. A human creates a key at https://console.agentmail.to and exports it.
+  2. A human creates a key at https://console.agentmail.to/dashboard/api-keys
+     (that page requires a scope + access level — see references/onboarding.md)
+     and exports it.
 
 Then: export AGENTMAIL_API_KEY=...   (do not commit it; do not paste it here)
 EOF

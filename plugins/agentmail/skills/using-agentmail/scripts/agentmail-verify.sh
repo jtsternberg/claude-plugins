@@ -39,7 +39,7 @@ Usage: agentmail-verify.sh --otp-code <6 digits> [--key-file <path>]
                falls back to an exported AGENTMAIL_API_KEY.
 
 If the OTP email never arrives, the human can instead create an account at
-https://console.agentmail.to using the same human email.
+https://console.agentmail.to/dashboard/api-keys using the same human email.
 EOF
 }
 

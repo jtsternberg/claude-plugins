@@ -21,7 +21,7 @@ to fix it.
 npm install -g agentmail-cli      # the npm package is a thin wrapper whose postinstall
                                   # downloads a Go binary from GitHub releases, so this
                                   # needs network access to github.com
-export AGENTMAIL_API_KEY=am_...   # from signup below, or console.agentmail.to
+export AGENTMAIL_API_KEY=am_...   # from signup below, or console.agentmail.to/dashboard/api-keys
 ```
 
 If the CLI ever tells you to reinstall `@agentmail/cli`, ignore it — that package does

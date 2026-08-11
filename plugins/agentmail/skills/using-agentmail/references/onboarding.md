@@ -8,11 +8,51 @@ automated, and one credential-handling rule that matters more than the commands.
 | Situation | Path |
 |---|---|
 | No AgentMail account at all, agent signs itself up | **Agent self-signup** (below) |
-| A human already has an account, or the OTP email never arrives | **Console key**: create one at [console.agentmail.to](https://console.agentmail.to) using the same human email, then `export AGENTMAIL_API_KEY=...` |
+| A human already has an account, or the OTP email never arrives | **Console key**: create one at [console.agentmail.to/dashboard/api-keys](https://console.agentmail.to/dashboard/api-keys) using the same human email (pick a scope + access — see [Console key: scope and access](#console-key-scope-and-access) below), then `export AGENTMAIL_API_KEY=...` |
 | A working key already exists | Nothing to do. Do **not** sign up again — it rotates the key. |
 
 Self-signup is for **first-time users only**. A human email address already signed up with
 AgentMail will not work through this flow.
+
+## Console key: scope and access
+
+Creating a key at
+[console.agentmail.to/dashboard/api-keys](https://console.agentmail.to/dashboard/api-keys)
+forces two required choices. Pick them for what this skill does, not by reflex.
+
+**SCOPE — where the key may act:**
+
+- **Entire organization** — every inbox and domain the org owns. **Choose this** for the
+  skill's full surface: it lists inboxes and can *create* them, both of which need org-wide
+  reach.
+- **Single inbox** — one inbox only; the least-privilege choice, correct when the agent
+  should live in exactly one inbox and never create others. `inboxes create` and org-wide
+  `inboxes list` will `403` under this scope.
+- **Single pod** — one tenant's inboxes/domains. Only relevant if you use pods (out of
+  scope for v0.1).
+
+**ACCESS — what it may do there:**
+
+- **Send & read mail** — read inboxes/threads, read and send messages and drafts. The core
+  the skill needs.
+- **Manage inboxes** — create/update/delete inboxes. Add this **on top of** Send & read
+  mail if the agent should create inboxes (`inboxes create`). The self-signup key already
+  has it; a console key does not unless you check it.
+- **Full access within scope** — everything in the catalog for that scope; same as leaving
+  access unset. Simplest if you don't want to reason about it.
+- **Read-only** — **do not pick this for this skill.** Every send, reply, and draft-send
+  will `403`. A read-only key is *not* how you make sending safe — that is the skill's
+  permission gate (below), which prompts on every send regardless of what the key can do.
+- **Advanced / Custom** — hand-pick permissions; only if you already know the catalog.
+
+**Recommended default:** SCOPE *Entire organization* + ACCESS *Send & read mail* and
+*Manage inboxes* (or *Full access within scope*). That matches what the self-signup key can
+do, so the whole skill works. **Narrowest that still functions:** SCOPE *Single inbox* +
+ACCESS *Send & read mail* — send/read/reply/draft on one existing inbox, no creation.
+
+The key's ACCESS is a **server-side** limit, independent of the skill's own send gate:
+sends stay off `allowed-tools`, so Claude Code prompts on each one no matter how broad the
+key is. Both layers apply.
 
 ## The rule that shapes everything else
 
@@ -37,8 +77,21 @@ bash "$SKILL_DIR/scripts/agentmail-signup.sh" \
   --username my-agent
 ```
 
-`--username my-agent` creates `my-agent@agentmail.to`. `--human-email` is where the OTP
-goes, and — until verification — the only address the agent can email.
+**Settle both inputs with the user before running it — both are required, and the second
+is user-facing:**
+
+- `--human-email` — where the 6-digit OTP goes, and (until verification) the only address
+  the agent can email. Ask which address; don't assume.
+- `--username` — becomes the agent's actual address, `<username>@agentmail.to` — what
+  recipients see and reply to. **Let the user choose it; don't pick one silently.** Must be
+  alphanumeric with `. _ -` and cannot lead with a separator. The script requires it
+  (omitting it exits `64`), so gather it up front rather than discovering the requirement
+  mid-flow.
+
+The key this returns is **organization-scoped** with send/read *and* inbox management — it
+can create inboxes and send, matching the skill's full surface. That is why self-signup
+users never pick a scope: they get the broad key automatically. Only the console-key path
+(above) makes you choose.
 
 Output is masked: `inbox_id`, `organization_id`, a key fingerprint like `am_us_…a1b2`, and
 the path to the credential file. Exit codes: `0` signed up · `40` refused because
@@ -68,8 +121,9 @@ Constraints worth stating to the user up front:
   does `agent sign-up` issue a fresh code with a reset attempt count. If the code has
   already expired, sign up again immediately.
 - **If the email never arrives**, skip the OTP entirely: the human can create an account
-  at [console.agentmail.to](https://console.agentmail.to) with the same human email and
-  generate a key from the dashboard.
+  at [console.agentmail.to/dashboard/api-keys](https://console.agentmail.to/dashboard/api-keys)
+  with the same human email and generate a key from the dashboard (pick a scope + access —
+  see [Console key: scope and access](#console-key-scope-and-access) below).
 
 ## Step 3 — verify
 

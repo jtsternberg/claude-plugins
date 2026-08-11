@@ -100,8 +100,10 @@ npx agentmail-cli <args>         # no global install; pays the download on a col
 ```
 
 **No key (exit 11):** either agent self-signup (below) or a human creates one at
-[console.agentmail.to](https://console.agentmail.to). Read
-[references/onboarding.md](references/onboarding.md) before starting signup.
+[console.agentmail.to/dashboard/api-keys](https://console.agentmail.to/dashboard/api-keys)
+(that page requires picking a **scope** and an **access** level — see
+[references/onboarding.md](references/onboarding.md) for which to choose). Read
+onboarding.md before starting signup.
 
 **Key rejected (exit 12):** it was revoked, malformed, or **rotated** — re-running
 `agent sign-up` for an email that already signed up rotates the key and silently
@@ -118,6 +120,13 @@ bash "$SKILL_DIR/scripts/agentmail-signup.sh" --human-email you@example.com --us
 # → a human reads the 6-digit code from their email
 bash "$SKILL_DIR/scripts/agentmail-verify.sh" --otp-code 123456
 ```
+
+Both `--human-email` and `--username` are **required**, and `--username` becomes the
+agent's real address (`<username>@agentmail.to`) — the thing recipients see and reply to.
+Ask the user for both up front and let them choose the username; don't pick one silently or
+discover the requirement mid-flow. (The console-key alternative instead makes you choose a
+**scope** and **access** level — which to pick is in
+[references/onboarding.md](references/onboarding.md).)
 
 Three things that matter more than the commands:
 
