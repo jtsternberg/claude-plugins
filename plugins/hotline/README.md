@@ -334,7 +334,7 @@ dial.sh --target "<the user's words>" --mode work_order --prompt-file /tmp/msg.t
 | `.status` | exit | Meaning |
 |---|---|---|
 | `connected` | 0 | The callee is up; `.remote_session_id` / `.call_dir` / `.surface_ref` describe the call |
-| `replay` | 2 | Identity needs one more pass — run the identical command again |
+| `replay` | 2 | Legacy fallback only — identity needs one more pass; run the identical command again |
 | `needs_disambiguation` | 3 | `.candidates` holds the matches; ask the user, re-run with a path |
 | `error` | 1 | `.stage` + `.detail` + `.recovery` |
 
@@ -347,44 +347,48 @@ and refreshing a follow-up's cached `surface_ref` after a new surface opens.
 outlast a tool-call timeout, and the caller has to report the connection to the
 user in between boot and response.
 
-### Session ID Discovery (the "Know Thyself" step)
+### Session identity (the "Know Thyself" step)
 
-`dial.sh` handles this loop itself: on a cache miss it plants the fingerprint,
-persists it keyed by the claude PID, and returns `{"status":"replay"}` so an
-identical re-run completes the call. The two-tool-call shape below is
-unavoidable — the fingerprint reaches the transcript only *after* a tool call
-returns — but nothing outside the wrapper has to know that.
+Identity resolves inline, in the same `dial.sh` invocation as the rest of the
+call. Claude Code exports `$CLAUDE_CODE_SESSION_ID` into every Bash subprocess
+(2.1.132 and up) and that value *is* the resumable session ID, so
+`session-init.sh` validates it as a UUID and returns. Codex callers land on
+`$CODEX_THREAD_ID` the same way.
 
 ```
 session-init.sh
       │
-      ▼
-session-fingerprint.sh ──► Cache hit? ──YES──► stdout: session ID (exit 0)
+      ├── $HOTLINE_CALLER_SESSION_ID set? ──────► caller_kind "override" ──► done
       │
-      NO (exit 1)
+      ├── $CLAUDE_CODE_SESSION_ID valid UUID? ──► caller_kind "native"   ──► done
+      │        (Claude Code >= 2.1.132 — the normal path, one call)
       │
-      ▼
-stderr: SESSION_FINGERPRINT_<uuid>
+      ├── $CODEX_THREAD_ID set? ────────────────► caller_kind "codex"    ──► done
       │
-      │  (fingerprint gets written into transcript
-      │   when this tool call completes)
-      │
-      ▼  [SEPARATE TOOL CALL]
-      │
-session-init.sh discover <fingerprint>
-      │
-      ▼
-session-discover.sh
-      │
-      ▼
-Grep recent .jsonl transcripts ──► Found? ──► Cache to /tmp, return ID
-      │                              │
-      NO                         (retries 3x
-      │                          with 1s delay
-      ▼                          for async flush)
-Fallback: search 10 most
-recent project dirs
+      └── LEGACY FALLBACK (pre-2.1.132 Claude, or a stripped environment)
+                │
+                ▼
+          session-fingerprint.sh ──► Cache hit? ──YES──► session ID (exit 0)
+                │
+                NO (exit 1) ──► stderr: SESSION_FINGERPRINT_<uuid>
+                │
+                │  (the fingerprint reaches the transcript only *after*
+                │   this tool call returns — hence a second call)
+                │
+                ▼  [SEPARATE TOOL CALL]
+          session-init.sh discover <fingerprint>
+                │
+                ▼
+          session-discover.sh greps recent .jsonl transcripts
+          (3 retries, 1s apart, for the async flush; then the 10
+           most recent project dirs) ──► Cache to /tmp, return ID
 ```
+
+`dial.sh` drives that fallback itself: on a legacy cache miss it plants the
+fingerprint, persists it keyed by the claude PID, and returns
+`{"status":"replay"}` so an identical re-run completes the call. The two-tool-call
+shape is unavoidable there, but it's the only path that produces a `replay`, and
+nothing outside the wrapper has to know about it.
 
 ### Workspace Resolution
 
@@ -413,7 +417,7 @@ resolve-workspace.sh "<user's words>"
 - **`hotline-pickup`** — Workspace identity introspection. Runs `gather-workspace-info.sh` to examine CLAUDE.md, package files, git history, then caches a concise identity to `~/.agents-hotline/identities/`. Used by workspace resolution for fuzzy matching.
 - **`hotline-add-contact`** — Register a workspace in dirmap so other agents can find it. Uses `dirmap add` if available, edits `~/.dirmap.json` directly otherwise.
 - **`hotline-whoami`** — Reverse-lookup the current workspace's dirmap slug. Caller ID for the hotline.
-- **`hotline-wiretap`** — Locate the current session's JSONL transcript file via fingerprint discovery.
+- **`hotline-wiretap`** — Locate the current session's JSONL transcript file, derived from the native session ID (fingerprint discovery on legacy clients).
 - **`hotline-switchboard`** — Live, read-only HTML dashboard of all hotline calls. See below.
 
 ### State
@@ -427,7 +431,8 @@ All hotline state lives in `~/.agents-hotline/`:
   half-trimmed file in place (`append` does it automatically)
 - `sessions/` — Outgoing session maps (keyed by caller session ID)
 - `pending/` — In-flight `dial.sh` identity fingerprints, keyed by claude PID.
-  Written on a `replay`, removed the moment discovery succeeds; entries older
+  Legacy-fallback state only — stays empty on the native path. Written on a
+  `replay`, removed the moment discovery succeeds; entries older
   than `HOTLINE_PENDING_TTL` (default 600s) are discarded as leftovers, since a
   recycled PID would otherwise inherit a dead session's fingerprint
 - `switchboard.pid` / `switchboard.log` — Switchboard server state
@@ -473,7 +478,9 @@ You may have noticed the state directory is `~/.agents-hotline/`, not `~/.claude
 
 ## Bonus: Session ID Discovery
 
-Hotline includes a standalone session ID discovery utility — a running Claude agent can discover its own session ID, something Claude Code doesn't expose natively. The community has been [asking for this](https://github.com/anthropics/claude-code/issues/25642) for a while.
+A running agent can read its own session ID from `$CLAUDE_CODE_SESSION_ID` — Claude Code exports it into every Bash subprocess as of 2.1.132, closing a gap the community had asked about in [anthropics/claude-code#25642](https://github.com/anthropics/claude-code/issues/25642) and friends. Hotline uses it directly.
+
+Hotline also still ships the fingerprint-and-grep discovery it was built on, as a standalone utility and as the fallback for clients older than 2.1.132 (or environments where the variable never arrives).
 
 **[Full docs and usage: SESSION-ID-DISCOVERY.md](SESSION-ID-DISCOVERY.md)**
 

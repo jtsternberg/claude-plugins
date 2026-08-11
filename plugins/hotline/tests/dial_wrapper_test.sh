@@ -25,6 +25,14 @@ DIAL="$HOTLINE_DIR/skills/dial/scripts/dial.sh"
 FAKE_CLAUDE_PID=990001          # above any real pid, so it can never collide
 STRAY_SESSION_CACHE="/tmp/claude-session-${FAKE_CLAUDE_PID}"
 
+# The suite itself usually runs INSIDE a Claude Code session, which exports
+# $CLAUDE_CODE_SESSION_ID into every subprocess. session-init.sh answers from it
+# in one call ("native"), so the legacy fingerprint tests below would never see
+# their own plant/discover round-trip. Prefix those invocations with this to
+# strip the inherited identity — the same reason the fake `ps` exists at all.
+# ($CODEX_THREAD_ID is stripped defensively; it is the next rung down.)
+STRIP_NATIVE_ID=(env -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID)
+
 POISON_BIN="$(mktemp -d)"
 POISON_LOG="$POISON_BIN/violations"
 for _poison in cmux claude dirmap; do
@@ -237,7 +245,7 @@ run_replay() {
   ( cd "$t/work" && PATH="$t/bin:$PATH" HOME="$t/home" \
       FAKE_CLAUDE_PID="$FAKE_CLAUDE_PID" HOTLINE_PENDING_DIR="$t/pending" \
       FAKE_CLAUDE_SESSION_ID="cccccccc-dddd-4eee-8fff-000000000000" \
-      bash "$DIAL" "${DIAL_ARGS[@]}" 2>>"$t/err.txt" )
+      "${STRIP_NATIVE_ID[@]}" bash "$DIAL" "${DIAL_ARGS[@]}" 2>>"$t/err.txt" )
 }
 
 out1=$(run_replay); rc1=$?
@@ -756,6 +764,7 @@ printf 'SESSION_FINGERPRINT_STALE-NEVER-PLANTED\n3\n1000000000\n' \
   > "$t/pending/hotline-pending-${FAKE_CLAUDE_PID}"
 out=$( cd "$t/work" && PATH="$t/bin:$PATH" HOME="$t/home" \
   FAKE_CLAUDE_PID="$FAKE_CLAUDE_PID" HOTLINE_PENDING_DIR="$t/pending" \
+  "${STRIP_NATIVE_ID[@]}" \
   bash "$DIAL" --target "$t/target" --mode quick --headless --prompt "hi" 2>/dev/null )
 rc=$?
 [[ "$rc" -eq 2 && "$(jq -r .status <<<"$out")" == "replay" \
@@ -769,6 +778,7 @@ printf 'SESSION_FINGERPRINT_FRESH-BUT-NEVER-PLANTED\n3\n%s\n' "$(date +%s)" \
   > "$t/pending/hotline-pending-${FAKE_CLAUDE_PID}"
 out=$( cd "$t/work" && PATH="$t/bin:$PATH" HOME="$t/home" \
   FAKE_CLAUDE_PID="$FAKE_CLAUDE_PID" HOTLINE_PENDING_DIR="$t/pending" \
+  "${STRIP_NATIVE_ID[@]}" \
   bash "$DIAL" --target "$t/target" --mode quick --headless --prompt "hi" 2>/dev/null )
 rc=$?
 [[ "$rc" -eq 1 && "$(jq -r .stage <<<"$out")" == "identity" ]]
@@ -782,6 +792,47 @@ rm -f "$STRAY_SESSION_CACHE"
 grep -q 'HOTLINE_PENDING_DIR:-\$HOME/.agents-hotline/pending' "$DIAL"
 check "pending state defaults into ~/.agents-hotline, not /tmp" $? \
   "$(grep -n 'PENDING_DIR=' "$DIAL")"
+
+# ===========================================================================
+# 14. Native identity ($CLAUDE_CODE_SESSION_ID) connects in ONE invocation.
+# ===========================================================================
+# Claude Code >= 2.1.132 exports the session ID into every Bash subprocess, so
+# session-init.sh answers "cached"/"native" without the fingerprint dance. No
+# fake `ps` is stubbed here on purpose: the native rung must not depend on
+# process ancestry at all, so a real `ps` finding no claude has to be harmless.
+t=$(new_env); note_leak "$t"
+make_claude "$t/bin"
+NATIVE_SID="9e1c7a3b-2d4f-4a6b-8c1d-0f2e3a4b5c6d"
+out=$( cd "$t/work" && PATH="$t/bin:$PATH" HOME="$t/home" \
+  HOTLINE_PENDING_DIR="$t/pending" \
+  FAKE_CLAUDE_SESSION_ID="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" \
+  env -u HOTLINE_CALLER_SESSION_ID -u CODEX_THREAD_ID \
+      CLAUDE_CODE_SESSION_ID="$NATIVE_SID" \
+  bash "$DIAL" --target "$t/target" --mode quick --headless \
+    --prompt "who am I talking to?" --boot-timeout 8 2>"$t/err.txt" )
+rc=$?
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+
+[[ "$rc" -eq 0 && "$(jq -r .status <<<"$out")" == "connected" ]]
+check "native identity connects in ONE invocation (no replay, exit 0)" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
+[[ "$(jq -r .caller_session_id <<<"$out")" == "$NATIVE_SID" ]]
+check "the native session id is adopted verbatim as caller_session_id" $? "out=$out"
+
+[[ "$(jq -r .caller_kind <<<"$out")" == "native" ]]
+check "the payload reports caller_kind=native" $? "out=$out"
+
+# Nothing may be persisted for a replay that never has to happen — a pending
+# file here would make the NEXT dial try to discover a fingerprint from it.
+[[ -z "$(ls -A "$t/pending" 2>/dev/null)" ]]
+check "the native path plants no pending fingerprint state" $? \
+  "$(ls -A "$t/pending" 2>/dev/null)"
+
+[[ -s "$t/home/.agents-hotline/sessions/${NATIVE_SID}.json" ]]
+check "the call is registered under the native caller session id" $? \
+  "$(ls -R "$t/home/.agents-hotline" 2>/dev/null)"
 
 # ===========================================================================
 if [[ -s "$POISON_LOG" ]]; then

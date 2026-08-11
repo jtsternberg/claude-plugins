@@ -2,15 +2,40 @@
 
 > **This is a standalone utility.** You don't need the rest of Hotline to use it.
 
-## The Problem
+## The Answer: `CLAUDE_CODE_SESSION_ID`
 
-There's no `CLAUDE_SESSION_ID` environment variable. Hooks receive the session ID in their stdin payload, but the *running agent itself* has no way to know its own identity — and the community has been [asking](https://github.com/anthropics/claude-code/issues/25642) [for](https://github.com/anthropics/claude-code/issues/13733) [it](https://github.com/anthropics/claude-code/issues/17188) for a while.
+Claude Code exports `CLAUDE_CODE_SESSION_ID` into every Bash subprocess it spawns — tool calls, hook commands, and stdio MCP servers alike — as of **2.1.132**. It matches the resumable session ID and the transcript filename, so a running agent reads its own identity straight out of the environment:
 
-Without self-awareness of its own session ID, an agent can't do things like build tooling that reconnects to itself via `--resume`, key per-session state without collisions, or — you know — call another agent and keep track of the conversation. Which is kind of the whole point of Hotline.
+```bash
+printf '%s\n' "$CLAUDE_CODE_SESSION_ID"
+```
 
-## The Solution: Fingerprinting
+That's what Hotline uses. Self-awareness of the session ID is what lets an agent reconnect to itself via `--resume`, key per-session state without collisions, or call another agent and keep track of the conversation — which is kind of the whole point of Hotline.
 
-Hotline ships two scripts that solve this with a clever two-step fingerprint method:
+Don't read the variable by hand, though: `session-init.sh` resolves identity across every harness Hotline supports, in one call, and validates what it finds:
+
+| Rung | Source | `caller_kind` |
+|---|---|---|
+| 1 | `$HOTLINE_CALLER_SESSION_ID` — explicit override | `override` |
+| 2 | `$CLAUDE_CODE_SESSION_ID`, validated as a UUID | `native` |
+| 3 | `$CODEX_THREAD_ID` — Codex callers | `codex` |
+| 4 | Fingerprint discovery (below) | — |
+
+```bash
+bash /path/to/plugins/hotline/scripts/session-init.sh
+# → {"status":"cached","session_id":"…","caller_kind":"native"}
+
+bash /path/to/plugins/hotline/scripts/session-init.sh --expanded
+# → also transcript_path, claude_pid, project_dir
+```
+
+The capability was requested in [anthropics/claude-code#25642](https://github.com/anthropics/claude-code/issues/25642), [anthropics/claude-code#13733](https://github.com/anthropics/claude-code/issues/13733) and [anthropics/claude-code#17188](https://github.com/anthropics/claude-code/issues/17188) — all three now closed. See the [environment variables reference](https://code.claude.com/docs/en/env-vars#variables) for the variable itself.
+
+## The Compatibility Path: Fingerprinting
+
+Before 2.1.132 there was no such variable. Hooks received the session ID in their stdin payload, but the *running agent itself* had no way to know its own identity. Hotline's original mechanism solved that, and it's still shipped and still the fallback whenever the native value is missing or malformed — a client older than 2.1.132, an environment that strips the variable, a wrapper that sanitizes the shell.
+
+Two scripts, a two-step fingerprint method:
 
 1. **`session-fingerprint.sh`** — Checks for a cached session ID. If found (exit 0), it writes the ID to stdout and you're done. If not found (exit 1), it generates a unique fingerprint string and writes it to stderr.
 
@@ -18,7 +43,9 @@ Hotline ships two scripts that solve this with a clever two-step fingerprint met
 
 The trick: the fingerprint string gets emitted into stderr during a Bash tool call, which means it appears in the conversation transcript. The discover script then finds which transcript file contains it. Transcript filename minus `.jsonl` = session ID. Boom.
 
-## Usage
+## Fingerprint Usage
+
+The two steps **must** be separate tool calls — the fingerprint reaches the transcript only after the first call returns.
 
 **First call (two-step):**
 
@@ -61,7 +88,7 @@ ln -s /path/to/plugins/hotline/scripts/session-discover.sh ~/bin/session-discove
 
 Now any hook or script can call `session-fingerprint` without knowing where the plugin lives.
 
-## How It Works Under the Hood
+## How the Fingerprint Works Under the Hood
 
 1. `session-fingerprint.sh` walks the process tree (`$$` → `$PPID` → ...) to find the `claude` parent PID
 2. Checks `/tmp/claude-session-<pid>` for a cached session ID

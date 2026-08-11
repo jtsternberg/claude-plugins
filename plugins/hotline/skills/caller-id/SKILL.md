@@ -6,7 +6,7 @@ allowed-tools: Bash
 
 # Hotline: Session ID
 
-Discover your own Claude Code session ID. Claude Code doesn't expose this natively, but Hotline's fingerprint-and-grep method can find it.
+Discover your own session ID. On current Claude Code (>= 2.1.132) this resolves natively in a single call; older clients fall back to Hotline's legacy fingerprint-and-grep discovery.
 
 ## Script Paths
 
@@ -20,11 +20,9 @@ eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")"
 
 This sets `HOTLINE_SCRIPTS` (and others). Use `$HOTLINE_SCRIPTS` in all script references below.
 
-## Discovery Protocol
+## Resolve Identity
 
-This is a **two-step process** that requires **two separate Bash tool calls**. The fingerprint must be written into the transcript (which happens when the first tool call returns) before it can be found.
-
-### Step 1: Check Cache or Plant Fingerprint
+One Bash call resolves identity on every current harness:
 
 ```bash
 # Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
@@ -33,15 +31,17 @@ eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")" && \
 bash "$HOTLINE_SCRIPTS/session-init.sh"
 ```
 
+The script checks, in order: an explicit `HOTLINE_CALLER_SESSION_ID` override, Claude Code's native `CLAUDE_CODE_SESSION_ID` (exported into every Bash subprocess since 2.1.132), Codex's `CODEX_THREAD_ID`, and only then the legacy fingerprint path.
+
 Parse the JSON output:
 
-- `{"status": "cached", "session_id": "..."}` — You already know the ID. Skip to **Report**.
-- `{"status": "planted", "fingerprint": "..."}` — Save the fingerprint value. Proceed to **Step 2** in a **separate tool call**.
-- `{"status": "error", "message": "..."}` — Report the error to the user. Discovery failed.
+- `{"status": "cached", "session_id": "...", "caller_kind": "native"}` — done. This is the normal outcome on current Claude Code (`caller_kind` may also be `override` or `codex`; a legacy fingerprint cache hit omits the field entirely). Skip to **Report**.
+- `{"status": "planted", "fingerprint": "..."}` — legacy client fallback (pre-2.1.132 Claude, or a stripped environment). Save the fingerprint and proceed to **Legacy Step 2** in a **separate tool call**.
+- `{"status": "error", "message": "..."}` — report the error to the user. Discovery failed.
 
-### Step 2: Discover from Fingerprint
+## Legacy Step 2: Discover from Fingerprint
 
-**This MUST be a separate Bash tool call** — the transcript needs to flush between steps.
+Only needed when the previous call returned `planted`. **This MUST be a separate Bash tool call** — the fingerprint is written into the transcript when the first tool call returns, so it won't exist yet if both steps run in one shell.
 
 ```bash
 # Codex: this path resolves under Claude Code; substitute the directory containing this plugin.
@@ -50,12 +50,12 @@ eval "$(bash "$PLUGIN_ROOT/scripts/paths.sh")" && \
 bash "$HOTLINE_SCRIPTS/session-init.sh" discover "<fingerprint>"
 ```
 
-Replace `<fingerprint>` with the value from Step 1.
+Replace `<fingerprint>` with the planted value.
 
 Parse the JSON output:
 
-- `{"status": "discovered", "session_id": "..."}` — Got it. Proceed to **Report**.
-- `{"status": "error", "message": "..."}` — Report the error. Discovery failed.
+- `{"status": "discovered", "session_id": "..."}` — got it. Proceed to **Report**.
+- `{"status": "error", "message": "..."}` — report the error. Discovery failed.
 
 ## Report
 
@@ -70,5 +70,6 @@ Tell the user their session ID:
 
 ## Important
 
-- **Two separate tool calls.** Do NOT combine Steps 1 and 2 into a single Bash invocation. The fingerprint is planted in the transcript by the first tool call's output — it won't exist yet if you run both steps back-to-back in one shell.
-- The session ID is cached after first discovery, so subsequent calls return instantly from cache.
+- **Do not skip the script in favor of echoing `$CLAUDE_CODE_SESSION_ID` yourself** — the script also handles overrides, Codex callers, and legacy clients, and validates the value.
+- On the legacy fallback only: Steps must stay **two separate tool calls**. Never combine `planted` handling and `discover` into a single Bash invocation.
+- The legacy path caches the discovered ID, so subsequent calls return instantly from cache.

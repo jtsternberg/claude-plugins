@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-28-hotline-design.md`
 
+> **Status note (2026-08-11):** this plan is complete and kept as the build record — read it as history, not as current guidance. Session identity is no longer fingerprint-first: Claude Code 2.1.132 added `CLAUDE_CODE_SESSION_ID`, and `plugins/hotline/scripts/session-init.sh` now resolves identity in one call (`HOTLINE_CALLER_SESSION_ID` → `CLAUDE_CODE_SESSION_ID` → `CODEX_THREAD_ID` → fingerprint). Task 2's two-step fingerprint flow survives as the pre-2.1.132 fallback; see `plugins/hotline/SESSION-ID-DISCOVERY.md` for what ships today.
+
 ---
 
 ### Task 1: Plugin Scaffold

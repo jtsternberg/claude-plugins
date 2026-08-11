@@ -12,24 +12,32 @@ argv/stdout/exit-code contracts. The plugin already trends this way — `session
 `register-call.sh`, and `persist-call-meta.sh` all exist because model-discipline steps kept
 getting skipped. Nothing composes the top-level flow yet; that's the gap.
 
-## The one hard constraint: identity
+## Identity: one call now, two only for legacy clients
 
-Fingerprint plant → discover **cannot** happen inside a single script invocation. The
-fingerprint lands in the transcript only after the tool call *returns* — a script can't grep
-for output the harness hasn't flushed yet. So worst case is two tool calls, period.
+Claude Code >= 2.1.132 exports `CLAUDE_CODE_SESSION_ID` into every Bash subprocess, and it
+equals the resumable session/transcript ID. `session-init.sh` resolves identity in a single
+invocation with precedence `HOTLINE_CALLER_SESSION_ID` → `CLAUDE_CODE_SESSION_ID` (caller kind
+`native`) → `CODEX_THREAD_ID` → the legacy fingerprint discovery. So on any current client the
+wrapper completes the whole flow in one tool call.
 
-But it doesn't have to stay a distinct model-managed step. Make the wrapper **re-entrant**:
+The fingerprint fallback is the only path that can't finish in one invocation: plant → discover
+**cannot** happen inside a single script run, because the fingerprint lands in the transcript
+only after the tool call *returns* — a script can't grep for output the harness hasn't flushed
+yet. That path stays reachable for pre-2.1.132 clients (and for a stripped or malformed env
+var), so the wrapper is **re-entrant**:
 
-1. Wrapper checks `HOTLINE_CALLER_SESSION_ID` / `--caller-session` / the `/tmp/claude-session-<pid>`
-   cache. Hit (the common case) → proceed, everything in one call.
-2. Miss → plant the fingerprint to stderr as today, persist it as pending state keyed by the
-   claude PID (`/tmp/hotline-pending-<pid>`), emit `{"status":"replay","hint":"run this exact
+1. Wrapper calls `session-init.sh`. Identity resolved (the normal case) → proceed, everything in
+   one call.
+2. Unresolved → plant the fingerprint to stderr as today, persist it as pending state keyed by
+   the claude PID (`/tmp/hotline-pending-<pid>`), emit `{"status":"replay","hint":"run this exact
    command again"}`, exit 2.
 3. The model re-runs **the same command verbatim**. The wrapper finds the pending fingerprint,
-   discovers the session ID, caches it, and continues into the full flow.
+   discovers the session ID, caches it to `/tmp/claude-session-<pid>`, and continues into the
+   full flow.
 
 No fingerprint plumbing in SKILL.md at all — the only prose rule is "if `status` is `replay`,
-run the identical command a second time." Steady state is one invocation.
+run the identical command a second time," and current clients never hit it. Steady state is one
+invocation.
 
 ## Interface
 
@@ -48,7 +56,7 @@ SKILL.md warns about. The wrapper writes the `[MODE:]/[CALLER:]/[SESSION:]` tags
 
 ## Internal flow
 
-1. **Identity** — as above.
+1. **Identity** — as above; one `session-init.sh` call, `replay`/exit 2 only on the legacy path.
 2. **Resolve workspace** — `resolve-workspace.sh`. Ambiguous → `{"status":"needs_disambiguation",
    "candidates":[...]}` and stop (model asks the user, re-runs with the picked path). Stale
    identity → run the `is-stale` + headless pickup-refresh + retry loop *internally*; it's
@@ -71,7 +79,7 @@ One JSON object, success or failure:
 
 ```json
 {
-  "status": "connected",            // replay | needs_disambiguation | connected | error
+  "status": "connected",            // connected | needs_disambiguation | error | replay (legacy only)
   "caller_session_id": "53ed…",
   "workspace": "/Users/JT/Code/claude-plugins",
   "mode": "work_order",
@@ -109,7 +117,8 @@ reduces to "surface `detail` and `recovery` to the user; never silently retry."
 
 Low: the wrapper *composes* existing tested scripts, changes none of them. Add
 `tests/dial_wrapper_test.sh` with the stubbed-`cmux` pattern the existing suites use, covering:
-cached-identity happy path, replay round-trip, disambiguation exit, headless fallback fold-in,
+native/cached-identity happy path (single call), legacy replay round-trip with
+`CLAUDE_CODE_SESSION_ID` unset, disambiguation exit, headless fallback fold-in,
 follow-up reuse vs resume-fresh, conference early-return.
 
 Dual-harness: one command is *easier* for Codex (one path substitution instead of eight);

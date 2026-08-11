@@ -8,19 +8,25 @@ The stage tells you which section below to read:
 | `.stage` | Section |
 |---|---|
 | `args` | (a malformed invocation — `.recovery` says which flag) |
-| `identity` | [Session Fingerprint Failures](#session-fingerprint-failures) |
+| `identity` | [Identity Failures](#identity-failures) |
 | `resolve` | [Workspace Resolution Failures](#workspace-resolution-failures), [Identity Cache Issues](#identity-cache-issues) |
 | `fire` | [CMUX Failures](#cmux-failures), [Headless Call Failures](#headless-call-failures) |
 | `boot` | [CMUX Failures](#cmux-failures) — the callee's REPL never came up |
 
-## Session Fingerprint Failures
+## Identity Failures
+
+Identity normally resolves inline from `$CLAUDE_CODE_SESSION_ID` (Claude Code >= 2.1.132) or `$CODEX_THREAD_ID`, in the same call as the rest of the dial. An `identity` stage error means every rung of the precedence chain missed — including the legacy fingerprint fallback.
+
+**You got a `replay`, or `caller_kind` wasn't `native`, on a Claude caller**
+- Not a failure: the legacy fingerprint fallback engaged and the call still completes on the re-run. It means `$CLAUDE_CODE_SESSION_ID` was either absent — a pre-2.1.132 Claude Code, or an environment that strips it (a wrapper, a sanitized shell, a launcher that scrubs env) — or present but not a UUID, in which case `session-init.sh` validates it, skips it, and falls through rather than propagate a bad ID.
+- Worth checking if you expected the one-call path: `printf '%s\n' "$CLAUDE_CODE_SESSION_ID"` and `claude --version`. Version >= 2.1.132 with an empty value inside a Bash tool call means something in the environment is dropping it.
 
 **"Could not find claude process in ancestry"**
-- You're not running inside a Claude Code session, or the process tree is unusual.
+- The legacy fallback ran and found no `claude` ancestor — so you're not inside a Claude Code session, or the process tree is unusual, *and* no native or Codex identity was available either.
 - **If you're running under Codex:** this is expected — Codex has no `claude` ancestor. `session-init.sh` should have already returned a `caller_kind: "codex"` identity instead of this error. If you still see the error under Codex, confirm `$CODEX_THREAD_ID` is set in your shell (`printf '%s\n' "$CODEX_THREAD_ID"`) and see `references/codex-caller.md`.
 - Recovery (other non-Claude callers): set `HOTLINE_CALLER_SESSION_ID=<stable-id>` in the environment to supply a caller identity directly, or ask the user for their session ID. As a last resort, proceed with a generated UUID — dialing works, but session caching won't persist across restarts.
 
-**"Fingerprint not found in recent transcripts"**
+**"Fingerprint not found in recent transcripts"** (legacy fallback only)
 - The fingerprint was planted but the transcript file wasn't written yet (both steps ran in the same tool call), or the transcript directory path doesn't match.
 - Recovery: `session-init.sh` and `session-init.sh discover` must run in **separate** tool calls (this is what `dial.sh`'s `status: replay` round-trip is for — re-run the identical command). If it still fails, check that `~/.claude/projects/` contains transcript files for the current directory.
 
@@ -68,7 +74,7 @@ The stage tells you which section below to read:
   ```
 
 **Two agents in same directory colliding**
-- Session fingerprint cache uses PID, so this shouldn't happen. If it does, the `/tmp/claude-session-<pid>` files may be stale.
+- The legacy fingerprint cache is keyed by claude PID, so this shouldn't happen (and can't at all on the native path, where each session reads its own `$CLAUDE_CODE_SESSION_ID`). If it does, the `/tmp/claude-session-<pid>` files may be stale.
 - Recovery: Delete `/tmp/claude-session-*` files and re-run `session-init.sh`.
 
 ## CMUX Failures

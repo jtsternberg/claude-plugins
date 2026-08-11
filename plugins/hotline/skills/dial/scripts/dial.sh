@@ -7,15 +7,21 @@
 # launchers, wait-for-session.sh — into a single call that emits ONE JSON
 # object. Nothing below modifies those scripts; this is orchestration only.
 #
-# RE-ENTRANT BY DESIGN. Discovering our own session ID needs two tool calls in
-# the worst case: the fingerprint only lands in the transcript after a tool call
+# NORMALLY ONE CALL. On current Claude Code (>= 2.1.132) session-init.sh reads
+# the native $CLAUDE_CODE_SESSION_ID and identity resolves inline; Codex callers
+# resolve via $CODEX_THREAD_ID the same way. The whole flow completes in a
+# single invocation.
+#
+# RE-ENTRANT FOR LEGACY CALLERS. On a pre-2.1.132 Claude (or a stripped
+# environment) identity falls back to fingerprint discovery, which needs two
+# tool calls: the fingerprint only lands in the transcript after a tool call
 # RETURNS, so no single invocation can plant it and then grep for it. Instead of
 # making that the model's problem, this script persists the pending fingerprint
 # keyed by the claude PID and asks to be run again, verbatim:
 #
-#   cache hit  → the whole flow runs in one call (the steady state)
-#   cache miss → plant, persist, emit {"status":"replay", ...}, exit 2
-#   re-run     → discover from the pending fingerprint, continue as above
+#   native/override/codex/cache hit → the whole flow runs in one call
+#   legacy cache miss → plant, persist, emit {"status":"replay", ...}, exit 2
+#   re-run            → discover from the pending fingerprint, continue as above
 #
 # Usage:
 #   dial.sh --target <reference> --mode quick|work_order|conference
@@ -31,7 +37,7 @@
 #
 # Statuses / exit codes (stdout is ALWAYS a single JSON object):
 #   connected            0   call is live; wait for the response separately
-#   replay               2   re-run this exact command to finish identity
+#   replay               2   legacy fallback only: re-run this exact command to finish identity
 #   needs_disambiguation 3   ask the user to pick from .candidates, re-run
 #   error                1   .stage / .detail / .recovery say what and why
 #

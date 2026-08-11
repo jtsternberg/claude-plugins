@@ -243,6 +243,8 @@ All workspace paths are resolved via `realpath` before being used as keys or has
 
 ### Session Identity — The Fingerprint Method
 
+> **Status note (2026-08-11):** the "no env var" premise below was accurate when this spec was written. Claude Code 2.1.132 added `CLAUDE_CODE_SESSION_ID`, exported into every Bash subprocess and equal to the resumable session/transcript ID. The implementation is now native-first — `plugins/hotline/scripts/session-init.sh` resolves identity in one call with precedence `HOTLINE_CALLER_SESSION_ID` → `CLAUDE_CODE_SESSION_ID` → `CODEX_THREAD_ID` → the fingerprint dance below, which is retained as the compatibility fallback for pre-2.1.132 clients. See `plugins/hotline/SESSION-ID-DISCOVERY.md` for current behavior; the rationale below stands as the record of why the fallback exists.
+
 A running Claude agent has no `CLAUDE_SESSION_ID` env var. The fingerprint method solves this without hooks:
 
 1. **`session-fingerprint.sh`** — Walks the process tree to find the `claude` parent PID. Checks `/tmp/claude-session-<pid>` for a cached session ID. On **cache hit**: exits 0, writes session ID to stdout — done in one call. On **cache miss**: exits 1, writes fingerprint string (`SESSION_FINGERPRINT_<uuid>`) to stderr, prompting the caller to run `session-discover.sh` in a subsequent tool call. The exit code tells the caller whether discovery is needed — no output parsing required.

@@ -12,9 +12,9 @@ launches a session and works from any harness.
 Claude Code ships a native way for one session to message another
 (`ListAgents` + `SendMessage`, Claude Code ≥ 2.1.224, macOS/Linux). When the target
 is a **live** session, this is dramatically simpler and more robust than hotline's
-launch-and-scrape transport: no workspace resolution, no session fingerprinting, no
-cmux surface, no `read-screen` polling. You just address the running session by name
-and send it text.
+launch-and-scrape transport: no workspace resolution, no caller-identity resolution,
+no cmux surface, no `read-screen` polling. You just address the running session by
+name and send it text.
 
 ## When this path applies (all must hold)
 
