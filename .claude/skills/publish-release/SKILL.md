@@ -9,7 +9,7 @@ Runbook for shipping a plugin change to the people who install these plugins.
 Run it — using the judgment below, or on an explicit `/publish-release` — once a
 change-set is complete and ready to release. It is the checklist; the
 authoritative step-by-step procedure lives in
-[`docs/codex/release.md`](../../../docs/codex/release.md), which this skill
+[`docs/release.md`](../../../docs/release.md), which this skill
 points into rather than duplicating.
 
 A change that reaches only your local working tree is not released. "Released"
@@ -58,7 +58,7 @@ release each; never bump a manifest for a plugin that did not actually change.
 
 ## Steps
 
-Follow `docs/codex/release.md` for the full detail of each; the short form:
+Follow `docs/release.md` for the full detail of each; the short form:
 
 1. **Identify what changed and which surfaces publish it.** Which plugin
    directory changed? Is it offered through the Claude marketplace
@@ -83,9 +83,9 @@ Follow `docs/codex/release.md` for the full detail of each; the short form:
    start a new session, and run a `/<plugin>:<skill>` probe. Codex-native-only
    plugins have no Claude step. (release.md §4)
 
-## If a Claude-specific runbook is ever needed
+## If a harness-specific runbook is ever needed
 
-Today `docs/codex/release.md` covers the Claude side in §4, so there is one
-shared runbook. If the Claude release path grows steps that don't belong in the
-Codex doc, add `docs/claude/release.md` and link it here alongside the Codex
-one — keep this skill as the single manual entry point that fans out to both.
+Today `docs/release.md` is the shared runbook. If either harness grows a
+specialized release path, add a harness-specific companion under `docs/claude/`
+or `docs/codex/` and link it from the shared guide—keep this skill as the single
+manual entry point that fans out to both.
