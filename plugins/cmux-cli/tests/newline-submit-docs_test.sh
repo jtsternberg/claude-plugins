@@ -33,7 +33,13 @@ FAIL=0
 FAILED_CASES=()
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 CMUX_DOC="$ROOT/plugins/cmux-cli/skills/using-cmux-cli/SKILL.md"
-DIAL_DOC="$ROOT/plugins/hotline/skills/dial/SKILL.md"
+# The hotline-side home of this prose is the dial skill's error-recovery
+# reference, not its SKILL.md. SKILL.md used to carry the whole flow inline; once
+# dial.sh took over the mechanics, the transport forensics moved to the file the
+# caller is sent to when a call misbehaves. The canary follows the prose — what
+# it guards is that the facts stay stated somewhere a caller will actually read,
+# not that they live at one particular path.
+DIAL_DOC="$ROOT/plugins/hotline/skills/dial/references/error-recovery.md"
 GOTCHA_ANCHOR="gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl"
 
 pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }

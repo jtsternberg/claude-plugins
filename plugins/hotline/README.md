@@ -224,6 +224,10 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
 │                 │  hotline-dial   │  (SKILL.md loaded)              │
 │                 │    skill        │                                 │
 │                 └────────┬────────┘                                 │
+│                          │  ONE command                             │
+│                 ┌────────▼────────┐                                 │
+│                 │    dial.sh      │  emits ONE JSON payload         │
+│                 └────────┬────────┘                                 │
 │                          │                                          │
 │            ┌─────────────┼──────────────┐                           │
 │            ▼             ▼              ▼                           │
@@ -317,7 +321,39 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+### The dial wrapper
+
+`skills/dial/scripts/dial.sh` is the single entry point for everything in that
+first box. It composes the scripts below it — it modifies none of them — and
+emits one JSON object:
+
+```bash
+dial.sh --target "<the user's words>" --mode work_order --prompt-file /tmp/msg.txt
+```
+
+| `.status` | exit | Meaning |
+|---|---|---|
+| `connected` | 0 | The callee is up; `.remote_session_id` / `.call_dir` / `.surface_ref` describe the call |
+| `replay` | 2 | Identity needs one more pass — run the identical command again |
+| `needs_disambiguation` | 3 | `.candidates` holds the matches; ask the user, re-run with a path |
+| `error` | 1 | `.stage` + `.detail` + `.recovery` |
+
+Four things it folds in rather than handing back as a decision, each recorded in
+a `fallbacks` array: the cmux-cli-missing headless re-fire, a refused surface
+reuse falling through to resume-fresh, side-by-side degrading to a detached tab,
+and refreshing a follow-up's cached `surface_ref` after a new surface opens.
+
+`wait-for-response.sh` stays outside the wrapper on purpose — a work order can
+outlast a tool-call timeout, and the caller has to report the connection to the
+user in between boot and response.
+
 ### Session ID Discovery (the "Know Thyself" step)
+
+`dial.sh` handles this loop itself: on a cache miss it plants the fingerprint,
+persists it keyed by the claude PID, and returns `{"status":"replay"}` so an
+identical re-run completes the call. The two-tool-call shape below is
+unavoidable — the fingerprint reaches the transcript only *after* a tool call
+returns — but nothing outside the wrapper has to know that.
 
 ```
 session-init.sh
@@ -372,7 +408,7 @@ resolve-workspace.sh "<user's words>"
 
 ### The Skills
 
-- **`hotline-dial`** — The caller side. Orchestrates the entire flow above: resolve target, discover session, select transport, make the call, relay the response. Forks by default when dialing someone else's session ID.
+- **`hotline-dial`** — The caller side. One `dial.sh` invocation runs the whole flow above (identity, resolve, transport, launch, boot wait) and returns one JSON payload; the skill supplies the judgment — which workspace, which mode, fork-vs-assist — and relays the response. Forks by default when dialing someone else's session ID.
 - **`hotline-ringing`** — The receiver-side handshake. Loaded via the `/hotline:hotline-ringing` prefix in the prompt. Tells Agent B what's happening, how to respond, and how to signal completion. Enforces workspace isolation.
 - **`hotline-pickup`** — Workspace identity introspection. Runs `gather-workspace-info.sh` to examine CLAUDE.md, package files, git history, then caches a concise identity to `~/.agents-hotline/identities/`. Used by workspace resolution for fuzzy matching.
 - **`hotline-add-contact`** — Register a workspace in dirmap so other agents can find it. Uses `dirmap add` if available, edits `~/.dirmap.json` directly otherwise.

@@ -2,6 +2,17 @@
 
 Common failure modes and how to recover from them.
 
+`dial.sh` reports failures as `{"status":"error","stage":…,"detail":…,"recovery":…}`.
+The stage tells you which section below to read:
+
+| `.stage` | Section |
+|---|---|
+| `args` | (a malformed invocation — `.recovery` says which flag) |
+| `identity` | [Session Fingerprint Failures](#session-fingerprint-failures) |
+| `resolve` | [Workspace Resolution Failures](#workspace-resolution-failures), [Identity Cache Issues](#identity-cache-issues) |
+| `transport`, `fire` | [CMUX Failures](#cmux-failures), [Headless Call Failures](#headless-call-failures) |
+| `boot` | [CMUX Failures](#cmux-failures) — the callee's REPL never came up |
+
 ## Session Fingerprint Failures
 
 **"Could not find claude process in ancestry"**
@@ -11,7 +22,7 @@ Common failure modes and how to recover from them.
 
 **"Fingerprint not found in recent transcripts"**
 - The fingerprint was planted but the transcript file wasn't written yet (both steps ran in the same tool call), or the transcript directory path doesn't match.
-- Recovery: Make sure `session-init.sh` and `session-init.sh discover` run in **separate** tool calls. If it still fails, check that `~/.claude/projects/` contains transcript files for the current directory.
+- Recovery: `session-init.sh` and `session-init.sh discover` must run in **separate** tool calls (this is what `dial.sh`'s `status: replay` round-trip is for — re-run the identical command). If it still fails, check that `~/.claude/projects/` contains transcript files for the current directory.
 
 ## Workspace Resolution Failures
 
@@ -74,7 +85,7 @@ Common failure modes and how to recover from them.
 
 **`{"fallback":"headless"}` returned instead of a `call_dir`**
 - cmux is up but the `cmux-cli` plugin isn't installed, so the side-by-side opener (`open-side-surface.sh`) couldn't be resolved. This is expected, not an error.
-- Recovery: re-issue the same call through the headless transport (`headless-call-async.sh` / `headless-call.sh`). The dial SKILL's Step 5 does this automatically. To force side-by-side, install the `cmux-cli` plugin; or pass `--detached` / `--window` (neither needs `cmux-cli`).
+- Recovery: none needed by hand — `dial.sh` re-fires the call through the headless transport itself and records `cmux-cli-missing→headless` in `.fallbacks`. To force side-by-side, install the `cmux-cli` plugin; or pass `--detached` / `--window` (neither needs `cmux-cli`).
 
 **`open-side-surface failed` / `open-window-surface failed` in error.txt (opener resolved but errored)**
 - The opener ran but couldn't create the surface — usually `cmux identify` failed (socket unreachable) or `cmux tree` returned no panes.
@@ -91,6 +102,73 @@ Common failure modes and how to recover from them.
 **`--window <name>` keeps creating new windows**
 - cmux windows are not directly name-addressable, so Hotline identifies a "named window" by a workspace titled `<name>` inside it. If that titled workspace was renamed or closed, the next `--window <name>` won't find it and will create a fresh window.
 - Recovery: pass the explicit `window:<n>` ref instead of a name when you need to target a specific existing window, or accept that the name reseeds a new window + titled workspace.
+
+### Surface reuse (follow-ups typed into a live REPL)
+
+`dial.sh` routes a follow-up into the surface the callee's session already
+occupies, and only opens a fresh surface when that is refused — which it records
+as `surface-reuse→fresh(<reason>)` in `.fallbacks`. `cmux-reuse-surface.sh`'s own
+header documents the refusal conditions; what follows is what to do when a
+follow-up *appears* to vanish.
+
+**A newline bundled into the payload does not submit.** The target is a claude
+TUI/Ink REPL, which reads through bracketed paste, so a trailing `\n` in a
+`cmux send` lands as a **literal line break in the input box** — stored as CR
+(`0x0D`) — and no submit ever registers. It does **not** submit early. That is
+why `cmux-reuse-surface.sh` sends the text and then `cmux send-key Enter` as two
+separate steps with a settle between them, verified rather than inferred: a
+~124 B two-line payload with a trailing `\n` produced zero user events for 10 s,
+and a separate `send-key Enter` then submitted it complete (claude-plugins-5zhp /
+-8bfd, on claude 2.1.221 / cmux 0.64.20).
+
+**Only single-line messages take the reuse path.** Multi-line ones go to the
+fresh-surface path, which hands the prompt to a launch script as an argument, so
+no keystroke simulation is involved at all. There is **no size threshold** behind
+that rule — 12 controlled sends from 507 B to 16 KB, including 66-line payloads,
+each landed as exactly one turn. What goes wrong is sporadic and unexplained:
+
+- the post-paste settle is a fixed `sleep 0.2`, verified sufficient for a
+  one-line paste and never for a long multi-line one; an Enter landing mid-paste
+  submits *half* a message as a real turn, which is harder to notice than one
+  that plainly never submitted;
+- a send has been observed **fragmenting into 3–7 separately submitted turns** in
+  real traffic, while refusing to reproduce across those 12 controlled trials;
+- one of the 12 **silently lost 2,538 contiguous middle bytes** from a 3,045 B
+  payload — one user event, no error, the bytes provably absent from the whole
+  transcript (a separate ~16 KB single-line trial lost 3,066).
+
+None of that is size-gated and the trigger is unknown, so treat a successful send
+as "bytes reached the PTY" and nothing more. The proof of delivery is the call's
+nonce turning up in the callee's transcript or on its screen — which is exactly
+what `wait-for-response.sh` correlates on.
+
+**One content hazard is real:** a payload containing the literal two characters
+`\n`, `\r` or `\t`. `cmux send` interprets those sequences in its argument and
+there is **no backslash escape** to opt out with — `\\` arrives as two
+backslashes, which makes doubling worse rather than better. `cmux-reuse-surface.sh`
+defends by splitting the payload just after each backslash that precedes
+`n`/`r`/`t` and sending the pieces back to back; each send appends at the cursor,
+so the box accumulates the exact bytes.
+
+**A follow-up that seems to have vanished** (no reply, no new user turn in the
+callee's transcript) is a transport question, not a quoting one —
+for plain text, escaping of the message body is never the cause.
+Two things that are **not** proof of a failed send:
+
+- **A missing user record.** A message typed into a busy REPL is enqueued, and
+  claude may deliver it *inside* the running turn at its next tool boundary as a
+  `queued_command` attachment — which writes no user record at all, even though
+  the callee reads and answers it. (`transcript-extract.sh` counts that, the
+  receiver's own `STATUS:` line, and the `enqueue` record as delivery evidence
+  for exactly this reason.)
+- **Text visible in the input box.** A queued message is drawn there while it
+  waits, alongside `Press up to edit queued messages`.
+
+So run `cmux read-screen --surface "$SURFACE_REF"` and read the *whole* screen:
+text in the box with a **quiet** REPL and no queued-message line is genuinely
+unsubmitted — send `send-key Enter`, and do **not** re-send the text (it
+appends). Text in the box with a live spinner is a queued message that already
+landed; pressing Enter there risks a double submit.
 
 ## Identity Cache Issues
 
