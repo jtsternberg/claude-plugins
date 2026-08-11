@@ -1,0 +1,5 @@
+interface:
+  display_name: Create Subagent
+  short_description: Create a Claude subagent with best practices.
+policy:
+  allow_implicit_invocation: false

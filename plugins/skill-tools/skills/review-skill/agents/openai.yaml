@@ -1,0 +1,5 @@
+interface:
+  display_name: Review Skill
+  short_description: Review a skill against best practices.
+policy:
+  allow_implicit_invocation: false

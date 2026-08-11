@@ -1,0 +1,5 @@
+interface:
+  display_name: Blog Image Prompts
+  short_description: Generate AI image prompts and placement points for a blog post.
+policy:
+  allow_implicit_invocation: false

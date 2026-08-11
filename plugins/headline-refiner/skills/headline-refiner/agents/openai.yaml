@@ -1,0 +1,5 @@
+interface:
+  display_name: Headline Refiner
+  short_description: Refine headlines using the 5-Part Headline Framework.
+policy:
+  allow_implicit_invocation: false

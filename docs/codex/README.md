@@ -17,6 +17,7 @@ the evidence behind it.
 | [Compatibility and install guide](../compatibility.md) | Marketplace setup, invocation, updates, and the 28-plugin support matrix | Users and plugin authors |
 | [Standalone skill installs](standalone-skills.md) | Discovery locations, one-skill installer, updates, and uninstall | Codex users and maintainers |
 | [Release checklist](../release.md) | Version, publish, refresh, and cache-verification procedure | Maintainers |
+| [Explicit-only invocation policy](explicit-only-invocation-policy.md) | Claude/Codex explicit-only policy mirror, risk inventory, and live Codex probe | Maintainers |
 | Evidence | `compat-matrix.md`, `*-under-codex.md`, `*-semantics.md`, `install-from-git.md`, and `path-resolution-evidence.md` | Maintainers rechecking behavior |
 | Decisions | `adr-*.md`, `path-resolution-options.md`, and `rename-viability.md` | Maintainers reviewing trade-offs |
 | Measurements | `skill-description-budget.md`, `skill-description-rewrites.md`, and `proposed-descriptions.json` | Maintainers changing discovery metadata |

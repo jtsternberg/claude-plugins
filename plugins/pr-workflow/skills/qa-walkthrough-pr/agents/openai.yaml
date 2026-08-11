@@ -1,0 +1,5 @@
+interface:
+  display_name: QA Walkthrough PR
+  short_description: Guide manual QA for a PR or branch.
+policy:
+  allow_implicit_invocation: false

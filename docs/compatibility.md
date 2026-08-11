@@ -93,6 +93,9 @@ is deliberately not repeated here.
   repository has migrated its reusable command workflows to skills.
 - Codex runs plugin hooks only after the user trusts them. Hook path resolution
   and skill-body shell path resolution are separate contracts.
+- Explicit-only skills must declare both harness policies: Claude Code reads
+  `disable-model-invocation: true` in `SKILL.md`, while Codex reads
+  `policy.allow_implicit_invocation: false` in `agents/openai.yaml`.
 - Skill-body commands must not assume Claude path variables exist in Codex.
   The repository's dual-harness authoring pattern keeps Claude's literal path
   token and gives Codex adjacent path-substitution instructions.

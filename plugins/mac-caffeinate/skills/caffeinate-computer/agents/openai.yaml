@@ -1,0 +1,5 @@
+interface:
+  display_name: Caffeinate Computer
+  short_description: Keep the Mac awake during long-running work.
+policy:
+  allow_implicit_invocation: false

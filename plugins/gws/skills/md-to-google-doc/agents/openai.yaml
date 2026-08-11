@@ -1,0 +1,5 @@
+interface:
+  display_name: Markdown to Google Doc
+  short_description: Upload or sync local markdown to Google Docs.
+policy:
+  allow_implicit_invocation: false

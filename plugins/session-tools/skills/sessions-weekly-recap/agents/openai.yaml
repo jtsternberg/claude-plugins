@@ -1,0 +1,5 @@
+interface:
+  display_name: Sessions Weekly Recap
+  short_description: Generate recap notes from session transcripts.
+policy:
+  allow_implicit_invocation: false
