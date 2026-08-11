@@ -6,7 +6,7 @@
 #    in the handoff it writes later.
 # 2. Scans the working directory for pending handoffs — HANDOFF*.md files and,
 #    when beads is available, open issues titled "pending-handoff:" — and prints one
-#    compact line per finding, suggesting /handoff:pickup-handoff <identifier>.
+#    compact line per finding, suggesting the harness-specific pickup command.
 #    Each finding line carries its own identifier (bd id, or filename) so pickup
 #    can be invoked with it and resolve directly instead of re-searching.
 #
@@ -20,6 +20,20 @@ if [ ! -t 0 ]; then
 fi
 
 PY=$(command -v python3 || command -v python || true)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+COMMAND_GENERATOR="$SCRIPT_DIR/../../skills/handoff/scripts/generate-command.sh"
+
+render_command() {
+  action=$1
+  argument=$2
+  # Both markers (or neither) would make the command syntax guesswork. Leave
+  # an explicit neutral instruction rather than emitting the wrong client form.
+  if { [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -n "${CODEX_THREAD_ID:-}" ]; } || \
+    { [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -z "${CODEX_THREAD_ID:-}" ]; }; then
+    return 1
+  fi
+  "$COMMAND_GENERATOR" --action "$action" "$argument" 2>/dev/null
+}
 
 json_get() {
   # json_get <key> — best-effort string value extraction from $INPUT.
@@ -141,14 +155,21 @@ if [ -n "$findings" ]; then
   printf 'Pending handoff(s) found in %s:\n' "$CWD"
   printf '%s' "$findings"
   [ -n "$maybes" ] && printf 'Also open, titled like work ABOUT handoffs rather than a handoff itself:\n%s' "$maybes"
-  printf 'To resume one, run /handoff:pickup-handoff <id-or-filename> — pass the identifier\n'
-  printf 'from the list above so pickup resolves it directly instead of re-searching.\n'
+  if pickup_command=$(render_command pickup-handoff '<id-or-filename>'); then
+    printf 'To resume one, run %s — pass the identifier from the list above so pickup resolves it directly instead of re-searching.\n' "$pickup_command"
+  else
+    printf "%s\n" "To resume one, invoke the installed handoff pickup skill with <id-or-filename> using this client's skill syntax; the hook could not determine whether this is Claude Code or Codex."
+  fi
 elif [ -n "$maybes" ]; then
   # Nothing carries the `pending-handoff:` prefix, so don't claim one — but
   # don't stay silent either, in case one was titled by hand without the prefix.
   printf 'No handoff matched the `pending-handoff:` prefix in %s, but these are open:\n' "$CWD"
   printf '%s' "$maybes"
-  printf 'If one of those IS the handoff, resume it with /handoff:pickup-handoff <id>.\n'
+  if pickup_command=$(render_command pickup-handoff '<id>'); then
+    printf 'If one of those IS the handoff, resume it with %s.\n' "$pickup_command"
+  else
+    printf "%s\n" "If one of those IS the handoff, invoke the installed handoff pickup skill with <id> using this client's skill syntax; the hook could not determine whether this is Claude Code or Codex."
+  fi
 fi
 
 exit 0

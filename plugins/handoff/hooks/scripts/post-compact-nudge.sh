@@ -3,7 +3,8 @@
 #
 # Runs right after a context compaction. Refreshes the session-info cache
 # (the transcript path can change across resumes) and prints a one-line nudge
-# that /handoff:handoff can bank fresh context while it's still fresh.
+# that the harness-specific handoff command can bank fresh context while it is
+# still fresh.
 #
 # Never fails: every error path degrades silently and the script exits 0.
 
@@ -14,6 +15,16 @@ if [ ! -t 0 ]; then
 fi
 
 PY=$(command -v python3 || command -v python || true)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+COMMAND_GENERATOR="$SCRIPT_DIR/../../skills/handoff/scripts/generate-command.sh"
+
+if { [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -n "${CODEX_THREAD_ID:-}" ]; } || \
+  { [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -z "${CODEX_THREAD_ID:-}" ]; }; then
+  handoff_command="the installed handoff skill using this client's skill syntax"
+else
+  handoff_command=$("$COMMAND_GENERATOR" --action handoff 2>/dev/null || true)
+  [ -n "$handoff_command" ] || handoff_command="the installed handoff skill using this client's skill syntax"
+fi
 
 json_get() {
   # json_get <key> — best-effort string value extraction from $INPUT.
@@ -61,6 +72,6 @@ if [ -n "$AGENT_PID" ] && [ -n "$SESSION_ID" ]; then
     > "/tmp/claude-handoff/${AGENT_PID}.json" 2>/dev/null || true
 fi
 
-echo "Context was just compacted. If mid-task, running /handoff:handoff now will bank fresh context into a handoff before details fade."
+printf 'Context was just compacted. If mid-task, running %s now will bank fresh context into a handoff before details fade.\n' "$handoff_command"
 
 exit 0
