@@ -1,0 +1,5 @@
+interface:
+  display_name: Hotline Whoami
+  short_description: Report this workspace's dirmap slug (caller ID)
+policy:
+  allow_implicit_invocation: false

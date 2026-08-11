@@ -1,0 +1,5 @@
+interface:
+  display_name: Hotline Ringing
+  short_description: Handle an incoming hotline call (receiver handshake)
+policy:
+  allow_implicit_invocation: false
