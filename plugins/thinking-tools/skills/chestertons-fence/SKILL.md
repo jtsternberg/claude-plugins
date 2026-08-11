@@ -40,6 +40,9 @@ Investigate why the fence was built. Use every available source:
 - **Related issues / PRs** — Search for referenced ticket numbers, keywords, or the function/file name in issue trackers
 - **Grep for usage** — Is it called from unexpected places? Is it referenced in configs, cron jobs, or external systems?
 - **Tests** — Do any tests exercise this code path? What do they assert? What would break?
+- **Past conversations (MemPalace, when installed)** — A fence built during an agent session is often explained in that session and nowhere else. The commit records *what* changed; the conversation records *why*.
+
+MemPalace is optional, so gate on it: `command -v mempalace >/dev/null 2>&1 && mempalace search "<the file, function, config key, or error it guards against>"`. If the command isn't there, skip this source without comment and rely on the rest. When it is, narrow a noisy result with `--wing`/`--room` (`mempalace status` lists what exists; `--wing claude_history` restricts the search to past Claude Code conversations). Quote what you find, and say plainly when recall comes back empty or weak — a thin hit is not a rationale.
 
 ### Step 2b: Ask the Fence-Builder (Optional)
 
@@ -50,7 +53,7 @@ If the investigation leaves gaps — unclear commit messages, missing context, a
 - "This config value looks arbitrary. Is there a reason it's set to 30 rather than the default?"
 - "I found three places this is referenced but none of them seem active. Has this system been decommissioned?"
 
-Skip this step when the investigation in Step 2 produced a clear, confident answer. Use it when the picture is incomplete — half a story is more dangerous than no story at all.
+Exhaust the searchable sources first — including the MemPalace search above, which may already hold the answer in the user's own words — then ask about what's left. Skip this step when the investigation in Step 2 produced a clear, confident answer. Use it when the picture is incomplete — half a story is more dangerous than no story at all.
 
 ### Step 3: Assess the Risk
 
