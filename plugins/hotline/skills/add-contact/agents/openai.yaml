@@ -1,0 +1,5 @@
+interface:
+  display_name: Hotline Add Contact
+  short_description: Register this workspace in dirmap so hotline-dial can reach it
+policy:
+  allow_implicit_invocation: false

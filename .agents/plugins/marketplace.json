@@ -19,6 +19,14 @@
         "path": "./plugins/pr-workflow"
       },
       "category": "Coding"
+    },
+    {
+      "name": "hotline",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hotline"
+      },
+      "category": "Coding"
     }
   ]
 }
