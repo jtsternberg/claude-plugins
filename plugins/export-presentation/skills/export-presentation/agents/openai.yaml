@@ -1,0 +1,5 @@
+interface:
+  display_name: Export Presentation
+  short_description: Export HTML slide presentations to PDF or PNG screenshots.
+policy:
+  allow_implicit_invocation: false

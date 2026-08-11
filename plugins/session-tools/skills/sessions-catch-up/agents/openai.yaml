@@ -1,0 +1,5 @@
+interface:
+  display_name: Sessions Catch Up
+  short_description: Brief another session's transcript without touching it.
+policy:
+  allow_implicit_invocation: false

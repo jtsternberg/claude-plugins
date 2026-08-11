@@ -1,0 +1,5 @@
+interface:
+  display_name: Review Slash Command
+  short_description: Review a slash command for improvement opportunities.
+policy:
+  allow_implicit_invocation: false

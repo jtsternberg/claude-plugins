@@ -1,0 +1,5 @@
+interface:
+  display_name: Create Slides Presentation
+  short_description: Create an animated HTML slide deck.
+policy:
+  allow_implicit_invocation: false

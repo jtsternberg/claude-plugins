@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { collectExplicitInvocationPolicy, policyErrors } from '../../../scripts/audit-explicit-invocation-policy.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const PLUGINS = path.join(REPO, 'plugins');
@@ -264,4 +265,11 @@ test('invocation-policy guard rejects Claude/Codex disagreement', () => {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 	assert.deepEqual(invocationPolicyErrors(PLUGINS), []);
+});
+
+test('explicit-only inventory has mirrored Codex policy and risk classification', () => {
+	const report = collectExplicitInvocationPolicy(REPO);
+	assert.equal(report.explicitOnly.length, 33);
+	assert.equal(report.codexExplicitOnly.length, 33);
+	assert.deepEqual(policyErrors(report), []);
 });

@@ -1,0 +1,5 @@
+interface:
+  display_name: Create Slash Command
+  short_description: Create a Claude command with proper structure.
+policy:
+  allow_implicit_invocation: false

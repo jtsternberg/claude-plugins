@@ -1,0 +1,5 @@
+interface:
+  display_name: Watch PR Then Action
+  short_description: Poll a GitHub PR, then run a follow-up action.
+policy:
+  allow_implicit_invocation: false

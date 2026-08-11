@@ -1,0 +1,5 @@
+interface:
+  display_name: Paperclip
+  short_description: Operate a local Paperclip instance via the paperclipai CLI.
+policy:
+  allow_implicit_invocation: false

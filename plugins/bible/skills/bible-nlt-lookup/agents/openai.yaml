@@ -1,0 +1,5 @@
+interface:
+  display_name: Bible NLT Lookup
+  short_description: Look up Bible verses, passages, or references via the NLT API.
+policy:
+  allow_implicit_invocation: false

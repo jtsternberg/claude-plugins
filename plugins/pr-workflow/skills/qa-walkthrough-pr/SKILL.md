@@ -10,9 +10,8 @@ effort: high
 
 # QA Walkthrough
 
-<!-- Note: disable-model-invocation is intentionally NOT set. While this skill creates beads
-     epics (a side effect), users expect "QA my changes" to trigger it automatically.
-     Reviewed 2026-04-14 against official skills docs. -->
+<!-- Note: this skill is explicit-only in both harnesses. It creates beads epics and
+     should run only when the user names the workflow directly. -->
 
 Guided manual QA walkthrough that generates a test plan from a PR, branch diff, or description, builds a structured beads task list (`bd create`) and epic, and walks the user through each test interactively.
 

@@ -1,0 +1,5 @@
+interface:
+  display_name: Sessions Fork
+  short_description: Prime this session with transferable context.
+policy:
+  allow_implicit_invocation: false

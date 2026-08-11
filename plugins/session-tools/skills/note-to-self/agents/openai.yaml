@@ -1,0 +1,5 @@
+interface:
+  display_name: Note to Self
+  short_description: Leave a durable conversation breadcrumb.
+policy:
+  allow_implicit_invocation: false

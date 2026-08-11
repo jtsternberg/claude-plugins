@@ -1,0 +1,5 @@
+interface:
+  display_name: Google Doc to Markdown
+  short_description: Download a Google Doc as local markdown.
+policy:
+  allow_implicit_invocation: false

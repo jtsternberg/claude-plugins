@@ -1,0 +1,5 @@
+interface:
+  display_name: Create Git Tree
+  short_description: Create git worktrees for parallel branch work.
+policy:
+  allow_implicit_invocation: false
