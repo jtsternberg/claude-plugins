@@ -36,7 +36,7 @@ Key areas to emphasize:
 6. **Invocation control**: Does `disable-model-invocation` / `user-invocable` match the skill's purpose? Side-effect workflows should be user-only. Background knowledge should be model-only.
    - **`paths:` gotcha**: The docs describe `paths:` as limiting *auto-activation*, but it also gates `/slash-command` registry lookup. If the skill has `disable-model-invocation: true` (user-invocable only) and the user's `cwd` doesn't match the glob, the slash command silently disappears from the registry — it can't be invoked at all. Never recommend `paths:` for `disable-model-invocation: true` skills. Only suggest it for purely model-invocable skills where narrowing auto-trigger to specific file contexts is the goal.
 7. **Tool permissions**: Are `allowed-tools` entries scoped with patterns (e.g., `Bash(git *)`) or overly broad (bare `Bash`)?
-8. **String substitutions**: Is the skill using ARGUMENTS, CLAUDE_SKILL_DIR, CLAUDE_SESSION_ID variables where they'd add value?
+8. **String substitutions**: Is the skill using ARGUMENTS, CLAUDE_SKILL_DIR, CLAUDE_PLUGIN_ROOT, CLAUDE_CODE_SESSION_ID variables where they'd add value? (CLAUDE_CODE_SESSION_ID is exported into every Bash subprocess by Claude Code >= 2.1.132 and equals the resumable session/transcript ID; it is Claude-only — Codex sets CODEX_THREAD_ID instead.)
 9. **Subagent execution**: Does the skill use `context: fork` when it shouldn't (needs conversation context or interactive follow-up), or skip it when it should (self-contained task that doesn't need history)? `context: fork` always forks — it's a directive, not a hint. The skill content becomes the subagent's prompt with no conversation history.
 
 ## Step 2: Understand Intent, Then Evaluate
