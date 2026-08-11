@@ -12,9 +12,9 @@ launches a session and works from any harness.
 Claude Code ships a native way for one session to message another
 (`ListAgents` + `SendMessage`, Claude Code ≥ 2.1.224, macOS/Linux). When the target
 is a **live** session, this is dramatically simpler and more robust than hotline's
-launch-and-scrape transport: no workspace resolution, no session fingerprinting, no
-cmux surface, no `read-screen` polling. You just address the running session by name
-and send it text.
+launch-and-scrape transport: no workspace resolution, no caller-identity resolution,
+no cmux surface, no `read-screen` polling. You just address the running session by
+name and send it text.
 
 ## When this path applies (all must hold)
 
@@ -30,12 +30,11 @@ and send it text.
    asking it something it can answer from where it already is — those fit. "Draft the
    about page and report back" does not; that wants a launched, observable callee.
 3. **You are not dialing by a raw session ID.** A session ID is hotline's
-   fork-a-transcript path (SKILL.md Step 4), not a `ListAgents` name. Keep those on the
+   fork-a-transcript path (`dial.sh --resume`), not a `ListAgents` name. Keep those on the
    normal flow.
 
 **If this isn't the shape** — a cold/unknown target, a work order, a conference call, or
-a session-ID dial — **return to SKILL.md's Prerequisites (Know Thyself) and dial
-normally.** The `ListAgents` check in step 1 below is the hard backstop: if nothing live
+a session-ID dial — **return to SKILL.md's "The one command" and dial normally.** The `ListAgents` check in step 1 below is the hard backstop: if nothing live
 matches, you fall back there too, so it's fine to err toward reading on.
 
 ## The algorithm
@@ -57,8 +56,8 @@ folder-derived slugs (e.g. `myapp-3f`) unless the user set one with `/rename`.
   **ask** with `AskUserQuestion`. Put the candidates (or the native-vs-launch choice)
   as options; don't guess when the wrong pick messages the wrong session.
 - **No live match** → this wasn't a native case after all. Say so briefly and fall
-  back to the normal launch flow — **SKILL.md's Prerequisites (Know Thyself), then
-  Step 1**. Do not invent a name.
+  back to the normal launch flow — **SKILL.md's "The one command"**. Do not invent
+  a name.
 
 ### 3. Send
 
@@ -119,4 +118,4 @@ so it lands in a surface and on the switchboard.
 - **Feature can be off.** Requires Claude Code ≥ 2.1.224 on macOS/Linux and is disabled
   by `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` / `DISABLE_TELEMETRY` / `DO_NOT_TRACK`
   and on some managed platforms (Bedrock, Vertex, Foundry). If `ListAgents` errors or
-  isn't available, fall back to SKILL.md Step 1.
+  isn't available, fall back to SKILL.md's "The one command".

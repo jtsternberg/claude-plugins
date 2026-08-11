@@ -102,7 +102,10 @@ loop only as an explicit fallback tier while confidence builds.
    dequeue? Submit-deadline may need to also accept a queue-operation with the nonce.
 2. **`--resume` / `--fork-session` shape**: resume appends to the same id
    (expected); fork writes a new id we must discover (session-discover/newest-file
-   heuristic should cover — verify).
+   heuristic should cover — verify). Note (2026-08-11): `CLAUDE_CODE_SESSION_ID`
+   does not solve this one. It is only visible *inside* a session's own subprocesses,
+   and here the caller needs the id of a `claude` process it launched — so discovery
+   from outside stays necessary.
 3. **Multi-message turns**: confirm one visual "response" can span several
    `assistant` events before `end_turn`; concatenating text blocks reproduces the
    screen. Filter subagent/sidechain events (`isSidechain`?).

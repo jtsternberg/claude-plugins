@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # session-fingerprint.sh
 #
-# Discovers the agent's own Claude Code session ID via a fingerprint method.
+# LEGACY FALLBACK. Discovers the agent's own Claude Code session ID via a
+# fingerprint method. Only needed on Claude Code < 2.1.132 (or when
+# $CLAUDE_CODE_SESSION_ID has been stripped from the environment) — current
+# Claude Code exports the session ID natively and session-init.sh uses that
+# before ever calling this script.
 #
 # Usage: session-fingerprint.sh
 #
@@ -18,6 +22,9 @@ set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: session-fingerprint.sh"
+  echo ""
+  echo "Legacy fallback for Claude Code < 2.1.132 — current clients resolve"
+  echo "identity from \$CLAUDE_CODE_SESSION_ID via session-init.sh instead."
   echo ""
   echo "Exit 0: cache hit — session ID written to stdout."
   echo "Exit 1: cache miss — fingerprint string written to stderr (SESSION_FINGERPRINT_<uuid>)."

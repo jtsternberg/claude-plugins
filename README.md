@@ -106,7 +106,7 @@ Exports HTML slide presentations to PDF or PNG screenshots using browser automat
 **Install:** `claude plugin install export-presentation@jtsternberg`
 
 #### 📞 [hotline](plugins/hotline)
-Cross-workspace communication for agent sessions. Claude Code and Codex can place calls; the current launch transport starts Claude Code receivers. Also ships a [standalone session ID discovery utility](plugins/hotline/SESSION-ID-DISCOVERY.md).
+Cross-workspace communication for agent sessions — dial another workspace to ask questions, delegate work, or collaborate. Claude Code and Codex can place calls; the current launch transport starts Claude Code receivers. Caller identity comes from Claude Code's native `CLAUDE_CODE_SESSION_ID` (or Codex's thread ID), with a [bundled fingerprint fallback](plugins/hotline/SESSION-ID-DISCOVERY.md) for older clients.
 
 **Install:** `claude plugin install hotline@jtsternberg` or `codex plugin add hotline@jtsternberg`
 

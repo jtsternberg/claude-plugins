@@ -1,19 +1,34 @@
 # Hotline From Codex (non-Claude callers)
 
-Hotline's caller-identity discovery was built for Claude Code, which has no clean
-self-ID API — so it plants a fingerprint in the transcript and greps
-`~/.claude/projects/**/<id>.jsonl` to recover the session ID. A Codex session has
-no `claude` process in its ancestry, so that machinery can't run. This file covers
-how a **Codex-run** agent (or any non-Claude caller) gets a stable identity so the
-rest of the dial flow works unchanged.
+Hotline reads the caller's identity out of whatever the harness exports. A Claude
+Code caller has `$CLAUDE_CODE_SESSION_ID`; a Codex caller has `$CODEX_THREAD_ID`.
+Both are the same shape of answer to the same question, both resolve in a single
+call, and Codex needs nothing special beyond being one rung down the chain. This
+file covers what a **Codex-run** agent (or any non-Claude caller) needs to know so
+the rest of the dial flow works unchanged.
 
 You only need this file if you're running under Codex (or another non-Claude
 harness). Claude callers: ignore it — the main `SKILL.md` flow is for you.
 
+## The precedence chain
+
+`session-init.sh` resolves in this order and returns on the first hit:
+
+| Rung | Source | `caller_kind` |
+|---|---|---|
+| 1 | `$HOTLINE_CALLER_SESSION_ID` — explicit override | `override` |
+| 2 | `$CLAUDE_CODE_SESSION_ID`, validated as a UUID (Claude Code >= 2.1.132) | `native` |
+| 3 | `$CODEX_THREAD_ID` | `codex` |
+| 4 | Legacy fingerprint + transcript grep — two separate tool calls | — |
+
+Under Codex, rungs 2 and 4 can't fire: there's no `$CLAUDE_CODE_SESSION_ID`, and
+no `claude` process in the ancestry for the fingerprint path to hang off. Rung 3
+is your normal path, and it's a one-call resolve just like rung 2 is for Claude.
+
 ## The short version
 
-`session-init.sh` already handles Codex. When it can't find a `claude` process it
-checks `$CODEX_THREAD_ID` and, if set, returns:
+`session-init.sh` already handles Codex. Finding `$CODEX_THREAD_ID` set is itself
+the "this is Codex" signal, and it returns:
 
 ```json
 { "status": "cached", "session_id": "<CODEX_THREAD_ID>", "caller_kind": "codex" }
@@ -29,6 +44,11 @@ Verified against codex-cli 0.142.5:
 
 - **It's always set.** Every shell Codex spawns gets `$CODEX_THREAD_ID`, and it *is*
   the current session/thread ID. No fingerprint, no transcript grep.
+- **It's the same contract as Claude's native variable.** Claude Code exports
+  `$CLAUDE_CODE_SESSION_ID` into every Bash subprocess and it equals the resumable
+  session ID; `$CODEX_THREAD_ID` does exactly that for a Codex thread. Identity is
+  symmetric between the two harnesses — the one asymmetry is *resume transport*,
+  not identity (see the caveat at the bottom).
 - **It's stable across resume.** `codex exec resume <id>` re-enters the same thread
   and the shell sees the same value — so an outgoing-call cache keyed by this ID
   survives a resume.
@@ -51,7 +71,7 @@ HOTLINE_CALLER_SESSION_ID=<stable-id> bash "$HOTLINE_SCRIPTS/session-init.sh"
 ```
 
 This takes precedence over everything — the override short-circuits before the
-fingerprint/Codex logic runs.
+native, Codex and legacy-fingerprint rungs run.
 
 ## Fallback (defensive only — not a normal path)
 

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # session-discover.sh
 #
-# Finds the Claude Code session ID by grepping transcript files for a planted fingerprint.
+# LEGACY FALLBACK. Finds the Claude Code session ID by grepping transcript
+# files for a planted fingerprint. Only needed on Claude Code < 2.1.132 (or
+# when $CLAUDE_CODE_SESSION_ID has been stripped from the environment) —
+# current Claude Code exports the session ID natively and session-init.sh
+# uses that before ever reaching the fingerprint path.
 #
 # Usage: session-discover.sh <fingerprint> [--json]
 #
