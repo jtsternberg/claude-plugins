@@ -7,7 +7,7 @@
 
 A curated collection of skills, hooks, and automation for Claude Code and
 Codex. The two harnesses use different catalogs in this repository, so check
-the [support matrix](docs/codex/compatibility.md#plugin-support-matrix) before
+the [support matrix](docs/compatibility.md#plugin-support-matrix) before
 installing.
 
 ---
@@ -49,11 +49,15 @@ installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
 To install one self-contained repository skill instead of a whole plugin, see
 [standalone Codex skills](docs/codex/standalone-skills.md). For commands,
 updates, catalog scope, and all 28 plugin names, see the
-[Codex compatibility guide](docs/codex/compatibility.md).
+[compatibility guide](docs/compatibility.md).
 
 ---
 
-## Plugins
+## Plugin Highlights
+
+These are selected plugins and workflows. The
+[support matrix](docs/compatibility.md#plugin-support-matrix) is the complete
+28-name inventory and the authority for harness availability.
 
 ### Skills
 
@@ -283,10 +287,10 @@ plugins/
 ```
 
 For the current install commands, invocation conventions, and per-plugin
-support boundary, see the [Codex compatibility guide](docs/codex/compatibility.md).
+support boundary, see the [compatibility guide](docs/compatibility.md).
 Detailed probe logs and historical decisions are kept separately in the
 [Codex research archive](docs/codex/README.md). Maintainers shipping a plugin
-change should use the [dual-harness release guide](docs/codex/release.md).
+change should use the [dual-harness release guide](docs/release.md).
 
 ---
 
@@ -299,7 +303,7 @@ Contributions are welcome! To add a new plugin:
 3. Add its manifest and reusable workflows under `skills/<name>/SKILL.md`
 4. Register it in the catalog for each harness it supports
 5. Validate every skill against the repository's dual-harness contract
-6. Update this README and the [support matrix](docs/codex/compatibility.md#plugin-support-matrix)
+6. Update this README and the [support matrix](docs/compatibility.md#plugin-support-matrix)
 7. Submit a pull request
 
 ---

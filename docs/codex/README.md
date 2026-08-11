@@ -6,17 +6,17 @@ and superseded options are evidence—not a promise that every historical
 observation still describes the current Codex release.
 
 For the short, maintained, user-facing summary, see the
-[Codex compatibility guide](compatibility.md). The guide is the right link for
-users and plugin authors; this directory is the right place to preserve the
-evidence behind it.
+[dual-harness compatibility guide](../compatibility.md). The guide is the right
+link for users and plugin authors; this directory is the right place to preserve
+the evidence behind it.
 
 ## How to read this directory
 
 | Area | Contents | Audience |
 | --- | --- | --- |
-| [Compatibility and install guide](compatibility.md) | Marketplace setup, invocation, updates, and the 28-plugin support matrix | Users and plugin authors |
+| [Compatibility and install guide](../compatibility.md) | Marketplace setup, invocation, updates, and the 28-plugin support matrix | Users and plugin authors |
 | [Standalone skill installs](standalone-skills.md) | Discovery locations, one-skill installer, updates, and uninstall | Codex users and maintainers |
-| [Release checklist](release.md) | Version, publish, refresh, and cache-verification procedure | Maintainers |
+| [Release checklist](../release.md) | Version, publish, refresh, and cache-verification procedure | Maintainers |
 | Evidence | `compat-matrix.md`, `*-under-codex.md`, `*-semantics.md`, `install-from-git.md`, and `path-resolution-evidence.md` | Maintainers rechecking behavior |
 | Decisions | `adr-*.md`, `path-resolution-options.md`, and `rename-viability.md` | Maintainers reviewing trade-offs |
 | Measurements | `skill-description-budget.md`, `skill-description-rewrites.md`, and `proposed-descriptions.json` | Maintainers changing discovery metadata |
@@ -28,10 +28,11 @@ references, internal decision language, or scratch-probe detail.
 
 ## Maintained guides and historical evidence
 
-`compatibility.md` and `standalone-skills.md` are the user-facing guides.
-`release.md` is the maintainer release runbook. The other files preserve dated
-research and should not be treated as current setup instructions unless the
-maintained guide links to a specific finding.
+[The compatibility guide](../compatibility.md) and
+[standalone-skills.md](standalone-skills.md) are the user-facing guides. The
+[release guide](../release.md) is the maintainer runbook. The other files
+preserve dated research and should not be treated as current setup instructions
+unless the maintained guide links to a specific finding.
 
 ## Version-sensitive evidence
 
@@ -67,8 +68,9 @@ reproduce a compatibility decision.
 
 ## Public-safety boundary
 
-Only `compatibility.md` and `standalone-skills.md` are intended as public-facing
-user guides. `release.md` is public maintainer documentation. The remaining
-files are research records; before linking one from user documentation, remove
-internal process references and confirm that paths, issue identifiers, and
-scratch details are appropriate to publish.
+Only the [compatibility guide](../compatibility.md) and
+[standalone-skills.md](standalone-skills.md) are intended as public-facing user
+guides. The [release guide](../release.md) is public maintainer documentation.
+The remaining files are research records; before linking one from user
+documentation, remove internal process references and confirm that paths, issue
+identifiers, and scratch details are appropriate to publish.

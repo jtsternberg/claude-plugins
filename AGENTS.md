@@ -144,7 +144,7 @@ When a plugin change (skills, commands, hooks, metadata) is ready to ship, bump 
 
 Bump **once, at the end of the work session**, for the whole change-set — not on every iteration within a session. Iterate and commit freely while you work; do the single version bump when the change is done and about to be released. One release, one bump.
 
-Manually invoke the `publish-release` skill when a release should be pushed. It is the manual entry point for shipping a plugin change to installers — version bump, validation, merge, and marketplace refresh across both harnesses — and points to the detailed runbook at [`docs/codex/release.md`](docs/codex/release.md).
+Manually invoke the `publish-release` skill when a release should be pushed. It is the manual entry point for shipping a plugin change to installers — version bump, validation, merge, and marketplace refresh across both harnesses — and points to the detailed runbook at [`docs/release.md`](docs/release.md).
 
 ## Keeping Third-Party Docs In Sync
 

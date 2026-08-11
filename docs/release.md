@@ -1,4 +1,4 @@
-# Release plugins to Claude Code and Codex
+# Release repository plugins to Claude Code and Codex
 
 Plugin versions are release identifiers and Codex cache keys. Every plugin
 change must bump the version in that plugin's manifest. A Codex-visible change
