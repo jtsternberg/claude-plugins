@@ -2,35 +2,46 @@
 # =============================================================================
 # Regression tests for cmux-reuse-surface.sh. Three behaviors are pinned here:
 #
-#   1. TWO-STEP SUBMIT — the follow-up is typed as literal text via `cmux send`,
-#      then submitted via `cmux send-key Enter`. Bundling the newline into the
-#      `send` does not submit against a bracketed-paste TUI REPL
-#      (claude-plugins-5zhp).
+#   1. ONE PASTE, WHOLE PAYLOAD — the follow-up is delivered as a single
+#      `terminal.paste` over cmux's control socket, carrying the entire payload
+#      (with its leading [CALL_ID:] line) in ONE request line. There is no
+#      chunking, no size threshold, no sidecar file, and no separate submit key.
 #
-#   2. LITERAL PAYLOAD DELIVERY (claude-plugins-nofy) — `cmux send` interprets
-#      the two-character sequences \n, \r and \t in its text argument and has NO
-#      backslash escape (verified live on cmux 0.64.20: `\\` arrives as TWO
-#      backslashes, `\\n` as one backslash + Enter). So a payload containing
-#      those sequences must be SPLIT across several `send` calls such that no
-#      single argument contains one, and the concatenation must reproduce the
-#      payload byte for byte.
+#   2. NOTHING RIDES ARGV — the payload reaches the socket helper as a file PATH.
+#      `cmux rpc` is argv-only, which is why this path exists at all: a work order
+#      in an argv is readable by every local user through `ps`
+#      (claude-plugins-86ka). The python3 shim below logs the helper's argv, so a
+#      payload leaking back into it is a test failure.
 #
-#   3. CONDITIONAL INPUT-BOX CLEAR (claude-plugins-06ws) — the raw Ctrl-C byte
-#      is sent ONLY when the REPL's input box visibly holds unsent text AND the
-#      REPL shows no sign of an active turn. Into a busy REPL, or an interrupted
-#      one, or one whose box would not clear, the script must not send text at
-#      all — it returns the fresh-surface fallback.
+#   3. DELIVERY IS PROVEN, NOT ASSUMED — ok:true from the socket is an ack. The
+#      nonce must show up in the callee's transcript (a user turn OR a
+#      queued_command attachment, since a busy REPL writes only the latter) or,
+#      failing that, on screen. An unconfirmed paste returns the fresh-surface
+#      fallback and leaves no call dir behind.
 #
-# `cmux` is stubbed on PATH. read-screen serves a scripted sequence of fixture
-# screens (one per call, holding on the last), so a test can stage "parked then
-# clean" or "changing while busy". Nothing here touches a real cmux or REPL.
+# Plus the pre-send gates, unchanged by the delivery swap: an interrupted REPL,
+# a busy REPL with parked text, and a box that will not clear are all refused
+# BEFORE anything is sent (claude-plugins-06ws).
+#
+# TWO STUB LAYERS, because a socket write cannot be intercepted on PATH:
+#   • `cmux` and `claude` are PATH stubs (read-screen serves a scripted sequence
+#     of fixture screens, tree answers the surface lookup).
+#   • $CMUX_SOCKET_PATH points at a python stub server that logs every request
+#     line and answers from a canned response file. The default server is
+#     POISONED: it answers ok:false and records a violation, so a case that
+#     forgets to stage responses fails loudly instead of quietly passing.
+# Nothing here touches a real cmux, a real REPL, or the real control socket.
 # =============================================================================
 set -u
 
 PASS=0
 FAIL=0
 FAILED_CASES=()
-SCRIPT_UNDER_TEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/dial/scripts/cmux-reuse-surface.sh"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOTLINE_DIR="$(cd "$TESTS_DIR/.." && pwd)"
+SCRIPT_UNDER_TEST="$HOTLINE_DIR/skills/dial/scripts/cmux-reuse-surface.sh"
+SOCKET_STUB="$TESTS_DIR/lib/socket-stub.py"
+REAL_PYTHON3="$(command -v python3)"
 
 pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() {
@@ -38,12 +49,23 @@ fail() {
   [[ -n "${2:-}" ]] && echo "    $2"
 }
 
+if [[ -z "$REAL_PYTHON3" ]]; then
+  echo "cmux-reuse-surface: SKIP — python3 not available (the control-socket helper needs it)"
+  exit 0
+fi
+
 # The live input box pads its ❯ glyph with a NO-BREAK SPACE; the transcript
 # echoes of prior user turns use a plain space. Both shapes appear in the
 # fixtures below so the "which ❯ line is the live box" logic gets exercised.
 GLYPH=$'\xe2\x9d\xaf'
 NBSP=$'\xc2\xa0'
 RULE="$(printf '─%.0s' {1..40})"
+
+# Stable handles the tree stub knows about.
+SURF_UUID="aaaa0000-1111-4111-8111-111111111111"
+WS_UUID="bbbb0000-2222-4222-8222-222222222222"
+CALLEE_SESSION="cccc0000-3333-4333-8333-333333333333"
+CALLEE_CWD="/tmp/callee-ws"
 
 # ---------------------------------------------------------------------------
 # Poison stubs. Every case below installs its own `cmux` on PATH; these sit in
@@ -67,7 +89,51 @@ done
 PATH="$POISON_BIN:$PATH"
 
 STUBROOT="$(mktemp -d)"
-trap 'rm -rf "$STUBROOT" "$POISON_BIN"' EXIT
+
+# --- Socket stub plumbing ---------------------------------------------------
+STUB_PIDS=()
+stop_stubs() {
+  local p
+  for p in ${STUB_PIDS[@]+"${STUB_PIDS[@]}"}; do kill "$p" 2>/dev/null || true; done
+}
+trap 'stop_stubs; rm -rf "$STUBROOT" "$POISON_BIN"' EXIT
+
+# start_socket_stub <dir> [responses-json] — echoes the socket path.
+# Blocks until the socket is actually accepting, rather than sleeping and hoping:
+# a fixed sleep here is the classic source of a flaky suite.
+start_socket_stub() {
+  local dir="$1" responses="${2:-}" sock args=() i
+  sock="$dir/cmux.sock"
+  mkdir -p "$dir"
+  args=(--socket "$sock" --requests "$dir/requests.log")
+  if [[ -n "$responses" ]]; then
+    args+=(--responses "$responses")
+  else
+    args+=(--poison --violations "$POISON_LOG")
+  fi
+  "$REAL_PYTHON3" "$SOCKET_STUB" "${args[@]}" > "$dir/stub.out" 2>"$dir/stub.err" &
+  STUB_PIDS+=($!)
+  for i in $(seq 1 60); do
+    grep -q READY "$dir/stub.out" 2>/dev/null && break
+    sleep 0.05
+  done
+  printf '%s' "$sock"
+}
+
+# The default socket every case inherits is the poisoned one.
+POISON_SOCK="$(start_socket_stub "$STUBROOT/poison-socket")"
+: > "$STUBROOT/poison-socket/requests.log"
+
+# Canned responses: a paste the socket accepts, and one it rejects.
+OK_RESPONSES="$STUBROOT/ok.json"
+cat > "$OK_RESPONSES" <<'JSON'
+{"terminal.paste": {"ok": true, "result": {"submitted": true}},
+ "_default": {"ok": true, "result": {}}}
+JSON
+REJECT_RESPONSES="$STUBROOT/reject.json"
+cat > "$REJECT_RESPONSES" <<'JSON'
+{"terminal.paste": {"ok": false, "error": {"message": "surface is not a terminal"}}}
+JSON
 
 # --- Fixture screens -------------------------------------------------------
 # Empty box, idle: prior user turn above (plain space), live box below (NBSP).
@@ -109,20 +175,43 @@ screen_placeholder() {
   printf '%s\n%s%sTry "how does <filepath> work?"\n%s\n' \
     "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
+# A large paste collapses to a placeholder — the nonce is genuinely NOT on screen
+# even though delivery succeeded.
+screen_pasted_placeholder() {
+  printf '%s\n%s%s[Pasted text +75 lines]\n%s\n' \
+    "$RULE" "$GLYPH" "$NBSP" "$RULE"
+}
+# Queued against a busy REPL. The box renders it like unsent text, so this
+# marker is the only screen-side proof.
+screen_queued() {
+  printf '%s%s Run the earlier thing\n\n%s Working… (5s · ↓ 12 tokens)\n%s\n%s%s\n%s\nPress up to edit queued messages\n' \
+    "$GLYPH" " " "✶" "$RULE" "$GLYPH" "$NBSP" "$RULE"
+}
+# The user has scrolled up, so read-screen returns a stale viewport and the
+# absence of the nonce proves nothing.
+screen_scrolled() {
+  printf '%s%s Run the earlier thing\n\nJump to bottom (click) ↓\n%s\n%s%s\n%s\n' \
+    "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"
+}
 
 # --- Stub harness ----------------------------------------------------------
 # run_case <name> -- <screen-fn>... -- [extra args to the script under test]
-# Sets: OUT, CALLLOG (one %q-quoted line per cmux invocation), SENDTEXTS
-# (NUL-separated final argument of every `cmux send`).
+#
+# Per-case knobs, set in the environment of the call:
+#   CASE_RESPONSES   canned socket responses (default: the poisoned server)
+#   CASE_TRANSCRIPT  JSONL body to plant as the callee's transcript
+#   CASE_NO_TREE     the tree lookup fails
+#   CASE_ORPHAN_TREE the surface is absent from the tree
+#   CASE_SURFACE     surface handle to pass (default: the UUID)
+#   CASE_TARGET      "" to omit --cwd/--session, forcing the screen fallback
 CASEDIR=""
 OUT=""
 CALLLOG=""
-SENDTEXT=""
+REQLOG=""
+PYLOG=""
 CASE_CALL_DIR=""
-CASE_MESSAGE=""
+CASE_HAD_PAYLOAD_FILE=false
 CASE_HAS_MESSAGE=false
-CASE_EXCHANGES_DIR=""
-declare -a SENDTEXTS=()
 
 run_case() {
   local name="$1"; shift
@@ -132,20 +221,42 @@ run_case() {
   extra=("$@")
 
   CASEDIR="$STUBROOT/$name"
-  mkdir -p "$CASEDIR/screens"
+  mkdir -p "$CASEDIR/screens" "$CASEDIR/bin" "$CASEDIR/home"
   CALLLOG="$CASEDIR/calls.log"
-  SENDTEXT="$CASEDIR/sendtext.log"
-  : > "$CALLLOG"; : > "$SENDTEXT"
+  PYLOG="$CASEDIR/python-argv.log"
+  : > "$CALLLOG"; : > "$PYLOG"
 
   local i=1 fn
-  for fn in "${screens[@]}"; do
+  for fn in ${screens[@]+"${screens[@]}"}; do
     "$fn" > "$CASEDIR/screens/$i.txt"
     i=$((i + 1))
   done
   echo $((i - 1)) > "$CASEDIR/screens/count"
   echo 0 > "$CASEDIR/screens/cursor"
 
-  cat > "$CASEDIR/cmux" <<'STUB'
+  # Socket: a per-case server when responses are staged, else the poisoned one.
+  local sock="$POISON_SOCK"
+  if [[ -n "${CASE_RESPONSES:-}" ]]; then
+    sock="$(start_socket_stub "$CASEDIR/socket" "$CASE_RESPONSES")"
+    REQLOG="$CASEDIR/socket/requests.log"
+  else
+    REQLOG="$STUBROOT/poison-socket/requests.log"
+  fi
+  local reqbase=0
+  [[ -f "$REQLOG" ]] && reqbase=$(wc -l < "$REQLOG" | tr -d ' ')
+  echo "$reqbase" > "$CASEDIR/reqbase"
+
+  # The callee's transcript, if this case stages one. HOME is redirected so
+  # transcript-path.sh resolves into the sandbox.
+  if [[ -n "${CASE_TRANSCRIPT:-}" ]]; then
+    local enc
+    enc=$(printf '%s' "$CALLEE_CWD" | sed 's|[^a-zA-Z0-9]|-|g')
+    mkdir -p "$CASEDIR/home/.claude/projects/$enc"
+    printf '%s' "$CASE_TRANSCRIPT" > "$CASEDIR/home/.claude/projects/$enc/${CALLEE_SESSION}.jsonl"
+    echo "$CASEDIR/home/.claude/projects/$enc/${CALLEE_SESSION}.jsonl" > "$CASEDIR/transcript_path"
+  fi
+
+  cat > "$CASEDIR/bin/cmux" <<'STUB'
 #!/usr/bin/env bash
 # %q renders every arg shell-quoted on ONE line, so a bundled newline shows up
 # as a literal $'\n' token instead of silently wrapping the log.
@@ -156,49 +267,69 @@ case "$1" in
     c=$(cat "$STUB_SCREENS/cursor")
     c=$((c + 1)); [[ $c -gt $n ]] && c=$n
     echo "$c" > "$STUB_SCREENS/cursor"
-    cat "$STUB_SCREENS/$c.txt"
-    # Whatever has been typed shows up on the screen, as it would in a real
-    # REPL — the script's post-send check reads the nonce back this way. Set
-    # STUB_NO_ECHO to model a send whose bytes never arrived.
-    [[ -f "$STUB_SCREENS/typed.txt" ]] && cat "$STUB_SCREENS/typed.txt"
+    [[ "$n" -gt 0 ]] && cat "$STUB_SCREENS/$c.txt"
     exit 0
     ;;
-  send)
-    # Record the payload (last arg) raw and NUL-terminated so the test can
-    # reassemble it without fighting shell quoting.
-    printf '%s\0' "${@: -1}" >> "$STUB_SENDTEXT"
-    [[ -z "${STUB_NO_ECHO:-}" ]] && printf '%s\n' "${@: -1}" >> "$STUB_SCREENS/typed.txt"
-    exit 0
-    ;;
+  tree)
+    [[ -n "${STUB_NO_TREE:-}" ]] && exit 1
+    if [[ -n "${STUB_ORPHAN_TREE:-}" ]]; then
+      jq -nc '{windows:[{workspaces:[{id:"OTHER-WS",ref:"workspace:9",
+        panes:[{surfaces:[{id:"SOMEONE-ELSE",ref:"surface:9"}]}]}]}]}'
+    else
+      jq -nc --arg s "$STUB_SURF" --arg w "$STUB_WS" \
+        '{windows:[{workspaces:[{id:$w,ref:"workspace:1",
+          panes:[{surfaces:[{id:$s,ref:"surface:1"}]}]}]}]}'
+    fi
+    exit 0 ;;
   *) exit 0 ;;
 esac
 STUB
-  chmod +x "$CASEDIR/cmux"
+  chmod +x "$CASEDIR/bin/cmux"
 
-  # HOTLINE_EXCHANGES_DIR keeps the durable archive inside the scratch tree
-  # instead of the real ~/.agents-hotline.
-  OUT="$(STUB_CALLLOG="$CALLLOG" STUB_SENDTEXT="$SENDTEXT" STUB_SCREENS="$CASEDIR/screens" \
-    STUB_NO_ECHO="${STUB_NO_ECHO:-}" \
-    HOTLINE_EXCHANGES_DIR="${CASE_EXCHANGES_DIR:-$CASEDIR/exchanges}" \
-    PATH="$CASEDIR:$PATH" bash "$SCRIPT_UNDER_TEST" \
-    --surface "w1:s1" --session "sess-123" "${extra[@]}" 2>&1)"
+  # python3 shim: records the helper's argv and the MODE of the file it was
+  # handed, then delegates. Two things this pins that nothing else can:
+  # the payload travels as a path (never as an argument), and that path is
+  # owner-only at the moment it is read.
+  cat > "$CASEDIR/bin/python3" <<STUB
+#!/usr/bin/env bash
+printf '%q ' "\$@" >> "$PYLOG"; printf '\n' >> "$PYLOG"
+for _a in "\$@"; do
+  if [[ -n "\${_want_file:-}" ]]; then
+    printf 'PAYLOAD_MODE %s %s\n' \
+      "\$(stat -f '%Lp' "\$_a" 2>/dev/null || stat -c '%a' "\$_a" 2>/dev/null)" "\$_a" >> "$PYLOG"
+    _want_file=""
+  fi
+  [[ "\$_a" == "--payload-file" ]] && _want_file=1
+done
+exec "$REAL_PYTHON3" "\$@"
+STUB
+  chmod +x "$CASEDIR/bin/python3"
 
-  SENDTEXTS=()
-  while IFS= read -r -d '' t; do SENDTEXTS+=("$t"); done < "$SENDTEXT"
+  local -a target=()
+  if [[ "${CASE_TARGET-unset}" == "unset" ]]; then
+    target=(--cwd "$CALLEE_CWD" --session "$CALLEE_SESSION")
+  fi
+
+  OUT="$(STUB_CALLLOG="$CALLLOG" STUB_SCREENS="$CASEDIR/screens" \
+    STUB_SURF="$SURF_UUID" STUB_WS="$WS_UUID" \
+    STUB_NO_TREE="${CASE_NO_TREE:-}" STUB_ORPHAN_TREE="${CASE_ORPHAN_TREE:-}" \
+    CMUX_SOCKET_PATH="$sock" HOME="$CASEDIR/home" \
+    HOTLINE_PASTE_CONFIRM_TRIES=3 HOTLINE_PASTE_CONFIRM_SLEEP=0.05 \
+    PATH="$CASEDIR/bin:$PATH" bash "$SCRIPT_UNDER_TEST" \
+    --surface "${CASE_SURFACE:-$SURF_UUID}" \
+    ${target[@]+"${target[@]}"} "${extra[@]}" 2>&1)"
 
   # Any call_dir the script created is a temp dir. Snapshot what the assertions
   # need out of it BEFORE removing it, so no case has to leave one behind.
   CASE_CALL_DIR=""
-  CASE_MESSAGE=""
+  CASE_HAD_PAYLOAD_FILE=false
   CASE_HAS_MESSAGE=false
   local cd_path
   cd_path="$(printf '%s' "$OUT" | sed -n 's/.*"call_dir": *"\([^"]*\)".*/\1/p')"
   if [[ -n "$cd_path" ]]; then
     CASE_CALL_DIR="$cd_path"
-    if [[ -f "$cd_path/message.md" ]]; then
-      CASE_HAS_MESSAGE=true
-      CASE_MESSAGE="$(cat "$cd_path/message.md")"
-    fi
+    [[ -f "$cd_path/payload.txt" ]] && CASE_HAD_PAYLOAD_FILE=true
+    [[ -f "$cd_path/message.md" ]] && CASE_HAS_MESSAGE=true
     [[ -d "$cd_path" ]] && rm -rf "$cd_path"
   fi
   return 0
@@ -206,13 +337,40 @@ STUB
 
 log_view() { cat "$CALLLOG"; }
 
+# Request lines this case produced (the poisoned log is shared, so slice it).
+requests() {
+  local base; base=$(cat "$CASEDIR/reqbase" 2>/dev/null || echo 0)
+  [[ -f "$REQLOG" ]] || return 0
+  tail -n "+$((base + 1))" "$REQLOG"
+}
+request_count() { requests | grep -c . || true; }
+# The `text` param of the single terminal.paste request, decoded.
+pasted_text() {
+  requests | head -1 | "$REAL_PYTHON3" -c '
+import json,sys
+line = sys.stdin.read().strip()
+if line.startswith("_cmux_capability_v1 "):
+    line = line.split(" ", 2)[2]
+print(json.loads(line)["params"].get("text", ""), end="")
+' 2>/dev/null
+}
+request_field() {  # request_field <jq-ish dotted path under params>
+  requests | head -1 | "$REAL_PYTHON3" -c '
+import json,sys
+line = sys.stdin.read().strip()
+if line.startswith("_cmux_capability_v1 "):
+    line = line.split(" ", 2)[2]
+obj = json.loads(line)
+key = sys.argv[1]
+print(obj.get(key, obj.get("params", {}).get(key, "")), end="")
+' "$1" 2>/dev/null
+}
 # Count `cmux send` calls whose payload is the raw Ctrl-C byte.
 clear_count() { grep -cE "^send .*\\\$'\\\\003'" "$CALLLOG" || true; }
 # Index (0-based) of the first Ctrl-C send in the call log, or -1.
 clear_index() {
   local i=0 line
   while IFS= read -r line; do
-    [[ "$line" == "send "*'$\047\003\047'* ]] && { echo "$i"; return; }
     case "$line" in
       send*\$\'\\003\'*) echo "$i"; return ;;
     esac
@@ -220,91 +378,333 @@ clear_index() {
   done < "$CALLLOG"
   echo -1
 }
-# Index of the first send-key Enter, or -1.
-enter_index() {
-  local i=0 line
-  while IFS= read -r line; do
-    case "$line" in
-      send-key*Enter*) echo "$i"; return ;;
-    esac
-    i=$((i + 1))
-  done < "$CALLLOG"
-  echo -1
+
+# A transcript in each landing shape phase-2 found. The queued shape is the one a
+# user-turn-only verifier misreads as a lost payload.
+transcript_user_turn() {  # transcript_user_turn <nonce>
+  printf '{"type":"user","message":{"role":"user","content":"[CALL_ID: %s]\\nthe payload"}}\n' "$1"
 }
-# The message the REPL would end up with: every non-Ctrl-C send payload, joined.
-assembled() {
-  local out="" t
-  for t in "${SENDTEXTS[@]:-}"; do
-    [[ "$t" == $'\003' ]] && continue
-    out+="$t"
-  done
-  printf '%s' "$out"
+transcript_queued() {     # transcript_queued <nonce>
+  printf '{"type":"attachment","attachment":{"type":"queued_command","prompt":"[CALL_ID: %s]\\nthe payload"}}\n' "$1"
+}
+nonce_of() { printf '%s' "$OUT" | sed -n 's/.*"call_id": *"\([^"]*\)".*/\1/p'; }
+# The nonce is minted inside the script, so a transcript fixture cannot know it
+# ahead of time. These cases plant the transcript from the request the stub
+# logged, which is exactly what a real callee would have written.
+plant_transcript_from_request() {  # plant_transcript_from_request <shape-fn>
+  local nonce tp
+  nonce=$(pasted_text | sed -n 's/^\[CALL_ID: \([^]]*\)\].*/\1/p' | head -1)
+  tp=$(cat "$CASEDIR/transcript_path" 2>/dev/null) || return 1
+  [[ -z "$nonce" || -z "$tp" ]] && return 1
+  "$1" "$nonce" > "$tp"
 }
 
 echo "cmux-reuse-surface"
 echo ""
-echo "  -- literal payload delivery (nofy) --"
+echo "  -- one paste, whole payload --"
 
-# --- A payload with no backslash-escape sequences goes in ONE send. ----------
-run_case plain screen_idle_empty -- --prompt "hello world"
-texts=(); for t in "${SENDTEXTS[@]:-}"; do [[ "$t" == $'\003' ]] || texts+=("$t"); done
-if [[ ${#texts[@]} -eq 1 ]]; then
-  pass "plain payload is sent as a single 'cmux send'"
+# The payload that used to force nudge delivery: multi-line, past the old 800-byte
+# inline ceiling, with a $DOLLAR and `backticks` in play.
+MULTILINE_MSG=$'Step one: audit the guard at dial.sh line 457 and write down exactly which messages it refuses.\nStep two: fix it, with a $DOLLAR and `backticks` in play, plus a bullet list below.\nStep three: report back.'
+BIG_MSG="$MULTILINE_MSG$(printf '\nfiller %.0s' {1..120})"
+
+# A transcript is planted mid-flight by a paste-through socket stub: the first
+# read of the transcript comes AFTER the request is logged, so a shape fixture
+# written from the request is in place in time.
+#
+# Simpler and deterministic: give the script a transcript that already contains
+# the nonce by letting the screen confirm instead. These first cases assert the
+# REQUEST, which needs no confirmation to be true — the script's own output tells
+# us which tier confirmed.
+CASE_RESPONSES="$OK_RESPONSES" CASE_TRANSCRIPT="" \
+  run_case paste_multiline screen_idle_empty screen_pasted_placeholder -- --prompt "$MULTILINE_MSG"
+CASE_RESPONSES=""; CASE_TRANSCRIPT=""
+
+[[ "$(request_count)" -eq 1 ]] \
+  && pass "exactly ONE socket request carries the whole follow-up" \
+  || fail "exactly ONE socket request carries the whole follow-up" "requests: $(request_count)"$'\n'"$(requests)"
+
+[[ "$(request_field method)" == "terminal.paste" ]] \
+  && pass "the request method is terminal.paste" \
+  || fail "the request method is terminal.paste" "got: $(request_field method)"
+
+[[ "$(pasted_text)" == "[CALL_ID: "*"]"$'\n'"$MULTILINE_MSG" ]] \
+  && pass "the pasted text is the [CALL_ID:] line plus the payload, byte for byte" \
+  || fail "the pasted text is the [CALL_ID:] line plus the payload, byte for byte" \
+          "got: $(printf '%q' "$(pasted_text)")"
+
+[[ "$(pasted_text)" == '[CALL_ID: '* ]] \
+  && pass "the nonce LEADS the payload (never split by a line wrap)" \
+  || fail "the nonce LEADS the payload (never split by a line wrap)" "got: $(pasted_text)"
+
+# Its own line, not sharing one with the first line of the message: the paste is
+# atomic, so the header cannot be welded onto the payload by a wrap.
+[[ "$(pasted_text)" == *$']\nStep one'* ]] \
+  && pass "the nonce line is terminated before the payload starts" \
+  || fail "the nonce line is terminated before the payload starts" "got: $(printf '%q' "$(pasted_text)")"
+
+[[ "$(request_field submit_key)" == "return" ]] \
+  && pass "submit_key is 'return'" \
+  || fail "submit_key is 'return'" "got: $(request_field submit_key)"
+
+[[ "$(request_field workspace_id)" == "$WS_UUID" && "$(request_field surface_id)" == "$SURF_UUID" ]] \
+  && pass "the paste is addressed by workspace and surface UUID, resolved from the tree" \
+  || fail "the paste is addressed by workspace and surface UUID, resolved from the tree" \
+          "ws=$(request_field workspace_id) surf=$(request_field surface_id)"
+
+[[ "$OUT" == *'"delivery": "paste"'* ]] \
+  && pass "the outcome reports delivery=paste" \
+  || fail "the outcome reports delivery=paste" "out: $OUT"
+
+$CASE_HAS_MESSAGE \
+  && fail "no message.md sidecar is written" "message.md exists" \
+  || pass "no message.md sidecar is written"
+
+# The whole point of dropping the archive: nothing durable is written outside the
+# call dir any more. HOME is the sandbox for the duration of the case, so anything
+# the script wrote under ~/.agents-hotline/ shows up here.
+if [[ -n "$(find "$CASEDIR/home" -type f 2>/dev/null | grep -v '/\.claude/' || true)" ]]; then
+  fail "no exchange archive is created outside the call dir" \
+       "$(find "$CASEDIR/home" -type f | grep -v '/\.claude/')"
 else
-  fail "plain payload is sent as a single 'cmux send'" "sends: ${#texts[@]}"
+  pass "no exchange archive is created outside the call dir"
 fi
-[[ "$(assembled)" == *"hello world"* ]] \
-  && pass "plain payload arrives intact" \
-  || fail "plain payload arrives intact" "assembled: $(assembled)"
 
-# --- CANARY: a literal backslash-n must survive to the REPL. ----------------
-CANARY='docs say "\n and \r send Enter" and \t sends Tab'
-run_case canary screen_idle_empty -- --prompt "$CANARY"
-asm="$(assembled)"
-[[ "$asm" == *"$CANARY"* ]] \
-  && pass "payload containing literal \\n \\r \\t reassembles byte-for-byte" \
-  || fail "payload containing literal \\n \\r \\t reassembles byte-for-byte" "assembled: $asm"
+echo ""
+echo "  -- nothing rides argv --"
 
-bad=""
-for t in "${SENDTEXTS[@]:-}"; do
-  [[ "$t" == $'\003' ]] && continue
-  case "$t" in
-    *\\n*|*\\r*|*\\t*) bad="$t"; break ;;
-  esac
-done
-[[ -z "$bad" ]] \
-  && pass "no single 'cmux send' argument carries a \\n/\\r/\\t sequence" \
-  || fail "no single 'cmux send' argument carries a \\n/\\r/\\t sequence" "arg: $bad"
+grep -q -- '--payload-file' "$PYLOG" \
+  && pass "the socket helper is handed a FILE path, not the payload" \
+  || fail "the socket helper is handed a FILE path, not the payload" "$(cat "$PYLOG")"
 
-# --- Doubled backslashes must not be collapsed or expanded. -----------------
-DOUBLED='path C:\\name and a bare trailing \'
-run_case doubled screen_idle_empty -- --prompt "$DOUBLED"
-asm="$(assembled)"
-[[ "$asm" == *"$DOUBLED"* ]] \
-  && pass "doubled and trailing backslashes survive unchanged" \
-  || fail "doubled and trailing backslashes survive unchanged" "assembled: $asm"
-bad=""
-for t in "${SENDTEXTS[@]:-}"; do
-  [[ "$t" == $'\003' ]] && continue
-  case "$t" in *\\n*|*\\r*|*\\t*) bad="$t"; break ;; esac
-done
-[[ -z "$bad" ]] \
-  && pass "doubled-backslash payload still splits away every \\n sequence" \
-  || fail "doubled-backslash payload still splits away every \\n sequence" "arg: $bad"
-
-# --- A real newline must never be bundled into a send. ----------------------
-run_case newline screen_idle_empty -- --prompt "hello world"
-if grep -qE "^send .*\\\\n" "$CALLLOG"; then
-  fail "no trailing newline bundled into 'cmux send'" "the \\n-in-send regression is back"
+if grep -qF 'Step one: audit the guard' "$PYLOG"; then
+  fail "no payload text appears in the helper's argv" "$(cat "$PYLOG")"
 else
-  pass "no trailing newline bundled into 'cmux send'"
+  pass "no payload text appears in the helper's argv"
 fi
+
+# `cmux send`/`send-key` are gone from the delivery path entirely. A payload on a
+# `cmux send` line would be back on argv, and back on a lossy transport.
+if grep -E '^send(-key)? ' "$CALLLOG" | grep -qF 'Step one'; then
+  fail "the payload never goes out through cmux send" "$(log_view)"
+else
+  pass "the payload never goes out through cmux send"
+fi
+
+if grep -qE '^send-key .*Enter' "$CALLLOG"; then
+  fail "no separate send-key Enter is needed" "$(log_view)"
+else
+  pass "no separate send-key Enter is needed (submit_key does it)"
+fi
+
+grep -q "PAYLOAD_MODE 600 " "$PYLOG" \
+  && pass "the payload file is owner-only (0600) when the helper reads it" \
+  || fail "the payload file is owner-only (0600) when the helper reads it" "$(grep PAYLOAD_MODE "$PYLOG")"
+
+$CASE_HAD_PAYLOAD_FILE \
+  && fail "the payload file is removed once delivery is confirmed" "payload.txt survived in $CASE_CALL_DIR" \
+  || pass "the payload file is removed once delivery is confirmed"
+
+echo ""
+echo "  -- size and escaping are no longer special cases --"
+
+# The old nofy canary. `cmux send` interpreted \n/\r/\t with no escape hatch, so
+# the payload had to be split; json.dumps escapes them in-process instead.
+CANARY='docs say "\n and \r send Enter" and \t sends Tab, and a bare trailing \'
+CASE_RESPONSES="$OK_RESPONSES" run_case paste_canary screen_idle_empty screen_pasted_placeholder -- --prompt "$CANARY"
+CASE_RESPONSES=""
+[[ "$(pasted_text)" == *"$CANARY" ]] \
+  && pass "a payload containing literal \\n \\r \\t arrives byte-for-byte in ONE request" \
+  || fail "a payload containing literal \\n \\r \\t arrives byte-for-byte in ONE request" \
+          "got: $(printf '%q' "$(pasted_text)")"
+[[ "$(request_count)" -eq 1 ]] \
+  && pass "…and is not split across several requests" \
+  || fail "…and is not split across several requests" "requests: $(request_count)"
+
+# Over the old 800-byte ceiling, and wide characters: both used to change the
+# delivery mode. Neither does now.
+CASE_RESPONSES="$OK_RESPONSES" run_case paste_big screen_idle_empty screen_pasted_placeholder -- --prompt "$BIG_MSG"
+CASE_RESPONSES=""
+[[ "$(pasted_text)" == *"$BIG_MSG" && "$(request_count)" -eq 1 ]] \
+  && pass "a payload well past the old inline ceiling still goes in ONE paste" \
+  || fail "a payload well past the old inline ceiling still goes in ONE paste" \
+          "requests=$(request_count) bytes=$(pasted_text | wc -c)"
+
+WIDE_MSG="$(printf '日%.0s' {1..400})"   # 400 chars, 1200 bytes
+CASE_RESPONSES="$OK_RESPONSES" run_case paste_wide screen_idle_empty screen_pasted_placeholder -- --prompt "$WIDE_MSG"
+CASE_RESPONSES=""
+[[ "$(pasted_text)" == *"$WIDE_MSG" ]] \
+  && pass "a multibyte payload survives the JSON round trip intact" \
+  || fail "a multibyte payload survives the JSON round trip intact" \
+          "got ${#WIDE_MSG} chars back as: $(pasted_text | head -c 40)"
+
+# A short single-line follow-up takes the same path — no mode to choose.
+CASE_RESPONSES="$OK_RESPONSES" run_case paste_short screen_idle_empty screen_pasted_placeholder -- --prompt "one more thing"
+CASE_RESPONSES=""
+[[ "$(pasted_text)" == *$'\n''one more thing' && "$OUT" == *'"delivery": "paste"'* ]] \
+  && pass "a short single-line follow-up takes the same single path" \
+  || fail "a short single-line follow-up takes the same single path" "out: $OUT text: $(printf '%q' "$(pasted_text)")"
+
+# --prompt-file is the same bytes as --prompt.
+PF="$STUBROOT/payload.txt"
+printf '%s' "$MULTILINE_MSG" > "$PF"
+CASE_RESPONSES="$OK_RESPONSES" run_case paste_prompt_file screen_idle_empty screen_pasted_placeholder -- --prompt-file "$PF"
+CASE_RESPONSES=""
+[[ "$(pasted_text)" == *"$MULTILINE_MSG" ]] \
+  && pass "--prompt-file delivers the same bytes as --prompt" \
+  || fail "--prompt-file delivers the same bytes as --prompt" "got: $(printf '%q' "$(pasted_text)")"
+
+run_case prompt_file_missing screen_idle_empty -- --prompt-file "$STUBROOT/nope.txt"
+[[ "$OUT" == *'"error"'* && "$OUT" == *"does not exist"* ]] \
+  && pass "a missing --prompt-file is an error, not an empty message" \
+  || fail "a missing --prompt-file is an error, not an empty message" "out: $OUT"
+
+echo ""
+echo "  -- delivery is proven, not assumed --"
+
+# PRIMARY TIER: the callee's transcript. Staged from the request the stub logged,
+# because the nonce is minted inside the script.
+#
+
+# The transcript tier is exercised directly against cmux-paste.sh, where the
+# nonce is an input rather than a secret: that is the only way to plant a
+# transcript containing it before the poll runs.
+PASTE_SCRIPT="$HOTLINE_DIR/skills/dial/scripts/cmux-paste.sh"
+# confirm_case <n> <shape-fn|notarget> <screen-fn>
+#
+# Exercises the confirmation tiers directly against cmux-paste.sh rather than
+# through the reuse script, because that is the only place the nonce is an INPUT:
+# reuse mints its own, so no fixture written beforehand could contain it.
+# "notarget" withholds --cwd/--session, which is what forces the screen tier.
+confirm_case() {
+  local shape="$2" screenfn="$3"
+  local dir="$STUBROOT/confirm-$1"
+  mkdir -p "$dir/bin" "$dir/home" "$dir/screens"
+  local sock; sock="$(start_socket_stub "$dir/socket" "$OK_RESPONSES")"
+  local nonce="deadbeef0000$1"
+  printf '[CALL_ID: %s]\n%s' "$nonce" "$MULTILINE_MSG" > "$dir/payload.txt"
+  chmod 600 "$dir/payload.txt"
+  "$screenfn" > "$dir/screens/1.txt"; echo 1 > "$dir/screens/count"; echo 0 > "$dir/screens/cursor"
+  if [[ "$shape" != "notarget" ]]; then
+    local enc; enc=$(printf '%s' "$CALLEE_CWD" | sed 's|[^a-zA-Z0-9]|-|g')
+    mkdir -p "$dir/home/.claude/projects/$enc"
+    "$shape" "$nonce" > "$dir/home/.claude/projects/$enc/${CALLEE_SESSION}.jsonl"
+  fi
+  cp "$STUBROOT/paste_multiline/bin/cmux" "$dir/bin/cmux"
+  local -a target=(--cwd "$CALLEE_CWD" --session "$CALLEE_SESSION")
+  [[ "$shape" == "notarget" ]] && target=()
+  CONFIRM_OUT="$(STUB_CALLLOG="$dir/calls.log" STUB_SCREENS="$dir/screens" \
+    STUB_SURF="$SURF_UUID" STUB_WS="$WS_UUID" \
+    CMUX_SOCKET_PATH="$sock" HOME="$dir/home" \
+    HOTLINE_PASTE_CONFIRM_TRIES=3 HOTLINE_PASTE_CONFIRM_SLEEP=0.05 \
+    PATH="$dir/bin:$PATH" bash "$PASTE_SCRIPT" \
+    --surface "$SURF_UUID" --payload-file "$dir/payload.txt" --call-id "$nonce" \
+    ${target[@]+"${target[@]}"} 2>&1)"
+}
+
+confirm_case 1 transcript_user_turn screen_scrolled
+[[ "$CONFIRM_OUT" == *'"confirmed":"transcript"'* ]] \
+  && pass "a user turn carrying the nonce confirms delivery from the transcript" \
+  || fail "a user turn carrying the nonce confirms delivery from the transcript" "out: $CONFIRM_OUT"
+
+# THE ONE THAT MATTERS: a busy REPL queues the paste and writes NO user turn at
+# all, only a queued_command attachment. A verifier counting user turns reads
+# this landed payload as lost and re-sends it.
+confirm_case 2 transcript_queued screen_placeholder
+[[ "$CONFIRM_OUT" == *'"confirmed":"transcript"'* ]] \
+  && pass "a queued_command attachment confirms delivery (no user turn is written)" \
+  || fail "a queued_command attachment confirms delivery (no user turn is written)" "out: $CONFIRM_OUT"
+
+# SECONDARY TIER: the screen, for a callee whose transcript we cannot read.
+confirm_case 3 notarget screen_pasted_placeholder
+[[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \
+  && pass "a collapsed [Pasted text placeholder confirms delivery on screen" \
+  || fail "a collapsed [Pasted text placeholder confirms delivery on screen" "out: $CONFIRM_OUT"
+
+confirm_case 4 notarget screen_queued
+[[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \
+  && pass "'Press up to edit queued messages' counts as landed" \
+  || fail "'Press up to edit queued messages' counts as landed" "out: $CONFIRM_OUT"
+
+# A scrolled viewport is NOT a failed send: cmux has no primitive to snap a
+# terminal back to its live tail, so absence of the nonce proves nothing, and
+# re-sending on it is a documented double-submit.
+confirm_case 5 notarget screen_scrolled
+[[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \
+  && pass "a scrolled viewport counts as landed, not as a lost paste" \
+  || fail "a scrolled viewport counts as landed, not as a lost paste" "out: $CONFIRM_OUT"
+
+# Nothing anywhere: report it rather than assuming ok:true meant delivery.
+confirm_case 6 notarget screen_idle_empty
+[[ "$CONFIRM_OUT" == *'"delivered":false'* && "$CONFIRM_OUT" == *"never appeared"* ]] \
+  && pass "an unconfirmable paste is reported as undelivered, not as success" \
+  || fail "an unconfirmable paste is reported as undelivered, not as success" "out: $CONFIRM_OUT"
+
+echo ""
+echo "  -- an unconfirmed paste falls back and leaves no corpse --"
+
+CASE_RESPONSES="$OK_RESPONSES" run_case lost_paste screen_idle_empty -- --prompt "$MULTILINE_MSG"
+CASE_RESPONSES=""
+[[ "$OUT" == *'"fallback"'* && "$OUT" == *"never appeared"* ]] \
+  && pass "a paste nobody can confirm returns the fresh-surface fallback" \
+  || fail "a paste nobody can confirm returns the fresh-surface fallback" "out: $OUT"
+[[ -n "$CASE_CALL_DIR" && -d "$CASE_CALL_DIR" ]] \
+  && fail "the unconfirmed call dir is removed" "still present: $CASE_CALL_DIR" \
+  || pass "the unconfirmed call dir is removed"
+
+# ok:false from the socket: fall back, and do not pretend the screen said anything.
+CASE_RESPONSES="$REJECT_RESPONSES" run_case rejected_paste screen_idle_empty -- --prompt "$MULTILINE_MSG"
+CASE_RESPONSES=""
+[[ "$OUT" == *'"fallback"'* && "$OUT" == *"terminal.paste"* ]] \
+  && pass "a rejected terminal.paste returns the fallback and names the failure" \
+  || fail "a rejected terminal.paste returns the fallback and names the failure" "out: $OUT"
+
+# Unresolvable surface: fall back BEFORE any socket traffic.
+CASE_ORPHAN_TREE=1 run_case orphan_tree screen_idle_empty -- --prompt "$MULTILINE_MSG"
+CASE_ORPHAN_TREE=""
+[[ "$OUT" == *'"fallback"'* && "$OUT" == *"not in the cmux tree"* ]] \
+  && pass "a surface missing from the tree returns the fallback" \
+  || fail "a surface missing from the tree returns the fallback" "out: $OUT"
+[[ "$(request_count)" -eq 0 ]] \
+  && pass "…and nothing is pasted anywhere" \
+  || fail "…and nothing is pasted anywhere" "$(requests)"
+
+CASE_NO_TREE=1 run_case no_tree screen_idle_empty -- --prompt "$MULTILINE_MSG"
+CASE_NO_TREE=""
+[[ "$OUT" == *'"fallback"'* && "$OUT" == *"cmux tree"* && "$(request_count)" -eq 0 ]] \
+  && pass "an unreadable tree returns the fallback with nothing sent" \
+  || fail "an unreadable tree returns the fallback with nothing sent" "out: $OUT"
+
+# --- Surface gone → fallback, and nothing sent anywhere. --------------------
+CASEDIR="$STUBROOT/gone"; mkdir -p "$CASEDIR/bin"
+CALLLOG="$CASEDIR/calls.log"; : > "$CALLLOG"
+REQLOG="$STUBROOT/poison-socket/requests.log"
+echo "$(wc -l < "$REQLOG" | tr -d ' ')" > "$CASEDIR/reqbase"
+cat > "$CASEDIR/bin/cmux" <<'STUB'
+#!/usr/bin/env bash
+printf '%q ' "$@" >> "$STUB_CALLLOG"; printf '\n' >> "$STUB_CALLLOG"
+case "$1" in
+  read-screen) echo "Error: surface not found" >&2; exit 1 ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x "$CASEDIR/bin/cmux"
+OUT="$(STUB_CALLLOG="$CALLLOG" CMUX_SOCKET_PATH="$POISON_SOCK" \
+  PATH="$CASEDIR/bin:$PATH" bash "$SCRIPT_UNDER_TEST" \
+  --surface "$SURF_UUID" --prompt "follow up" 2>&1)"
+[[ "$OUT" == *'"fallback"'* ]] \
+  && pass "a dead surface returns the fresh-surface fallback" \
+  || fail "a dead surface returns the fresh-surface fallback" "out: $OUT"
+[[ "$(request_count)" -eq 0 ]] \
+  && pass "a dead surface receives nothing at all" \
+  || fail "a dead surface receives nothing at all" "$(requests)"
 
 echo ""
 echo "  -- conditional input-box clear (06ws) --"
 
 # --- Idle + empty box: no clear at all, message goes through. ---------------
-run_case idle_empty screen_idle_empty -- --prompt "follow up"
+CASE_RESPONSES="$OK_RESPONSES" run_case idle_empty screen_idle_empty screen_pasted_placeholder -- --prompt "follow up"
+CASE_RESPONSES=""
 [[ "$(clear_count)" -eq 0 ]] \
   && pass "idle REPL with an empty box gets NO Ctrl-C" \
   || fail "idle REPL with an empty box gets NO Ctrl-C" "log:"$'\n'"$(log_view)"
@@ -313,15 +713,17 @@ run_case idle_empty screen_idle_empty -- --prompt "follow up"
   || fail "idle REPL with an empty box: emits call_dir" "out: $OUT"
 
 # --- Empty box on a never-used REPL: the placeholder is not parked text. ----
-run_case placeholder screen_placeholder -- --prompt "follow up"
+CASE_RESPONSES="$OK_RESPONSES" run_case placeholder screen_placeholder screen_pasted_placeholder -- --prompt "follow up"
+CASE_RESPONSES=""
 [[ "$(clear_count)" -eq 0 ]] \
   && pass "placeholder hint is not mistaken for parked text" \
   || fail "placeholder hint is not mistaken for parked text" "log:"$'\n'"$(log_view)"
 
 # --- Busy + empty box: still no clear, and the message is still sent. -------
-#     Text+Enter into a busy REPL is enqueued and delivered; the destructive
-#     thing is the interrupt, so it is the interrupt we withhold.
-run_case busy_empty screen_busy_empty -- --prompt "follow up"
+#     Text into a busy REPL is enqueued and delivered; the destructive thing is
+#     the interrupt, so it is the interrupt we withhold.
+CASE_RESPONSES="$OK_RESPONSES" run_case busy_empty screen_busy_empty screen_queued -- --prompt "follow up"
+CASE_RESPONSES=""
 [[ "$(clear_count)" -eq 0 ]] \
   && pass "busy REPL with an empty box gets NO Ctrl-C" \
   || fail "busy REPL with an empty box gets NO Ctrl-C" "log:"$'\n'"$(log_view)"
@@ -329,19 +731,16 @@ run_case busy_empty screen_busy_empty -- --prompt "follow up"
   && pass "busy REPL with an empty box: message still sent, emits call_dir" \
   || fail "busy REPL with an empty box: message still sent, emits call_dir" "out: $OUT"
 
-# --- Idle + parked text: clear, confirm it took, then send. -----------------
-run_case parked_clears screen_idle_parked screen_idle_parked screen_idle_empty -- --prompt "follow up"
+# --- Idle + parked text: clear, confirm it took, then paste. ----------------
+CASE_RESPONSES="$OK_RESPONSES" run_case parked_clears \
+  screen_idle_parked screen_idle_parked screen_idle_empty screen_pasted_placeholder -- --prompt "follow up"
+CASE_RESPONSES=""
 [[ "$(clear_count)" -ge 1 ]] \
   && pass "idle REPL with parked text IS cleared" \
   || fail "idle REPL with parked text IS cleared" "log:"$'\n'"$(log_view)"
-ci="$(clear_index)"; msg_i=-1; i=0
-while IFS= read -r line; do
-  case "$line" in send*follow*up*) msg_i=$i; break ;; esac
-  i=$((i + 1))
-done < "$CALLLOG"
-[[ "$ci" -ge 0 && "$msg_i" -gt "$ci" ]] \
-  && pass "the clear precedes the message text" \
-  || fail "the clear precedes the message text" "clear=$ci msg=$msg_i"
+[[ "$(clear_index)" -ge 0 && "$(request_count)" -eq 1 ]] \
+  && pass "the clear precedes the paste" \
+  || fail "the clear precedes the paste" "clear=$(clear_index) requests=$(request_count)"
 [[ "$OUT" == *'"call_dir"'* ]] \
   && pass "cleared box: emits call_dir" \
   || fail "cleared box: emits call_dir" "out: $OUT"
@@ -351,323 +750,54 @@ run_case parked_sticks screen_idle_parked screen_idle_parked screen_idle_parked 
 [[ "$OUT" == *'"fallback"'* ]] \
   && pass "a box that will not clear returns the fresh-surface fallback" \
   || fail "a box that will not clear returns the fresh-surface fallback" "out: $OUT"
-if printf '%s' "$(assembled)" | grep -q "follow up"; then
-  fail "a box that will not clear never receives the message" "it was sent anyway"
-else
-  pass "a box that will not clear never receives the message"
-fi
+[[ "$(request_count)" -eq 0 ]] \
+  && pass "a box that will not clear never receives the message" \
+  || fail "a box that will not clear never receives the message" "$(requests)"
 
-# --- Busy + parked text: no clear, no send, fall back. ----------------------
+# --- Busy + parked text: no clear, nothing sent, fall back. -----------------
 run_case busy_parked screen_busy_parked screen_busy_parked -- --prompt "follow up"
 [[ "$(clear_count)" -eq 0 ]] \
   && pass "busy REPL with parked text gets NO Ctrl-C" \
   || fail "busy REPL with parked text gets NO Ctrl-C" "log:"$'\n'"$(log_view)"
-[[ "$OUT" == *'"fallback"'* ]] \
-  && pass "busy REPL with parked text returns the fresh-surface fallback" \
-  || fail "busy REPL with parked text returns the fresh-surface fallback" "out: $OUT"
-if printf '%s' "$(assembled)" | grep -q "follow up"; then
-  fail "busy REPL with parked text never receives the message" "it was sent anyway"
-else
-  pass "busy REPL with parked text never receives the message"
-fi
+[[ "$OUT" == *'"fallback"'* && "$(request_count)" -eq 0 ]] \
+  && pass "busy REPL with parked text falls back and receives nothing" \
+  || fail "busy REPL with parked text falls back and receives nothing" "out: $OUT"
 
 # --- Parked text on a REPL with no spinner but a changing screen. -----------
 run_case parked_moving screen_parked_moving_a screen_parked_moving_b -- --prompt "follow up"
-[[ "$(clear_count)" -eq 0 ]] \
-  && pass "a changing screen counts as busy: no Ctrl-C" \
-  || fail "a changing screen counts as busy: no Ctrl-C" "log:"$'\n'"$(log_view)"
-[[ "$OUT" == *'"fallback"'* ]] \
-  && pass "a changing screen with parked text returns the fallback" \
-  || fail "a changing screen with parked text returns the fallback" "out: $OUT"
+[[ "$(clear_count)" -eq 0 && "$OUT" == *'"fallback"'* ]] \
+  && pass "a changing screen counts as busy: no Ctrl-C, no paste, fallback" \
+  || fail "a changing screen counts as busy: no Ctrl-C, no paste, fallback" "out: $OUT"
 
 # --- Interrupted REPL: send nothing, fall back (06ws acceptance criteria). --
 run_case interrupted screen_interrupted -- --prompt "follow up"
 [[ "$OUT" == *'"fallback"'* ]] \
   && pass "an interrupted REPL returns the fresh-surface fallback, not exit 0 success" \
   || fail "an interrupted REPL returns the fresh-surface fallback, not exit 0 success" "out: $OUT"
-[[ "$(clear_count)" -eq 0 ]] \
-  && pass "an interrupted REPL gets NO Ctrl-C" \
-  || fail "an interrupted REPL gets NO Ctrl-C" "log:"$'\n'"$(log_view)"
-if printf '%s' "$(assembled)" | grep -q "follow up"; then
-  fail "an interrupted REPL never receives the message" "it was sent anyway"
-else
-  pass "an interrupted REPL never receives the message"
-fi
+[[ "$(clear_count)" -eq 0 && "$(request_count)" -eq 0 ]] \
+  && pass "an interrupted REPL gets neither a Ctrl-C nor a paste" \
+  || fail "an interrupted REPL gets neither a Ctrl-C nor a paste" "log:"$'\n'"$(log_view)"
 
 echo ""
-echo "  -- submit contract --"
+echo "  -- legacy cached handles --"
 
-# --- Enter is a send-key, and it comes after every text chunk. --------------
-run_case submit screen_idle_empty -- --prompt "$CANARY"
-ei="$(enter_index)"
-[[ "$ei" -ge 0 ]] \
-  && pass "Enter submitted via 'cmux send-key Enter'" \
-  || fail "Enter submitted via 'cmux send-key Enter'" "log:"$'\n'"$(log_view)"
-last_send=-1; i=0
-while IFS= read -r line; do
-  case "$line" in send\ *) last_send=$i ;; esac
-  i=$((i + 1))
-done < "$CALLLOG"
-[[ "$ei" -gt "$last_send" && "$last_send" -ge 0 ]] \
-  && pass "Enter comes after the LAST text chunk" \
-  || fail "Enter comes after the LAST text chunk" "enter=$ei last_send=$last_send"
+# Caches written by older plugin versions hold a positional surface:N ref. Reuse
+# still accepts them (closing never will), so the tree lookup has to resolve a
+# ref to the UUID pair terminal.paste needs.
+CASE_RESPONSES="$OK_RESPONSES" CASE_SURFACE="surface:1" \
+  run_case positional_ref screen_idle_empty screen_pasted_placeholder -- --prompt "follow up"
+CASE_RESPONSES=""; CASE_SURFACE=""
+[[ "$(request_field surface_id)" == "$SURF_UUID" && "$(request_field workspace_id)" == "$WS_UUID" ]] \
+  && pass "a legacy surface:N handle resolves to the UUID pair the paste needs" \
+  || fail "a legacy surface:N handle resolves to the UUID pair the paste needs" \
+          "surf=$(request_field surface_id) ws=$(request_field workspace_id)"
 
-# ===========================================================================
-# Nudge delivery for payloads too big to type (claude-plugins-i8fb).
-#
-# Multi-line follow-ups used to skip reuse entirely, so every substantive
-# work-order follow-up stacked a new pane. They now reuse the surface: the
-# payload goes to $CALL_DIR/message.md and ONE short line points at it. The
-# payload must never cross `cmux send` — that transport loses contiguous bytes
-# mid-payload with no error, which on a work order means the callee acts on
-# instructions that lost their middle.
-# ===========================================================================
-# Deliberately longer than the 160-char preview cap, so truncation is exercised
-# rather than assumed: "Step three" sits past the cap and must NOT be quoted.
-MULTILINE_MSG=$'Step one: audit the guard at dial.sh line 457 and write down exactly which messages it refuses.\nStep two: fix it, with a $DOLLAR and `backticks` in play, plus a bullet list below.\nStep three: report back.'
-
-run_case nudge_multiline screen_idle_empty -- --prompt "$MULTILINE_MSG" --cwd /tmp/callee
-
-[[ "$OUT" == *'"call_dir"'* ]] \
-  && pass "a multi-line follow-up REUSES the surface instead of falling back" \
-  || fail "a multi-line follow-up REUSES the surface instead of falling back" "out: $OUT"
-
-[[ "$OUT" == *'"delivery": "nudge"'* ]] \
-  && pass "the payload reports delivery=nudge" \
-  || fail "the payload reports delivery=nudge" "out: $OUT"
-
-$CASE_HAS_MESSAGE \
-  && pass "the payload is written to \$CALL_DIR/message.md" \
-  || fail "the payload is written to \$CALL_DIR/message.md" "out: $OUT"
-
-[[ "$CASE_MESSAGE" == "$MULTILINE_MSG" ]] \
-  && pass "message.md is byte-identical to the payload" \
-  || fail "message.md is byte-identical to the payload" \
-          "wrote: $(printf '%q' "$CASE_MESSAGE")"
-
-# Exactly one text send, and not a byte of the payload's newlines in it. More
-# than one send would mean the payload itself was being chunked into the REPL.
-typed_count=0
-for t in "${SENDTEXTS[@]:-}"; do [[ "$t" == $'\003' ]] || typed_count=$((typed_count + 1)); done
-[[ "$typed_count" -eq 1 ]] \
-  && pass "exactly ONE send carries the nudge" \
-  || fail "exactly ONE send carries the nudge" "sends: $typed_count"
-
-nudge="$(assembled)"
-[[ "$nudge" != *$'\n'* ]] \
-  && pass "the nudge is a single line (no newline reaches the REPL)" \
-  || fail "the nudge is a single line (no newline reaches the REPL)" \
-          "nudge: $(printf '%q' "$nudge")"
-
-[[ "$nudge" == *"message.md"* ]] \
-  && pass "the nudge names the file to read" \
-  || fail "the nudge names the file to read" "nudge: $nudge"
-
-[[ "$nudge" == '[CALL_ID: '* ]] \
-  && pass "the nonce LEADS the nudge (never split by a line wrap)" \
-  || fail "the nonce LEADS the nudge (never split by a line wrap)" "nudge: $nudge"
-
-# Instruction before excerpt: a callee that acts on the gist instead of reading
-# the file is how this design fails.
-read_pos=$(awk -v s="$nudge" 'BEGIN{print index(s, "read ")}')
-prev_pos=$(awk -v s="$nudge" 'BEGIN{print index(s, "Preview")}')
-[[ "$read_pos" -gt 0 && "$prev_pos" -gt "$read_pos" ]] \
-  && pass "the read instruction precedes the preview" \
-  || fail "the read instruction precedes the preview" "nudge: $nudge"
-
-[[ "$nudge" == *"Step one: audit the guard"* && "$nudge" != *"Step three"* \
-   && "$nudge" == *"…)" ]] \
-  && pass "the preview quotes the head of the payload, truncated and marked" \
-  || fail "the preview quotes the head of the payload, truncated and marked" "nudge: $nudge"
-
-# A payload that fits gets no misleading ellipsis.
-run_case nudge_short_multiline screen_idle_empty -- --prompt $'two lines\nonly'
-[[ "$(assembled)" == *"two lines only"* && "$(assembled)" != *"…"* ]] \
-  && pass "a payload shorter than the cap is quoted whole, with no ellipsis" \
-  || fail "a payload shorter than the cap is quoted whole, with no ellipsis" \
-          "nudge: $(assembled)"
-
-grep -q 'send-key .*Enter' "$CALLLOG" \
-  && pass "the nudge is submitted with a separate send-key Enter" \
-  || fail "the nudge is submitted with a separate send-key Enter" "$(log_view)"
-
-# --- The durable archive ----------------------------------------------------
-# The call dir is transient (/tmp is GC'd, cleanup skills remove call dirs), so
-# without this the payload has no lasting home: the callee transcript keeps only
-# the nudge and a path to a file that no longer exists.
-arch_dir="$STUBROOT/nudge_multiline/exchanges"
-arch=$(ls "$arch_dir"/*.md 2>/dev/null | head -1)
-[[ -n "$arch" && "$(cat "$arch")" == "$MULTILINE_MSG" ]] \
-  && pass "the payload is archived outside the call dir, verbatim" \
-  || fail "the payload is archived outside the call dir, verbatim" \
-          "arch=$arch dir=$(ls -1 "$arch_dir" 2>/dev/null | tr '\n' ' ')"
-
-[[ -s "$arch_dir/index.jsonl" ]] \
-  && jq -e '.call_id and .ts and (.delivery == "nudge") and (.bytes > 0)' \
-       < "$arch_dir/index.jsonl" >/dev/null 2>&1 \
-  && pass "the archive index records call_id, timestamp, delivery and size" \
-  || fail "the archive index records call_id, timestamp, delivery and size" \
-          "$(cat "$arch_dir/index.jsonl" 2>/dev/null)"
-
-# OWNER-ONLY. These payloads are whole work orders — one of them, in this repo's
-# own history, was a security review. A default-umask 0644 archive in a 0755
-# directory hands every archived follow-up to any local user, which is exactly
-# what the launchers chmod 700 their launch scripts to prevent.
-[[ "$(stat -f '%Lp' "$arch_dir" 2>/dev/null || stat -c '%a' "$arch_dir" 2>/dev/null)" == "700" ]] \
-  && pass "the archive directory is owner-only (0700)" \
-  || fail "the archive directory is owner-only (0700)" \
-          "mode=$(stat -f '%Lp' "$arch_dir" 2>/dev/null || stat -c '%a' "$arch_dir" 2>/dev/null)"
-
-for f in "$arch" "$arch_dir/index.jsonl"; do
-  mode=$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null)
-  [[ "$mode" == "600" ]] \
-    && pass "$(basename "$f") is owner-only (0600)" \
-    || fail "$(basename "$f") is owner-only (0600)" "mode=$mode"
-done
-
-# An index.jsonl left 0644 by a pre-fix version must be tightened, not inherited:
-# umask governs only files this run creates.
-loose_dir="$STUBROOT/loose/exchanges"
-mkdir -p "$loose_dir"; chmod 755 "$loose_dir"
-printf '{"call_id":"old"}\n' > "$loose_dir/index.jsonl"; chmod 644 "$loose_dir/index.jsonl"
-CASE_EXCHANGES_DIR="$loose_dir" run_case loose_perms screen_idle_empty -- --prompt "$MULTILINE_MSG"
-CASE_EXCHANGES_DIR=""
-lmode=$(stat -f '%Lp' "$loose_dir/index.jsonl" 2>/dev/null || stat -c '%a' "$loose_dir/index.jsonl" 2>/dev/null)
-ldmode=$(stat -f '%Lp' "$loose_dir" 2>/dev/null || stat -c '%a' "$loose_dir" 2>/dev/null)
-[[ "$lmode" == "600" && "$ldmode" == "700" ]] \
-  && pass "a pre-existing world-readable archive is tightened, not inherited" \
-  || fail "a pre-existing world-readable archive is tightened, not inherited" \
-          "dir=$ldmode index=$lmode"
-
-# The archived file is named for the nonce, so a caller holding a call_id (from
-# its own payload, or from dial history) can find what was actually asked.
-arch_id=$(jq -r '.call_id' < "$arch_dir/index.jsonl" 2>/dev/null | head -1)
-[[ -n "$arch_id" && "$(basename "$arch")" == "${arch_id}.md" && "$nudge" == *"$arch_id"* ]] \
-  && pass "the archive is keyed by the same nonce the callee echoes back" \
-  || fail "the archive is keyed by the same nonce the callee echoes back" \
-          "arch_id=$arch_id file=$(basename "$arch")"
-
-# --- Oversize single-line payloads take the same route ----------------------
-BIG_MSG="$(printf 'x%.0s' {1..900})"
-run_case nudge_oversize screen_idle_empty -- --prompt "$BIG_MSG"
-[[ "$OUT" == *'"delivery": "nudge"'* && "$CASE_MESSAGE" == "$BIG_MSG" ]] \
-  && pass "an oversize SINGLE-line payload also goes via message.md" \
-  || fail "an oversize SINGLE-line payload also goes via message.md" "out: $OUT"
-
-# A single-line payload under the ceiling in CHARACTERS but over it in BYTES must
-# still take the file route: ${#PROMPT} counts characters under a UTF-8 locale, so
-# measuring the wrong one puts a ~2 KB payload on a transport this threshold
-# exists to keep it off.
-WIDE_MSG="$(printf '日%.0s' {1..400})"   # 400 chars, 1200 bytes
-run_case nudge_wide_chars screen_idle_empty -- --prompt "$WIDE_MSG"
-[[ "$OUT" == *'"delivery": "nudge"'* ]] \
-  && pass "the inline ceiling is measured in bytes, not characters" \
-  || fail "the inline ceiling is measured in bytes, not characters" "out: $OUT"
-
-arch_idx="$STUBROOT/nudge_wide_chars/exchanges/index.jsonl"
-[[ "$(jq -r '.bytes' < "$arch_idx" 2>/dev/null)" == "1200" ]] \
-  && pass "the archive index records a real byte count" \
-  || fail "the archive index records a real byte count" \
-          "$(cat "$arch_idx" 2>/dev/null)"
-
-# --- Short single-line payloads stay inline (regression guard) --------------
-# This is the whole reason the split exists: a quick follow-up stays visible in
-# the callee's transcript rather than becoming a pointer to a file.
-run_case inline_short screen_idle_empty -- --prompt "one more thing"
-[[ "$OUT" == *'"delivery": "inline"'* ]] \
-  && pass "a short single-line follow-up is still typed inline" \
-  || fail "a short single-line follow-up is still typed inline" "out: $OUT"
-
-$CASE_HAS_MESSAGE \
-  && fail "inline delivery writes no message.md" "message.md exists" \
-  || pass "inline delivery writes no message.md"
-
-[[ "$(assembled)" == *"one more thing"* ]] \
-  && pass "the inline payload itself reaches the REPL" \
-  || fail "the inline payload itself reaches the REPL" "sent: $(assembled)"
-
-# --- --prompt-file is the same bytes as --prompt ----------------------------
-PF="$STUBROOT/payload.txt"
-printf '%s' "$MULTILINE_MSG" > "$PF"
-run_case prompt_file screen_idle_empty -- --prompt-file "$PF"
-[[ "$CASE_MESSAGE" == "$MULTILINE_MSG" ]] \
-  && pass "--prompt-file delivers the same bytes as --prompt" \
-  || fail "--prompt-file delivers the same bytes as --prompt" \
-          "wrote: $(printf '%q' "$CASE_MESSAGE")"
-
-run_case prompt_file_missing screen_idle_empty -- --prompt-file "$STUBROOT/nope.txt"
-[[ "$OUT" == *'"error"'* && "$OUT" == *"does not exist"* ]] \
-  && pass "a missing --prompt-file is an error, not an empty message" \
-  || fail "a missing --prompt-file is an error, not an empty message" "out: $OUT"
-
-# ===========================================================================
-# A send whose bytes never arrive must not leave a call dir behind.
-#
-# `cmux send` exits 0 once bytes reach the PTY and has no opinion about what the
-# REPL did with them. Without this check wait-for-response.sh polls for a nonce
-# that was never submitted and fails 30-60s later — and the call dir it was
-# waiting on is a corpse.
-# ===========================================================================
-STUB_NO_ECHO=1 run_case lost_send screen_idle_empty -- --prompt "$MULTILINE_MSG"
-[[ "$OUT" == *'"fallback"'* && "$OUT" == *"never appeared on screen"* ]] \
-  && pass "a nudge that never appears on screen returns the fresh fallback" \
-  || fail "a nudge that never appears on screen returns the fresh fallback" "out: $OUT"
-
-[[ -n "$CASE_CALL_DIR" && -d "$CASE_CALL_DIR" ]] \
-  && fail "the lost-send call dir is removed" "still present: $CASE_CALL_DIR" \
-  || pass "the lost-send call dir is removed"
-
-# A scrolled-up viewport is NOT a failed send. cmux has no primitive to snap a
-# terminal back to its live tail, so absence of the nonce proves nothing — and
-# re-sending on this signal is a documented double-submit.
-screen_scrolled() {
-  printf '%s%s Run the earlier thing\n\nJump to bottom (click) ↓\n%s\n%s%s\n%s\n' \
-    "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"
-}
-STUB_NO_ECHO=1 run_case scrolled_viewport screen_scrolled -- --prompt "$MULTILINE_MSG"
-[[ "$OUT" == *'"call_dir"'* ]] \
-  && pass "a scrolled viewport counts as landed, not as a lost send" \
-  || fail "a scrolled viewport counts as landed, not as a lost send" "out: $OUT"
-
-# Text queued against a busy REPL is delivered at the next tool boundary. The
-# box renders it exactly like unsent text, so this marker is the only proof.
-screen_queued() {
-  printf '%s%s Run the earlier thing\n\n%s Working… (5s · ↓ 12 tokens)\n%s\n%s%s\n%s\nPress up to edit queued messages\n' \
-    "$GLYPH" " " "✶" "$RULE" "$GLYPH" "$NBSP" "$RULE"
-}
-STUB_NO_ECHO=1 run_case queued_message screen_queued -- --prompt "$MULTILINE_MSG"
-[[ "$OUT" == *'"call_dir"'* ]] \
-  && pass "a queued message counts as landed" \
-  || fail "a queued message counts as landed" "out: $OUT"
-
-# --- Surface gone → fallback, and nothing typed anywhere. ------------------
-CASEDIR="$STUBROOT/gone"; mkdir -p "$CASEDIR"
-CALLLOG="$CASEDIR/calls.log"; SENDTEXT="$CASEDIR/sendtext.log"
-: > "$CALLLOG"; : > "$SENDTEXT"
-cat > "$CASEDIR/cmux" <<'STUB'
-#!/usr/bin/env bash
-printf '%q ' "$@" >> "$STUB_CALLLOG"; printf '\n' >> "$STUB_CALLLOG"
-case "$1" in
-  read-screen) echo "Error: surface not found" >&2; exit 1 ;;
-  send) printf '%s\0' "${@: -1}" >> "$STUB_SENDTEXT"; exit 0 ;;
-  *) exit 0 ;;
-esac
-STUB
-chmod +x "$CASEDIR/cmux"
-OUT="$(STUB_CALLLOG="$CALLLOG" STUB_SENDTEXT="$SENDTEXT" PATH="$CASEDIR:$PATH" \
-  bash "$SCRIPT_UNDER_TEST" --surface "w1:s1" --prompt "follow up" 2>&1)"
-[[ "$OUT" == *'"fallback"'* ]] \
-  && pass "a dead surface returns the fresh-surface fallback" \
-  || fail "a dead surface returns the fresh-surface fallback" "out: $OUT"
-[[ ! -s "$SENDTEXT" ]] \
-  && pass "a dead surface receives no text at all" \
-  || fail "a dead surface receives no text at all" "sent: $(tr '\0' '|' < "$SENDTEXT")"
-
-# The whole point of the poison stubs: a leak is a test failure, not a stray pane.
+# The whole point of the poison stubs: a leak is a test failure, not a stray pane
+# or a paste into the developer's own REPL.
 if [[ -s "$POISON_LOG" ]]; then
-  fail "no test reaches the real cmux or claude" "$(cat "$POISON_LOG")"
+  fail "no test reaches the real cmux, claude, or control socket" "$(cat "$POISON_LOG")"
 else
-  pass "no test reaches the real cmux or claude"
+  pass "no test reaches the real cmux, claude, or control socket"
 fi
 
 echo ""

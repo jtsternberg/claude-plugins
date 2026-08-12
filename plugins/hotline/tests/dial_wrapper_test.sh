@@ -12,6 +12,13 @@
 # Poison stubs sit at the FRONT of PATH for the whole file: a test that forgets
 # its own stub fails loudly here instead of launching a real cmux pane or a real
 # `claude` (which is exactly what happened once in cmux-call-async_test.sh).
+#
+# PATH stubs are not enough on their own any more: every cmux delivery is a
+# terminal.paste written straight to cmux's control socket, which no PATH entry
+# can intercept. So each scratch env also gets its own stub socket server
+# ($CMUX_SOCKET_PATH), and the default one is POISONED — it answers ok:false and
+# records a violation, so an unstubbed socket call fails the suite instead of
+# reaching the developer's own live cmux.
 # =============================================================================
 set -u
 
@@ -49,7 +56,116 @@ PATH="$POISON_BIN:$PATH"
 # Launch scripts and call dirs the launchers create live outside our scratch
 # tree; collect and remove them at the end.
 LEAKED=()
-trap 'rm -rf "$POISON_BIN" "$STRAY_SESSION_CACHE" ${LEAKED[@]+"${LEAKED[@]}"}' EXIT
+STUB_PIDS=()
+stop_stubs() {
+  local p
+  for p in ${STUB_PIDS[@]+"${STUB_PIDS[@]}"}; do kill "$p" 2>/dev/null || true; done
+}
+trap 'stop_stubs; rm -rf "$POISON_BIN" "$STRAY_SESSION_CACHE" ${LEAKED[@]+"${LEAKED[@]}"}' EXIT
+
+# --- control-socket stubs ----------------------------------------------------
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOCKET_STUB="$TESTS_DIR/lib/socket-stub.py"
+REAL_PYTHON3="$(command -v python3)"
+if [[ -z "$REAL_PYTHON3" ]]; then
+  echo "dial.sh wrapper: SKIP — python3 not available (the control-socket helper needs it)"
+  exit 0
+fi
+SOCKROOT="$(mktemp -d)"
+LEAKED+=("$SOCKROOT")
+
+# The canned answers a working cmux gives. system.capabilities must advertise
+# terminal.paste under result.METHODS — result.capabilities is a different list
+# of *.v1 feature tokens and never contains it, so a preflight reading the wrong
+# one would degrade every call on a cmux that supports the verb perfectly well.
+SOCK_OK_RESPONSES="$SOCKROOT/ok.json"
+cat > "$SOCK_OK_RESPONSES" <<'JSON'
+{"system.capabilities": {"ok": true, "result": {
+   "methods": ["system.capabilities", "terminal.paste", "workspace.close"],
+   "capabilities": ["terminal.bytes.v1", "events.v1"]}},
+ "terminal.paste": {"ok": true, "result": {"submitted": true}},
+ "_default": {"ok": true, "result": {}}}
+JSON
+# A cmux too old to offer the verb: the preflight must catch this and say so.
+SOCK_NO_PASTE_RESPONSES="$SOCKROOT/no-paste.json"
+cat > "$SOCK_NO_PASTE_RESPONSES" <<'JSON'
+{"system.capabilities": {"ok": true, "result": {
+   "methods": ["system.capabilities", "workspace.close"],
+   "capabilities": ["terminal.bytes.v1"]}},
+ "_default": {"ok": true, "result": {}}}
+JSON
+
+# start_socket_stub <dir> [responses] [echo-file] — echoes the socket path.
+# Blocks on the stub's own READY line rather than sleeping and hoping.
+start_socket_stub() {
+  local dir="$1" responses="${2:-}" echo_file="${3:-}" reject="${4:-}" sock args=() i
+  mkdir -p "$dir"
+  sock="$dir/cmux.sock"
+  args=(--socket "$sock" --requests "$dir/requests.log")
+  if [[ -n "$responses" ]]; then
+    args+=(--responses "$responses")
+  else
+    args+=(--poison --violations "$POISON_LOG")
+  fi
+  [[ -n "$echo_file" ]] && args+=(--echo-file "$echo_file")
+  [[ -n "$reject" ]] && args+=(--reject-surface "$reject")
+  "$REAL_PYTHON3" "$SOCKET_STUB" "${args[@]}" > "$dir/stub.out" 2>"$dir/stub.err" &
+  STUB_PIDS+=($!)
+  for i in $(seq 1 60); do
+    grep -q READY "$dir/stub.out" 2>/dev/null && break
+    sleep 0.05
+  done
+  printf '%s' "$sock"
+}
+
+POISON_SOCK="$(start_socket_stub "$SOCKROOT/poison")"
+: > "$SOCKROOT/poison/requests.log"
+
+# The working socket every cmux case inherits. One server for the whole file
+# rather than one per scratch env: the request log and the echo file are shared,
+# and assertions look at the LAST terminal.paste, which is the one the case under
+# test just made.
+SOCK_ECHO_FILE="$SOCKROOT/typed.txt"
+: > "$SOCK_ECHO_FILE"
+OK_SOCK="$(start_socket_stub "$SOCKROOT/ok" "$SOCK_OK_RESPONSES" "$SOCK_ECHO_FILE")"
+OK_REQUESTS="$SOCKROOT/ok/requests.log"
+: > "$OK_REQUESTS"
+# A socket that accepts the paste but echoes nothing back to the screen: the
+# model of a paste whose bytes never arrived.
+NOECHO_SOCK="$(start_socket_stub "$SOCKROOT/noecho" "$SOCK_OK_RESPONSES")"
+# A socket that refuses the paste for the STALE surface and accepts it for its
+# replacement. This is how a case makes reuse fail at DELIVERY — leaving the old
+# surface idle and clean, so superseded-surface cleanup is then in play — without
+# also breaking delivery into the fresh surface the call falls back to.
+STALE_SURFACE="aaaa0000-1111-4111-8111-111111111111"
+REJECT_STALE_SOCK="$(start_socket_stub "$SOCKROOT/reject-stale" "$SOCK_OK_RESPONSES" \
+  "$SOCK_ECHO_FILE" "$STALE_SURFACE")"
+# A cmux with no terminal.paste at all.
+NO_PASTE_SOCK="$(start_socket_stub "$SOCKROOT/nopaste" "$SOCK_NO_PASTE_RESPONSES")"
+
+export CMUX_SOCKET_PATH="$OK_SOCK"
+export SOCK_ECHO_FILE
+
+# The params of the LAST terminal.paste request, decoded.
+last_paste() {  # last_paste [field]  (field defaults to the pasted text)
+  local field="${1:-text}"
+  grep -F '"terminal.paste"' "$OK_REQUESTS" 2>/dev/null | tail -1 \
+    | "$REAL_PYTHON3" -c '
+import json,sys
+line = sys.stdin.read().strip()
+if not line: sys.exit(0)
+if line.startswith("_cmux_capability_v1 "):
+    line = line.split(" ", 2)[2]
+print(json.loads(line)["params"].get(sys.argv[1], ""), end="")
+' "$field" 2>/dev/null
+}
+paste_count() { grep -cF '"terminal.paste"' "$OK_REQUESTS" 2>/dev/null || true; }
+capability_count() { grep -cF '"system.capabilities"' "$OK_REQUESTS" 2>/dev/null || true; }
+# Keep the confirmation polls short: the transcript tier legitimately misses in
+# this suite (no callee is writing one), and the screen tier answers immediately.
+export HOTLINE_PASTE_CONFIRM_TRIES=2
+export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
+export HOTLINE_PASTE_BOX_TIMEOUT=3
 
 pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() {
@@ -74,28 +190,35 @@ ST="${CMUX_FAKE_STATE:?}"
 echo "$*" >> "$ST/cmux_calls"
 case "$1" in
   ping)          exit "${CMUX_PING_RC:-0}" ;;
-  # Typed text shows up on the screen, as it would in a real REPL: reuse
-  # confirms its nonce landed by reading it back. Set CMUX_FAKE_NO_ECHO to model
-  # a send whose bytes never arrived.
   # Both branches must end on an explicit exit 0: a trailing conditional would
   # otherwise become the stub's exit status, and a "failed" read-screen reads as
   # a dead surface.
   read-screen)   cat "$ST/screen.txt" 2>/dev/null
-                 if [[ -z "${CMUX_FAKE_NO_ECHO:-}" && -f "$ST/typed.txt" ]]; then
-                   cat "$ST/typed.txt"
+                 # Whatever the socket stub echoed shows up on the screen, as a
+                 # pasted payload would in a real REPL: that is how delivery
+                 # confirmation sees its nonce. Pointing a case at a socket stub
+                 # started WITHOUT --echo-file models a paste whose bytes never
+                 # arrived.
+                 if [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]]; then
+                   cat "$SOCK_ECHO_FILE"
                  fi
                  exit 0 ;;
-  send)          echo "$*" >> "$ST/send_calls"
-                 if [[ -z "${CMUX_FAKE_NO_ECHO:-}" ]]; then
-                   printf '%s\n' "${@: -1}" >> "$ST/typed.txt"
-                 fi
-                 exit 0 ;;
+  send)          echo "$*" >> "$ST/send_calls"; exit 0 ;;
   send-key)      echo "$*" >> "$ST/sendkey_calls" ;;
   new-workspace) echo "OK workspace:123" ;;
-  # Superseded-surface cleanup resolves a surface's workspace from the tree.
-  tree)          jq -nc '{windows:[{workspaces:[{id:"WORKSPACE-UUID-1",
-                   panes:[{surface_ids:["aaaa0000-1111-4111-8111-111111111111",
-                                        "SURFACE-UUID-OLD","SURFACE-UUID-777"]}]}]}]}' ;;
+  # Both the paste and superseded-surface cleanup resolve a surface's workspace
+  # and UUID from the tree, via --id-format both. workspace:123 is the detached
+  # placement's own tab (what new-workspace above just returned), so a detached
+  # first contact can find the surface to paste into.
+  tree)          jq -nc '{windows:[{workspaces:[
+                   {id:"WORKSPACE-UUID-1",ref:"workspace:5",
+                    panes:[{surfaces:[
+                     {id:"aaaa0000-1111-4111-8111-111111111111",ref:"surface:1"},
+                     {id:"SURFACE-UUID-OLD",ref:"surface:2"},
+                     {id:"SURFACE-UUID-777",ref:"surface:777"}]}]},
+                   {id:"WORKSPACE-UUID-DETACHED",ref:"workspace:123",
+                    panes:[{selected_surface_id:"SURFACE-UUID-DETACHED",
+                            surfaces:[{id:"SURFACE-UUID-DETACHED",ref:"surface:900"}]}]}]}]}' ;;
   close-surface) echo "$*" >> "$ST/close_calls"; echo "OK" ;;
   *)             exit 0 ;;
 esac
@@ -171,7 +294,11 @@ new_env() {   # echoes a fresh scratch root with bin/, home/, target/, work/
   local t
   t=$(mktemp -d /tmp/hotline-dial-test-XXXXXX)
   mkdir -p "$t/bin" "$t/home" "$t/target" "$t/work" "$t/pending" "$t/empty"
-  printf 'Claude Code v2.1.221\n' > "$t/screen.txt"
+  # A booted REPL: the banner (wait-for-session's signal A) AND a drawn input box
+  # (signal C, and what cmux-paste.sh waits for before pasting — a paste into a
+  # shell that has not yet exec'd claude is lost silently).
+  printf 'Claude Code v2.1.221\n%s\n\xe2\x9d\xaf\xc2\xa0\n%s\n' \
+    "────────────────────" "────────────────────" > "$t/screen.txt"
   echo "$t"
 }
 
@@ -229,13 +356,44 @@ check "clean cmux path records no fallbacks" $? "out=$out"
 [[ "$(jq -r .awaiting_response <<<"$out")" == "true" ]]
 check "async modes flag awaiting_response=true (wait-for-response is a separate step)" $? "out=$out"
 
+# First contact is PASTED, not launched. The ringing invocation and its tags are
+# asserted against the terminal.paste request, and the launch script is asserted
+# to be free of them: the prompt on claude's argv is the claude-plugins-86ka leak,
+# and it is what scope B of the paste rework exists to close.
+pasted="$(last_paste)"
+grep -q '/hotline:hotline-ringing' <<<"$pasted" \
+  && grep -qF '[MODE: work_order]' <<<"$pasted" \
+  && grep -qF '[SESSION: caller-1111]' <<<"$pasted" \
+  && grep -qF '[CALLER: ' <<<"$pasted" \
+  && grep -qF 'run the suite' <<<"$pasted"
+check "first contact PASTES the ringing command with MODE/CALLER/SESSION tags" $? \
+  "pasted=$pasted"
+
+[[ "$pasted" == '/hotline:hotline-ringing [CALL_ID: '* ]]
+check "the nonce follows the slash command (a leading header would break parsing)" $? \
+  "pasted=$pasted"
+
 launch_plain=$(unquoted <<<"$launch")
-grep -q '/hotline:hotline-ringing' <<<"$launch_plain" \
-  && grep -qF '[MODE: work_order]' <<<"$launch_plain" \
-  && grep -qF '[SESSION: caller-1111]' <<<"$launch_plain" \
-  && grep -qF '[CALLER: ' <<<"$launch_plain"
-check "first contact wraps the ringing command with MODE/CALLER/SESSION tags" $? \
-  "launch=$launch"
+if grep -qF 'run the suite' <<<"$launch_plain" \
+   || grep -q 'hotline-ringing' <<<"$launch_plain"; then
+  fail "the prompt never reaches claude's argv" "launch=$launch"
+else
+  pass "the prompt never reaches claude's argv"
+fi
+
+[[ "$(last_paste surface_id)" == "SURFACE-UUID-777" \
+   && "$(last_paste workspace_id)" == "WORKSPACE-UUID-1" \
+   && "$(last_paste submit_key)" == "return" ]]
+check "the paste is addressed to the new surface by UUID, submit_key=return" $? \
+  "surface=$(last_paste surface_id) ws=$(last_paste workspace_id) key=$(last_paste submit_key)"
+
+[[ "$(capability_count)" -ge 1 ]]
+check "the dial preflights terminal.paste over the socket" $? \
+  "capability calls: $(capability_count)"
+
+[[ ! -f "$call_dir/pending_paste.md" ]]
+check "pending_paste.md is removed once the prompt has landed" $? \
+  "still present in $call_dir"
 
 grep -q -- '--resume' <<<"$launch"
 if [[ $? -eq 0 ]]; then
@@ -395,21 +553,34 @@ call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 check "follow-up connects with first_contact=false" $? \
   "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
 
-grep -q 'one more thing' "$t/send_calls" 2>/dev/null
-check "the follow-up message is typed into the existing surface" $? \
-  "send_calls=$(cat "$t/send_calls" 2>/dev/null)"
+pasted="$(last_paste)"
+[[ "$pasted" == *'one more thing' && "$(last_paste surface_id)" == "SURFACE-UUID-777" ]]
+check "the follow-up message is pasted into the existing surface" $? \
+  "pasted=$pasted surface=$(last_paste surface_id)"
 
-grep -q 'hotline:hotline-ringing' "$t/send_calls" 2>/dev/null
-if [[ $? -eq 0 ]]; then
-  fail "follow-ups never re-wrap with the ringing command" \
-       "send_calls=$(cat "$t/send_calls" 2>/dev/null)"
+if grep -q 'hotline:hotline-ringing' <<<"$pasted"; then
+  fail "follow-ups never re-wrap with the ringing command" "pasted=$pasted"
 else
   pass "follow-ups never re-wrap with the ringing command"
 fi
 
-grep -q 'send-key --surface SURFACE-UUID-777 Enter' "$t/sendkey_calls" 2>/dev/null
-check "reuse submits with a separate send-key Enter" $? \
-  "sendkey_calls=$(cat "$t/sendkey_calls" 2>/dev/null)"
+# The nonce leads its own line for a follow-up: nothing here is a slash command,
+# and a header on its own line cannot be broken across a rendered wrap.
+[[ "$pasted" == '[CALL_ID: '*']'$'\n''one more thing' ]]
+check "the follow-up carries the nonce on a line of its own" $? "pasted=$(printf '%q' "$pasted")"
+
+# No send-key, and no `cmux send` of the payload: submit_key does the submitting,
+# and the payload never touches the transport that used to lose bytes from it.
+if [[ -s "$t/sendkey_calls" ]]; then
+  fail "reuse needs no separate send-key Enter" "sendkey_calls=$(cat "$t/sendkey_calls")"
+else
+  pass "reuse needs no separate send-key Enter"
+fi
+if grep -q 'one more thing' "$t/send_calls" 2>/dev/null; then
+  fail "the payload never goes out through cmux send" "send_calls=$(cat "$t/send_calls")"
+else
+  pass "the payload never goes out through cmux send"
+fi
 
 # Reuse must not open a surface, so no launch script is ever written.
 [[ -n "$call_dir" && ! -f "$call_dir/launch_script.txt" ]]
@@ -429,10 +600,11 @@ check "a successful reuse records no fallbacks" $? "out=$out"
 # ===========================================================================
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
-# One screen has to serve two readers here: cmux-reuse-surface.sh sees the
-# post-interrupt prompt and declines, while wait-for-session.sh (polling the NEW
-# surface through the same stub) needs the REPL banner to confirm boot.
-printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n' \
+# One screen has to serve three readers here: cmux-reuse-surface.sh sees the
+# post-interrupt prompt and declines; wait-for-session.sh (polling the NEW surface
+# through the same stub) needs the REPL banner to confirm boot; and cmux-paste.sh
+# needs a drawn input box before it will paste into that new surface.
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
   > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6666" --session "66666666-6666-4666-8666-666666666666" \
@@ -483,21 +655,21 @@ check "the cache is self-healed to the new surface for the next follow-up" $? \
 
 # A multi-line follow-up REUSES the live surface (claude-plugins-i8fb). It used
 # to skip reuse outright, which is what stacked a new pane on every substantive
-# work-order follow-up. The payload goes to the call dir; the REPL gets a pointer.
+# work-order follow-up — and then, briefly, to reuse it by writing the payload to
+# a sidecar file and typing a pointer. Now the payload itself is pasted, whole.
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
 printf 'some earlier output\n\xe2\x9d\xaf \nClaude Code v2.1.221\n' > "$t/screen.txt"
-# The TAIL sentinel has to sit well past the nudge's 160-char preview cap, so
-# "the payload never crosses cmux send" tests the payload instead of tripping
-# over the preview quoting its head. Built rather than hand-counted: 12 numbered
-# lines is ~380 chars before the sentinel.
+# A work-order-sized payload with a sentinel at the very END: a delivery that
+# truncates or splits the body loses the tail first, so the sentinel arriving is
+# what proves the whole thing went in one piece.
 { for i in $(seq 1 12); do echo "follow-up detail line $i of the work order"; done
   echo 'TAIL-SENTINEL-9Q'; } > "$t/msg.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-7777" --session "77777777-7777-4777-8777-777777777777" \
   --mode work_order --surface "SURFACE-UUID-OLD"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
-  HOTLINE_CALLER_SESSION_ID="caller-7777" HOTLINE_EXCHANGES_DIR="$t/exchanges" \
+  HOTLINE_CALLER_SESSION_ID="caller-7777" \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
   bash "$DIAL" --target "$t/target" --mode work_order \
     --prompt-file "$t/msg.txt" --boot-timeout 5 2>"$t/err.txt")
@@ -510,20 +682,24 @@ call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 check "a multi-line follow-up reuses the live surface, opening no second one" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
-[[ -f "$call_dir/message.md" && "$(cat "$call_dir/message.md")" == "$(cat "$t/msg.txt")" ]]
-check "the multi-line payload lands in the call dir byte-identical" $? \
-  "message.md=$(cat "$call_dir/message.md" 2>/dev/null)"
+# The WHOLE payload, in ONE request, tail included.
+[[ "$(last_paste)" == *"$(cat "$t/msg.txt")" ]]
+check "the multi-line payload is pasted byte-identical, tail sentinel and all" $? \
+  "pasted=$(printf '%q' "$(last_paste)")"
 
-# The payload must not be typed into the REPL — only the pointer to it. The
-# sentinel lives past the preview cap, so its absence means the body stayed off
-# the wire (the preview quoting the payload's head is by design).
-! grep -q 'TAIL-SENTINEL-9Q' "$t/send_calls" 2>/dev/null
-check "the payload itself never crosses cmux send" $? \
-  "send_calls=$(cat "$t/send_calls" 2>/dev/null)"
+# No sidecar, and nothing for the callee to go read outside its own workspace.
+[[ ! -f "$call_dir/message.md" ]]
+check "no message.md sidecar is written" $? "call_dir contents: $(ls -A "$call_dir" 2>/dev/null | tr '\n' ' ')"
 
-grep -q 'message.md' "$t/send_calls" 2>/dev/null
-check "the REPL receives a pointer to the payload" $? \
-  "send_calls=$(cat "$t/send_calls" 2>/dev/null)"
+[[ ! -f "$call_dir/payload.txt" ]]
+check "the payload vehicle is cleaned out of the call dir" $? \
+  "call_dir contents: $(ls -A "$call_dir" 2>/dev/null | tr '\n' ' ')"
+
+if grep -q 'TAIL-SENTINEL-9Q' "$t/send_calls" 2>/dev/null; then
+  fail "the payload never crosses cmux send" "send_calls=$(cat "$t/send_calls")"
+else
+  pass "the payload never crosses cmux send"
+fi
 
 [[ "$(jq -r '.fallbacks | length' <<<"$out")" -eq 0 ]]
 check "reusing for a multi-line follow-up records no fallback (nothing degraded)" $? \
@@ -582,7 +758,7 @@ make_cmux "$t/bin"; make_claude "$t/bin"
 # would be reused and the headless path never reached. Stage a REPL that refuses
 # the follow-up (post-interrupt state) so the call falls through to the transport
 # decision, which is what this case is about.
-printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n' \
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
   > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6c" --session "6c6c6c6c-6c6c-4c6c-8c6c-6c6c6c6c6c6c" \
@@ -614,7 +790,7 @@ make_cmux "$t/bin"; make_claude "$t/bin"
 # Same two-readers screen as case 6: cmux-reuse-surface.sh sees the post-interrupt
 # prompt and declines (so the call reaches the placement decision), while
 # wait-for-session.sh needs the REPL banner to confirm the detached boot.
-printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n' \
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
   > "$t/screen.txt"
 cat > "$t/side-degrade.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -666,7 +842,7 @@ printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-1] the previous follow-up\n\nClaude Co
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6e" --session "6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e" \
   --mode work_order --surface "aaaa0000-1111-4111-8111-111111111111" --call-id "nonce-prev-1"
-out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_NO_ECHO=1 \
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_SOCKET_PATH="$REJECT_STALE_SOCK" \
   HOTLINE_CALLER_SESSION_ID="caller-6e" HOTLINE_CLEANUP_SETTLE=0 \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
   bash "$DIAL" --target "$t/target" --mode work_order \
@@ -692,7 +868,7 @@ check "the replacement surface is never the one closed" $? \
 # cleanup must refuse — and say so rather than closing on a weaker signal.
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
-printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n' \
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
   > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6f" --session "6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f" \
@@ -723,7 +899,7 @@ printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-3] the previous follow-up\n\nClaude Co
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6h" --session "6h6h6h6h-6h6h-4h6h-8h6h-6h6h6h6h6h6h" \
   --mode work_order --surface "surface:211" --call-id "nonce-prev-3"
-out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_NO_ECHO=1 \
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_SOCKET_PATH="$REJECT_STALE_SOCK" \
   HOTLINE_CALLER_SESSION_ID="caller-6h" HOTLINE_CLEANUP_SETTLE=0 \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
   bash "$DIAL" --target "$t/target" --mode work_order \
@@ -746,7 +922,7 @@ printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-2] the previous follow-up\n\nClaude Co
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6g" --session "6g6g6g6g-6g6g-4g6g-8g6g-6g6g6g6g6g6g" \
   --mode work_order --surface "aaaa0000-1111-4111-8111-111111111111" --call-id "nonce-prev-2"
-out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_NO_ECHO=1 \
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_SOCKET_PATH="$REJECT_STALE_SOCK" \
   HOTLINE_CALLER_SESSION_ID="caller-6g" HOTLINE_CLOSE_SUPERSEDED=0 \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
   bash "$DIAL" --target "$t/target" --mode work_order \
@@ -932,10 +1108,10 @@ call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 check "conference follow-up connects with first_contact=false" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
-grep -q 'next thought' "$t/send_calls" 2>/dev/null \
+[[ "$(last_paste)" == *'next thought' ]] \
   && ! grep -q 'hotline-cmux-launch' "$t/send_calls" 2>/dev/null
-check "conference follow-up types into the live surface, opens no second one" $? \
-  "send_calls=$(cat "$t/send_calls" 2>/dev/null)"
+check "conference follow-up is pasted into the live surface, opens no second one" $? \
+  "pasted=$(last_paste) send_calls=$(cat "$t/send_calls" 2>/dev/null)"
 
 target_real=$(cd "$t/target" && pwd -P)
 [[ "$(jq -r --arg t "$target_real" '.connections[$t].exchange_count' \
@@ -1111,6 +1287,90 @@ check "the native path plants no pending fingerprint state" $? \
 [[ -s "$t/home/.agents-hotline/sessions/${NATIVE_SID}.json" ]]
 check "the call is registered under the native caller session id" $? \
   "$(ls -R "$t/home/.agents-hotline" 2>/dev/null)"
+
+# ===========================================================================
+# Capability preflight: a cmux with no terminal.paste cannot carry a call.
+#
+# Every cmux delivery is a terminal.paste now, first contact included, so there is
+# no paste-free cmux path left to degrade to. The dial says so and goes headless
+# rather than resurrecting the argv launch this rework removed — a silent fallback
+# tier that reopened the leak would give back exactly what was paid for.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_claude "$t/bin"
+FAKE_CLAUDE_SESSION_ID="caaaaaaa-cccc-4ccc-8ccc-cccccccccccc"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  CMUX_SOCKET_PATH="$NO_PASTE_SOCK" \
+  HOTLINE_CALLER_SESSION_ID="caller-cap" HOTLINE_PENDING_DIR="$t/pending" \
+  FAKE_CLAUDE_SESSION_ID="$FAKE_CLAUDE_SESSION_ID" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "no paste available here" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+
+jq -e '.fallbacks | index("terminal-paste-unavailable→headless")' <<<"$out" >/dev/null 2>&1
+check "a cmux without terminal.paste records the capability miss as a fallback" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+[[ "$(jq -r .status <<<"$out")" == "connected" && "$(jq -r .transport <<<"$out")" == "headless" ]]
+check "…and the call still completes, over the headless transport" $? "out=$out"
+
+[[ ! -s "$SOCKROOT/nopaste/requests.log" ]] || \
+  ! grep -qF '"terminal.paste"' "$SOCKROOT/nopaste/requests.log"
+check "…and no paste is attempted against a cmux that cannot do it" $? \
+  "$(cat "$SOCKROOT/nopaste/requests.log" 2>/dev/null)"
+
+# ===========================================================================
+# The prompt is written to a 0600 temp file and cleaned up, even when the caller
+# passed --prompt. Handing the launchers a file is what keeps the payload out of
+# every argv downstream (claude-plugins-86ka); leaving the file behind would
+# undo the point of the 0600.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+mkdir -p "$t/bin2"
+# A python3 shim in front of the socket helper: records its argv and the mode of
+# the file it was handed, so "the payload travels as an owner-only path, never as
+# an argument" is asserted rather than assumed.
+cat > "$t/bin2/python3" <<SHIM
+#!/usr/bin/env bash
+printf '%q ' "\$@" >> "$t/python-argv.log"; printf '\n' >> "$t/python-argv.log"
+for _a in "\$@"; do
+  if [[ -n "\${_want:-}" ]]; then
+    printf 'PAYLOAD_MODE %s\n' \
+      "\$(stat -f '%Lp' "\$_a" 2>/dev/null || stat -c '%a' "\$_a" 2>/dev/null)" >> "$t/python-argv.log"
+    _want=""
+  fi
+  [[ "\$_a" == "--payload-file" ]] && _want=1
+done
+exec "$REAL_PYTHON3" "\$@"
+SHIM
+chmod +x "$t/bin2/python3"
+PROMPTS_BEFORE=$(ls -d /tmp/hotline-prompt-* 2>/dev/null | wc -l | tr -d ' ')
+out=$(PATH="$t/bin2:$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-argv" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "PROMPT-ON-ARGV-SENTINEL" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+
+grep -q -- '--payload-file' "$t/python-argv.log" 2>/dev/null
+check "the socket helper is handed a FILE path, not the payload" $? \
+  "$(cat "$t/python-argv.log" 2>/dev/null)"
+
+! grep -q 'PROMPT-ON-ARGV-SENTINEL' "$t/python-argv.log" 2>/dev/null
+check "no payload text appears in the helper's argv" $? \
+  "$(cat "$t/python-argv.log" 2>/dev/null)"
+
+grep -q 'PAYLOAD_MODE 600' "$t/python-argv.log" 2>/dev/null
+check "the file the helper reads is owner-only (0600)" $? \
+  "$(grep PAYLOAD_MODE "$t/python-argv.log" 2>/dev/null)"
+
+PROMPTS_AFTER=$(ls -d /tmp/hotline-prompt-* 2>/dev/null | wc -l | tr -d ' ')
+[[ "$PROMPTS_AFTER" -le "$PROMPTS_BEFORE" ]]
+check "the dial's own prompt temp file does not outlive the dial" $? \
+  "before=$PROMPTS_BEFORE after=$PROMPTS_AFTER: $(ls -d /tmp/hotline-prompt-* 2>/dev/null)"
 
 # ===========================================================================
 if [[ -s "$POISON_LOG" ]]; then

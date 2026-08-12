@@ -132,12 +132,18 @@ case "$1" in
     fi
     exit 0 ;;
   tree)
+    # --id-format both: each surface reports its stable `id` alongside its
+    # positional `ref`, which is what the shared resolver in repl-state.sh reads
+    # so one lookup serves a UUID handle and a legacy surface:N handle alike.
     [[ -s "$D/no_tree" ]] && exit 1
     if [[ -s "$D/orphan" ]]; then
-      jq -nc '{windows:[{workspaces:[{id:"OTHER-WS",panes:[{surface_ids:["SOMEONE-ELSE"]}]}]}]}'
+      jq -nc '{windows:[{workspaces:[{id:"OTHER-WS",ref:"workspace:9",
+        panes:[{surfaces:[{id:"SOMEONE-ELSE",ref:"surface:9"}]}]}]}]}'
     else
       jq -nc --arg s "$SURF" --arg w "$WS" \
-        '{windows:[{workspaces:[{id:$w,panes:[{surface_ids:[$s,"bbbb0000-2222-4222-8222-222222222222"]}]}]}]}'
+        '{windows:[{workspaces:[{id:$w,ref:"workspace:1",panes:[{surfaces:[
+           {id:$s,ref:"surface:1"},
+           {id:"bbbb0000-2222-4222-8222-222222222222",ref:"surface:2"}]}]}]}]}'
     fi
     exit 0 ;;
   close-surface)
@@ -170,7 +176,7 @@ grep -q "^close-surface --workspace $WS --surface $SURF" "$CALLLOG" \
 
 # The workspace is resolved from the tree, not stored — so a cache written before
 # workspaces were recorded still gets cleaned up.
-grep -q '^tree --all --json --id-format uuids' "$CALLLOG" \
+grep -q '^tree --all --json --id-format both' "$CALLLOG" \
   && pass "the workspace is resolved from the cmux tree by UUID" \
   || fail "the workspace is resolved from the cmux tree by UUID" "$(cat "$CALLLOG")"
 

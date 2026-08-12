@@ -691,7 +691,8 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
       --arg w "$(cat "$CALL_DIR/workspace_ref.txt" 2>/dev/null)" '
       .windows[]?.workspaces[]?
       | select((.ref // "") == $w or (.id // "") == $w)
-      | .panes[]?.selected_surface_id // empty' 2>/dev/null | head -1)
+      | .panes[]?
+      | (.selected_surface_id // .surfaces[0].id // empty)' 2>/dev/null | head -1)
   else
     DELIVER_SURFACE="$SURFACE_REF"
   fi

@@ -89,12 +89,8 @@ cat > "$CALLEE_T" <<'EOF'
 {"type":"assistant","timestamp":"2026-07-02T10:00:09Z","message":{"role":"assistant","content":[{"type":"text","text":"Callee response"}]}}
 EOF
 
-EXCHANGES_DIR="$SANDBOX/exchanges"
-mkdir -p "$EXCHANGES_DIR"
-
 PORT=$(( (RANDOM % 2000) + 42000 ))
 HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
-  HOTLINE_EXCHANGES_DIR="$EXCHANGES_DIR" \
   node "$SB_SCRIPTS/server.js" --port="$PORT" --stale-hours=24 > "$SANDBOX/server.log" 2>&1 &
 SERVER_PID=$!
 
@@ -173,61 +169,59 @@ else
   fail "parser: compaction summary surfaced"
 fi
 
-# ---- case: file-delivered follow-ups render their PAYLOAD, not the pointer -------
-# A follow-up too large to type into the callee's REPL arrives as a short pointer
-# line (cmux-reuse-surface.sh). Rendering that verbatim would show "read <path>"
-# where the question belongs — and the call dir it names is transient, so the
-# archive is what keeps the exchange readable after cleanup.
+# ---- case: a pasted follow-up renders as itself, with no side channel ------------
+# Payloads arrive in the callee's transcript verbatim, so the reader shows what was
+# asked without resolving anything off disk. This pins that: the multi-line payload
+# and its leading [CALL_ID:] line are rendered as one message, and no entry claims
+# it came "via file". The parser used to read a pointer line's path out of the call
+# dir and a caller-side archive — an arbitrary-path read that is now deleted rather
+# than hardened (claude-plugins-ml7l), and this case fails if it ever comes back.
 
-NUDGE_SID="13131313-2424-3535-4646-575757575757"
-LIVE_DIR="$SANDBOX/hotline-call-LIVE"
-mkdir -p "$LIVE_DIR"
-printf 'the live payload\nsecond line of it\n' > "$LIVE_DIR/message.md"
-printf 'the archived payload\nsecond archived line\n' > "$EXCHANGES_DIR/beefbeefbeefbeef.md"
-cat > "$PROJECTS_ROOT/-tmp-caller-ws/${NUDGE_SID}.jsonl" <<EOF
-{"type":"user","message":{"role":"user","content":"[CALL_ID: aaaabbbbccccdddd] Next instructions: read $LIVE_DIR/message.md in full before acting. (Preview: the live payload…)"}}
-{"type":"user","message":{"role":"user","content":"[CALL_ID: beefbeefbeefbeef] Next instructions: read /tmp/hotline-call-GONE/message.md in full before acting. (Preview: the archived payload…)"}}
-{"type":"user","message":{"role":"user","content":"[CALL_ID: 0000dead0000dead] Next instructions: read /tmp/hotline-call-VANISHED/message.md in full before acting. (Preview: lost to time…)"}}
+PASTE_SID="13131313-2424-3535-4646-575757575757"
+PASTED_PAYLOAD='[CALL_ID: aaaabbbbccccdddd]\nStep one: audit the guard.\nStep two: report back.'
+cat > "$PROJECTS_ROOT/-tmp-caller-ws/${PASTE_SID}.jsonl" <<EOF
+{"type":"user","message":{"role":"user","content":"$PASTED_PAYLOAD"}}
 {"type":"user","message":{"role":"user","content":"an ordinary typed follow-up"}}
 EOF
 
-NUDGE_T=$(curl -sf "$BASE/api/transcript?session=$NUDGE_SID")
+PASTE_T=$(curl -sf "$BASE/api/transcript?session=$PASTE_SID")
 
-if [[ $(echo "$NUDGE_T" | jq -r '.entries[0].text') == "the live payload
-second line of it" ]]; then
-  pass "parser: nudge resolves from the live call dir"
+if [[ $(echo "$PASTE_T" | jq -r '.entries[0].text') == "[CALL_ID: aaaabbbbccccdddd]
+Step one: audit the guard.
+Step two: report back." ]]; then
+  pass "parser: a pasted multi-line payload renders verbatim, nonce line included"
 else
-  fail "parser: nudge resolves from the live call dir (got: $(echo "$NUDGE_T" | jq -r '.entries[0].text'))"
+  fail "parser: a pasted multi-line payload renders verbatim, nonce line included (got: $(echo "$PASTE_T" | jq -r '.entries[0].text'))"
 fi
 
-# The whole point of the archive: the call dir in this pointer does not exist.
-if [[ $(echo "$NUDGE_T" | jq -r '.entries[1].text') == "the archived payload
-second archived line" ]]; then
-  pass "parser: nudge falls back to the durable archive when the call dir is gone"
+if [[ $(echo "$PASTE_T" | jq -r '.entries[0].viaFile') == "null" \
+   && $(echo "$PASTE_T" | jq -r '.entries[1].viaFile') == "null" ]]; then
+  pass "parser: nothing is marked 'via file' — there is no file delivery left"
 else
-  fail "parser: nudge falls back to the durable archive when the call dir is gone (got: $(echo "$NUDGE_T" | jq -r '.entries[1].text'))"
+  fail "parser: nothing is marked 'via file' — there is no file delivery left (got: $(echo "$PASTE_T" | jq -c '.entries'))"
 fi
 
-if [[ $(echo "$NUDGE_T" | jq -r '.entries[0].viaFile') == "true" ]]; then
-  pass "parser: a file-delivered payload is marked as such"
+# A pointer line is now just text. If the resolver ever returns, this renders the
+# contents of the file instead and fails.
+POINTER_SID="14141414-2525-3636-4747-585858585858"
+LIVE_DIR="$SANDBOX/hotline-call-LIVE"
+mkdir -p "$LIVE_DIR"
+printf 'a payload nobody should resolve\n' > "$LIVE_DIR/message.md"
+cat > "$PROJECTS_ROOT/-tmp-caller-ws/${POINTER_SID}.jsonl" <<EOF
+{"type":"user","message":{"role":"user","content":"[CALL_ID: beefbeefbeefbeef] Next instructions: read $LIVE_DIR/message.md in full before acting. (Preview: a payload…)"}}
+EOF
+POINTER_T=$(curl -sf "$BASE/api/transcript?session=$POINTER_SID")
+if [[ $(echo "$POINTER_T" | jq -r '.entries[0].text') == *"read $LIVE_DIR/message.md"* \
+   && $(echo "$POINTER_T" | jq -r '.entries[0].text') != *"nobody should resolve"* ]]; then
+  pass "parser: a pointer-shaped line is plain text — no path is read off disk"
 else
-  fail "parser: a file-delivered payload is marked as such (got: $(echo "$NUDGE_T" | jq -c '.entries[0]'))"
+  fail "parser: a pointer-shaped line is plain text — no path is read off disk (got: $(echo "$POINTER_T" | jq -c '.entries[0]'))"
 fi
 
-# Unresolvable: show the pointer rather than an empty bubble, and do NOT claim it
-# was typed.
-if [[ $(echo "$NUDGE_T" | jq -r '.entries[2].text') == *"read /tmp/hotline-call-VANISHED/message.md"* \
-   && $(echo "$NUDGE_T" | jq -r '.entries[2].viaFile') == "null" ]]; then
-  pass "parser: an unresolvable pointer falls back to its own text"
-else
-  fail "parser: an unresolvable pointer falls back to its own text (got: $(echo "$NUDGE_T" | jq -c '.entries[2]'))"
-fi
-
-if [[ $(echo "$NUDGE_T" | jq -r '.entries[3].text') == "an ordinary typed follow-up" \
-   && $(echo "$NUDGE_T" | jq -r '.entries[3].viaFile') == "null" ]]; then
+if [[ $(echo "$PASTE_T" | jq -r '.entries[1].text') == "an ordinary typed follow-up" ]]; then
   pass "parser: ordinary typed messages are untouched"
 else
-  fail "parser: ordinary typed messages are untouched (got: $(echo "$NUDGE_T" | jq -c '.entries[3]'))"
+  fail "parser: ordinary typed messages are untouched (got: $(echo "$PASTE_T" | jq -c '.entries[1]'))"
 fi
 
 # ---- case: slash-command / background-task harness blocks stripped ---------------

@@ -48,13 +48,16 @@ fail() {
   [[ -n "${2:-}" ]] && echo "    $2"
 }
 
+# Shape mirror of the launch line cmux-call-async.sh writes, for the quoting
+# assertions below. NO PROMPT: production launches a bare claude REPL and pastes
+# the prompt in afterwards, and the real script's output is asserted directly
+# further down so this mirror cannot quietly drift away from it.
 build_launch_script() {
   local resume_id="$1"
   local session_id_preset="$2"
   local fork_session="$3"
   local session_name="$4"
   local allowed_tools="$5"
-  local prompt="$6"
 
   {
     printf '#!/usr/bin/env bash\n'
@@ -65,8 +68,7 @@ build_launch_script() {
     $fork_session && printf ' --fork-session'
     [[ -n "$session_name" ]] && printf ' -n %q' "$session_name"
     # Mirrors production: `=`-joined single argv word (see cmux-call-async.sh).
-    printf ' --allowedTools=%q' "$allowed_tools"
-    printf ' -- %q\n' "$prompt"
+    printf ' --allowedTools=%q\n' "$allowed_tools"
   }
 }
 
@@ -136,7 +138,7 @@ assert_async_error_contract() {
 
 echo "cmux-call-async regression:"
 
-script=$(build_launch_script "" "11111111-1111-4111-8111-111111111111" false "hotline test" "Bash(git *) Edit" "hello")
+script=$(build_launch_script "" "11111111-1111-4111-8111-111111111111" false "hotline test" "Bash(git *) Edit")
 if printf '%s' "$script" | bash -n 2> /tmp/hotline-cmux-test.err; then
   pass "launch script quotes complex --tools specs"
 else
@@ -144,19 +146,7 @@ else
 fi
 rm -f /tmp/hotline-cmux-test.err
 
-# Regression: --allowedTools is variadic (<tools...>). Without `--` separating
-# the tools list from the positional prompt, claude swallows the prompt as
-# another "tool" name and starts with an empty REPL ("No conversation yet").
-# This was the actual root cause of the original lindris-frontend ↔
-# lindris-backend hotline-call failure on 2026-05-14. Verified by reproducing
-# the broken arg order live in a cmux workspace.
-script=$(build_launch_script "" "22222222-2222-4222-8222-222222222222" false "name" "Bash Read" "submit me")
-if printf '%s' "$script" | grep -qE -- "--allowedTools=.+ -- "; then
-  pass "launch script puts -- between --allowedTools and the positional prompt"
-else
-  fail "launch script puts -- between --allowedTools and the positional prompt" \
-       "got: $script"
-fi
+script=$(build_launch_script "" "22222222-2222-4222-8222-222222222222" false "name" "Bash Read")
 
 # Regression: --allowedTools must be `=`-joined into ONE argv word. cmux's
 # checkpoint recorder treats the flag as an arity-0 boolean and drops the value
@@ -410,8 +400,115 @@ else
   fail "first-contact launch script is delivered exactly once" \
        "send_calls=$(cat "$tmp/send_calls" 2>/dev/null)"
 fi
+
+# ---------------------------------------------------------------------------
+# THE PROMPT IS NOT IN THE LAUNCH. Asserted against the launch script the real
+# run just wrote, not a mirror of it.
+#
+# First contact used to run `claude "<ringing-wrapped prompt>"`, putting whole
+# work orders in an argv readable by any local user through `ps`
+# (claude-plugins-86ka). Now the REPL comes up bare and the prompt waits in
+# pending_paste.md for the same terminal.paste every follow-up uses.
+# ---------------------------------------------------------------------------
+LAUNCH_BODY=""
+[[ -f "$call_dir/launch_script.txt" ]] && \
+  LAUNCH_BODY="$(cat "$(cat "$call_dir/launch_script.txt")" 2>/dev/null)"
+
+if [[ -n "$LAUNCH_BODY" ]] && ! printf '%s' "$LAUNCH_BODY" | grep -qF 'hello surface'; then
+  pass "the prompt is NOT in the launch script"
+else
+  fail "the prompt is NOT in the launch script" "launch: $LAUNCH_BODY"
+fi
+# No positional prompt means no `--` separator either. Its presence would mean a
+# prompt came back.
+if printf '%s' "$LAUNCH_BODY" | grep -qE -- '--allowedTools=.* -- '; then
+  fail "the launch line ends at --allowedTools, with no positional prompt" "launch: $LAUNCH_BODY"
+else
+  pass "the launch line ends at --allowedTools, with no positional prompt"
+fi
+if printf '%s' "$LAUNCH_BODY" | grep -q 'claude'; then
+  pass "the launch script still starts a claude REPL"
+else
+  fail "the launch script still starts a claude REPL" "launch: $LAUNCH_BODY"
+fi
+
+if [[ -s "$call_dir/pending_paste.md" ]]; then
+  pass "the prompt waits in pending_paste.md for delivery"
+else
+  fail "the prompt waits in pending_paste.md for delivery" "call_dir=$call_dir"
+fi
+PENDING_MODE=$(stat -f '%Lp' "$call_dir/pending_paste.md" 2>/dev/null \
+  || stat -c '%a' "$call_dir/pending_paste.md" 2>/dev/null)
+if [[ "$PENDING_MODE" == "600" ]]; then
+  pass "pending_paste.md is owner-only (0600)"
+else
+  fail "pending_paste.md is owner-only (0600)" "mode=$PENDING_MODE"
+fi
+PENDING_BODY="$(cat "$call_dir/pending_paste.md" 2>/dev/null)"
+if [[ "$PENDING_BODY" == *"hello surface"* ]]; then
+  pass "pending_paste.md holds the prompt verbatim"
+else
+  fail "pending_paste.md holds the prompt verbatim" "got: $PENDING_BODY"
+fi
+
 [[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
 rm -rf "$tmp" "$call_dir"
+
+# A slash-command prompt keeps the nonce AFTER the command token, on the same
+# line — the shape the ringing skill parses. claude only recognises a slash
+# command at the very start of the input, so a leading header line would turn the
+# whole ringing invocation into plain text.
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/cwd"
+: > "$tmp/screen.txt"
+make_min_surface_cmux "$tmp/bin"
+make_side_stub "$tmp/open-side.sh"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" \
+  --prompt "/hotline:hotline-ringing [MODE: work_order] do the thing" 2>"$tmp/stderr.txt")
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+RING_BODY="$(cat "$call_dir/pending_paste.md" 2>/dev/null)"
+if [[ "$RING_BODY" == '/hotline:hotline-ringing [CALL_ID: '*'] [MODE: work_order] do the thing' ]]; then
+  pass "a slash-command prompt keeps the nonce after the command token"
+else
+  fail "a slash-command prompt keeps the nonce after the command token" "got: $RING_BODY"
+fi
+if [[ "$(cat "$call_dir/mode.txt" 2>/dev/null)" == "work_order" ]]; then
+  pass "the ringing tags are still parsed for the call registry"
+else
+  fail "the ringing tags are still parsed for the call registry" \
+       "mode.txt=$(cat "$call_dir/mode.txt" 2>/dev/null)"
+fi
+[[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
+# --prompt-file is the argv-free entry point dial.sh uses.
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/cwd"
+: > "$tmp/screen.txt"
+make_min_surface_cmux "$tmp/bin"
+make_side_stub "$tmp/open-side.sh"
+printf 'work order from a file\nwith a second line' > "$tmp/prompt.txt"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt-file "$tmp/prompt.txt" 2>"$tmp/stderr.txt")
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+if [[ "$(cat "$call_dir/pending_paste.md" 2>/dev/null)" == *"work order from a file"$'\n'"with a second line" ]]; then
+  pass "--prompt-file lands the same bytes in pending_paste.md"
+else
+  fail "--prompt-file lands the same bytes in pending_paste.md" \
+       "got: $(cat "$call_dir/pending_paste.md" 2>/dev/null)"
+fi
+[[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
+out=$(bash "$SCRIPT_UNDER_TEST" --cwd /tmp --prompt-file "/tmp/definitely-not-here-$$" 2>&1)
+if [[ "$out" == *'"error"'* && "$out" == *"does not exist"* ]]; then
+  pass "a missing --prompt-file is an error, not an empty prompt"
+else
+  fail "a missing --prompt-file is an error, not an empty prompt" "out: $out"
+fi
 
 # Headless FALLBACK: cmux present but cmux-cli's opener not resolvable. The
 # launcher must signal {"fallback":"headless"} (so the dial skill re-routes to
