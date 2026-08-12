@@ -2,10 +2,34 @@
 # =============================================================================
 # CMUX Call: Open a workspace in CMUX and launch Claude
 #
-# Usage:
-#   cmux-call.sh --cwd <path> [--prompt <text>] [--resume <session-id>]
+# The synchronous sibling of cmux-call-async.sh, used by conference mode: the
+# session is handed to the user in a visible surface and nobody polls for a
+# response, so this script does the whole job in one go.
 #
-# Outputs: {"workspace_id": "...", "cwd": "...", "session_id": "..."}
+# THE PROMPT IS NOT LAUNCHED WITH CLAUDE. Like cmux-call-async.sh, this starts a
+# BARE claude REPL and then delivers the prompt with one `terminal.paste` over
+# cmux's control socket (cmux-paste.sh). It used to pass the prompt as claude's
+# positional argument, which published whole work orders to `ps` for every local
+# user (claude-plugins-86ka, claude-plugins-92s5). Conference was the last path
+# still doing that.
+#
+# Being synchronous, this script owns the boot wait too — cmux-paste.sh --wait-box
+# blocks until the REPL has drawn its input box, because a payload delivered to a
+# surface that has not exec'd claude goes to the shell, which would RUN it.
+#
+# It also mints a per-call nonce now. Conference calls previously had none, so the
+# receiver had no call_id to echo and superseded-surface cleanup could never prove
+# a conference surface's identity. The nonce is returned as .call_id.
+#
+# Usage:
+#   cmux-call.sh --cwd <path> [--prompt <text> | --prompt-file <path>]
+#                [--resume <session-id>] [--name <name>] [--fork-session]
+#                [--tools <tools>] [--detached | --window <name|ref>]
+#
+# Outputs: {"workspace_ref"|"surface_ref", "surface_id", "placement", "cwd",
+#           "session_id", "call_id"}
+#   # → {"error": "...", "undelivered": true}  the REPL is up but the prompt
+#   #   never landed; .prompt_file still holds it.
 # =============================================================================
 set -euo pipefail
 
@@ -15,13 +39,15 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Opens a workspace in CMUX and launches Claude."
   echo "Outputs: {\"workspace_id\": \"...\", \"cwd\": \"...\", \"session_id\": \"...\"}"
   echo ""
-  echo "  --prompt <text>  Optional prompt to deliver to the interactive session"
+  echo "  --prompt <text>       Optional prompt to deliver to the interactive session"
+  echo "  --prompt-file <path>  Same, read from a file (preferred: keeps it off argv)"
   echo "  --tools <tools>  Override allowed tools (default: \"Bash Read Edit Write Grep Glob\")"
   exit 0
 fi
 
 CWD=""
 PROMPT=""
+PROMPT_FILE=""
 RESUME_ID=""
 SESSION_NAME=""
 FORK_SESSION=false
@@ -37,6 +63,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --cwd) CWD="$2"; shift 2 ;;
     --prompt) PROMPT="$2"; shift 2 ;;
+    --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
     --resume) RESUME_ID="$2"; shift 2 ;;
     --name) SESSION_NAME="$2"; shift 2 ;;
     --fork-session) FORK_SESSION=true; shift ;;
@@ -52,6 +79,14 @@ if [[ -z "$CWD" ]]; then
   exit 1
 fi
 
+if [[ -n "$PROMPT_FILE" ]]; then
+  if [[ ! -f "$PROMPT_FILE" ]]; then
+    jq -nc --arg p "$PROMPT_FILE" '{error: ("--prompt-file does not exist: " + $p)}'
+    exit 1
+  fi
+  PROMPT=$(cat "$PROMPT_FILE")
+fi
+
 # --fork-session COPIES the resumed session's transcript into a new id. With no
 # --resume target there is nothing to copy, so claude forks an EMPTY session — the
 # call appears to succeed but the receiver reports "fresh session, nothing run here".
@@ -63,6 +98,9 @@ if $FORK_SESSION && [[ -z "$RESUME_ID" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Tree reading (and the input-box judgement) live in one place.
+# shellcheck source=../../../scripts/repl-state.sh
+source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
 
 # Side-by-side delegates to cmux-cli's canonical open-side-surface.sh (single
 # source of truth — no vendored copy). cmux can be present without the cmux-cli
@@ -150,6 +188,29 @@ else
   )
 fi
 
+# Per-call nonce, and it goes INTO the prompt. Inline after a slash command, not on
+# a leading line of its own: claude parses a slash command only at the very start
+# of the input, so a header above `/hotline:hotline-ringing` would turn the whole
+# invocation into plain text. Same rule as cmux-call-async.sh.
+CALL_ID=$(
+  openssl rand -hex 8 2>/dev/null \
+  || od -A n -N 8 -t x1 /dev/urandom 2>/dev/null | tr -d ' \n' \
+  || date +%s%N | sha256sum 2>/dev/null | cut -c1-16
+)
+if [[ -n "$PROMPT" ]]; then
+  if [[ "$PROMPT" == /* ]]; then
+    CMD_TOKEN="${PROMPT%% *}"
+    REST="${PROMPT#* }"
+    if [[ "$CMD_TOKEN" == "$PROMPT" ]]; then
+      PROMPT="$CMD_TOKEN [CALL_ID: $CALL_ID]"
+    else
+      PROMPT="$CMD_TOKEN [CALL_ID: $CALL_ID] $REST"
+    fi
+  else
+    PROMPT="[CALL_ID: $CALL_ID] $PROMPT"
+  fi
+fi
+
 LAUNCH_SCRIPT=$(mktemp /tmp/hotline-cmux-launch-XXXXX)
 chmod 700 "$LAUNCH_SCRIPT"
 {
@@ -175,11 +236,9 @@ chmod 700 "$LAUNCH_SCRIPT"
   esac
   # `=`-joined into ONE argv word, not two. See cmux-call-async.sh for why the
   # two-token `--allowedTools <list>` form breaks `cmux restore claude`.
+  # No positional prompt follows, so no `--` separator is needed either: the REPL
+  # comes up empty and the prompt is pasted in below.
   printf ' --allowedTools=%q' "$ALLOWED_TOOLS"
-  # `--` is REQUIRED before the positional prompt because --allowedTools is
-  # variadic (`<tools...>`) and would otherwise swallow the prompt as an
-  # extra "tool" name. See cmux-call-async.sh for the live-reproduced bug.
-  [[ -n "$PROMPT" ]] && printf ' -- %q' "$PROMPT"
   printf '\n'
 } > "$LAUNCH_SCRIPT"
 
@@ -187,6 +246,50 @@ if ! cmux send "${SEND_TARGET[@]}" "bash $LAUNCH_SCRIPT\n"; then
   rm -f "$LAUNCH_SCRIPT"
   jq -n --arg err "cmux send failed" '{error: $err}'
   exit 1
+fi
+
+# --- Deliver the prompt into the REPL that is now booting --------------------
+# Same verb as every other hotline delivery. Synchronous here: nobody polls a
+# conference call, so if this script returned before the prompt landed there would
+# be no second chance to notice.
+if [[ -n "$PROMPT" ]]; then
+  PASTE_PROMPT=$(mktemp /tmp/hotline-conf-prompt-XXXXX)
+  chmod 600 "$PASTE_PROMPT"
+  printf '%s' "$PROMPT" > "$PASTE_PROMPT"
+
+  # Which surface? A surface placement already knows. The detached placement named
+  # a workspace, so its surface comes out of the shared tree reader.
+  PASTE_SURFACE="$PLACE_ID"
+  PASTE_WORKSPACE=""
+  if [[ "$PLACE_KIND" == "workspace" ]]; then
+    if CONF_ADDR=$(cmux_workspace_current_surface "$PLACE_REF"); then
+      PASTE_WORKSPACE="${CONF_ADDR%% *}"
+      PASTE_SURFACE="${CONF_ADDR##* }"
+    fi
+  fi
+  if [[ -z "$PASTE_SURFACE" ]]; then
+    jq -n --arg err "the conference REPL was launched but no surface could be resolved to paste the prompt into (placement $PLACE_KIND $PLACE_REF)" \
+          --arg pf "$PASTE_PROMPT" \
+      '{error: $err, undelivered: true, prompt_file: $pf}'
+    exit 1
+  fi
+
+  CONF_PASTE_ARGS=(--surface "$PASTE_SURFACE" --payload-file "$PASTE_PROMPT"
+                   --call-id "$CALL_ID" --cwd "$CWD"
+                   --wait-box "${HOTLINE_PASTE_BOX_TIMEOUT:-20}")
+  [[ -n "$PASTE_WORKSPACE"    ]] && CONF_PASTE_ARGS+=(--workspace "$PASTE_WORKSPACE")
+  [[ -n "$SESSION_ID_PRESET"  ]] && CONF_PASTE_ARGS+=(--session "$SESSION_ID_PRESET")
+  CONF_DELIVERY=$(bash "$SCRIPT_DIR/cmux-paste.sh" "${CONF_PASTE_ARGS[@]}" 2>/dev/null)
+  if [[ "$(jq -r '.delivered // false' <<<"$CONF_DELIVERY" 2>/dev/null)" != "true" ]]; then
+    # The surface stays open: its REPL is live, and the prompt file is left behind
+    # so a human (or the caller) can still deliver it.
+    jq -n --arg err "the conference REPL booted but the prompt never landed in it: $(jq -r '.reason // "no reason given"' <<<"$CONF_DELIVERY" 2>/dev/null | tr '\n\r\t' '   ' | cut -c1-200)" \
+          --arg pf "$PASTE_PROMPT" \
+      '{error: $err, undelivered: true, prompt_file: $pf}'
+    exit 1
+  fi
+  # Delivered and confirmed — the callee's transcript is the record now.
+  rm -f "$PASTE_PROMPT"
 fi
 
 # Register the call in the sessions registry (script-level — conference mode
@@ -209,9 +312,9 @@ fi
 WS_OUT=""; SURF_OUT=""
 if [[ "$PLACE_KIND" == "surface" ]]; then SURF_OUT="$PLACE_REF"; else WS_OUT="$PLACE_REF"; fi
 jq -n --arg ws "$WS_OUT" --arg surf "$SURF_OUT" --arg surf_id "$PLACE_ID" --arg cwd "$CWD" \
-  --arg sid "${SESSION_ID_PRESET:-new}" --arg kind "$PLACE_KIND" \
+  --arg sid "${SESSION_ID_PRESET:-new}" --arg kind "$PLACE_KIND" --arg cid "$CALL_ID" \
   '{workspace_ref: (if $ws == "" then null else $ws end),
     surface_ref:   (if $surf == "" then null else $surf end),
     surface_id:    (if $surf_id == "" then null else $surf_id end),
-    placement: $kind, cwd: $cwd, session_id: $sid,
+    placement: $kind, cwd: $cwd, session_id: $sid, call_id: $cid,
     message: "CMUX \($kind) opened with Claude session"}'

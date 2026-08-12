@@ -32,6 +32,7 @@ fi
 
 CWD=""
 PROMPT=""
+PROMPT_FILE=""
 RESUME_ID=""
 SESSION_NAME=""
 FORK_SESSION=false
@@ -41,6 +42,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --cwd) CWD="$2"; shift 2 ;;
     --prompt) PROMPT="$2"; shift 2 ;;
+    --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
     --resume) RESUME_ID="$2"; shift 2 ;;
     --name) SESSION_NAME="$2"; shift 2 ;;
     --fork-session) FORK_SESSION=true; shift ;;
@@ -48,6 +50,20 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
+
+# --prompt-file is preferred, and dial.sh always uses it. `claude -p` reads its
+# prompt from STDIN when no positional prompt is given (verified live against
+# claude 2.1.226 with --output-format stream-json), so the payload can reach the
+# receiver without ever appearing in an argv that `ps` publishes to every local
+# user (claude-plugins-86ka). --prompt is kept for direct callers and is written
+# to a private temp file below rather than passed through.
+if [[ -n "$PROMPT_FILE" ]]; then
+  if [[ ! -f "$PROMPT_FILE" ]]; then
+    jq -nc --arg p "$PROMPT_FILE" '{error: ("--prompt-file does not exist: " + $p)}'
+    exit 1
+  fi
+  PROMPT=$(cat "$PROMPT_FILE")
+fi
 
 if [[ -z "$PROMPT" ]]; then
   echo '{"error": "No prompt provided"}'
@@ -68,10 +84,22 @@ fi
 CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
 # Persist receiver cwd + [MODE:]/[CALLER:]/[SESSION:] tags from the ringing
 # prompt so wait-for-session.sh can register the call in the sessions registry.
-bash "$(dirname "${BASH_SOURCE[0]}")/persist-call-meta.sh" "$CALL_DIR" "$CWD" "$PROMPT"
+# The prompt goes on STDIN, so it needs a file inside the call dir either way:
+# the background worker outlives this shell, so it cannot inherit a here-string.
+# 0600 in a 0700 mktemp dir — a work order is exactly what other local users must
+# not be able to read.
+STDIN_PROMPT="$CALL_DIR/prompt.txt"
+( umask 077; printf '%s' "$PROMPT" > "$STDIN_PROMPT" )
+chmod 600 "$STDIN_PROMPT" 2>/dev/null || true
 
-# Build the command
-CMD=(claude -p "$PROMPT" --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
+if [[ -n "$PROMPT_FILE" ]]; then
+  bash "$(dirname "${BASH_SOURCE[0]}")/persist-call-meta.sh" "$CALL_DIR" "$CWD" --prompt-file "$PROMPT_FILE"
+else
+  bash "$(dirname "${BASH_SOURCE[0]}")/persist-call-meta.sh" "$CALL_DIR" "$CWD" --prompt-file "$STDIN_PROMPT"
+fi
+
+# Build the command. NO positional prompt: it arrives on stdin (see above).
+CMD=(claude -p --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
 [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && CMD+=(--model "$HOTLINE_CLAUDE_MODEL")
 
 if [[ -n "$RESUME_ID" ]]; then
@@ -105,7 +133,7 @@ fi
 
   # Run claude and process the stream
   if [[ -n "$EXEC_DIR" ]]; then
-    (cd "$EXEC_DIR" && "${CMD[@]}" 2>"$STDERR_FILE") | while IFS= read -r line; do
+    (cd "$EXEC_DIR" && "${CMD[@]}" <"$STDIN_PROMPT" 2>"$STDERR_FILE") | while IFS= read -r line; do
       echo "$line" >> "$STREAM_FILE"
       if ! $SID_WRITTEN; then
         SID=$(echo "$line" | jq -r '.session_id // empty' 2>/dev/null || true)
@@ -116,7 +144,7 @@ fi
       fi
     done || true
   else
-    "${CMD[@]}" 2>"$STDERR_FILE" | while IFS= read -r line; do
+    "${CMD[@]}" <"$STDIN_PROMPT" 2>"$STDERR_FILE" | while IFS= read -r line; do
       echo "$line" >> "$STREAM_FILE"
       if ! $SID_WRITTEN; then
         SID=$(echo "$line" | jq -r '.session_id // empty' 2>/dev/null || true)
@@ -127,6 +155,10 @@ fi
       fi
     done || true
   fi
+
+  # claude has exited, so the stdin copy of the prompt has served its purpose.
+  # The receiver's own transcript is the record of what was asked.
+  rm -f "$STDIN_PROMPT"
 
   # Parse final response
   #

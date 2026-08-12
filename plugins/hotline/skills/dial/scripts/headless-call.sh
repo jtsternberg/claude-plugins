@@ -32,6 +32,7 @@ fi
 
 CWD=""
 PROMPT=""
+PROMPT_FILE=""
 RESUME_ID=""
 SESSION_NAME=""
 FORK_SESSION=false
@@ -41,6 +42,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --cwd) CWD="$2"; shift 2 ;;
     --prompt) PROMPT="$2"; shift 2 ;;
+    --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
     --resume) RESUME_ID="$2"; shift 2 ;;
     --name) SESSION_NAME="$2"; shift 2 ;;
     --fork-session) FORK_SESSION=true; shift ;;
@@ -49,13 +51,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# --prompt-file is preferred. `claude -p` reads its prompt from STDIN when given no
+# positional prompt (verified live against claude 2.1.226 with
+# --output-format stream-json), which keeps the payload out of an argv `ps`
+# publishes to every local user (claude-plugins-86ka).
+if [[ -n "$PROMPT_FILE" ]]; then
+  if [[ ! -f "$PROMPT_FILE" ]]; then
+    jq -nc --arg p "$PROMPT_FILE" '{error: ("--prompt-file does not exist: " + $p)}'
+    exit 1
+  fi
+  PROMPT=$(cat "$PROMPT_FILE")
+fi
+
 if [[ -z "$PROMPT" ]]; then
   echo '{"error": "No prompt provided"}'
   exit 1
 fi
 
-# Build the command as an array
-CMD=(claude -p "$PROMPT" --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
+# Build the command as an array. NO positional prompt — it arrives on stdin.
+CMD=(claude -p --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
 [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && CMD+=(--model "$HOTLINE_CLAUDE_MODEL")
 
 if [[ -n "$RESUME_ID" ]]; then
@@ -84,7 +98,13 @@ fi
 STDERR_FILE=$(mktemp)
 STREAM_FILE=$(mktemp)
 SID_FILE=$(mktemp)
-trap "rm -f $STDERR_FILE $STREAM_FILE $SID_FILE" EXIT
+# The prompt reaches claude on stdin, so it needs a file. 0600 before a byte of it
+# is written — a default-umask copy of a work order in /tmp is readable by any
+# local user, which is the whole reason it is not on the argv either.
+STDIN_PROMPT=$(mktemp /tmp/hotline-headless-prompt-XXXXX)
+chmod 600 "$STDIN_PROMPT"
+printf '%s' "$PROMPT" > "$STDIN_PROMPT"
+trap 'rm -f "$STDERR_FILE" "$STREAM_FILE" "$SID_FILE" "$STDIN_PROMPT"' EXIT
 
 # Stream processor: extracts session_id from first event that has one,
 # writes it to SID_FILE and emits it immediately as line 1 of output.
@@ -107,9 +127,9 @@ stream_process() {
 
 # Execute and pipe through stream processor
 if [[ -n "$EXEC_DIR" ]]; then
-  (cd "$EXEC_DIR" && "${CMD[@]}" 2>"$STDERR_FILE") | stream_process || true
+  (cd "$EXEC_DIR" && "${CMD[@]}" <"$STDIN_PROMPT" 2>"$STDERR_FILE") | stream_process || true
 else
-  "${CMD[@]}" 2>"$STDERR_FILE" | stream_process || true
+  "${CMD[@]}" <"$STDIN_PROMPT" 2>"$STDERR_FILE" | stream_process || true
 fi
 
 # Check for completely empty stream
