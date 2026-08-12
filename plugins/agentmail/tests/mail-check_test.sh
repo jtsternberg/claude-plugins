@@ -135,13 +135,14 @@ write_config() { printf '%s\n' "$1" > "$CONFIG"; }
 # run [--no-json-tools] [--no-cli] [--no-key] [--harness claude|codex] -- <hook args...>
 run() {
 	local path="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin"
-	local with_key="yes" harness="" mode="${STUB_MODE_OVERRIDE:-ok}"
+	local with_key="yes" harness="" debug="" mode="${STUB_MODE_OVERRIDE:-ok}"
 	while [ $# -gt 0 ]; do
 		case "$1" in
 			--no-json-tools) path="$NOJSON_BIN" ;;
 			--no-cli) path="/usr/bin:/bin:/usr/sbin:/sbin" ;;
 			--no-key) with_key="" ;;
 			--harness) shift; harness="$1" ;;
+			--debug) debug=1 ;;
 			--) shift; break ;;
 		esac
 		shift
@@ -157,6 +158,7 @@ run() {
 		${STUB_NEWEST:+STUB_NEWEST="$STUB_NEWEST"} \
 		${STUB_PREVIEW:+STUB_PREVIEW="$STUB_PREVIEW"} \
 		${with_key:+AGENTMAIL_API_KEY="$KEY"} \
+		${debug:+AGENTMAIL_MAIL_CHECK_DEBUG=1} \
 		${harness:+$( [ "$harness" = claude ] && echo CLAUDE_CODE_SESSION_ID=sess-1 || echo CODEX_THREAD_ID=thread-1 )} \
 		bash "$HOOK" "$@"
 	return $?
@@ -260,14 +262,26 @@ elapsed=$(( $(date +%s) - start ))
 [ "$elapsed" -lt 6 ] && ok "a hanging CLI is abandoned in ${elapsed}s (timeout_seconds honored)" \
 	|| bad "hang took ${elapsed}s — the hook would stall the session"
 
-# Silent means stderr too. Killing a background job makes bash announce
-# "Terminated: 15" unless the job is disowned, and that noise lands in the user's
-# terminal and in every CI log.
+# Silent means stderr too. Killing the watchdog's background job makes bash
+# announce "Terminated: 15" on its own stderr, asynchronously — measured at about
+# one run in five, which is why `disown` alone was not enough and the hook
+# redirects stderr for its whole unattended path.
 fresh_case; write_config '{"version":1,"enabled":true,"mode":"remind","timeout_seconds":1}'
 err="$(run -- --event UserPromptSubmit 2>&1 >/dev/null)"
 [ -z "$err" ] && ok "a hanging CLI produces no stderr either" \
 	|| bad "the timeout path writes job-control noise to stderr" "$err"
 unset STUB_MODE_OVERRIDE
+
+# The silencing has to be a switch rather than a black hole, and this is asserted
+# statically on purpose: the noise it suppresses is intermittent, so a test that
+# required the noise to APPEAR with the hatch open would be flaky in the other
+# direction.
+if grep -q 'AGENTMAIL_MAIL_CHECK_DEBUG' "$HOOK" && \
+   grep -B2 -A2 'exec 2>/dev/null' "$HOOK" | grep -q 'AGENTMAIL_MAIL_CHECK_DEBUG'; then
+	ok "stderr silencing is gated on AGENTMAIL_MAIL_CHECK_DEBUG (a switch, not a black hole)"
+else
+	bad "the hook silences stderr unconditionally — nothing can turn it back on for debugging"
+fi
 
 fresh_case; write_config "$REMIND"; STUB_UNREAD=3
 out="$(run -- --event Frobnicate)"; rc=$?

@@ -143,6 +143,20 @@ fi
 # === hook path === (unattended; everything below exits 0, always)
 # =============================================================================
 
+# Silence stderr for the whole unattended path.
+#
+# This is not tidiness. The watchdog below kills a background job, and bash
+# announces that as `Terminated: 15` on ITS OWN stderr, asynchronously, naming the
+# subshell. `disown` suppresses it most of the time but not reliably — measured at
+# roughly one run in five — and an intermittently noisy hook is worse than a
+# consistently noisy one, because it passes review and then surfaces in a user's
+# terminal and in CI logs. Nothing in this path writes to stderr deliberately, so
+# there is nothing to lose; set AGENTMAIL_MAIL_CHECK_DEBUG=1 to get it back while
+# debugging.
+if [ -z "${AGENTMAIL_MAIL_CHECK_DEBUG:-}" ]; then
+	exec 2>/dev/null
+fi
+
 # A single exit point. Every failure below is a `quit`, so there is no path that
 # can block a prompt.
 quit() { exit 0; }

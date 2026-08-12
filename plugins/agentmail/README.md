@@ -23,6 +23,12 @@ Ships five skills and one hook. Invoke a skill as `/agentmail:<name>` in Claude 
 The hook notices unread mail during a session. It does nothing until you turn it on — see
 [Mail-check hook](#mail-check-hook).
 
+**Codex availability caveat.** Everything here is built to the repo's dual-harness contract
+and the hook is live-verified on Codex, but `agentmail` is not in this repo's Codex-native
+marketplace catalog (`.agents/plugins/marketplace.json` lists three plugins), so
+`codex plugin add agentmail@jtsternberg` does not resolve today. That is a repo-wide catalog
+gap, tracked separately as beads claude-plugins-0way, not a property of this plugin.
+
 ## Setup
 
 The plugin never installs anything for you. It detects what is missing and tells you how

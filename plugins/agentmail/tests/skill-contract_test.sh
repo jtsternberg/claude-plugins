@@ -285,6 +285,37 @@ for d in "${SKILLS[@]}"; do
 	done
 done
 
+# Every `agentmail` command a skill actually shows in a fenced block must be on
+# the right side of the permission line: reads allowlisted (or the user is
+# prompted for routine, harmless work and learns to click through prompts),
+# mutations NOT allowlisted (or an irreversible send stops prompting). Both
+# directions are asserted, because "keep allowed-tools synchronized with what the
+# skill runs" is satisfiable in the wrong direction by allowlisting everything.
+for d in "${SKILLS[@]}"; do
+	name="$(basename "$d")"
+	a="$(allowed_of "$d/SKILL.md")"
+	while read -r cmd; do
+		[ -n "$cmd" ] || continue
+		verb="${cmd##* }"
+		granted=0
+		printf '%s' "$a" | grep -qF "$cmd" && granted=1
+		case "$verb" in
+			list|get|search|get-raw|get-attachment)
+				[ "$granted" -eq 1 ] \
+					&& ok "$name: read command allowlisted — $cmd" \
+					|| bad "$name: shows '$cmd' but does not allowlist it (needless prompt)" ;;
+			send|reply|reply-all|forward|delete|create|update|verify|sign-up)
+				[ "$granted" -eq 0 ] \
+					&& ok "$name: mutating command stays behind a prompt — $cmd" \
+					|| bad "$name: allowlisted the mutating '$cmd'" \
+					       "Email cannot be recalled and there is no send idempotency. The prompt is the feature." ;;
+			*)
+				ok "$name: unclassified command left alone — $cmd" ;;
+		esac
+	done < <(awk '/^```(bash|sh)$/{f=1;next} /^```/{f=0} f' "$d/SKILL.md" \
+		| grep -oE '^agentmail [a-z:-]+ [a-z-]+' | sort -u)
+done
+
 # The mirror rule, in both directions.
 for d in "${SKILLS[@]}"; do
 	name="$(basename "$d")"
