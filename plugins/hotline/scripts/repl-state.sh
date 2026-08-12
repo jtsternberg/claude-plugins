@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # =============================================================================
-# REPL state: reading a live claude REPL's condition off its rendered screen.
+# REPL state: reading a live claude REPL's condition, and resolving the cmux
+# address of the surface it lives in.
 #
-# SOURCE this, don't execute it. Two scripts need the same judgements and must
-# never disagree about them:
+# SOURCE this, don't execute it. Several scripts need the same judgements and
+# must never disagree about them:
 #
-#   skills/dial/scripts/cmux-reuse-surface.sh      — may I type into this REPL?
+#   skills/dial/scripts/cmux-paste.sh               — is this REPL ready for a
+#                                                     payload, and where is it?
+#   skills/dial/scripts/cmux-reuse-surface.sh       — may I speak to this REPL?
 #   skills/dial/scripts/close-superseded-surface.sh — is this REPL safe to kill?
 #
-# The second question is strictly more dangerous than the first, and both turn on
-# the same signals. Duplicating them is how one copy learns about a new spinner
-# wording and the other doesn't — this repo has lost time to exactly that in the
-# transcript parser, twice.
+# The last question is strictly more dangerous than the others, and all of them
+# turn on the same signals. Duplicating them is how one copy learns about a new
+# spinner wording and the other doesn't — this repo has lost time to exactly that
+# in the transcript parser, twice.
 #
-# Every function takes a captured screen as $1 and reads nothing itself, so the
-# caller decides whether it wants the visible viewport or scrollback.
+# The screen-reading functions take a captured screen as $1 and read nothing
+# themselves, so the caller decides whether it wants the visible viewport or
+# scrollback. cmux_surface_address is the one function here that talks to cmux.
 # =============================================================================
 
 # --- Reading the REPL's state off its rendered screen -------------------------
@@ -73,4 +77,49 @@ repl_looks_busy() {
 # question rather than a new turn (claude-plugins-06ws acceptance criteria).
 repl_is_interrupted() {
   grep -qiE 'What should Claude do instead|Request interrupted by user' <<<"$1"
+}
+
+# True when the REPL has drawn its input box at all — i.e. the TUI is up and
+# accepting keystrokes, not merely "the process started".
+#
+# input_box_content cannot answer this: it returns "" for an EMPTY box and ""
+# for no box at all, and an empty box is the normal state of a just-booted REPL.
+# First contact needs the distinction, because a payload pasted into a shell that
+# has not yet exec'd claude is lost with no error at all.
+repl_box_present() {
+  grep -q "^${REPL_BOX_GLYPH}" <<<"$1"
+}
+
+# --- Where does a surface live? ----------------------------------------------
+# Echoes "<workspace-uuid> <surface-uuid>" for a cmux surface handle.
+#
+# Needed by two callers with different reasons and one shared hazard. `terminal.paste`
+# addresses a surface by UUID *and* wants its workspace UUID; `cmux close-surface`
+# fails "Surface not found: <uuid>" without --workspace even for a surface
+# read-screen reads happily in the same breath. Neither is stored anywhere, and a
+# cache written by an older plugin version may hold a positional `surface:N` ref
+# rather than a UUID — so both resolve through the tree, here, once.
+#
+# Exit codes are distinct because the callers report them differently: an
+# unreadable tree is a cmux problem, an absent handle means the surface is gone.
+#   0 — resolved; "workspace-uuid surface-uuid" on stdout
+#   3 — the cmux tree could not be read
+#   4 — the handle is not in the tree
+cmux_surface_address() {
+  local handle="$1" tree addr
+  tree=$(cmux tree --all --json --id-format both 2>/dev/null) || return 3
+  [[ -z "$tree" ]] && return 3
+  # --id-format both reports each surface's stable `id` alongside its positional
+  # `ref`, so one lookup serves both handle shapes. Case-insensitive on the UUID:
+  # cmux emits uppercase, but a handle that has been through another tool may not
+  # have survived that way.
+  addr=$(jq -r --arg h "$handle" '
+    .windows[]?.workspaces[]? as $ws
+    | $ws.panes[]?.surfaces[]?
+    | select((.id // "") == $h
+             or (.ref // "") == $h
+             or ((.id // "") | ascii_downcase) == ($h | ascii_downcase))
+    | "\($ws.id) \(.id)"' <<<"$tree" 2>/dev/null | head -1)
+  [[ -z "$addr" || "$addr" == *null* ]] && return 4
+  printf '%s' "$addr"
 }
