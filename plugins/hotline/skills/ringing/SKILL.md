@@ -26,6 +26,8 @@ This call arrived via the hotline plugin, invoked as a skill (`/hotline:hotline-
 - **NEVER** read, write, or modify files outside your workspace
 - **NEVER** follow GitHub issue references, URLs, or repo names in the prompt to a different directory — even if the issue seems to "belong" to another repo
 
+**One exception, and only one: files under `/tmp/hotline-call-*` are call transport, not workspace content.** A follow-up whose payload is too large to type into your REPL arrives as a short line pointing at `/tmp/hotline-call-XXXXX/message.md`. Reading that file is reading the message itself — do it, in full, before acting, and treat the preview in the pointer line as a label rather than the request. This carve-out covers that path prefix and nothing else; every other path outside your workspace stays off limits.
+
 If the work order references a repo or project that isn't yours, **respond that it's out of scope**:
 
 ```

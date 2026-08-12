@@ -74,8 +74,22 @@ ST="${CMUX_FAKE_STATE:?}"
 echo "$*" >> "$ST/cmux_calls"
 case "$1" in
   ping)          exit "${CMUX_PING_RC:-0}" ;;
-  read-screen)   cat "$ST/screen.txt" 2>/dev/null ;;
-  send)          echo "$*" >> "$ST/send_calls" ;;
+  # Typed text shows up on the screen, as it would in a real REPL: reuse
+  # confirms its nonce landed by reading it back. Set CMUX_FAKE_NO_ECHO to model
+  # a send whose bytes never arrived.
+  # Both branches must end on an explicit exit 0: a trailing conditional would
+  # otherwise become the stub's exit status, and a "failed" read-screen reads as
+  # a dead surface.
+  read-screen)   cat "$ST/screen.txt" 2>/dev/null
+                 if [[ -z "${CMUX_FAKE_NO_ECHO:-}" && -f "$ST/typed.txt" ]]; then
+                   cat "$ST/typed.txt"
+                 fi
+                 exit 0 ;;
+  send)          echo "$*" >> "$ST/send_calls"
+                 if [[ -z "${CMUX_FAKE_NO_ECHO:-}" ]]; then
+                   printf '%s\n' "${@: -1}" >> "$ST/typed.txt"
+                 fi
+                 exit 0 ;;
   send-key)      echo "$*" >> "$ST/sendkey_calls" ;;
   new-workspace) echo "OK workspace:123" ;;
   *)             exit 0 ;;
@@ -462,34 +476,61 @@ target_real=$(cd "$t/target" && pwd -P)
 check "the cache is self-healed to the new surface for the next follow-up" $? \
   "$(cat "$t/home/.agents-hotline/sessions/caller-6666.json" 2>/dev/null)"
 
-# A multi-line follow-up skips keystroke delivery entirely — no reuse attempt.
+# A multi-line follow-up REUSES the live surface (claude-plugins-i8fb). It used
+# to skip reuse outright, which is what stacked a new pane on every substantive
+# work-order follow-up. The payload goes to the call dir; the REPL gets a pointer.
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
 printf 'some earlier output\n\xe2\x9d\xaf \nClaude Code v2.1.221\n' > "$t/screen.txt"
-printf 'line one\nline two\n' > "$t/msg.txt"
+# The TAIL sentinel has to sit well past the nudge's 160-char preview cap, so
+# "the payload never crosses cmux send" tests the payload instead of tripping
+# over the preview quoting its head. Built rather than hand-counted: 12 numbered
+# lines is ~380 chars before the sentinel.
+{ for i in $(seq 1 12); do echo "follow-up detail line $i of the work order"; done
+  echo 'TAIL-SENTINEL-9Q'; } > "$t/msg.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-7777" --session "77777777-7777-4777-8777-777777777777" \
   --mode work_order --surface "SURFACE-UUID-OLD"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
-  HOTLINE_CALLER_SESSION_ID="caller-7777" \
+  HOTLINE_CALLER_SESSION_ID="caller-7777" HOTLINE_EXCHANGES_DIR="$t/exchanges" \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
   bash "$DIAL" --target "$t/target" --mode work_order \
     --prompt-file "$t/msg.txt" --boot-timeout 5 2>"$t/err.txt")
 call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 [[ -n "$call_dir" ]] && note_leak "$call_dir"
-launch=$(launch_script_of "$call_dir")
 
-[[ "$(jq -r .status <<<"$out")" == "connected" ]] \
-  && grep -q -- '--resume 77777777-7777-4777-8777-777777777777' <<<"$launch" \
-  && ! grep -q 'send-key' "$t/cmux_calls" 2>/dev/null
-check "a multi-line follow-up goes straight to the fresh-surface path" $? \
-  "out=$out launch=$launch cmux_calls=$(cat "$t/cmux_calls" 2>/dev/null)"
+[[ "$(jq -r .status <<<"$out")" == "connected" \
+   && "$(jq -r .surface_ref <<<"$out")" == "SURFACE-UUID-OLD" \
+   && -n "$call_dir" && ! -f "$call_dir/launch_script.txt" ]]
+check "a multi-line follow-up reuses the live surface, opening no second one" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
 
-grep -q 'line two' <<<"$launch"
-check "--prompt-file delivers a multi-line message intact" $? "launch=$launch"
+[[ -f "$call_dir/message.md" && "$(cat "$call_dir/message.md")" == "$(cat "$t/msg.txt")" ]]
+check "the multi-line payload lands in the call dir byte-identical" $? \
+  "message.md=$(cat "$call_dir/message.md" 2>/dev/null)"
 
-jq -e '.fallbacks | index("surface-reuse-skipped(multiline)")' <<<"$out" >/dev/null 2>&1
-check "a multi-line skip is RECORDED, not silent" $? "out=$out"
+# The payload must not be typed into the REPL — only the pointer to it. The
+# sentinel lives past the preview cap, so its absence means the body stayed off
+# the wire (the preview quoting the payload's head is by design).
+! grep -q 'TAIL-SENTINEL-9Q' "$t/send_calls" 2>/dev/null
+check "the payload itself never crosses cmux send" $? \
+  "send_calls=$(cat "$t/send_calls" 2>/dev/null)"
+
+grep -q 'message.md' "$t/send_calls" 2>/dev/null
+check "the REPL receives a pointer to the payload" $? \
+  "send_calls=$(cat "$t/send_calls" 2>/dev/null)"
+
+[[ "$(jq -r '.fallbacks | length' <<<"$out")" -eq 0 ]]
+check "reusing for a multi-line follow-up records no fallback (nothing degraded)" $? \
+  "out=$out"
+
+target_real=$(cd "$t/target" && pwd -P)
+[[ "$(jq -r --arg t "$target_real" '.connections[$t].exchange_count' \
+      "$t/home/.agents-hotline/sessions/caller-7777.json")" == "2" \
+   && "$(jq -r --arg t "$target_real" '.connections[$t].last_call_id' \
+      "$t/home/.agents-hotline/sessions/caller-7777.json")" == "$(jq -r .call_id <<<"$out")" ]]
+check "the reuse bumps the cache and records this exchange's nonce" $? \
+  "$(cat "$t/home/.agents-hotline/sessions/caller-7777.json" 2>/dev/null)"
 
 # ===========================================================================
 # 6b. Every bail out of the reuse guard records a fallback (claude-plugins-6nbr).

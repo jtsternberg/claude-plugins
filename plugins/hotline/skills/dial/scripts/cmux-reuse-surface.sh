@@ -23,7 +23,8 @@
 # inside it would nest a second REPL.
 #
 # Usage:
-#   cmux-reuse-surface.sh --surface <uuid-or-ref> --session <id> --prompt <text>
+#   cmux-reuse-surface.sh --surface <uuid-or-ref> --session <id>
+#                         (--prompt <text> | --prompt-file <path>)
 #                         [--cwd <path>] [--keep-workspace]
 #   # → {"call_dir": "/tmp/hotline-call-XXXXX"}   (reused)
 #   # → {"fallback": "fresh", "reason": "..."}     (surface gone / send failed)
@@ -33,12 +34,27 @@
 # data instead of scraping the screen (its preferred path). Omitting it still
 # works — wait-for-response falls back to screen-scraping.
 #
-# NOTE: the message is typed into a live claude REPL, which reads via bracketed
-# paste. So `cmux send` delivers the literal text and `cmux send-key Enter`
-# submits it as a separate step — a trailing "\n" bundled into the `cmux send`
-# does NOT submit; the REPL takes it as a literal newline in the input box.
-# Callers still route multi-line follow-ups to the fresh-surface fallback (which
-# uses a launch script); the single-line reuse path is the common case.
+# TWO DELIVERY MODES, chosen by payload shape (claude-plugins-i8fb):
+#
+#   inline — single-line and <= $INLINE_MAX_BYTES. Typed straight into the REPL.
+#     Keeps the follow-up text in the callee's transcript, where a human reading
+#     the session (and the switchboard) can see what was asked.
+#
+#   nudge  — anything else. The payload is written VERBATIM to
+#     $CALL_DIR/message.md and the REPL receives one short line pointing at it.
+#     Multi-line follow-ups used to skip reuse entirely for fear of keystroke
+#     fragility, which meant every substantive work-order follow-up stacked a new
+#     pane and orphaned the previous one. The fear was justified but the remedy
+#     was backwards: `cmux send` delivery is sporadically lossy in ways that are
+#     NOT size-gated (a verified 3,045-byte payload lost 2,538 contiguous bytes,
+#     one user event, no error), so a work order is exactly the payload you must
+#     not push through it. A file crosses no lossy hop at all, and the one line
+#     that does is short enough to verify landed.
+#
+# The message is typed into a live claude REPL, which reads via bracketed paste.
+# So `cmux send` delivers the literal text and `cmux send-key Enter` submits it as
+# a separate step — a trailing "\n" bundled into the `cmux send` does NOT submit;
+# the REPL takes it as a literal newline in the input box.
 #
 # Two transport hazards are handled below, both verified live (claude 2.1.221 /
 # cmux 0.64.20):
@@ -58,26 +74,52 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,/^# =\{10,\}$/p' "$0" | sed 's/^# \{0,1\}//' | grep -v '^=\{10,\}$'
   exit 0
 fi
 
 SURFACE_REF=""
 SESSION_ID=""
 PROMPT=""
+PROMPT_FILE=""
 CWD=""
 KEEP_WORKSPACE=true
+
+# Inline delivery ceiling. 507 bytes has gone through clean in controlled
+# testing; the smallest verified loss event was in a 3,045-byte payload. 800 sits
+# inside the proven-clean range with room to spare, and anything bigger is a
+# payload worth protecting rather than a quick reply.
+INLINE_MAX_BYTES="${HOTLINE_INLINE_MAX_BYTES:-800}"
+# How much of the payload the nudge quotes, so a human reading the callee's
+# transcript sees what the exchange was about instead of a bare path.
+PREVIEW_MAX_CHARS="${HOTLINE_NUDGE_PREVIEW_CHARS:-160}"
+# Caller-side durable archive. The call dir is transient — /tmp is GC'd, and
+# cleanup skills remove call dirs once an exchange finishes — so with nudge
+# delivery the payload would otherwise have no lasting home at all: the callee
+# transcript keeps only the nudge and a path to a deleted file.
+EXCHANGES_DIR="${HOTLINE_EXCHANGES_DIR:-$HOME/.agents-hotline/exchanges}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --surface)        SURFACE_REF="$2";   shift 2 ;;
     --session)        SESSION_ID="$2";    shift 2 ;;
     --prompt)         PROMPT="$2";        shift 2 ;;
+    --prompt-file)    PROMPT_FILE="$2";   shift 2 ;;
     --cwd)            CWD="$2";           shift 2 ;;
     --keep-workspace) KEEP_WORKSPACE=true; shift  ;;
     *)                shift ;;
   esac
 done
+
+# --prompt-file is preferred: it keeps the payload out of argv entirely, so
+# quoting and shell metacharacters are never in play on the way in either.
+if [[ -n "$PROMPT_FILE" ]]; then
+  if [[ ! -f "$PROMPT_FILE" ]]; then
+    echo "{\"error\": \"--prompt-file does not exist: $PROMPT_FILE\"}"
+    exit 1
+  fi
+  PROMPT=$(cat "$PROMPT_FILE")
+fi
 
 fallback_fresh() {
   jq -n --arg reason "$1" '{fallback: "fresh", reason: $reason}'
@@ -175,7 +217,7 @@ split_for_cmux_send() {
 }
 
 [[ -z "$SURFACE_REF" ]] && fallback_fresh "no surface_ref provided"
-[[ -z "$PROMPT"      ]] && { echo '{"error": "No --prompt provided"}'; exit 1; }
+[[ -z "$PROMPT"      ]] && { echo '{"error": "No --prompt or --prompt-file provided"}'; exit 1; }
 
 # Existence check: read-screen fails (non-zero) when the surface is gone. A live
 # surface returns its current screen (non-empty for an idle claude REPL). Treat
@@ -249,7 +291,46 @@ echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
 # Follow-ups never re-wrap with /hotline:hotline-ringing (the ringing skill is already
 # loaded in the remote session), so PROMPT is always a raw message — just prefix
 # the nonce. The receiver echoes it back as `STATUS: <signal> call_id=<nonce>`.
-MSG="[CALL_ID: $CALL_ID] $PROMPT"
+#
+# Which of the two delivery modes applies is decided here, on payload shape
+# alone. The nonce leads the line in BOTH modes, deliberately: it is what
+# wait-for-response.sh correlates on, and at the start of the input box it can
+# never be split across a rendered line wrap the way a mid-line match could be.
+DELIVERY="inline"
+if [[ "$PROMPT" == *$'\n'* || ${#PROMPT} -gt $INLINE_MAX_BYTES ]]; then
+  DELIVERY="nudge"
+fi
+
+if [[ "$DELIVERY" == "inline" ]]; then
+  MSG="[CALL_ID: $CALL_ID] $PROMPT"
+else
+  # The payload itself never crosses the wire. Written verbatim — no trailing
+  # newline added, no re-quoting — so what the callee reads is byte-for-byte what
+  # the caller wrote.
+  printf '%s' "$PROMPT" > "$CALL_DIR/message.md"
+
+  # Durable copy, because the call dir is not durable. Failure here must not fail
+  # the call: the delivery the callee depends on is message.md, not the archive.
+  if mkdir -p "$EXCHANGES_DIR" 2>/dev/null; then
+    printf '%s' "$PROMPT" > "$EXCHANGES_DIR/${CALL_ID}.md" 2>/dev/null || true
+    jq -nc --arg id "$CALL_ID" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+           --arg session "$SESSION_ID" --arg cwd "$CWD" \
+           --arg path "$EXCHANGES_DIR/${CALL_ID}.md" \
+           --argjson bytes "${#PROMPT}" \
+      '{call_id:$id, ts:$ts, session_id:$session, cwd:$cwd, bytes:$bytes,
+        delivery:"nudge", path:$path}' >> "$EXCHANGES_DIR/index.jsonl" 2>/dev/null || true
+  fi
+
+  # Instruction BEFORE preview, and the preview labelled as one. A callee that
+  # acts on a truncated gist instead of reading the file is the way this design
+  # fails, so the sentence never opens with the excerpt. Newlines and tabs in the
+  # excerpt collapse to spaces — the nudge must stay exactly one line, both to
+  # submit as a single turn and to keep it short enough to verify.
+  PREVIEW=$(printf '%s' "$PROMPT" | tr '\n\r\t' '   ' | cut -c1-"$PREVIEW_MAX_CHARS")
+  ELLIPSIS=""
+  [[ ${#PROMPT} -gt $PREVIEW_MAX_CHARS ]] && ELLIPSIS="…"
+  MSG="[CALL_ID: $CALL_ID] Next instructions: read $CALL_DIR/message.md in full before acting. (Preview: ${PREVIEW}${ELLIPSIS})"
+fi
 
 # Clear the parked text out of the input box, then PROVE it went — the Ctrl-C is
 # known to silently no-op sometimes (observed while the callee's stop hooks ran).
@@ -294,4 +375,40 @@ if ! SEND_OUTPUT=$(cmux send-key --surface "$SURFACE_REF" Enter 2>&1); then
   fallback_fresh "cmux send-key Enter into surface $SURFACE_REF failed: $SEND_OUTPUT"
 fi
 
-jq -n --arg dir "$CALL_DIR" '{call_dir: $dir}'
+# --- Did it land? ------------------------------------------------------------
+# `cmux send` exits 0 once bytes reach the PTY and has no opinion about what the
+# REPL did with them, and delivery is sporadically lossy. Confirming the nonce is
+# cheap here and expensive later: without this, a dropped message is only noticed
+# by wait-for-response.sh 30-60s on, as a hard failure rather than a fallback.
+#
+# Two screen markers mean "landed" without the nonce being visible, and BOTH must
+# be honoured or this check reintroduces the exact bug it guards against:
+#   • "Jump to bottom" — the user has scrolled the surface up, so read-screen is
+#     returning a stale viewport. cmux exposes no primitive to snap a scrolled
+#     terminal back to the live tail, so absence of the nonce here proves nothing.
+#     Re-sending on this signal is a documented double-submit.
+#   • "Press up to edit queued messages" — the REPL was busy and queued our text.
+#     That IS successful delivery; claude flushes it at the next tool boundary.
+nudge_landed() {
+  local i scr
+  for i in $(seq 1 10); do
+    scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || scr=""
+    if [[ -n "$scr" ]]; then
+      printf '%s' "$scr" | grep -qF "$CALL_ID"                        && return 0
+      printf '%s' "$scr" | grep -qF 'Jump to bottom'                  && return 0
+      printf '%s' "$scr" | grep -qF 'Press up to edit queued'         && return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
+
+if ! nudge_landed; then
+  # The call dir must go. wait-for-response.sh would otherwise poll a surface for
+  # a nonce that was never submitted, and the caller would sit on a corpse.
+  rm -rf "$CALL_DIR"
+  fallback_fresh "sent ${DELIVERY} into surface $SURFACE_REF but its nonce never appeared on screen; treating delivery as lost"
+fi
+
+jq -n --arg dir "$CALL_DIR" --arg delivery "$DELIVERY" \
+  '{call_dir: $dir, delivery: $delivery}'

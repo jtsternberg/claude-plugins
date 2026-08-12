@@ -449,10 +449,13 @@ CALL_ID_OUT=""
 # Step 5a — Follow-up into the surface the session already lives in.
 #
 # Preferred whenever it applies: the surface holds a live REPL for that exact
-# session, so we type the next message into it instead of stacking a new
-# surface per turn. Multi-line messages skip this deliberately — the fresh
-# path hands the prompt to a launch script as an argument, so no keystroke
-# simulation is involved.
+# session, so we send the next message into it instead of stacking a new surface
+# per turn. Multi-line messages used to skip this outright, which meant the reuse
+# path never ran for the follow-ups it existed to serve — work-order follow-ups
+# are almost always multi-line, so every substantive one opened a second pane and
+# orphaned the first. cmux-reuse-surface.sh now decides delivery itself: short
+# single-line messages are typed in, anything larger goes to the call dir with a
+# one-line pointer (claude-plugins-i8fb).
 #
 # EVERY bail records a fallback. The add_fallback for a refusal used to sit
 # INSIDE this block, so a bail-before-attempt emitted `fallbacks:[]` — a
@@ -465,13 +468,14 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
     # Headless/detached first contact leaves no surface to reuse, and a prior
     # follow-up may have cleared a stale one.
     add_fallback "surface-reuse-skipped(no-cached-surface)"
-  elif [[ "$MESSAGE" == *$'\n'* ]]; then
-    add_fallback "surface-reuse-skipped(multiline)"
-    SURFACE_REF=""
   else
+    # Hand over the file when we have one: a follow-up's SEND_PROMPT is the raw
+    # message, so --prompt-file is the same bytes without an argv round-trip.
+    REUSE_PROMPT_ARGS=(--prompt "$SEND_PROMPT")
+    [[ -n "$PROMPT_FILE" ]] && REUSE_PROMPT_ARGS=(--prompt-file "$PROMPT_FILE")
     REUSE=$(bash "$DIAL_SCRIPTS/cmux-reuse-surface.sh" \
       --surface "$SURFACE_REF" --session "$REMOTE_SESSION_ID" \
-      --prompt "$SEND_PROMPT" --cwd "$TARGET_PATH" 2>/dev/null)
+      "${REUSE_PROMPT_ARGS[@]}" --cwd "$TARGET_PATH" 2>/dev/null)
     REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
     if [[ -n "$REUSE_DIR" ]]; then
       CALL_DIR="$REUSE_DIR"

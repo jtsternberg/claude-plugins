@@ -97,6 +97,9 @@ CASEDIR=""
 OUT=""
 CALLLOG=""
 SENDTEXT=""
+CASE_CALL_DIR=""
+CASE_MESSAGE=""
+CASE_HAS_MESSAGE=false
 declare -a SENDTEXTS=()
 
 run_case() {
@@ -132,12 +135,17 @@ case "$1" in
     c=$((c + 1)); [[ $c -gt $n ]] && c=$n
     echo "$c" > "$STUB_SCREENS/cursor"
     cat "$STUB_SCREENS/$c.txt"
+    # Whatever has been typed shows up on the screen, as it would in a real
+    # REPL — the script's post-send check reads the nonce back this way. Set
+    # STUB_NO_ECHO to model a send whose bytes never arrived.
+    [[ -f "$STUB_SCREENS/typed.txt" ]] && cat "$STUB_SCREENS/typed.txt"
     exit 0
     ;;
   send)
     # Record the payload (last arg) raw and NUL-terminated so the test can
     # reassemble it without fighting shell quoting.
     printf '%s\0' "${@: -1}" >> "$STUB_SENDTEXT"
+    [[ -z "${STUB_NO_ECHO:-}" ]] && printf '%s\n' "${@: -1}" >> "$STUB_SCREENS/typed.txt"
     exit 0
     ;;
   *) exit 0 ;;
@@ -145,17 +153,31 @@ esac
 STUB
   chmod +x "$CASEDIR/cmux"
 
+  # HOTLINE_EXCHANGES_DIR keeps the durable archive inside the scratch tree
+  # instead of the real ~/.agents-hotline.
   OUT="$(STUB_CALLLOG="$CALLLOG" STUB_SENDTEXT="$SENDTEXT" STUB_SCREENS="$CASEDIR/screens" \
+    STUB_NO_ECHO="${STUB_NO_ECHO:-}" HOTLINE_EXCHANGES_DIR="$CASEDIR/exchanges" \
     PATH="$CASEDIR:$PATH" bash "$SCRIPT_UNDER_TEST" \
     --surface "w1:s1" --session "sess-123" "${extra[@]}" 2>&1)"
 
   SENDTEXTS=()
   while IFS= read -r -d '' t; do SENDTEXTS+=("$t"); done < "$SENDTEXT"
 
-  # Any call_dir the script created is a temp dir; clean up as we go.
+  # Any call_dir the script created is a temp dir. Snapshot what the assertions
+  # need out of it BEFORE removing it, so no case has to leave one behind.
+  CASE_CALL_DIR=""
+  CASE_MESSAGE=""
+  CASE_HAS_MESSAGE=false
   local cd_path
   cd_path="$(printf '%s' "$OUT" | sed -n 's/.*"call_dir": *"\([^"]*\)".*/\1/p')"
-  [[ -n "$cd_path" && -d "$cd_path" ]] && rm -rf "$cd_path"
+  if [[ -n "$cd_path" ]]; then
+    CASE_CALL_DIR="$cd_path"
+    if [[ -f "$cd_path/message.md" ]]; then
+      CASE_HAS_MESSAGE=true
+      CASE_MESSAGE="$(cat "$cd_path/message.md")"
+    fi
+    [[ -d "$cd_path" ]] && rm -rf "$cd_path"
+  fi
   return 0
 }
 
@@ -366,6 +388,188 @@ done < "$CALLLOG"
 [[ "$ei" -gt "$last_send" && "$last_send" -ge 0 ]] \
   && pass "Enter comes after the LAST text chunk" \
   || fail "Enter comes after the LAST text chunk" "enter=$ei last_send=$last_send"
+
+# ===========================================================================
+# Nudge delivery for payloads too big to type (claude-plugins-i8fb).
+#
+# Multi-line follow-ups used to skip reuse entirely, so every substantive
+# work-order follow-up stacked a new pane. They now reuse the surface: the
+# payload goes to $CALL_DIR/message.md and ONE short line points at it. The
+# payload must never cross `cmux send` — that transport loses contiguous bytes
+# mid-payload with no error, which on a work order means the callee acts on
+# instructions that lost their middle.
+# ===========================================================================
+# Deliberately longer than the 160-char preview cap, so truncation is exercised
+# rather than assumed: "Step three" sits past the cap and must NOT be quoted.
+MULTILINE_MSG=$'Step one: audit the guard at dial.sh line 457 and write down exactly which messages it refuses.\nStep two: fix it, with a $DOLLAR and `backticks` in play, plus a bullet list below.\nStep three: report back.'
+
+run_case nudge_multiline screen_idle_empty -- --prompt "$MULTILINE_MSG" --cwd /tmp/callee
+
+[[ "$OUT" == *'"call_dir"'* ]] \
+  && pass "a multi-line follow-up REUSES the surface instead of falling back" \
+  || fail "a multi-line follow-up REUSES the surface instead of falling back" "out: $OUT"
+
+[[ "$OUT" == *'"delivery": "nudge"'* ]] \
+  && pass "the payload reports delivery=nudge" \
+  || fail "the payload reports delivery=nudge" "out: $OUT"
+
+$CASE_HAS_MESSAGE \
+  && pass "the payload is written to \$CALL_DIR/message.md" \
+  || fail "the payload is written to \$CALL_DIR/message.md" "out: $OUT"
+
+[[ "$CASE_MESSAGE" == "$MULTILINE_MSG" ]] \
+  && pass "message.md is byte-identical to the payload" \
+  || fail "message.md is byte-identical to the payload" \
+          "wrote: $(printf '%q' "$CASE_MESSAGE")"
+
+# Exactly one text send, and not a byte of the payload's newlines in it. More
+# than one send would mean the payload itself was being chunked into the REPL.
+typed_count=0
+for t in "${SENDTEXTS[@]:-}"; do [[ "$t" == $'\003' ]] || typed_count=$((typed_count + 1)); done
+[[ "$typed_count" -eq 1 ]] \
+  && pass "exactly ONE send carries the nudge" \
+  || fail "exactly ONE send carries the nudge" "sends: $typed_count"
+
+nudge="$(assembled)"
+[[ "$nudge" != *$'\n'* ]] \
+  && pass "the nudge is a single line (no newline reaches the REPL)" \
+  || fail "the nudge is a single line (no newline reaches the REPL)" \
+          "nudge: $(printf '%q' "$nudge")"
+
+[[ "$nudge" == *"message.md"* ]] \
+  && pass "the nudge names the file to read" \
+  || fail "the nudge names the file to read" "nudge: $nudge"
+
+[[ "$nudge" == '[CALL_ID: '* ]] \
+  && pass "the nonce LEADS the nudge (never split by a line wrap)" \
+  || fail "the nonce LEADS the nudge (never split by a line wrap)" "nudge: $nudge"
+
+# Instruction before excerpt: a callee that acts on the gist instead of reading
+# the file is how this design fails.
+read_pos=$(awk -v s="$nudge" 'BEGIN{print index(s, "read ")}')
+prev_pos=$(awk -v s="$nudge" 'BEGIN{print index(s, "Preview")}')
+[[ "$read_pos" -gt 0 && "$prev_pos" -gt "$read_pos" ]] \
+  && pass "the read instruction precedes the preview" \
+  || fail "the read instruction precedes the preview" "nudge: $nudge"
+
+[[ "$nudge" == *"Step one: audit the guard"* && "$nudge" != *"Step three"* \
+   && "$nudge" == *"…)" ]] \
+  && pass "the preview quotes the head of the payload, truncated and marked" \
+  || fail "the preview quotes the head of the payload, truncated and marked" "nudge: $nudge"
+
+# A payload that fits gets no misleading ellipsis.
+run_case nudge_short_multiline screen_idle_empty -- --prompt $'two lines\nonly'
+[[ "$(assembled)" == *"two lines only"* && "$(assembled)" != *"…"* ]] \
+  && pass "a payload shorter than the cap is quoted whole, with no ellipsis" \
+  || fail "a payload shorter than the cap is quoted whole, with no ellipsis" \
+          "nudge: $(assembled)"
+
+grep -q 'send-key .*Enter' "$CALLLOG" \
+  && pass "the nudge is submitted with a separate send-key Enter" \
+  || fail "the nudge is submitted with a separate send-key Enter" "$(log_view)"
+
+# --- The durable archive ----------------------------------------------------
+# The call dir is transient (/tmp is GC'd, cleanup skills remove call dirs), so
+# without this the payload has no lasting home: the callee transcript keeps only
+# the nudge and a path to a file that no longer exists.
+arch_dir="$STUBROOT/nudge_multiline/exchanges"
+arch=$(ls "$arch_dir"/*.md 2>/dev/null | head -1)
+[[ -n "$arch" && "$(cat "$arch")" == "$MULTILINE_MSG" ]] \
+  && pass "the payload is archived outside the call dir, verbatim" \
+  || fail "the payload is archived outside the call dir, verbatim" \
+          "arch=$arch dir=$(ls -1 "$arch_dir" 2>/dev/null | tr '\n' ' ')"
+
+[[ -s "$arch_dir/index.jsonl" ]] \
+  && jq -e '.call_id and .ts and (.delivery == "nudge") and (.bytes > 0)' \
+       < "$arch_dir/index.jsonl" >/dev/null 2>&1 \
+  && pass "the archive index records call_id, timestamp, delivery and size" \
+  || fail "the archive index records call_id, timestamp, delivery and size" \
+          "$(cat "$arch_dir/index.jsonl" 2>/dev/null)"
+
+# The archived file is named for the nonce, so a caller holding a call_id (from
+# its own payload, or from dial history) can find what was actually asked.
+arch_id=$(jq -r '.call_id' < "$arch_dir/index.jsonl" 2>/dev/null | head -1)
+[[ -n "$arch_id" && "$(basename "$arch")" == "${arch_id}.md" && "$nudge" == *"$arch_id"* ]] \
+  && pass "the archive is keyed by the same nonce the callee echoes back" \
+  || fail "the archive is keyed by the same nonce the callee echoes back" \
+          "arch_id=$arch_id file=$(basename "$arch")"
+
+# --- Oversize single-line payloads take the same route ----------------------
+BIG_MSG="$(printf 'x%.0s' {1..900})"
+run_case nudge_oversize screen_idle_empty -- --prompt "$BIG_MSG"
+[[ "$OUT" == *'"delivery": "nudge"'* && "$CASE_MESSAGE" == "$BIG_MSG" ]] \
+  && pass "an oversize SINGLE-line payload also goes via message.md" \
+  || fail "an oversize SINGLE-line payload also goes via message.md" "out: $OUT"
+
+# --- Short single-line payloads stay inline (regression guard) --------------
+# This is the whole reason the split exists: a quick follow-up stays visible in
+# the callee's transcript rather than becoming a pointer to a file.
+run_case inline_short screen_idle_empty -- --prompt "one more thing"
+[[ "$OUT" == *'"delivery": "inline"'* ]] \
+  && pass "a short single-line follow-up is still typed inline" \
+  || fail "a short single-line follow-up is still typed inline" "out: $OUT"
+
+$CASE_HAS_MESSAGE \
+  && fail "inline delivery writes no message.md" "message.md exists" \
+  || pass "inline delivery writes no message.md"
+
+[[ "$(assembled)" == *"one more thing"* ]] \
+  && pass "the inline payload itself reaches the REPL" \
+  || fail "the inline payload itself reaches the REPL" "sent: $(assembled)"
+
+# --- --prompt-file is the same bytes as --prompt ----------------------------
+PF="$STUBROOT/payload.txt"
+printf '%s' "$MULTILINE_MSG" > "$PF"
+run_case prompt_file screen_idle_empty -- --prompt-file "$PF"
+[[ "$CASE_MESSAGE" == "$MULTILINE_MSG" ]] \
+  && pass "--prompt-file delivers the same bytes as --prompt" \
+  || fail "--prompt-file delivers the same bytes as --prompt" \
+          "wrote: $(printf '%q' "$CASE_MESSAGE")"
+
+run_case prompt_file_missing screen_idle_empty -- --prompt-file "$STUBROOT/nope.txt"
+[[ "$OUT" == *'"error"'* && "$OUT" == *"does not exist"* ]] \
+  && pass "a missing --prompt-file is an error, not an empty message" \
+  || fail "a missing --prompt-file is an error, not an empty message" "out: $OUT"
+
+# ===========================================================================
+# A send whose bytes never arrive must not leave a call dir behind.
+#
+# `cmux send` exits 0 once bytes reach the PTY and has no opinion about what the
+# REPL did with them. Without this check wait-for-response.sh polls for a nonce
+# that was never submitted and fails 30-60s later — and the call dir it was
+# waiting on is a corpse.
+# ===========================================================================
+STUB_NO_ECHO=1 run_case lost_send screen_idle_empty -- --prompt "$MULTILINE_MSG"
+[[ "$OUT" == *'"fallback"'* && "$OUT" == *"never appeared on screen"* ]] \
+  && pass "a nudge that never appears on screen returns the fresh fallback" \
+  || fail "a nudge that never appears on screen returns the fresh fallback" "out: $OUT"
+
+[[ -n "$CASE_CALL_DIR" && -d "$CASE_CALL_DIR" ]] \
+  && fail "the lost-send call dir is removed" "still present: $CASE_CALL_DIR" \
+  || pass "the lost-send call dir is removed"
+
+# A scrolled-up viewport is NOT a failed send. cmux has no primitive to snap a
+# terminal back to its live tail, so absence of the nonce proves nothing — and
+# re-sending on this signal is a documented double-submit.
+screen_scrolled() {
+  printf '%s%s Run the earlier thing\n\nJump to bottom (click) ↓\n%s\n%s%s\n%s\n' \
+    "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"
+}
+STUB_NO_ECHO=1 run_case scrolled_viewport screen_scrolled -- --prompt "$MULTILINE_MSG"
+[[ "$OUT" == *'"call_dir"'* ]] \
+  && pass "a scrolled viewport counts as landed, not as a lost send" \
+  || fail "a scrolled viewport counts as landed, not as a lost send" "out: $OUT"
+
+# Text queued against a busy REPL is delivered at the next tool boundary. The
+# box renders it exactly like unsent text, so this marker is the only proof.
+screen_queued() {
+  printf '%s%s Run the earlier thing\n\n%s Working… (5s · ↓ 12 tokens)\n%s\n%s%s\n%s\nPress up to edit queued messages\n' \
+    "$GLYPH" " " "✶" "$RULE" "$GLYPH" "$NBSP" "$RULE"
+}
+STUB_NO_ECHO=1 run_case queued_message screen_queued -- --prompt "$MULTILINE_MSG"
+[[ "$OUT" == *'"call_dir"'* ]] \
+  && pass "a queued message counts as landed" \
+  || fail "a queued message counts as landed" "out: $OUT"
 
 # --- Surface gone → fallback, and nothing typed anywhere. ------------------
 CASEDIR="$STUBROOT/gone"; mkdir -p "$CASEDIR"
