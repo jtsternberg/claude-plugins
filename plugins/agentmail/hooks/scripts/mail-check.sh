@@ -378,11 +378,12 @@ fi
 # which is the common case, running before every prompt of every session.
 #
 # The preflight answers "is the CLI on PATH and is a key set" and its exit code
-# is the documented interface: 20 means both. Reusing it avoids a second
-# implementation of that check which could drift from the first.
+# is the documented interface: a healthy --local run exits 0 (10/11 name what's
+# missing). Reusing it avoids a second implementation of that check which could
+# drift from the first.
 [ -f "$PLUGIN_ROOT/scripts/agentmail-preflight.sh" ] || quit
 bash "$PLUGIN_ROOT/scripts/agentmail-preflight.sh" --local >/dev/null 2>&1
-[ "$?" -eq 20 ] || quit
+[ "$?" -eq 0 ] || quit
 
 # --- scratch space, beside the state file rather than in TMPDIR ---------------
 # The API response held here carries subjects, senders, and preview text. That is
