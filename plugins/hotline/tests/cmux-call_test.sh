@@ -114,6 +114,9 @@ case "$1" in
     ;;
   send)
     printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args"
+    # Real cmux prints this on STDOUT. The stub must too, or a script that forgets
+    # to capture it looks clean here and corrupts its JSON in production.
+    echo "OK ${3:-workspace:123}"
     ;;
   read-screen)
     # A booted REPL: the input box is a ❯ padded with a NO-BREAK SPACE. A plain
@@ -151,6 +154,18 @@ if [[ $rc -eq 0 ]]; then
   pass "first-contact conference call exits successfully"
 else
   fail "first-contact conference call exits successfully" "exit code: $rc stderr=$(cat "$tmp/stderr.txt")"
+fi
+
+# STDOUT IS EXACTLY ONE JSON OBJECT. `cmux send` prints "OK surface:N workspace:N",
+# and an unredirected send prepended that to the payload — so every
+# `jq -r '.session_id'` in dial.sh's conference branch came back empty. The suite's
+# own `send` stub writes to a file, so only a real run showed it; this asserts the
+# shape the caller actually depends on.
+if jq -e . "$tmp/out.json" >/dev/null 2>&1; then
+  pass "stdout is a single parseable JSON object (no leaked cmux chatter)"
+else
+  fail "stdout is a single parseable JSON object (no leaked cmux chatter)" \
+       "got: $(cat "$tmp/out.json")"
 fi
 
 send_args=$(cat "$tmp/send_args" 2>/dev/null || true)
@@ -291,7 +306,7 @@ cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 ST="${CMUX_FAKE_STATE:?}"
 case "$1" in
-  send) echo "$*" >> "$ST/send_calls" ;;
+  send) echo "$*" >> "$ST/send_calls"; echo "OK surface:777" ;;
   read-screen)
     # A drawn input box: ❯ padded with a NO-BREAK SPACE, which is what delivery
     # requires before it will paste (a plain space is a shell prompt).
@@ -393,7 +408,7 @@ cat > "$tmpf/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
   new-workspace) echo "OK workspace:123" ;;
-  send)          printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args" ;;
+  send)          printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args"; echo "OK workspace:123" ;;
   read-screen)
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
     [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"

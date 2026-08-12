@@ -242,9 +242,17 @@ chmod 700 "$LAUNCH_SCRIPT"
   printf '\n'
 } > "$LAUNCH_SCRIPT"
 
-if ! cmux send "${SEND_TARGET[@]}" "bash $LAUNCH_SCRIPT\n"; then
+# CAPTURED, not left to leak. `cmux send` prints "OK surface:N workspace:N" on
+# stdout, and this script's stdout is a single JSON object its caller parses with
+# jq — so an unredirected send prepended a non-JSON line to the payload and every
+# `jq -r '.session_id'` in dial.sh's conference branch came back empty. Found by
+# running the real thing (the suite's `send` stub writes to a file, so no stub
+# would ever have shown it). Capturing also gives the failure path a real
+# diagnostic instead of a bare "cmux send failed".
+if ! SEND_OUTPUT=$(cmux send "${SEND_TARGET[@]}" "bash $LAUNCH_SCRIPT\n" 2>&1); then
   rm -f "$LAUNCH_SCRIPT"
-  jq -n --arg err "cmux send failed" '{error: $err}'
+  jq -n --arg err "cmux send failed: $(printf '%s' "$SEND_OUTPUT" | tr '\n\r\t' '   ' | cut -c1-160)" \
+    '{error: $err}'
   exit 1
 fi
 
