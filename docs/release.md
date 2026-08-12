@@ -7,26 +7,39 @@ transition and relies on undocumented in-place refresh behavior.
 
 ## 1. Identify the published surfaces
 
-Check which catalog offers the plugin before testing the release:
+Codex and Claude Code resolve different catalogs. Know which one governs a
+plugin's Codex availability before testing a release:
 
-- `.claude-plugin/marketplace.json` is the Claude Code catalog and the legacy
-  Codex-compatible catalog.
-- `.agents/plugins/marketplace.json` is the Codex-native catalog. It contains a
-  deliberately smaller plugin set.
+- `.claude-plugin/marketplace.json` is the Claude Code catalog **and the single
+  inventory source of truth**. Codex does **not** read it once a native catalog
+  exists: Codex CLI 0.147.0 resolves marketplace `jtsternberg` to
+  `.agents/plugins/marketplace.json` and never falls back to the Claude catalog.
+- `.agents/plugins/marketplace.json` is the Codex-native catalog. It is
+  **generated, not hand-authored**: `scripts/gen-codex-catalog.mjs` reads the
+  legacy catalog (full inventory) plus the small policy overlay in
+  `scripts/codex-catalog.config.json`, and emits an entry for every plugin. A
+  plugin with no usable Codex surface carries `policy.installation:
+  NOT_AVAILABLE`, so Codex refuses to install it rather than silently omitting
+  it. Regenerate with `node scripts/gen-codex-catalog.mjs`; the gate runs it in
+  `--check` mode (`tests/codex-catalog-drift.test.mjs`) and fails on drift.
+  **Never edit this file by hand** — add the plugin to the legacy catalog (and,
+  if it needs a policy override, to the config) and regenerate.
 
-Both catalogs point to plugin directories; neither pins plugin versions. Each
-catalog reads the manifest for its harness:
+Neither catalog pins plugin versions. Codex reads a plugin's manifest by
+fallback: `.codex-plugin/plugin.json` if the plugin ships one, otherwise
+`.claude-plugin/plugin.json`. This is verified live on Codex CLI 0.147.0 — a
+plugin with only a Claude manifest installs from the native catalog and reports
+its Claude manifest version. Only `codex`, `hotline`, and `pr-workflow` ship a
+`.codex-plugin/plugin.json`; every other plugin is served to Codex from its
+Claude manifest.
 
-- `.claude-plugin/plugin.json` for a plugin published in the Claude catalog;
-- `.codex-plugin/plugin.json` for a plugin published in the Codex-native catalog.
-
-Some plugins, including `hotline` and `pr-workflow`, publish both manifests.
 When a shared skill or bundled resource changes, bump every published manifest
-whose harness receives that change and keep their release versions aligned.
-For a genuinely harness-specific metadata change, bump only the affected
-manifest and state why the other harness did not receive a release. Do not add
-a second manifest merely to mirror metadata for a harness that does not publish
-the plugin.
+whose harness receives that change and keep their release versions aligned. For
+a plugin that ships both manifests (`hotline`, `pr-workflow`), keep the two
+versions aligned. For a genuinely harness-specific metadata change, bump only
+the affected manifest and state why the other harness did not receive a release.
+Do not add a `.codex-plugin/plugin.json` merely to mirror metadata: the native
+catalog already serves the plugin from its Claude manifest by fallback.
 
 ## 2. Prepare and validate the change
 

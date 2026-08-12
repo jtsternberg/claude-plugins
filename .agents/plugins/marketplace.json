@@ -5,10 +5,53 @@
   },
   "plugins": [
     {
-      "name": "codex",
+      "name": "git-tree",
       "source": {
         "source": "local",
-        "path": "./plugins/codex"
+        "path": "./plugins/git-tree"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "headline-refiner",
+      "source": {
+        "source": "local",
+        "path": "./plugins/headline-refiner"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "obsidian-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/obsidian-cli"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "publish-insights",
+      "source": {
+        "source": "local",
+        "path": "./plugins/publish-insights"
+      },
+      "category": "Coding",
+      "policy": {
+        "installation": "NOT_AVAILABLE"
+      }
+    },
+    {
+      "name": "generating-blog-images",
+      "source": {
+        "source": "local",
+        "path": "./plugins/generating-blog-images"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "git-commits",
+      "source": {
+        "source": "local",
+        "path": "./plugins/git-commits"
       },
       "category": "Coding"
     },
@@ -21,10 +64,181 @@
       "category": "Coding"
     },
     {
+      "name": "skill-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/skill-tools"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "beads-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/beads-workflow"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "handoff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/handoff"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "workspace-status",
+      "source": {
+        "source": "local",
+        "path": "./plugins/workspace-status"
+      },
+      "category": "Coding",
+      "policy": {
+        "installation": "NOT_AVAILABLE"
+      }
+    },
+    {
+      "name": "slides-presentation",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slides-presentation"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "export-presentation",
+      "source": {
+        "source": "local",
+        "path": "./plugins/export-presentation"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "localwp-shell",
+      "source": {
+        "source": "local",
+        "path": "./plugins/localwp-shell"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "thinking-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/thinking-tools"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "bible",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bible"
+      },
+      "category": "Coding"
+    },
+    {
       "name": "hotline",
       "source": {
         "source": "local",
         "path": "./plugins/hotline"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "paperclip",
+      "source": {
+        "source": "local",
+        "path": "./plugins/paperclip"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "gws",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gws"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "session-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/session-tools"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "work-with-media",
+      "source": {
+        "source": "local",
+        "path": "./plugins/work-with-media"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "research-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/research-tools"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "cmux-cli",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cmux-cli"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "mac-caffeinate",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mac-caffeinate"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "collab-tools",
+      "source": {
+        "source": "local",
+        "path": "./plugins/collab-tools"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "slack",
+      "source": {
+        "source": "local",
+        "path": "./plugins/slack"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "fable",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fable"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "agentmail",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agentmail"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
       },
       "category": "Coding"
     }

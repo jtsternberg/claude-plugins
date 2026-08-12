@@ -1,0 +1,18 @@
+{
+  "_comment": "Input overrides for scripts/gen-codex-catalog.mjs. The plugin INVENTORY is derived from .claude-plugin/marketplace.json (the single source of truth); this file only carries the small, deliberate Codex-native policy overlay. See docs/codex/adr-002-marketplace-catalog.md.",
+  "header": {
+    "name": "jtsternberg",
+    "interface": {
+      "displayName": "JT Sternberg"
+    }
+  },
+  "defaultCategory": "Coding",
+  "categoryOverrides": {},
+  "nativeOnly": [
+    { "name": "codex", "path": "./plugins/codex" }
+  ],
+  "notAvailable": [
+    "publish-insights",
+    "workspace-status"
+  ]
+}
