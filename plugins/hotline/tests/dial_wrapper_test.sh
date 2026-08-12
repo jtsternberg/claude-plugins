@@ -488,6 +488,117 @@ check "a multi-line follow-up goes straight to the fresh-surface path" $? \
 grep -q 'line two' <<<"$launch"
 check "--prompt-file delivers a multi-line message intact" $? "launch=$launch"
 
+jq -e '.fallbacks | index("surface-reuse-skipped(multiline)")' <<<"$out" >/dev/null 2>&1
+check "a multi-line skip is RECORDED, not silent" $? "out=$out"
+
+# ===========================================================================
+# 6b. Every bail out of the reuse guard records a fallback (claude-plugins-6nbr).
+#
+# The add_fallback for a refusal used to live inside the block the guard skipped,
+# so a follow-up that opened a second pane reported fallbacks:[] — identical to a
+# clean first-contact dial, with nothing to explain the new tab.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+printf 'some earlier output\n\xe2\x9d\xaf \nClaude Code v2.1.221\n' > "$t/screen.txt"
+# A cached session with NO surface: what a headless or detached first contact
+# leaves behind, and what --clear-surface leaves after a degraded follow-up.
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-6b" --session "6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b" \
+  --mode work_order
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-6b" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "single line, but nowhere to type it" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+
+jq -e '.fallbacks | index("surface-reuse-skipped(no-cached-surface)")' <<<"$out" >/dev/null 2>&1
+check "a follow-up with no cached surface records the skip" $? "out=$out"
+
+[[ "$(jq -r .first_contact <<<"$out")" == "false" && "$(jq -r .status <<<"$out")" == "connected" ]]
+check "…and still completes as a follow-up via the fresh path" $? "out=$out"
+
+# ===========================================================================
+# 6c. A follow-up that ends with NO surface CLEARS the cached one
+#     (claude-plugins-2caw).
+#
+# Two ways to get there: the cmux→headless fold-in, and side placement degrading
+# to detached. Both used to leave the previous surface_ref in the cache, so the
+# next follow-up passed the reuse guard and typed into a surface this session had
+# already left — the message landing in a REPL nobody was reading.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_claude "$t/bin"
+# The reuse guard runs BEFORE the transport fold-in, so a usable cached surface
+# would be reused and the headless path never reached. Stage a REPL that refuses
+# the follow-up (post-interrupt state) so the call falls through to the transport
+# decision, which is what this case is about.
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n' \
+  > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-6c" --session "6c6c6c6c-6c6c-4c6c-8c6c-6c6c6c6c6c6c" \
+  --mode work_order --surface "SURFACE-UUID-STALE"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-6c" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/nope.sh" HOTLINE_PLUGINS_DIR="$t/empty" \
+  HOTLINE_PENDING_DIR="$t/pending" \
+  FAKE_CLAUDE_SESSION_ID="6c6c6c6c-6c6c-4c6c-8c6c-6c6c6c6c6c6c" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "fold me into headless" --boot-timeout 8 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+target_real=$(cd "$t/target" && pwd -P)
+cache_6c="$t/home/.agents-hotline/sessions/caller-6c.json"
+
+[[ "$(jq -r .transport <<<"$out")" == "headless" ]]
+check "the headless fold-in still applies on a follow-up" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+[[ "$(jq -r --arg t "$target_real" '.connections[$t] | has("surface_ref")' "$cache_6c")" == "false" ]]
+check "a headless follow-up CLEARS the stale surface_ref" $? "$(cat "$cache_6c" 2>/dev/null)"
+
+# Side placement degrading to detached: open-side-surface exits 2 with the
+# identify diagnostic cmux-call-async.sh keys on, so no surface_ref.txt is ever
+# written and the call lands in its own workspace instead.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_claude "$t/bin"
+# Same two-readers screen as case 6: cmux-reuse-surface.sh sees the post-interrupt
+# prompt and declines (so the call reaches the placement decision), while
+# wait-for-session.sh needs the REPL banner to confirm the detached boot.
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n' \
+  > "$t/screen.txt"
+cat > "$t/side-degrade.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "open-side-surface: could not resolve caller pane from identify" >&2
+exit 2
+EOF
+chmod +x "$t/side-degrade.sh"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-6d" --session "6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d" \
+  --mode work_order --surface "SURFACE-UUID-STALE"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-6d" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side-degrade.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "degrade me to detached" --boot-timeout 8 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+target_real=$(cd "$t/target" && pwd -P)
+cache_6d="$t/home/.agents-hotline/sessions/caller-6d.json"
+
+[[ "$(jq -r .placement <<<"$out")" == "detached" ]] \
+  && jq -e '.fallbacks | index("surface-context→detached")' <<<"$out" >/dev/null 2>&1
+check "side placement degrades to detached and says so" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+[[ "$(jq -r --arg t "$target_real" '.connections[$t] | has("surface_ref")' "$cache_6d")" == "false" ]]
+check "a degraded-to-detached follow-up CLEARS the stale surface_ref" $? \
+  "$(cat "$cache_6d" 2>/dev/null)"
+
 # ===========================================================================
 # 7. Conference mode early-returns after cmux-call.sh — no boot/response wait.
 # ===========================================================================

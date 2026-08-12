@@ -88,11 +88,23 @@ Exactly one JSON object on stdout, always. Read `.status`:
 | `needs_disambiguation` | 3 | The reference matched several workspaces; `.candidates` has them. | Ask the user which one, then re-run with `--target <their chosen path>`. |
 | `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`fire`/`boot`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user. **Never silently retry.** |
 
-`.fallbacks` lists what the wrapper worked around on its way — e.g.
-`cmux-cli-missing→headless`, `surface-context→detached`,
-`surface-reuse→fresh(...)`. Those are already handled; mention them only if the
-user is debugging or the degradation matters to them (a detached tab instead of
-the side-by-side surface they expected, say).
+`.fallbacks` lists what the wrapper worked around on its way. All of them are
+already handled; mention them only if the user is debugging or the degradation
+matters to them (a detached tab instead of the side-by-side surface they
+expected, say).
+
+| Entry | What happened |
+|---|---|
+| `cmux-cli-missing→headless` | cmux is up but cmux-cli isn't installed, so the call was re-fired headless. |
+| `cmux-unavailable→headless` | No cmux at all. |
+| `surface-context→detached` | Side-by-side needs the caller's own surface context and it wouldn't resolve, so the callee landed in its own workspace tab. |
+| `surface-reuse→fresh(<reason>)` | A follow-up tried to type into the live surface and that surface refused (gone, mid-turn, post-interrupt, dirty input box). It opened a fresh one instead; `<reason>` says which. |
+| `surface-reuse-skipped(no-cached-surface)` | A follow-up had no surface to reuse — first contact was headless or detached, or a previous degraded follow-up cleared a stale ref. |
+| `identity→refreshed` / `identity→refresh-failed(...)` | `--refresh-identity` ran (or tried to). |
+
+A follow-up that opens a second surface **always** records why. If you see a new
+tab with `fallbacks:[]`, that is a bug — report it rather than explaining it
+away.
 
 `.awaiting_response` is `false` for a cmux conference call — that session is
 handed to the user in a visible surface, so there is nothing to poll. Report the

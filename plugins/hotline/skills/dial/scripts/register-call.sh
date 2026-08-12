@@ -48,10 +48,20 @@ if [[ -s "$CALL_DIR/surface_ref.txt" ]]; then
   SURFACE_ARGS=(--surface "$(cat "$CALL_DIR/surface_ref.txt")")
 fi
 
+# The nonce of THIS exchange. Superseded-surface cleanup uses it as proof that a
+# surface it is about to close is the one that hosted the previous exchange, and
+# not a pane the user has since repurposed — so it has to be recorded from first
+# contact, not just from the first follow-up.
+CALL_ID_ARGS=()
+if [[ -s "$CALL_DIR/call_id.txt" ]]; then
+  CALL_ID_ARGS=(--call-id "$(cat "$CALL_DIR/call_id.txt")")
+fi
+
 bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
   --caller-session "$CALLER_SESSION" \
   --session "$SESSION_ID" \
-  --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
+  --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} \
+  ${CALL_ID_ARGS[@]+"${CALL_ID_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
 
 # Dial history: "who called THIS workspace", keyed by the RECEIVER's cwd.
 # --session keeps its historical meaning (the CALLER's session id); the callee's

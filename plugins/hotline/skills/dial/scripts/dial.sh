@@ -453,23 +453,39 @@ CALL_ID_OUT=""
 # surface per turn. Multi-line messages skip this deliberately — the fresh
 # path hands the prompt to a launch script as an argument, so no keystroke
 # simulation is involved.
+#
+# EVERY bail records a fallback. The add_fallback for a refusal used to sit
+# INSIDE this block, so a bail-before-attempt emitted `fallbacks:[]` — a
+# follow-up that silently opened a second pane looked identical to a clean
+# first-contact dial, which is how the surface sprawl went unnoticed for so
+# long (claude-plugins-6nbr).
 # ---------------------------------------------------------------------------
-if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" && -n "$SURFACE_REF" && "$MESSAGE" != *$'\n'* ]]; then
-  REUSE=$(bash "$DIAL_SCRIPTS/cmux-reuse-surface.sh" \
-    --surface "$SURFACE_REF" --session "$REMOTE_SESSION_ID" \
-    --prompt "$SEND_PROMPT" --cwd "$TARGET_PATH" 2>/dev/null)
-  REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
-  if [[ -n "$REUSE_DIR" ]]; then
-    CALL_DIR="$REUSE_DIR"
-    [[ -s "$CALL_DIR/call_id.txt" ]] && CALL_ID_OUT=$(cat "$CALL_DIR/call_id.txt")
-    # The reused surface is unchanged, but bump last_contact / exchange_count.
-    bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
-      --caller-session "$MY_SESSION_ID" --surface "$SURFACE_REF" >/dev/null 2>&1
-    emit_connected true
+if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
+  if [[ -z "$SURFACE_REF" ]]; then
+    # Headless/detached first contact leaves no surface to reuse, and a prior
+    # follow-up may have cleared a stale one.
+    add_fallback "surface-reuse-skipped(no-cached-surface)"
+  elif [[ "$MESSAGE" == *$'\n'* ]]; then
+    add_fallback "surface-reuse-skipped(multiline)"
+    SURFACE_REF=""
+  else
+    REUSE=$(bash "$DIAL_SCRIPTS/cmux-reuse-surface.sh" \
+      --surface "$SURFACE_REF" --session "$REMOTE_SESSION_ID" \
+      --prompt "$SEND_PROMPT" --cwd "$TARGET_PATH" 2>/dev/null)
+    REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
+    if [[ -n "$REUSE_DIR" ]]; then
+      CALL_DIR="$REUSE_DIR"
+      [[ -s "$CALL_DIR/call_id.txt" ]] && CALL_ID_OUT=$(cat "$CALL_DIR/call_id.txt")
+      # The reused surface is unchanged, but bump last_contact / exchange_count.
+      bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
+        --caller-session "$MY_SESSION_ID" --surface "$SURFACE_REF" \
+        ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} >/dev/null 2>&1
+      emit_connected true
+    fi
+    # {"fallback":"fresh"} — surface gone, or not accepting the message right now.
+    add_fallback "surface-reuse→fresh($(jq -r '.reason // "no reason given"' <<<"$REUSE" 2>/dev/null | tr '\n' ' ' | cut -c1-140))"
+    SURFACE_REF=""
   fi
-  # {"fallback":"fresh"} — surface gone, or not accepting the message right now.
-  add_fallback "surface-reuse→fresh($(jq -r '.reason // "no reason given"' <<<"$REUSE" 2>/dev/null | tr '\n' ' ' | cut -c1-140))"
-  SURFACE_REF=""
 fi
 
 # ---------------------------------------------------------------------------
@@ -523,9 +539,16 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
         --caller-session "$MY_SESSION_ID" --session "$REMOTE_SESSION_ID" \
         --mode "$MODE_TAG" ${SURFACE_REF:+--surface "$SURFACE_REF"} >/dev/null 2>&1
     else
+      # Same clear-vs-leave-untouched distinction as step 6 below: a conference
+      # follow-up that produced no surface must not keep pointing at the old one.
+      CONF_CACHE=(--caller-session "$MY_SESSION_ID")
+      if [[ -n "$SURFACE_REF" ]]; then
+        CONF_CACHE+=(--surface "$SURFACE_REF")
+      else
+        CONF_CACHE+=(--clear-surface)
+      fi
       bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
-        --caller-session "$MY_SESSION_ID" \
-        ${SURFACE_REF:+--surface "$SURFACE_REF"} >/dev/null 2>&1
+        "${CONF_CACHE[@]}" >/dev/null 2>&1
     fi
     emit_connected false
   fi
@@ -600,10 +623,23 @@ fi
 # Follow-ups that had to open a NEW surface: refresh the cached surface_ref so
 # the next follow-up reuses the live one instead of the dead one. (First contact
 # is registered by wait-for-session.sh → register-call.sh.)
+#
+# When this follow-up ended up with NO surface — the cmux→headless fallback
+# above, or side placement degrading to detached — the ref must be CLEARED, not
+# left alone. An omitted --surface means "leave untouched", which would keep
+# pointing the next follow-up at a surface this session has since left, and
+# reuse would type the message into a REPL nobody is reading
+# (claude-plugins-2caw).
 if ! $FIRST_CONTACT; then
+  CACHE_ARGS=(--caller-session "$MY_SESSION_ID")
+  if [[ -n "$SURFACE_REF" ]]; then
+    CACHE_ARGS+=(--surface "$SURFACE_REF")
+  else
+    CACHE_ARGS+=(--clear-surface)
+  fi
+  [[ -n "$CALL_ID_OUT" ]] && CACHE_ARGS+=(--call-id "$CALL_ID_OUT")
   bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
-    --caller-session "$MY_SESSION_ID" \
-    ${SURFACE_REF:+--surface "$SURFACE_REF"} >/dev/null 2>&1
+    "${CACHE_ARGS[@]}" >/dev/null 2>&1
 fi
 
 emit_connected true

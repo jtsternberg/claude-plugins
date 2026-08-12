@@ -7,22 +7,35 @@
 #
 # Usage:
 #   session-cache.sh get <target-path> --caller-session <id>
-#   session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>]
-#   session-cache.sh update <target-path> --caller-session <id>
+#   session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>]
+#   session-cache.sh update <target-path> --caller-session <id> [--surface <ref> | --clear-surface] [--call-id <id>]
 #   session-cache.sh list --caller-session <id>
 #
-# --surface (set only) records the opaque cmux surface handle the callee's
-# session lives in, so a follow-up can route its message INTO that surface
-# instead of opening a new one. The JSON key remains surface_ref for backward
-# compatibility, but side-by-side launchers pass a stable UUID when available.
-# Optional — absent for headless/detached calls (no visible surface).
+# --surface records the opaque cmux surface handle the callee's session lives
+# in, so a follow-up can route its message INTO that surface instead of opening
+# a new one. The JSON key remains surface_ref for backward compatibility, but
+# side-by-side launchers pass a stable UUID when available. Optional — absent
+# for headless/detached calls (no visible surface).
+#
+# --clear-surface (update only) REMOVES surface_ref. An empty/omitted --surface
+# means "leave it untouched", which is right when a caller simply has nothing
+# new to say about the surface — but wrong when the caller KNOWS the session no
+# longer occupies one (a follow-up that fell back to headless, or whose side
+# placement degraded to detached). Leaving the old ref there sends the next
+# follow-up typing into a surface this session has left (claude-plugins-2caw).
+#
+# --call-id records the per-call nonce of the most recent exchange as
+# last_call_id. Cleanup needs it as proof of identity: a superseded surface is
+# only safe to close if its scrollback still carries the nonce of the exchange
+# it hosted, which distinguishes "the pane hotline used" from "a pane the user
+# has since repurposed".
 # =============================================================================
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: session-cache.sh get <target-path> --caller-session <id>"
-  echo "       session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>]"
-  echo "       session-cache.sh update <target-path> --caller-session <id>"
+  echo "       session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>]"
+  echo "       session-cache.sh update <target-path> --caller-session <id> [--surface <ref> | --clear-surface] [--call-id <id>]"
   echo "       session-cache.sh list --caller-session <id>"
   echo ""
   echo "Tracks Agent A's outgoing connections in ~/.agents-hotline/sessions/<caller-session>.json"
@@ -41,6 +54,8 @@ CALLER_SESSION=""
 SESSION_ID=""
 MODE=""
 SURFACE_REF=""
+CALL_ID=""
+CLEAR_SURFACE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,9 +63,18 @@ while [[ $# -gt 0 ]]; do
     --session) SESSION_ID="$2"; shift 2 ;;
     --mode) MODE="$2"; shift 2 ;;
     --surface) SURFACE_REF="$2"; shift 2 ;;
+    --call-id) CALL_ID="$2"; shift 2 ;;
+    --clear-surface) CLEAR_SURFACE=true; shift ;;
     *) [[ -z "$TARGET" ]] && TARGET="$1"; shift ;;
   esac
 done
+
+# Contradictory intent — "point at this surface" and "there is no surface" —
+# would resolve by whichever jq clause ran last. Refuse instead of guessing.
+if $CLEAR_SURFACE && [[ -n "$SURFACE_REF" ]]; then
+  echo "Error: --clear-surface and --surface are mutually exclusive" >&2
+  exit 1
+fi
 
 if [[ -z "$CALLER_SESSION" ]]; then
   echo "Error: --caller-session required" >&2
@@ -89,15 +113,19 @@ case "$CMD" in
     # surface_ref is added only when non-empty so `get`'s `.surface_ref // empty`
     # cleanly signals "no reusable surface" for headless/detached calls.
     if [[ -f "$CACHE_FILE" ]]; then
-      jq --arg t "$TARGET" --arg s "$SESSION_ID" --arg m "$MODE" --arg sf "$SURFACE_REF" --argjson now "$NOW" \
+      jq --arg t "$TARGET" --arg s "$SESSION_ID" --arg m "$MODE" --arg sf "$SURFACE_REF" \
+         --arg ci "$CALL_ID" --argjson now "$NOW" \
         '.connections[$t] = ({session_id: $s, started: $now, last_contact: $now, mode: $m, exchange_count: 1}
-           + (if $sf == "" then {} else {surface_ref: $sf} end))' \
+           + (if $sf == "" then {} else {surface_ref: $sf} end)
+           + (if $ci == "" then {} else {last_call_id: $ci} end))' \
         "$CACHE_FILE" > "${CACHE_FILE}.tmp" && mv "${CACHE_FILE}.tmp" "$CACHE_FILE"
     else
       jq -n --arg caller "$CALLER_CWD" --arg cs "$CALLER_SESSION" \
-        --arg t "$TARGET" --arg s "$SESSION_ID" --arg m "$MODE" --arg sf "$SURFACE_REF" --argjson now "$NOW" \
+        --arg t "$TARGET" --arg s "$SESSION_ID" --arg m "$MODE" --arg sf "$SURFACE_REF" \
+        --arg ci "$CALL_ID" --argjson now "$NOW" \
         '{caller: $caller, caller_session_id: $cs, connections: {($t): ({session_id: $s, started: $now, last_contact: $now, mode: $m, exchange_count: 1}
-           + (if $sf == "" then {} else {surface_ref: $sf} end))}}' \
+           + (if $sf == "" then {} else {surface_ref: $sf} end)
+           + (if $ci == "" then {} else {last_call_id: $ci} end))}}' \
         > "$CACHE_FILE"
     fi
     ;;
@@ -109,10 +137,16 @@ case "$CMD" in
     # Optional --surface refreshes surface_ref (self-heal: a follow-up that had
     # to open a NEW surface after the old one was closed records the new ref so
     # the next follow-up reuses it). Omitted → surface_ref is left untouched.
-    jq --arg t "$TARGET" --arg sf "$SURFACE_REF" --argjson now "$NOW" \
+    # --clear-surface removes it outright, for the follow-up that ended up with
+    # no surface at all.
+    jq --arg t "$TARGET" --arg sf "$SURFACE_REF" --arg ci "$CALL_ID" \
+       --argjson clear "$($CLEAR_SURFACE && echo true || echo false)" --argjson now "$NOW" \
       '.connections[$t].last_contact = $now
        | .connections[$t].exchange_count += 1
-       | (if $sf == "" then . else .connections[$t].surface_ref = $sf end)' \
+       | (if $ci == "" then . else .connections[$t].last_call_id = $ci end)
+       | (if $clear then del(.connections[$t].surface_ref)
+          elif $sf == "" then .
+          else .connections[$t].surface_ref = $sf end)' \
       "$CACHE_FILE" > "${CACHE_FILE}.tmp" && mv "${CACHE_FILE}.tmp" "$CACHE_FILE"
     ;;
   list)
