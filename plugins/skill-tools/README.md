@@ -41,9 +41,9 @@ Claude Code plugin: /skill-tools:adapt-skill <source skill> for <recipient workf
 Codex standalone: $adapt-skill <source skill> for <recipient workflow>
 ```
 
-Supply a public GitHub URL, an exact local path, or an installed skill reference. The workflow separates invariants from domain details and presents an adaptation map for approval before drafting. It requires separate approval before writing a final draft to a user-named destination.
+Supply a public GitHub URL, an exact local path, or an installed skill reference. The workflow separates invariants from domain details, presents a concise adaptation map, and writes a complete, reviewable draft skill directory in the same run. It honors an explicit destination; otherwise it uses `adapted-skills/<generated-name>/` under the current working directory. The directory includes the adapted `SKILL.md` plus required references, scripts, assets, templates, and agents metadata from the source; the final report identifies included and omitted resources.
 
-Source and recipient context may be sensitive. The skill does not harvest secrets, assumes no personal memory system, does not silently persist context, and has no dependency on a profile or interview plugin or special integration with one. A profile created elsewhere is merely an optional approved context attachment.
+Source and recipient context may be sensitive. The local output is explicitly a draft that can be edited or discarded; publication, commit, or push requires a separate explicit request. The skill keeps credentials and restricted data outside the adaptation, assumes no personal memory system, and has no dependency on a profile or interview plugin or special integration with one. A profile created elsewhere is merely an optional approved context attachment.
 
 For standalone Codex installation:
 

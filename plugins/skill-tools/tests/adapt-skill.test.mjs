@@ -43,25 +43,38 @@ test('separates the transferable method from recipient domain details', () => {
 	assert.match(skill, /reasoning sequence, evidence discipline/);
 	assert.match(skill, /verification and escalation rules/);
 	assert.match(skill, /evidence sources, objects, terminology, risks, actions, triggers, examples, outputs/);
-	for (const category of ['Evidence and objects', 'Terms, triggers, and actions', 'Risks and boundaries', 'Examples and outputs']) {
+	for (const category of ['Evidence and objects', 'Terms, triggers, and actions', 'Risks and boundaries', 'Examples and outputs', 'Companion resources']) {
 		assert.match(skill, new RegExp(`\\| ${category} \\|`));
 	}
 });
 
-test('keeps distinct map and write approval gates in order', () => {
-	const mapGate = skill.indexOf('Map approval authorizes drafting only, not a file write.');
-	const draft = skill.indexOf('## 4. Draft in the requested target format');
-	const writeGate = skill.indexOf('Ask for approval of the final draft and destination before writing any file.');
-	assert.ok(mapGate > 0 && mapGate < draft);
-	assert.ok(writeGate > draft);
+test('maps then proactively writes a deterministic reviewable draft', () => {
+	const map = skill.indexOf('## 3. Show the adaptation map');
+	const draft = skill.indexOf('## 4. Draft and save the complete skill directory');
+	assert.ok(map > 0 && map < draft);
+	assert.match(skill, /continue directly to drafting/);
+	assert.match(skill, /Honor an explicit destination/);
+	assert.match(skill, /`adapted-skills\/<generated-name>\/` relative to the current working directory/);
+	assert.match(skill, /private draft the user can edit or discard/);
+	assert.match(skill, /Report the adaptation map, exact created directory and files/);
+	assert.doesNotMatch(skill, /approve or revise|approval authorizes|Ask for approval/i);
 });
 
 test('chooses a verified target or labels a portable fallback', () => {
-	assert.match(skill, /Default to a self-contained Claude Code `SKILL.md`/);
-	assert.match(skill, /portable instruction bundle/);
+	assert.match(skill, /Default to a Claude Code skill directory containing `SKILL.md`/);
+	assert.match(skill, /portable instruction bundle directory/);
 	assert.match(skill, /direct compatibility is unverified/);
 	assert.match(skill, /domain support rather than professional authority/);
 	assert.match(openai, /default_prompt: "Use \$adapt-skill /);
 	assert.match(readme, /\/skill-tools:adapt-skill/);
 	assert.match(readme, /\$adapt-skill/);
+});
+
+test('reviews and reports companion resources without publishing', () => {
+	for (const resource of ['references', 'scripts', 'assets', 'templates', 'agents metadata']) {
+		assert.match(skill, new RegExp(resource));
+	}
+	assert.match(skill, /omit only resources the adapted workflow does not need/);
+	assert.match(skill, /included\/adapted\/copied\/omitted resources/);
+	assert.match(skill, /leave publication, commit, and push to a separate explicit request/);
 });
