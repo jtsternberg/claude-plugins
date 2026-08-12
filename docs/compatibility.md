@@ -8,9 +8,9 @@ catalogs, so install from the column that matches the client you are using.
 
 **Catalog probes:** Claude Code 2.1.226 and Codex CLI 0.147.0
 
-The clean probes found 27 entries in the Claude Code marketplace and exactly
+The repository catalogs contain 29 entries in the Claude Code marketplace and exactly
 three entries in the Codex-native marketplace: `codex`, `pr-workflow`, and
-`hotline`. Together those catalogs name 28 plugins. Recheck this guide after a
+`hotline`. Together those catalogs name 30 plugins. Recheck this guide after a
 client upgrade or a catalog change.
 
 ## Install and invoke
@@ -121,6 +121,7 @@ state, or user configuration. Those constraints are noted in the last column.
 
 | Plugin | Claude Code | Codex | Requirements and scope |
 | --- | --- | --- | --- |
+| [skill-adapter](../plugins/skill-adapter) | Available | Not offered | The self-contained `adapt-skill` workflow supports [standalone skill installation](codex/standalone-skills.md); public URL sources are limited to unauthenticated GitHub access in v1. |
 | [agentmail](../plugins/agentmail) | Available | Not offered | Requires the `agentmail` CLI and an `AGENTMAIL_API_KEY`. |
 | [beads-workflow](../plugins/beads-workflow) | Available | Not offered | Both workflows support [standalone skill installation](codex/standalone-skills.md); requires the `bd` CLI for Beads work. |
 | [bible](../plugins/bible) | Available | Not offered | Requires the configured Bible API access. |

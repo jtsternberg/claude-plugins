@@ -1,0 +1,9 @@
+{
+  "name": "skill-adapter",
+  "description": "Adapt reusable agent skills to new jobs and workflows while preserving their reasoning methods, evidence discipline, safety boundaries, verification, and escalation rules. Resolves a source from a public GitHub URL, local path, or installed skill reference; separates invariants from domain details; presents an approval-first adaptation map; and drafts a Claude Code skill or portable instruction bundle without silently persisting recipient context.",
+  "version": "0.1.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}

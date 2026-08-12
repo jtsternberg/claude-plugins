@@ -16,7 +16,7 @@ installing.
 
 ### Claude Code
 
-Add the marketplace and install any of its 28 listed plugins:
+Add the marketplace and install any of its 29 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
@@ -48,7 +48,7 @@ installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
 
 To install one self-contained repository skill instead of a whole plugin, see
 [standalone Codex skills](docs/codex/standalone-skills.md). For commands,
-updates, catalog scope, and all 29 plugin names, see the
+updates, catalog scope, and all 30 plugin names, see the
 [compatibility guide](docs/compatibility.md).
 
 ---
@@ -57,7 +57,7 @@ updates, catalog scope, and all 29 plugin names, see the
 
 These are selected plugins and workflows. The
 [support matrix](docs/compatibility.md#plugin-support-matrix) is the complete
-29-name inventory and the authority for harness availability.
+30-name inventory and the authority for harness availability.
 
 ### Skills
 
@@ -149,6 +149,11 @@ Codex-native A/B experiments: `codex:sol-delegate` for Sol-led delegation to Ter
 Give an agent its own email address — send, receive, reply, forward, and draft mail through the AgentMail API via the official `agentmail` CLI.
 
 **Install:** `claude plugin install agentmail@jtsternberg`
+
+#### 🧭 [skill-adapter](plugins/skill-adapter)
+Adapt a source skill's durable reasoning method to another job or workflow. `adapt-skill` separates invariants from domain details, maps recipient-specific replacements for approval, and drafts a Claude Code skill or portable instruction bundle without silently persisting sensitive context.
+
+**Install:** `claude plugin install skill-adapter@jtsternberg`
 
 ### Workflow skills
 
