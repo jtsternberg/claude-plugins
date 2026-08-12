@@ -92,6 +92,10 @@ case "$1" in
                  exit 0 ;;
   send-key)      echo "$*" >> "$ST/sendkey_calls" ;;
   new-workspace) echo "OK workspace:123" ;;
+  # Superseded-surface cleanup resolves a surface's workspace from the tree.
+  tree)          jq -nc '{windows:[{workspaces:[{id:"WORKSPACE-UUID-1",
+                   panes:[{surface_ids:["SURFACE-UUID-OLD","SURFACE-UUID-777"]}]}]}]}' ;;
+  close-surface) echo "$*" >> "$ST/close_calls"; echo "OK" ;;
   *)             exit 0 ;;
 esac
 EOF
@@ -641,6 +645,97 @@ check "a degraded-to-detached follow-up CLEARS the stale surface_ref" $? \
   "$(cat "$cache_6d" 2>/dev/null)"
 
 # ===========================================================================
+# 6e. A follow-up that opens a NEW surface closes the one it superseded
+#     (claude-plugins-n7xo).
+#
+# `claude --resume` in the new surface takes the session over, so the old surface
+# holds a REPL nobody will speak to again. Nothing used to close it, and a long
+# exchange accumulated one dead tab per turn.
+#
+# Reuse has to fail while the old surface stays readable and idle, which is
+# exactly the lossy-send case: the nudge goes out, its nonce never appears, reuse
+# falls back — and the old REPL is still sitting there idle.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+# The prior exchange's nonce is in scrollback (proof of identity), the REPL is
+# idle, and the banner lets wait-for-session confirm the replacement booted.
+printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-1] the previous follow-up\n\nClaude Code v2.1.221\n\xe2\x9d\xaf \n' \
+  > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-6e" --session "6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e" \
+  --mode work_order --surface "SURFACE-UUID-OLD" --call-id "nonce-prev-1"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_NO_ECHO=1 \
+  HOTLINE_CALLER_SESSION_ID="caller-6e" HOTLINE_CLEANUP_SETTLE=0 \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "carry on please" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+
+jq -e '.fallbacks | index("surface-cleanup→closed(SURFACE-UUID-OLD)")' <<<"$out" >/dev/null 2>&1
+check "the superseded surface is closed, and the close is reported" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+grep -q 'close-surface --workspace WORKSPACE-UUID-1 --surface SURFACE-UUID-OLD' \
+  "$t/close_calls" 2>/dev/null
+check "the close targets the OLD surface by handle, with its workspace" $? \
+  "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
+
+! grep -q 'surface SURFACE-UUID-777' "$t/close_calls" 2>/dev/null
+check "the replacement surface is never the one closed" $? \
+  "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
+
+# Without a recorded nonce there is nothing tying the handle to our exchange, so
+# cleanup must refuse — and say so rather than closing on a weaker signal.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n' \
+  > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-6f" --session "6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f" \
+  --mode work_order --surface "SURFACE-UUID-OLD"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-6f" HOTLINE_CLEANUP_SETTLE=0 \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "carry on please" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+
+jq -e '.fallbacks | map(startswith("surface-cleanup-skipped")) | any' <<<"$out" >/dev/null 2>&1
+check "a cleanup that cannot prove identity records a skip" $? "out=$out"
+
+[[ ! -s "$t/close_calls" ]]
+check "…and closes nothing" $? "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
+
+# The opt-out reaches the cleanup through dial.sh, not just the script.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-2] the previous follow-up\n\nClaude Code v2.1.221\n\xe2\x9d\xaf \n' \
+  > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-6g" --session "6g6g6g6g-6g6g-4g6g-8g6g-6g6g6g6g6g6g" \
+  --mode work_order --surface "SURFACE-UUID-OLD" --call-id "nonce-prev-2"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_NO_ECHO=1 \
+  HOTLINE_CALLER_SESSION_ID="caller-6g" HOTLINE_CLOSE_SUPERSEDED=0 \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "carry on please" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+
+jq -e '.fallbacks | index("surface-cleanup-skipped(disabled)")' <<<"$out" >/dev/null 2>&1
+check "HOTLINE_CLOSE_SUPERSEDED=0 reaches cleanup through dial.sh" $? "out=$out"
+
+[[ ! -s "$t/close_calls" ]]
+check "…and nothing is closed when it is off" $? \
+  "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
+
+# ===========================================================================
 # 7. Conference mode early-returns after cmux-call.sh — no boot/response wait.
 # ===========================================================================
 t=$(new_env); note_leak "$t"
@@ -896,7 +991,11 @@ out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
 call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 [[ -n "$call_dir" ]] && note_leak "$call_dir" && launch_script_of "$call_dir" >/dev/null
 
-[[ "$(jq -r '.fallbacks | length' <<<"$out" 2>/dev/null)" -eq 1 ]]
+# One entry for the refusal — the point of the case. Superseded-surface cleanup
+# legitimately adds a second entry of its own, so count the refusal's entries
+# rather than the whole array.
+[[ "$(jq -r '[.fallbacks[] | select(startswith("surface-reuse→fresh"))] | length' \
+      <<<"$out" 2>/dev/null)" -eq 1 ]]
 check "a multi-line refusal reason is one fallbacks entry, not several" $? "out=$out"
 
 jq -e '.fallbacks[0] | startswith("surface-reuse→fresh")' <<<"$out" >/dev/null 2>&1

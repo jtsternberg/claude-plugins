@@ -84,6 +84,15 @@ CALL_DIR=""
 # silently split one fallback into several bogus array entries.
 add_fallback() { FALLBACKS+=("$(printf '%s' "$1" | tr '\n\r\t' '   ')"); }
 
+# A sub-script's reason string, flattened for embedding INSIDE a fallback entry's
+# parentheses. The trailing trim matters because the collapse turns jq's trailing
+# newline into a space, and the space would otherwise land mid-entry as
+# `surface-cleanup-skipped(disabled )` where add_fallback can no longer see it.
+reason_of() {  # reason_of <json>
+  jq -r '.reason // "no reason given"' <<<"${1:-}" 2>/dev/null \
+    | tr '\n\r\t' '   ' | cut -c1-140 | sed 's/[[:space:]]*$//'
+}
+
 fb_json() {
   if [[ ${#FALLBACKS[@]} -eq 0 ]]; then
     echo '[]'
@@ -377,12 +386,19 @@ fi
 FIRST_CONTACT=true
 REMOTE_SESSION_ID=""
 SURFACE_REF=""
+# The surface (and nonce) this session was living in BEFORE this dial. Kept
+# separately because SURFACE_REF is reassigned as soon as a new surface opens, and
+# superseded-surface cleanup needs to know what it replaced.
+PREV_SURFACE_REF=""
+PREV_CALL_ID=""
 if [[ -z "$RESUME_ARG" ]]; then
   if CACHED=$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" \
                 --caller-session "$MY_SESSION_ID" 2>/dev/null) && [[ -n "$CACHED" ]]; then
     FIRST_CONTACT=false
     REMOTE_SESSION_ID=$(jq -r '.session_id // empty' <<<"$CACHED")
     SURFACE_REF=$(jq -r '.surface_ref // empty' <<<"$CACHED")
+    PREV_SURFACE_REF="$SURFACE_REF"
+    PREV_CALL_ID=$(jq -r '.last_call_id // empty' <<<"$CACHED")
   fi
 fi
 
@@ -487,7 +503,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
       emit_connected true
     fi
     # {"fallback":"fresh"} — surface gone, or not accepting the message right now.
-    add_fallback "surface-reuse→fresh($(jq -r '.reason // "no reason given"' <<<"$REUSE" 2>/dev/null | tr '\n' ' ' | cut -c1-140))"
+    add_fallback "surface-reuse→fresh($(reason_of "$REUSE"))"
     SURFACE_REF=""
   fi
 fi
@@ -644,6 +660,27 @@ if ! $FIRST_CONTACT; then
   [[ -n "$CALL_ID_OUT" ]] && CACHE_ARGS+=(--call-id "$CALL_ID_OUT")
   bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
     "${CACHE_ARGS[@]}" >/dev/null 2>&1
+fi
+
+# ---------------------------------------------------------------------------
+# Step 7 — Close the surface this follow-up superseded (claude-plugins-n7xo).
+#
+# Only reached when reuse did NOT apply, so the session was resumed somewhere new
+# and the old surface holds a REPL nobody will speak to again. Deliberately after
+# the boot wait: the replacement is provably live before anything gets closed.
+# The script itself proves the old surface is the right one and is idle, and
+# refuses with a reason otherwise — so every outcome is reported, and a refusal
+# never fails the dial.
+# ---------------------------------------------------------------------------
+if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" && -n "$PREV_SURFACE_REF" \
+      && "$PREV_SURFACE_REF" != "$SURFACE_REF" ]]; then
+  CLEANUP=$(bash "$DIAL_SCRIPTS/close-superseded-surface.sh" \
+    --surface "$PREV_SURFACE_REF" --expect-call-id "$PREV_CALL_ID" 2>/dev/null)
+  if [[ "$(jq -r '.closed // false' <<<"$CLEANUP" 2>/dev/null)" == "true" ]]; then
+    add_fallback "surface-cleanup→closed($PREV_SURFACE_REF)"
+  else
+    add_fallback "surface-cleanup-skipped($(reason_of "$CLEANUP"))"
+  fi
 fi
 
 emit_connected true
