@@ -1,5 +1,12 @@
 # Hotline follow-up dials stack orphaned surfaces
 
+> **Delivery mechanism superseded** by
+> [2026-08-12-hotline-terminal-paste-rework.md](2026-08-12-hotline-terminal-paste-rework.md).
+> The surface-reuse units (B/C/F4 and the pre-send gates) stand as described. The
+> nudge + `message.md` delivery, the `~/.agents-hotline/exchanges/` archive, and
+> the ringing-skill call-dir carve-out below never reached main — a single
+> `terminal.paste` over cmux's control socket replaced them before merge.
+
 Epic: claude-plugins-ma0b. Phase 1 — investigation and proposal. No behavior changed yet.
 
 A caller dials a work order, the callee checkpoints `AWAITING_REVIEW`, and the caller's

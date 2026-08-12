@@ -86,7 +86,12 @@ Exactly one JSON object on stdout, always. Read `.status`:
 | `connected` | 0 | The callee is up. `.remote_session_id`, `.workspace`, `.transport`, `.call_dir`, `.surface_ref`, `.first_contact`, `.fallbacks` describe the call. | Report the connection to the user, then wait for the response (below) — unless `.awaiting_response` is `false`. |
 | `replay` | 2 | Identity needed a second pass. `.fingerprint` is now in the transcript. | Run **the identical command again**. Nothing else. Don't explain it to the user. |
 | `needs_disambiguation` | 3 | The reference matched several workspaces; `.candidates` has them. | Ask the user which one, then re-run with `--target <their chosen path>`. |
-| `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`fire`/`boot`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user. **Never silently retry.** |
+| `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`fire`/`boot`/`deliver`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user. **Never silently retry.** |
+
+`deliver` is the one stage that leaves something live behind: the callee's REPL
+booted but the message never landed in it, so there is an open pane sitting empty.
+Say so — re-dialling blind can double-deliver, because the paste may have arrived
+just after the confirmation window closed.
 
 `.fallbacks` lists what the wrapper worked around on its way. All of them are
 already handled; mention them only if the user is debugging or the degradation
@@ -97,8 +102,9 @@ expected, say).
 |---|---|
 | `cmux-cli-missing→headless` | cmux is up but cmux-cli isn't installed, so the call was re-fired headless. |
 | `cmux-unavailable→headless` | No cmux at all. |
+| `terminal-paste-unavailable→headless` | cmux is up but its control socket doesn't offer `terminal.paste` — the verb every cmux delivery uses. The call went headless, so there is no visible pane. Upgrading cmux fixes it. |
 | `surface-context→detached` | Side-by-side needs the caller's own surface context and it wouldn't resolve, so the callee landed in its own workspace tab. |
-| `surface-reuse→fresh(<reason>)` | A follow-up tried to type into the live surface and that surface refused (gone, mid-turn, post-interrupt, dirty input box). It opened a fresh one instead; `<reason>` says which. |
+| `surface-reuse→fresh(<reason>)` | A follow-up tried to speak to the live surface and that surface refused (gone, mid-turn, post-interrupt, dirty input box), or the paste went out and could not be confirmed. It opened a fresh one instead; `<reason>` says which. |
 | `surface-reuse-skipped(no-cached-surface)` | A follow-up had no surface to reuse — first contact was headless or detached, or a previous degraded follow-up cleared a stale ref. |
 | `surface-cleanup→closed(<handle>)` | A follow-up opened a new surface, so the old one held a REPL nobody would speak to again. It was proven idle and proven to be the superseded exchange, then closed. |
 | `surface-cleanup-skipped(<reason>)` | The old surface was left alone. Common reasons: it is mid-turn; `parked-input` (unsent text in its box, which closing would discard); its identity couldn't be proven from the prior nonce; `positional-ref-unsafe` (the cached handle is a `surface:N` ref, which can name a different surface than it did — closing requires a UUID); it was already gone; or cmux refused (it will not close the last surface in a workspace). `HOTLINE_CLOSE_SUPERSEDED=0` reports `disabled`. |

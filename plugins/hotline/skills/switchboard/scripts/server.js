@@ -236,37 +236,13 @@ function stripSystemNoise(text) {
     .trim();
 }
 
-// ---- hotline nudge payloads --------------------------------------------------
-// A follow-up too large to type into the callee's REPL is delivered as a short
-// pointer line (cmux-reuse-surface.sh), so the transcript holds the pointer and
-// not the request. Rendering that verbatim would show "read <path>" where the
-// question belongs — and the call dir it names is transient, so by the time
-// anyone reads the conversation the file may be gone.
-//
-// Resolution order: the live call dir first (in-flight exchange), then the
-// caller-side durable archive keyed by the same nonce, then — if neither is
-// readable — the pointer text itself, clearly marked rather than silently blank.
-const EXCHANGES_DIR = process.env.HOTLINE_EXCHANGES_DIR
-  || path.join(HOME, '.agents-hotline', 'exchanges');
-const NUDGE_RE = /^\[CALL_ID:\s*([0-9a-f]+)\]\s*Next instructions:\s*read\s+(\S*message\.md)\b/i;
-const nudgeCache = new Map(); // callId -> resolved payload|null
-
-function resolveNudge(text) {
-  const m = NUDGE_RE.exec(text);
-  if (!m) return null;
-  const [, callId, msgPath] = m;
-  if (nudgeCache.has(callId)) return nudgeCache.get(callId);
-  let body = null;
-  for (const p of [msgPath, path.join(EXCHANGES_DIR, `${callId}.md`)]) {
-    try {
-      const s = fs.readFileSync(p, 'utf8');
-      if (s.trim()) { body = s; break; }
-    } catch { /* try the next location */ }
-  }
-  // Only cache a hit: a miss now may be an archive write that hasn't landed yet.
-  if (body !== null) nudgeCache.set(callId, body);
-  return body;
-}
+// Every hotline payload arrives in the callee's transcript verbatim, pasted over
+// cmux's control socket, so this reader needs no side channel to show what was
+// asked. There used to be one: large follow-ups were delivered as a short "read
+// <path>" pointer line, and rendering that verbatim showed a path where the
+// question belonged — so this file resolved the pointer by reading the call dir
+// and a caller-side archive. Both are gone, and with them the arbitrary-path read
+// that resolution required (claude-plugins-ml7l).
 
 // Parse one transcript JSONL line into a display entry, or null to skip.
 function parseLine(line) {
@@ -311,10 +287,6 @@ function parseLine(line) {
     }
     const text = stripSystemNoise(textFromContent(content));
     if (!text) return null;
-    const payload = resolveNudge(text);
-    if (payload !== null) {
-      return { role: 'user', kind: 'text', ts, text: payload, viaFile: true };
-    }
     return { role: 'user', kind: 'text', ts, text };
   }
 
@@ -821,10 +793,7 @@ function entryHtml(e) {
   const who = e.role === 'assistant' ? 'operator' : (e.role === 'user' ? 'caller' : (e.role === 'tool' ? 'wire' : 'exchange'));
   const tools = (e.tools || []).map(t => '<div>' + esc(t) + '</div>').join('');
   const body = e.text ? '<div class="body">' + md(e.text) + '</div>' : '';
-  // A payload delivered by file rather than typed: the words are the caller's,
-  // so say where they came from instead of passing it off as a typed message.
-  const via = e.viaFile ? '<div class="who via">via file</div>' : '';
-  return '<div class="entry ' + e.role + '"><div class="who">' + esc(who) + '</div>' + via + body +
+  return '<div class="entry ' + e.role + '"><div class="who">' + esc(who) + '</div>' + body +
     (tools ? '<div class="tools">' + tools + '</div>' : '') + '</div>';
 }
 
