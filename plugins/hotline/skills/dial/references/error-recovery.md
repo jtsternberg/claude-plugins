@@ -12,6 +12,7 @@ The stage tells you which section below to read:
 | `resolve` | [Workspace Resolution Failures](#workspace-resolution-failures), [Identity Cache Issues](#identity-cache-issues) |
 | `fire` | [CMUX Failures](#cmux-failures), [Headless Call Failures](#headless-call-failures) |
 | `boot` | [CMUX Failures](#cmux-failures) — the callee's REPL never came up |
+| `deliver` | [Delivery](#delivery-stage-deliver-and-messages-that-appear-to-vanish) — the REPL came up but the message never landed in it. **A live pane is sitting empty; the prompt is still on disk. Do not re-dial blind.** |
 
 ## Identity Failures
 
@@ -109,72 +110,68 @@ Identity normally resolves inline from `$CLAUDE_CODE_SESSION_ID` (Claude Code >=
 - cmux windows are not directly name-addressable, so Hotline identifies a "named window" by a workspace titled `<name>` inside it. If that titled workspace was renamed or closed, the next `--window <name>` won't find it and will create a fresh window.
 - Recovery: pass the explicit `window:<n>` ref instead of a name when you need to target a specific existing window, or accept that the name reseeds a new window + titled workspace.
 
-### Surface reuse (follow-ups typed into a live REPL)
+### Delivery: `stage: "deliver"` and messages that appear to vanish
+
+Every cmux message — first contact, follow-up, conference — is delivered the same
+way: `cmux-paste.sh` writes the payload as one `terminal.paste` over cmux's control
+socket, then proves the call's nonce reached the callee. Nothing is typed, no
+submit key is sent separately, and there is no size threshold or escaping hazard to
+reason about (`json.dumps` escapes the payload in-process; a live probe put 16MB
+through one request line).
+
+**`stage: "deliver"` means: the REPL is up, and it was never told anything.** The
+pane is live and empty. This is the one error stage that leaves something running
+behind it. Three rules:
+
+1. **Read `.detail`.** It carries the reason the paste could not be confirmed, and
+   the reasons are materially different: a surface that never drew an input box, a
+   `terminal.paste` the socket rejected, a nonce that turned up nowhere.
+2. **`$call_dir/pending_paste.md` still holds the prompt** — after a `deliver`
+   failure it is the only copy (a conference failure names its file in
+   `.recovery` instead). Do not discard the call dir before recovering it.
+3. **Do NOT re-dial blind.** Confirmation gives up after a bounded poll; a paste
+   that landed a moment later is indistinguishable from one that never landed, and
+   re-dialling then delivers the work order **twice**.
+
+To find out which happened, read the callee's transcript for the nonce
+(`jq` the JSONL under `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`) —
+that is byte-definitive, where the screen is not.
+
+**Two things are NOT proof that a message failed to arrive:**
+
+- **A missing user record.** A payload pasted into a busy REPL is queued and
+  written as a `queued_command` attachment, with **no user turn at all**, even
+  though the callee reads and answers it. A verifier that counts user turns reads
+  a perfectly landed message as lost. (`transcript-extract.sh` counts the
+  attachment, the receiver's own `STATUS:` line, and the `enqueue` record for
+  exactly this reason.)
+- **Text visible in the input box.** A queued message is drawn there while it
+  waits, alongside `Press up to edit queued messages`. A large paste renders as a
+  `[Pasted text +N lines]` placeholder instead, so the nonce is genuinely not on
+  screen even though delivery succeeded.
+
+**Never press Enter on a surface to "help" a stuck message.** `submit_key` already
+submitted it; an extra Enter on a queued or already-submitted payload is a double
+submit. If a payload really is sitting unsubmitted in the box, the right move is to
+let the dial fail and recover the prompt from `pending_paste.md`.
+
+**A surface whose REPL exited is refused, not pasted into.** If a callee ran
+`/exit`, or claude crashed, the surface still exists and its cached handle still
+resolves — but what is drawn is a shell prompt. Reuse checks for the input box (a
+`❯` padded with U+00A0, which a shell prompt does not produce) and falls back to a
+fresh surface with a reason, because pasting a work order at a shell with
+`submit_key: "return"` would make the shell **run** it.
+
+### Surface reuse (follow-ups into a live REPL)
 
 `dial.sh` routes a follow-up into the surface the callee's session already
-occupies, and only opens a fresh surface when that is refused — which it records
-as `surface-reuse→fresh(<reason>)` in `.fallbacks`. `cmux-reuse-surface.sh`'s own
-header documents the refusal conditions; what follows is what to do when a
-follow-up *appears* to vanish.
-
-**A newline bundled into the payload does not submit.** The target is a claude
-TUI/Ink REPL, which reads through bracketed paste, so a trailing `\n` in a
-`cmux send` lands as a **literal line break in the input box** — stored as CR
-(`0x0D`) — and no submit ever registers. It does **not** submit early. That is
-why `cmux-reuse-surface.sh` sends the text and then `cmux send-key Enter` as two
-separate steps with a settle between them, verified rather than inferred: a
-~124 B two-line payload with a trailing `\n` produced zero user events for 10 s,
-and a separate `send-key Enter` then submitted it complete (claude-plugins-5zhp /
--8bfd, on claude 2.1.221 / cmux 0.64.20).
-
-**Only single-line messages take the reuse path.** Multi-line ones go to the
-fresh-surface path, which hands the prompt to a launch script as an argument, so
-no keystroke simulation is involved at all. There is **no size threshold** behind
-that rule — 12 controlled sends from 507 B to 16 KB, including 66-line payloads,
-each landed as exactly one turn. What goes wrong is sporadic and unexplained:
-
-- the post-paste settle is a fixed `sleep 0.2`, verified sufficient for a
-  one-line paste and never for a long multi-line one; an Enter landing mid-paste
-  submits *half* a message as a real turn, which is harder to notice than one
-  that plainly never submitted;
-- a send has been observed **fragmenting into 3–7 separately submitted turns** in
-  real traffic, while refusing to reproduce across those 12 controlled trials;
-- one of the 12 **silently lost 2,538 contiguous middle bytes** from a 3,045 B
-  payload — one user event, no error, the bytes provably absent from the whole
-  transcript (a separate ~16 KB single-line trial lost 3,066).
-
-None of that is size-gated and the trigger is unknown, so treat a successful send
-as "bytes reached the PTY" and nothing more. The proof of delivery is the call's
-nonce turning up in the callee's transcript or on its screen — which is exactly
-what `wait-for-response.sh` correlates on.
-
-**One content hazard is real:** a payload containing the literal two characters
-`\n`, `\r` or `\t`. `cmux send` interprets those sequences in its argument and
-there is **no backslash escape** to opt out with — `\\` arrives as two
-backslashes, which makes doubling worse rather than better. `cmux-reuse-surface.sh`
-defends by splitting the payload just after each backslash that precedes
-`n`/`r`/`t` and sending the pieces back to back; each send appends at the cursor,
-so the box accumulates the exact bytes.
-
-**A follow-up that seems to have vanished** (no reply, no new user turn in the
-callee's transcript) is a transport question, not a quoting one —
-for plain text, escaping of the message body is never the cause.
-Two things that are **not** proof of a failed send:
-
-- **A missing user record.** A message typed into a busy REPL is enqueued, and
-  claude may deliver it *inside* the running turn at its next tool boundary as a
-  `queued_command` attachment — which writes no user record at all, even though
-  the callee reads and answers it. (`transcript-extract.sh` counts that, the
-  receiver's own `STATUS:` line, and the `enqueue` record as delivery evidence
-  for exactly this reason.)
-- **Text visible in the input box.** A queued message is drawn there while it
-  waits, alongside `Press up to edit queued messages`.
-
-So run `cmux read-screen --surface "$SURFACE_REF"` and read the *whole* screen:
-text in the box with a **quiet** REPL and no queued-message line is genuinely
-unsubmitted — send `send-key Enter`, and do **not** re-send the text (it
-appends). Text in the box with a live spinner is a queued message that already
-landed; pressing Enter there risks a double submit.
+occupies, and only opens a fresh surface when that is refused — which it records as
+`surface-reuse→fresh(<reason>)` in `.fallbacks`. `cmux-reuse-surface.sh`'s header
+documents every refusal condition: a surface that is gone, one showing no input
+box, the post-interrupt "what should Claude do instead?" state, unsent text in the
+box while a turn is in flight, a box that would not clear, and a paste that could
+not be confirmed. All of them are reasons, never errors — the follow-up still gets
+through, on a fresh surface.
 
 ## Identity Cache Issues
 

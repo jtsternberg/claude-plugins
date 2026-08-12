@@ -254,6 +254,12 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   escape hatch when identity discovery fails.
 - **`HOTLINE_SURFACE_READY_TIMEOUT=<seconds>`** — PTY-readiness budget for a new
   surface (default 8).
+- **`HOTLINE_PASTE_BOX_TIMEOUT=<seconds>`** — how long delivery waits for the
+  callee's REPL to draw its input box before refusing to paste. Defaults to
+  `--boot-timeout` (itself 60 for cmux), because both are waiting for the same
+  thing; set this only to decouple them. It is not a politeness timer: a payload
+  delivered to a surface that has not yet exec'd `claude` goes to the **shell**,
+  which would run it, so a miss here is a refusal rather than a gamble.
 - **`HOTLINE_PENDING_TTL=<seconds>`** — how long a `replay` fingerprint stays
   valid in `~/.agents-hotline/pending/` (default 600). A round-trip takes
   seconds; anything older is treated as a leftover and discarded.

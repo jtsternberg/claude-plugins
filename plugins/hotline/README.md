@@ -165,6 +165,27 @@ By default, workspace identities (cached by the `pickup` skill) are considered f
 
 Set it higher if your workspaces don't change much, lower if you're in rapid development across multiple projects.
 
+### Delivery timeout (`HOTLINE_PASTE_BOX_TIMEOUT`)
+
+Before pasting, delivery waits for the callee's REPL to draw its input box. That
+wait defaults to whatever `--boot-timeout` is for the call (60s on the cmux
+transport) — both are waiting for the same event. Override it only to decouple the
+two:
+
+```json
+{
+  "env": {
+    "HOTLINE_PASTE_BOX_TIMEOUT": "45"
+  }
+}
+```
+
+This is a safety gate rather than a patience setting. A payload delivered to a
+surface that has not yet exec'd `claude` does not disappear — it goes to the shell
+that *is* there, and delivery submits with Return, so the shell would run it. When
+the box never appears, hotline refuses to deliver and reports
+`stage: "deliver"` with the prompt still on disk.
+
 ### Skip permission prompts in cmux receivers (opt-in)
 
 When Hotline routes a call through `cmux` (interactive `claude`), the receiver runs in an unattended pane. Any permission gate the receiver hits — skill invocation, a Bash command not on `--allowedTools`, etc. — stalls the call until a human clicks "Yes." There's no human watching.
