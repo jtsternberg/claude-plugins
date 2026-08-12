@@ -1,8 +1,10 @@
 # AgentMail expansion: contacts, mail-check hooks, four new skills
 
-**Status:** spec, awaiting review. Nothing built yet.
+**Status:** approved 2026-08-11 (§7). Phase 2 — build.
 **Branch:** `agentmail-expansion` (worktree `/Users/JT/Code/gittree-agentmail-expansion`)
-**Plugin version:** stays `0.1.0` — bump deferred.
+**Plugin version:** stays `0.1.0` through testing. The release bump must document the
+preflight exit-code change — §7 Q5, tracked as claude-plugins-hyuk.
+**Addresses:** redacted. `<claude-inbox>`, `<partner-agent>`, `<partner-alt>`.
 
 Adds an address book, a periodic unread-mail notice that works in both harnesses, and
 four skills, to the existing `agentmail` plugin. No new plugin, so
@@ -32,29 +34,35 @@ Also rejected: **inbox `metadata`**. It merges on `inboxes update`, which is a m
 a resource JT's key may not be scoped to write, it is bounded and untyped, and it puts
 personal addresses on a remote object for no gain over a local file.
 
-### The known-contact ambiguity is resolved: `jtbot-chatgpt@agentmail.to`
+### The known-contact ambiguity is resolved: `<partner-agent>@agentmail.to`
 
-Read-only `inboxes:messages list` on `jtbot-claude@agentmail.to` returned 6 messages:
+Addresses are redacted throughout this document (Q1) — the real values live only in the
+local contacts store on JT's machine. The evidence below is message counts and thread
+structure, which survives redaction intact.
+
+Read-only `inboxes:messages list` on `<claude-inbox>` returned 6 messages:
 
 ```
-2026-08-11T21:21:29Z  JT's ChatGPT <jtbot-chatgpt@agentmail.to>  -> jtbot-claude  [received,unread]  Re: Hello from Claude
-2026-08-11T20:42:11Z  JT's Claude Code <jtbot-claude@…>          -> jtbot-chatgpt [sent]            Re: Hello from Claude
-2026-08-11T20:32:46Z  JT's ChatGPT <jtbot-chatgpt@agentmail.to>  -> jtbot-claude  [received,unread]  Re: Hello from Claude
-2026-08-11T20:29:42Z  Justin Sternberg <me@jtsternberg.com>      -> jtbot-claude  [received,unread]  Re: Claude's inbox is live
-2026-08-11T20:29:32Z  JT's Claude Code                           -> jtbot-chatgpt [sent]            Hello from Claude
-2026-08-11T20:27:21Z  JT's Claude Code                           -> me@jtsternberg.com [sent]       Claude's inbox is live
+2026-08-11T21:21:29Z  JT's ChatGPT     <partner-agent>  -> <claude-inbox>   [received,unread]  Re: Hello from Claude
+2026-08-11T20:42:11Z  JT's Claude Code <claude-inbox>   -> <partner-agent>  [sent]             Re: Hello from Claude
+2026-08-11T20:32:46Z  JT's ChatGPT     <partner-agent>  -> <claude-inbox>   [received,unread]  Re: Hello from Claude
+2026-08-11T20:29:42Z  Justin Sternberg me@jtsternberg.com -> <claude-inbox> [received,unread]  Re: Claude's inbox is live
+2026-08-11T20:29:32Z  JT's Claude Code <claude-inbox>   -> <partner-agent>  [sent]             Hello from Claude
+2026-08-11T20:27:21Z  JT's Claude Code <claude-inbox>   -> me@jtsternberg.com [sent]          Claude's inbox is live
 ```
 
-`jtbot-chatgpt@agentmail.to` is verifiable — four messages, one live thread
+`<partner-agent>` is verifiable — four messages, one live thread
 (`019def1e-8402-47d2-b606-fdcef4019608`). `me@jtsternberg.com` is verifiable — it sent
-mail in. `jtbot-99@agentmail.to` is **not** verifiable from here and must not be seeded as
+mail in. `<partner-alt>` is **not** verifiable from here and must not be seeded as
 fact: it appears in no message, and an inbox-scoped key cannot enumerate other inboxes
-(`inboxes list` returns exactly one, `count: 1`). A `-q jtbot-99` full-text search returned
-one hit, but reading that message's body shows the match came from tokenizing `jtbot`, not
-from the string `jtbot-99`.
+(`inboxes list` returns exactly one, `count: 1`). A full-text search for it returned one
+hit, but reading that message's body shows the match came from tokenizing the shared
+inbox-name prefix, not from the address.
 
-So the seed records `jtbot-99` as an unverified alternate note on the ChatGPT contact, with
-its provenance ("JT's memory") stated, not as an address to use.
+`<partner-alt>` is real, though — JT said verbally (session bd2a8174) that it is ChatGPT's
+**original** inbox and that `<partner-agent>` came later and is the one on the wire. So the
+seed records it as an unverified alternate on the ChatGPT contact, provenance stated as
+JT-verbal rather than observed, and never usable for a send until JT confirms it.
 
 ### The protocol in the work order is the protocol on the wire
 
@@ -241,7 +249,7 @@ opening it in an editor is a first-class use. `id` is a slug, generated from `na
 given, and is the stable handle for `update`/`remove`. `kind` is `human` | `agent` and is
 load-bearing rather than decorative — the relay protocol applies to `agent` contacts, and
 the "route it through the human" guardrail resolves to the `human` ones.
-`verified_from` exists because of the `jtbot-99` lesson: every address records how it was
+`verified_from` exists because of the `<partner-alt>` lesson: every address records how it was
 confirmed, so the next agent can tell evidence from recollection.
 
 Writes are temp-file-plus-`mv` in the same directory. Concurrent sessions are last-writer-
@@ -276,15 +284,18 @@ Created by the `contacts` skill on first use, from live evidence, **not shipped 
 | name | email | kind | verified_from |
 |---|---|---|---|
 | JT (Justin Sternberg) | me@jtsternberg.com | human | received mail 2026-08-11T20:29:42Z |
-| JT's ChatGPT | jtbot-chatgpt@agentmail.to | agent | thread 019def1e…, 4 messages, 2026-08-11 |
-| This agent (self) | jtbot-claude@agentmail.to | agent | `inboxes list`, `count: 1` |
+| JT's ChatGPT | <partner-agent>@agentmail.to | agent | thread 019def1e…, 4 messages, 2026-08-11 |
+| This agent (self) | <claude-inbox>@agentmail.to | agent | `inboxes list`, `count: 1` |
 
-The ChatGPT contact carries `notes: "JT's memory also mentions jtbot-99@agentmail.to. No
-evidence of it in this inbox, and an inbox-scoped key cannot enumerate other inboxes —
-confirm with JT before using it."`
+The ChatGPT contact carries an `aliases` entry for its original inbox and
+`notes: "<partner-alt> is this agent's original inbox (JT, verbally, session bd2a8174);
+<partner-agent> came later and is the one on the wire. Unconfirmed from any message in this
+inbox, and an inbox-scoped key cannot enumerate others — do not send to it until JT
+confirms."` The `verified_from` on that alternate reads `JT verbal, not observed`, which is
+the distinction the field exists to carry.
 
 `references/contacts.example.json` — the only contacts file that ships — uses
-`you@example.com` / `partner-agent@agentmail.to`. Rationale in open question **Q1**.
+`you@example.com` and `partner-agent@agentmail.to`. Rationale in open question **Q1**.
 
 ---
 
@@ -300,7 +311,7 @@ confirm with JT before using it."`
   "version": 1,
   "enabled": true,
   "mode": "remind",
-  "inboxes": ["jtbot-claude@agentmail.to"],
+  "inboxes": ["<claude-inbox>@agentmail.to"],
   "check_every_minutes": 15,
   "session_start_floor_seconds": 60,
   "renotify_after_minutes": 120,
@@ -330,6 +341,23 @@ confirm with JT before using it."`
 prompt must not switch itself on at install time; activation is an explicit act. Once a
 config exists, `remind` is the default mode and `auto` is opt-in, as specified.
 
+### Activation is one gesture, not hand-written JSON
+
+```
+mail-check.sh --init [--mode remind|auto] [--inbox <id>]
+```
+
+Copies `references/mail-check.example.json` into place, substituting `mode` and — when
+`--inbox` is omitted — leaving `inboxes` unset so the hook resolves and caches it on first
+run. It **never overwrites** an existing config (exit `4`, prints the existing path so the
+user can edit or delete it deliberately), and on success it prints exactly what it wrote and
+where, so activation is legible rather than magic.
+
+"Default-off" must not mean "off unless you can hand-author JSON" — an opt-in whose only
+door is an undocumented file shape is off in practice. `--init` is the door. It is named in
+`README.md` and in `check-mail`'s onboarding section, and it is the only write path the
+skills offer for this file.
+
 ### State
 
 `${XDG_CACHE_HOME:-$HOME/.cache}/agentmail/mail-check-state.json`, mode `0600`. Cache, not
@@ -339,7 +367,7 @@ config: deleting it costs one extra API call and nothing else.
 {
   "version": 1,
   "inboxes": {
-    "jtbot-claude@agentmail.to": {
+    "<claude-inbox>@agentmail.to": {
       "last_checked_at": 1786000000,
       "last_notified_at": 1785990000,
       "unread_count": 3,
@@ -407,15 +435,15 @@ unrecognized `--event` exits 0 silently rather than emitting a mismatched object
 `remind` (default):
 
 ```
-AgentMail: 3 unread in jtbot-claude@agentmail.to as of 21:34 — newest
-"Re: Hello from Claude" from jtbot-chatgpt@agentmail.to. Ask me to check it.
+AgentMail: 3 unread in <claude-inbox>@agentmail.to as of 21:34 — newest
+"Re: Hello from Claude" from <partner-agent>@agentmail.to. Ask me to check it.
 ```
 
 `auto` (opt-in):
 
 ```
-AgentMail: 3 unread in jtbot-claude@agentmail.to as of 21:34.
-1. Re: Hello from Claude — JT's ChatGPT <jtbot-chatgpt@agentmail.to>, 21:21
+AgentMail: 3 unread in <claude-inbox>@agentmail.to as of 21:34.
+1. Re: Hello from Claude — JT's ChatGPT <<partner-agent>@agentmail.to>, 21:21
    Hey Claude — Your proposed approach is now codified on my side as the …
 2. Re: Claude's inbox is live — Justin Sternberg <me@jtsternberg.com>, 20:29
    …
@@ -614,8 +642,12 @@ must allowlist only read verbs, so `reply`, `reply-all`, `forward`, and `drafts 
 prompting. `relay-work-order`'s SKILL.md must contain the destructive-action guardrail and
 the ambiguous-handoff→`[ASK]` rule (prose is advisory, a test is not). Every file under
 `hooks/` and `scripts/`: no `echo`/`printf` of a key-shaped variable, and no path that can
-exit non-zero from `mail-check.sh`. No live inbox address (`jtbot-claude@`, `jtbot-chatgpt@`)
-in any shipped plugin file — the guard for the §3 seed decision.
+exit non-zero from `mail-check.sh`.
+
+New: **no live `@agentmail.to` address in any shipped plugin file.** Implemented as an
+allowlist of example local-parts (`my-agent`, `partner-agent`, `abc123`, `support`, `you`,
+`agent`) rather than a denylist of JT's real inbox names — a denylist would have to name the
+live addresses in order to ban them, which is the leak it exists to prevent.
 
 ### `preflight_test.sh` (extended)
 
@@ -637,38 +669,19 @@ No probe sends mail or mutates inbox state.
 
 ---
 
-## 7. Open questions
+## 7. Decisions (reviewed and approved 2026-08-11)
 
-**Q1 — Publishing live agent addresses.** This spec records `jtbot-claude@agentmail.to` and
-`jtbot-chatgpt@agentmail.to`, and it will be committed to a public repo. `me@jtsternberg.com`
-is already in six files as your authorship email, so that one is settled; the two agent
-inboxes are new exposure and are spammable. Plan: shipped plugin files use placeholders
-(enforced by `safety_test.sh`), the real seed is created locally at runtime, and this spec
-keeps the addresses because the whole point of §1 was resolving which one is real. Say the
-word and I will redact them here to `jtbot-<agent>@agentmail.to` before the spec merges.
+All six open questions are resolved. Recorded as decisions rather than deleted, so the
+reasoning survives for whoever reads this next.
 
-**Q2 — `jtbot-99@agentmail.to`.** Unverifiable from an inbox-scoped key. Seeded as an
-unverified note on the ChatGPT contact. If you can confirm it from the AgentMail console,
-it becomes a second verified contact; otherwise it stays a note. Either is fine — I just
-won't assert it.
-
-**Q3 — Four skills, not five.** The one deviation from the work order: `checking mail` and
-`triage` merge into `check-mail` (§2). Confirm, or I ship five.
-
-**Q4 — Moving `agentmail-preflight.sh` to the plugin root.** Correct per AGENTS.md and
-needed by five consumers, but it touches `SKILL.md`, both reference docs, `README.md`, and
-`preflight_test.sh` in one go. Confirm the churn is wanted now rather than deferred.
-
-**Q5 — Preflight exit-code change.** `missing_permission` moves from exit 12 to exit 0.
-That is a documented-interface change on a published `0.1.0` plugin, made without a version
-bump (bump deferred per the work order). Flagging rather than assuming.
-
-**Q6 — Hook default-off.** No config file means no-op, so installing the plugin changes
-nothing until you write `mail-check.json`. Alternative is defaulting on in `remind` mode at
-install, which means an unrequested network call before every prompt in every session in
-every repo. Recommending default-off.
-
----
+| | Question | Verdict |
+|---|---|---|
+| Q1 | Publish the live agent addresses in this spec? | **Redact.** Placeholders throughout; real values live only in the local store. The §1 evidence is message counts and thread structure, which survives redaction. `safety_test.sh` keeps the shipped-file ban. |
+| Q2 | Treat `<partner-alt>` as real? | **Unverified note, enriched provenance.** JT confirmed verbally (session bd2a8174) that it is ChatGPT's original inbox and `<partner-agent>` came later. Recorded as JT-verbal, not observed; never send to it without confirmation. |
+| Q3 | Four skills or five? | **Four.** The work order listed functions, not a skill count; the routing-collision argument for merging `checking mail` into `check-mail` stands. |
+| Q4 | Move the preflight to the plugin root now? | **Now** — before more consumers ship against the wrong path. |
+| Q5 | Change the preflight exit-code contract at `0.1.0`? | **Yes, now.** Version stays `0.1.0` through testing per JT's hold. The release bump (likely `0.2.0`) must call the exit-code change out in `README.md` and the release notes — tracked so it cannot ship silently. |
+| Q6 | Hook default-off? | **Default-off, plus a one-gesture `--init`.** An opt-in whose only door is hand-written JSON is off in practice. See §4. |
 
 ## 8. Tracking
 
@@ -681,4 +694,5 @@ Epic **claude-plugins-nd5f**, with one issue per build unit:
 | claude-plugins-k8fe | mail-check hook, both harnesses (§4) |
 | claude-plugins-fdbk | `check-mail`, `replying`, `relay-work-order` + shared references (§2) |
 | claude-plugins-0t05 | live-probe Codex `additionalContext` delivery (§4, gap 2) |
+| claude-plugins-hyuk | release bump must document the preflight exit-code change (§7 Q5) |
 | claude-plugins-koht | **out of scope:** `handoff`'s plain-stdout hook under Codex (§1.5) |
