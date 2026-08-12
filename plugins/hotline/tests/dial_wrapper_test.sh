@@ -94,7 +94,8 @@ case "$1" in
   new-workspace) echo "OK workspace:123" ;;
   # Superseded-surface cleanup resolves a surface's workspace from the tree.
   tree)          jq -nc '{windows:[{workspaces:[{id:"WORKSPACE-UUID-1",
-                   panes:[{surface_ids:["SURFACE-UUID-OLD","SURFACE-UUID-777"]}]}]}]}' ;;
+                   panes:[{surface_ids:["aaaa0000-1111-4111-8111-111111111111",
+                                        "SURFACE-UUID-OLD","SURFACE-UUID-777"]}]}]}]}' ;;
   close-surface) echo "$*" >> "$ST/close_calls"; echo "OK" ;;
   *)             exit 0 ;;
 esac
@@ -664,7 +665,7 @@ printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-1] the previous follow-up\n\nClaude Co
   > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6e" --session "6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e" \
-  --mode work_order --surface "SURFACE-UUID-OLD" --call-id "nonce-prev-1"
+  --mode work_order --surface "aaaa0000-1111-4111-8111-111111111111" --call-id "nonce-prev-1"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_NO_ECHO=1 \
   HOTLINE_CALLER_SESSION_ID="caller-6e" HOTLINE_CLEANUP_SETTLE=0 \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
@@ -674,11 +675,11 @@ call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 [[ -n "$call_dir" ]] && note_leak "$call_dir"
 launch_script_of "$call_dir" >/dev/null
 
-jq -e '.fallbacks | index("surface-cleanup→closed(SURFACE-UUID-OLD)")' <<<"$out" >/dev/null 2>&1
+jq -e '.fallbacks | index("surface-cleanup→closed(aaaa0000-1111-4111-8111-111111111111)")' <<<"$out" >/dev/null 2>&1
 check "the superseded surface is closed, and the close is reported" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
-grep -q 'close-surface --workspace WORKSPACE-UUID-1 --surface SURFACE-UUID-OLD' \
+grep -q 'close-surface --workspace WORKSPACE-UUID-1 --surface aaaa0000-1111-4111-8111-111111111111' \
   "$t/close_calls" 2>/dev/null
 check "the close targets the OLD surface by handle, with its workspace" $? \
   "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
@@ -695,7 +696,7 @@ printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code
   > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6f" --session "6f6f6f6f-6f6f-4f6f-8f6f-6f6f6f6f6f6f" \
-  --mode work_order --surface "SURFACE-UUID-OLD"
+  --mode work_order --surface "aaaa0000-1111-4111-8111-111111111111"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
   HOTLINE_CALLER_SESSION_ID="caller-6f" HOTLINE_CLEANUP_SETTLE=0 \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
@@ -711,6 +712,32 @@ check "a cleanup that cannot prove identity records a skip" $? "out=$out"
 [[ ! -s "$t/close_calls" ]]
 check "…and closes nothing" $? "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
 
+# A cache written by an older plugin version holds a POSITIONAL surface:N ref.
+# Closing on that is unsafe in a way the nonce cannot rescue: the replacement
+# resumed the same session, so its scrollback replays the same nonce, and a
+# repositioned ref could name the replacement rather than the superseded surface.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-3] the previous follow-up\n\nClaude Code v2.1.221\n\xe2\x9d\xaf \n' \
+  > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-6h" --session "6h6h6h6h-6h6h-4h6h-8h6h-6h6h6h6h6h6h" \
+  --mode work_order --surface "surface:211" --call-id "nonce-prev-3"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_NO_ECHO=1 \
+  HOTLINE_CALLER_SESSION_ID="caller-6h" HOTLINE_CLEANUP_SETTLE=0 \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "carry on please" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+
+jq -e '.fallbacks | map(contains("positional-ref-unsafe")) | any' <<<"$out" >/dev/null 2>&1
+check "a positional cached ref is never closed, and says why" $? "out=$out"
+
+[[ ! -s "$t/close_calls" ]]
+check "…and nothing is closed for it" $? "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
+
 # The opt-out reaches the cleanup through dial.sh, not just the script.
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
@@ -718,7 +745,7 @@ printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-2] the previous follow-up\n\nClaude Co
   > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6g" --session "6g6g6g6g-6g6g-4g6g-8g6g-6g6g6g6g6g6g" \
-  --mode work_order --surface "SURFACE-UUID-OLD" --call-id "nonce-prev-2"
+  --mode work_order --surface "aaaa0000-1111-4111-8111-111111111111" --call-id "nonce-prev-2"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_NO_ECHO=1 \
   HOTLINE_CALLER_SESSION_ID="caller-6g" HOTLINE_CLOSE_SUPERSEDED=0 \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \

@@ -45,8 +45,29 @@ GLYPH=$'\xe2\x9d\xaf'
 NBSP=$'\xc2\xa0'
 RULE="$(printf '─%.0s' {1..40})"
 
+# ---------------------------------------------------------------------------
+# Poison stubs. Every case below installs its own `cmux` on PATH; these sit in
+# FRONT of the real binaries so a case that forgets one fails loudly here instead
+# of reaching the user's actual cmux and opening a live pane. A per-case stub
+# prepends ahead of these and still wins. (Same guard as surface-cleanup_test.sh
+# and cmux-call-async_test.sh — the latter exists because a missing stub really
+# did launch a `claude --resume` pane on every run.)
+# ---------------------------------------------------------------------------
+POISON_BIN="$(mktemp -d)"
+POISON_LOG="$POISON_BIN/violations"
+for _poison in cmux claude; do
+  cat > "$POISON_BIN/$_poison" <<POISON
+#!/usr/bin/env bash
+echo "$_poison \$*" >> "$POISON_LOG"
+echo "TEST BUG: reached the real $_poison — this invocation is missing its PATH stub" >&2
+exit 127
+POISON
+  chmod +x "$POISON_BIN/$_poison"
+done
+PATH="$POISON_BIN:$PATH"
+
 STUBROOT="$(mktemp -d)"
-trap 'rm -rf "$STUBROOT"' EXIT
+trap 'rm -rf "$STUBROOT" "$POISON_BIN"' EXIT
 
 # --- Fixture screens -------------------------------------------------------
 # Empty box, idle: prior user turn above (plain space), live box below (NBSP).
@@ -100,6 +121,7 @@ SENDTEXT=""
 CASE_CALL_DIR=""
 CASE_MESSAGE=""
 CASE_HAS_MESSAGE=false
+CASE_EXCHANGES_DIR=""
 declare -a SENDTEXTS=()
 
 run_case() {
@@ -156,7 +178,8 @@ STUB
   # HOTLINE_EXCHANGES_DIR keeps the durable archive inside the scratch tree
   # instead of the real ~/.agents-hotline.
   OUT="$(STUB_CALLLOG="$CALLLOG" STUB_SENDTEXT="$SENDTEXT" STUB_SCREENS="$CASEDIR/screens" \
-    STUB_NO_ECHO="${STUB_NO_ECHO:-}" HOTLINE_EXCHANGES_DIR="$CASEDIR/exchanges" \
+    STUB_NO_ECHO="${STUB_NO_ECHO:-}" \
+    HOTLINE_EXCHANGES_DIR="${CASE_EXCHANGES_DIR:-$CASEDIR/exchanges}" \
     PATH="$CASEDIR:$PATH" bash "$SCRIPT_UNDER_TEST" \
     --surface "w1:s1" --session "sess-123" "${extra[@]}" 2>&1)"
 
@@ -486,6 +509,36 @@ arch=$(ls "$arch_dir"/*.md 2>/dev/null | head -1)
   || fail "the archive index records call_id, timestamp, delivery and size" \
           "$(cat "$arch_dir/index.jsonl" 2>/dev/null)"
 
+# OWNER-ONLY. These payloads are whole work orders — one of them, in this repo's
+# own history, was a security review. A default-umask 0644 archive in a 0755
+# directory hands every archived follow-up to any local user, which is exactly
+# what the launchers chmod 700 their launch scripts to prevent.
+[[ "$(stat -f '%Lp' "$arch_dir" 2>/dev/null || stat -c '%a' "$arch_dir" 2>/dev/null)" == "700" ]] \
+  && pass "the archive directory is owner-only (0700)" \
+  || fail "the archive directory is owner-only (0700)" \
+          "mode=$(stat -f '%Lp' "$arch_dir" 2>/dev/null || stat -c '%a' "$arch_dir" 2>/dev/null)"
+
+for f in "$arch" "$arch_dir/index.jsonl"; do
+  mode=$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null)
+  [[ "$mode" == "600" ]] \
+    && pass "$(basename "$f") is owner-only (0600)" \
+    || fail "$(basename "$f") is owner-only (0600)" "mode=$mode"
+done
+
+# An index.jsonl left 0644 by a pre-fix version must be tightened, not inherited:
+# umask governs only files this run creates.
+loose_dir="$STUBROOT/loose/exchanges"
+mkdir -p "$loose_dir"; chmod 755 "$loose_dir"
+printf '{"call_id":"old"}\n' > "$loose_dir/index.jsonl"; chmod 644 "$loose_dir/index.jsonl"
+CASE_EXCHANGES_DIR="$loose_dir" run_case loose_perms screen_idle_empty -- --prompt "$MULTILINE_MSG"
+CASE_EXCHANGES_DIR=""
+lmode=$(stat -f '%Lp' "$loose_dir/index.jsonl" 2>/dev/null || stat -c '%a' "$loose_dir/index.jsonl" 2>/dev/null)
+ldmode=$(stat -f '%Lp' "$loose_dir" 2>/dev/null || stat -c '%a' "$loose_dir" 2>/dev/null)
+[[ "$lmode" == "600" && "$ldmode" == "700" ]] \
+  && pass "a pre-existing world-readable archive is tightened, not inherited" \
+  || fail "a pre-existing world-readable archive is tightened, not inherited" \
+          "dir=$ldmode index=$lmode"
+
 # The archived file is named for the nonce, so a caller holding a call_id (from
 # its own payload, or from dial history) can find what was actually asked.
 arch_id=$(jq -r '.call_id' < "$arch_dir/index.jsonl" 2>/dev/null | head -1)
@@ -609,6 +662,13 @@ OUT="$(STUB_CALLLOG="$CALLLOG" STUB_SENDTEXT="$SENDTEXT" PATH="$CASEDIR:$PATH" \
 [[ ! -s "$SENDTEXT" ]] \
   && pass "a dead surface receives no text at all" \
   || fail "a dead surface receives no text at all" "sent: $(tr '\0' '|' < "$SENDTEXT")"
+
+# The whole point of the poison stubs: a leak is a test failure, not a stray pane.
+if [[ -s "$POISON_LOG" ]]; then
+  fail "no test reaches the real cmux or claude" "$(cat "$POISON_LOG")"
+else
+  pass "no test reaches the real cmux or claude"
+fi
 
 echo ""
 echo "cmux-reuse-surface: $PASS passed, $FAIL failed"

@@ -9,17 +9,20 @@
 # turn.
 #
 # Closing a surface KILLS its foreground process (verified: a `sleep 400` in the
-# closed surface was reaped). So this refuses unless all four hold:
+# closed surface was reaped). So this refuses unless all of these hold:
 #
-#   1. The surface is still readable.
-#   2. Its scrollback carries --expect-call-id, the nonce of the exchange it
+#   1. The handle is a stable UUID, not a positional `surface:N` ref.
+#   2. The surface is still readable.
+#   3. Its scrollback carries --expect-call-id, the nonce of the exchange it
 #      hosted. This is the identity proof: it distinguishes "the pane hotline was
 #      using" from "a pane the user has since repurposed". Without it a recycled
 #      handle could point anywhere.
-#   3. Its REPL is not mid-turn — no in-flight markers, and a screen that has not
+#   4. Its REPL is not mid-turn — no in-flight markers, and a screen that has not
 #      changed across a short window.
-#   4. It is not sitting in the post-interrupt "what should Claude do instead?"
+#   5. It is not sitting in the post-interrupt "what should Claude do instead?"
 #      state, where a human is mid-decision.
+#   6. Its input box holds no unsent text. Reuse refuses to type over parked
+#      text; closing would delete it, which is worse.
 #
 # Every refusal is a reason string, never an error: cleanup failing to run must
 # not fail the dial that triggered it.
@@ -75,6 +78,18 @@ refuse() { jq -nc --arg reason "$1" '{closed: false, reason: $reason}'; exit 0; 
 # argument: with no nonce there is nothing tying this handle to our exchange.
 [[ -z "$EXPECT_CALL_ID" ]] && refuse "no prior call_id recorded for this surface, so its identity cannot be proven"
 
+# UUID handles only. The nonce-in-scrollback proof below is decisive for a UUID,
+# which names one surface for that surface's whole life — but a positional
+# `surface:N` ref names whatever currently sits in slot N, and slots renumber
+# when tabs move or siblings close. That matters more here than anywhere else:
+# the replacement surface resumed the SAME session, so its scrollback replays the
+# SAME prior nonce. A repositioned positional ref could therefore pass the
+# identity check while pointing at the very surface we just delivered into.
+# Reuse still accepts positional refs from old caches; closing never will.
+if [[ ! "$SURFACE_REF" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+  refuse "positional-ref-unsafe: '$SURFACE_REF' is not a stable UUID, and a repositioned ref could name the replacement surface rather than the superseded one"
+fi
+
 # Identity + liveness come from two different reads. The nonce was typed in the
 # PREVIOUS exchange and has almost certainly scrolled out of the viewport, so it
 # needs --scrollback; the busy/interrupt markers are drawn at the BOTTOM of the
@@ -97,6 +112,14 @@ repl_is_interrupted "$SCREEN" && \
 
 repl_looks_busy "$SCREEN" && \
   refuse "surface $SURFACE_REF has a turn in flight; closing it would destroy that work"
+
+# Unsent text in the input box is almost always a human's half-typed thought.
+# Reuse refuses to type on top of it; closing the surface would delete it
+# outright, which is strictly worse — an idle REPL is not the same as an
+# abandoned one.
+PARKED=$(input_box_content "$SCREEN")
+[[ -n "$PARKED" ]] && \
+  refuse "parked-input: surface $SURFACE_REF holds unsent text in its input box, which closing would discard"
 
 # A spinner wording we don't recognise still moves the screen. Bias to "busy":
 # a needless skip costs one stale tab, a wrong close destroys a running turn.

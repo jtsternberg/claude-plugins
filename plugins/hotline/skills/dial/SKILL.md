@@ -101,7 +101,7 @@ expected, say).
 | `surface-reuse→fresh(<reason>)` | A follow-up tried to type into the live surface and that surface refused (gone, mid-turn, post-interrupt, dirty input box). It opened a fresh one instead; `<reason>` says which. |
 | `surface-reuse-skipped(no-cached-surface)` | A follow-up had no surface to reuse — first contact was headless or detached, or a previous degraded follow-up cleared a stale ref. |
 | `surface-cleanup→closed(<handle>)` | A follow-up opened a new surface, so the old one held a REPL nobody would speak to again. It was proven idle and proven to be the superseded exchange, then closed. |
-| `surface-cleanup-skipped(<reason>)` | The old surface was left alone. Common reasons: it is mid-turn, its identity couldn't be proven from the prior nonce, it was already gone, or cmux refused (it will not close the last surface in a workspace). `HOTLINE_CLOSE_SUPERSEDED=0` reports `disabled`. |
+| `surface-cleanup-skipped(<reason>)` | The old surface was left alone. Common reasons: it is mid-turn; `parked-input` (unsent text in its box, which closing would discard); its identity couldn't be proven from the prior nonce; `positional-ref-unsafe` (the cached handle is a `surface:N` ref, which can name a different surface than it did — closing requires a UUID); it was already gone; or cmux refused (it will not close the last surface in a workspace). `HOTLINE_CLOSE_SUPERSEDED=0` reports `disabled`. |
 | `identity→refreshed` / `identity→refresh-failed(...)` | `--refresh-identity` ran (or tried to). |
 
 A follow-up that opens a second surface **always** records why. If you see a new

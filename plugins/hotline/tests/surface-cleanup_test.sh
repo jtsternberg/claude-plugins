@@ -6,8 +6,9 @@
 # in the closed surface was reaped — so this script's job is mostly to REFUSE.
 # What is pinned here:
 #
-#   1. It closes only when all four conditions hold: readable, scrollback carries
-#      the prior exchange's nonce, REPL idle across two reads, not interrupted.
+#   1. It closes only when every condition holds: a UUID handle, readable,
+#      scrollback carries the prior exchange's nonce, REPL idle across two reads,
+#      not interrupted, and no unsent text parked in the input box.
 #   2. Every refusal is {"closed":false,"reason":...} and exit 0. Cleanup failing
 #      must never fail the dial that triggered it.
 #   3. The close call carries BOTH --workspace and --surface, and targets a
@@ -53,7 +54,7 @@ fail() {
 GLYPH=$'\xe2\x9d\xaf'
 NBSP=$'\xc2\xa0'
 RULE="$(printf '─%.0s' {1..40})"
-SURF="SURFACE-UUID-OLD"
+SURF="aaaa0000-1111-4111-8111-111111111111"   # UUID-shaped: closing refuses positional refs
 WS="WORKSPACE-UUID-1"
 NONCE="abc123def456cafe"
 
@@ -64,6 +65,10 @@ screen_idle() {
 screen_busy() {
   printf '%s Dilly-dallying… (5s · ↓ 124 tokens)\n\n%s\n%s%s\n%s\n' \
     "✶" "$RULE" "$GLYPH" "$NBSP" "$RULE"
+}
+screen_idle_parked() {
+  printf '%s Baked for 12s\n\n%s\n%s%shalf-typed human thought\n%s\n' \
+    "✻" "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
 screen_interrupted() {
   printf '  Interrupted · What should Claude do instead?\n\n%s\n%s%s\n%s\n' \
@@ -83,6 +88,7 @@ run_case() {
       --moving)      moving=1; shift ;;
       --busy)        screen="screen_busy"; shift ;;
       --interrupted) screen="screen_interrupted"; shift ;;
+      --parked)      screen="screen_idle_parked"; shift ;;
       --no-tree)     no_tree=1; shift ;;
       --orphan-tree) orphan=1; shift ;;
       --unreadable)  unreadable=1; shift ;;
@@ -131,7 +137,7 @@ case "$1" in
       jq -nc '{windows:[{workspaces:[{id:"OTHER-WS",panes:[{surface_ids:["SOMEONE-ELSE"]}]}]}]}'
     else
       jq -nc --arg s "$SURF" --arg w "$WS" \
-        '{windows:[{workspaces:[{id:$w,panes:[{surface_ids:[$s,"SURFACE-UUID-SIBLING"]}]}]}]}'
+        '{windows:[{workspaces:[{id:$w,panes:[{surface_ids:[$s,"bbbb0000-2222-4222-8222-222222222222"]}]}]}]}'
     fi
     exit 0 ;;
   close-surface)
@@ -210,6 +216,26 @@ run_case interrupted --interrupted -- --surface "$SURF" --expect-call-id "$NONCE
 ! closed && [[ "$(reason)" == *"post-interrupt"* ]] && [[ "$(close_calls)" -eq 0 ]] \
   && pass "a post-interrupt REPL is NOT closed (a human is mid-decision)" \
   || fail "a post-interrupt REPL is NOT closed (a human is mid-decision)" "out=$OUT"
+
+# --- Parked input is a human's half-typed thought ---------------------------
+# Reuse refuses to type on top of it; closing would delete it outright.
+run_case parked --parked -- --surface "$SURF" --expect-call-id "$NONCE"
+! closed && [[ "$(reason)" == *"parked-input"* ]] && [[ "$(close_calls)" -eq 0 ]] \
+  && pass "an idle REPL with unsent text in its box is NOT closed" \
+  || fail "an idle REPL with unsent text in its box is NOT closed" "out=$OUT"
+
+# --- Positional refs can name the replacement, not the superseded surface ----
+# The replacement resumed the SAME session, so its scrollback replays the SAME
+# nonce — a repositioned surface:N could pass the identity check while pointing
+# at the pane we just delivered into.
+run_case positional -- --surface "surface:211" --expect-call-id "$NONCE"
+! closed && [[ "$(reason)" == *"positional-ref-unsafe"* ]] \
+  && pass "a positional surface:N ref is never closed" \
+  || fail "a positional surface:N ref is never closed" "out=$OUT"
+
+[[ "$(close_calls)" -eq 0 ]] \
+  && pass "…and it reads no screens and closes nothing" \
+  || fail "…and it reads no screens and closes nothing" "$(cat "$CALLLOG")"
 
 # --- Surface already gone ---------------------------------------------------
 run_case unreadable --unreadable -- --surface "$SURF" --expect-call-id "$NONCE"

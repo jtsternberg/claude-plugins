@@ -302,8 +302,35 @@ readable in the transcript), and cleanup is default-on.
 Answers to the open questions are in the approving review; nothing above is left
 undecided.
 
+### Review round two
+
+Adversarial review found one MAJOR and three minors, all fixed on this branch:
+
+- The durable archive was written with the default umask — 0644 files in a 0755
+  directory, so any local user could read whole archived work orders. Now 0700 dir
+  and 0600 files, and a pre-existing loose `index.jsonl` is tightened rather than
+  inherited. This is the same exposure the launchers `chmod 700` their launch
+  scripts to prevent.
+- Cleanup discarded parked input. Reuse refuses to type over unsent text in the
+  input box; closing the surface would have deleted it, which is worse. Now a
+  sixth gate condition, reported as `surface-cleanup-skipped(parked-input …)`.
+- The reuse suite had no poison-stub tripwire, so a future case that forgot its
+  own stub would have reached the real cmux silently. Added, matching the other
+  suites.
+- **Positional refs erode the identity proof.** The replacement surface resumed
+  the same session, so its scrollback replays the *same* prior nonce — a
+  repositioned `surface:N` could therefore pass the nonce check while naming the
+  surface we just delivered into. Closing now requires a UUID handle and refuses
+  anything else with `positional-ref-unsafe`. Reuse still accepts positional refs
+  from old caches; closing never will.
+
 ### Deferred
 
+- **claude-plugins-efxy** — conference follow-ups return before step 6/7, so
+  cleanup never runs for them and they can still stack orphans (F9 above). Not
+  silent: the fallback still reports the new tab.
+- **claude-plugins-ml7l** — constrain the switchboard's pointer resolution to the
+  call-dir and archive prefixes.
 - **claude-plugins-9rzn** — manual sweep for zombie surfaces already accumulated.
   Filed rather than built, with the caller's authorisation: it is the lowest-value
   unit and was not worth risking the rest.
@@ -311,7 +338,9 @@ undecided.
   archive covers the payload; the history entry does not exist either way.
 - **claude-plugins-86ka** — found while debugging this: every launch script passes
   the full prompt as argv, so `ps` exposes complete work orders to any local
-  process. Follow-ups no longer do this; first contact still does.
+  process. Three paths remain — first contact, a follow-up given `--prompt` rather
+  than `--prompt-file`, and inline delivery (by design, bounded to 800 bytes). Only
+  nudge-delivered follow-ups avoid it. A fix must cover all three.
 - **claude-plugins-3paw** — `workspace_ref.txt` still stores a positional ref.
 
 ## STATUS

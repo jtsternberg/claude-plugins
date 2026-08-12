@@ -265,14 +265,26 @@ else
 
   # Durable copy, because the call dir is not durable. Failure here must not fail
   # the call: the delivery the callee depends on is message.md, not the archive.
+  #
+  # OWNER-ONLY, both the directory and every file in it. These payloads are whole
+  # work orders — the launchers already chmod 700 their launch scripts for exactly
+  # this reason — and a default-umask 0644 archive would hand any local user the
+  # full text of every follow-up ever sent. $CALL_DIR needs no such treatment:
+  # mktemp -d is 0700 already.
   if mkdir -p "$EXCHANGES_DIR" 2>/dev/null; then
-    printf '%s' "$PROMPT" > "$EXCHANGES_DIR/${CALL_ID}.md" 2>/dev/null || true
-    jq -nc --arg id "$CALL_ID" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-           --arg session "$SESSION_ID" --arg cwd "$CWD" \
-           --arg path "$EXCHANGES_DIR/${CALL_ID}.md" \
-           --argjson bytes "$PROMPT_BYTES" \
-      '{call_id:$id, ts:$ts, session_id:$session, cwd:$cwd, bytes:$bytes,
-        delivery:"nudge", path:$path}' >> "$EXCHANGES_DIR/index.jsonl" 2>/dev/null || true
+    chmod 700 "$EXCHANGES_DIR" 2>/dev/null || true
+    ( umask 077
+      printf '%s' "$PROMPT" > "$EXCHANGES_DIR/${CALL_ID}.md"
+      jq -nc --arg id "$CALL_ID" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+             --arg session "$SESSION_ID" --arg cwd "$CWD" \
+             --arg path "$EXCHANGES_DIR/${CALL_ID}.md" \
+             --argjson bytes "$PROMPT_BYTES" \
+        '{call_id:$id, ts:$ts, session_id:$session, cwd:$cwd, bytes:$bytes,
+          delivery:"nudge", path:$path}' >> "$EXCHANGES_DIR/index.jsonl"
+    ) 2>/dev/null || true
+    # umask only governs files this run CREATES; an index.jsonl left 0644 by a
+    # pre-fix version would keep its permissions forever without this.
+    chmod 600 "$EXCHANGES_DIR/${CALL_ID}.md" "$EXCHANGES_DIR/index.jsonl" 2>/dev/null || true
   fi
 
   # Instruction BEFORE preview, and the preview labelled as one. A callee that
