@@ -14,8 +14,12 @@
 #   cmux-spawned bash) confirms REPL liveness via ANY of three signals:
 #     A) `cmux read-screen` matches the Claude Code REPL banner.
 #     B) The claude transcript file
-#        ~/.claude/projects/<encoded-cwd>/<preset-session-id>.jsonl exists
-#        and is non-empty (created the instant claude opens the session).
+#        ~/.claude/projects/<encoded-cwd>/<preset-session-id>.jsonl is non-empty
+#        AND has grown since this script started (created, or appended to, the
+#        moment claude opens the session). The growth requirement is not
+#        pedantry: on a plain resume that file already exists, so a bare
+#        existence check fired on the first poll and reported a boot that had not
+#        happened yet.
 #     C) The REPL has drawn its input box on screen.
 #   Any signal promotes session_id_preset.txt → session_id.txt. Signal B
 #   exists because banner regex is fragile (scrollback eviction, ANSI weirdness,
@@ -138,6 +142,23 @@ if $CMUX_MODE; then
     TRANSCRIPT_PATH="${HOME}/.claude/projects/${ENCODED_CWD}/${PRESET}.jsonl"
   fi
 
+  # FRESHNESS BASELINE for signal B. "The transcript file exists and is non-empty"
+  # is only evidence of a boot when the file did not exist a moment ago — which is
+  # true for a first contact under a brand-new session id, and FALSE for every
+  # plain resume, where the file has been sitting there since the session was
+  # created. Without this, a resume reported "REPL booted" on the first poll, in
+  # the same millisecond the launch command was sent, and everything downstream
+  # (including the paste) proceeded against a shell that had not exec'd claude yet.
+  #
+  # Recording the size rather than the mtime: growth is unambiguous, whereas a
+  # comparison against "now" has to reason about clock skew and about a claude that
+  # rewrites the file in place.
+  TRANSCRIPT_BASE_SIZE=-1
+  if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
+    TRANSCRIPT_BASE_SIZE=$(wc -c < "$TRANSCRIPT_PATH" 2>/dev/null | tr -d ' ')
+    [[ "$TRANSCRIPT_BASE_SIZE" =~ ^[0-9]+$ ]] || TRANSCRIPT_BASE_SIZE=-1
+  fi
+
   SAW_BANNER=false
   SAW_TRANSCRIPT=false
   SAW_BOX=false
@@ -181,11 +202,15 @@ if $CMUX_MODE; then
       fi
     fi
 
-    # Signal B: transcript file exists and is non-empty.
+    # Signal B: the transcript file is non-empty AND has grown since we started
+    # (or did not exist then). See the baseline above for why growth is required.
     if [[ -n "$TRANSCRIPT_PATH" && -s "$TRANSCRIPT_PATH" ]]; then
-      SAW_TRANSCRIPT=true
-      echo "$PRESET" > "$CALL_DIR/session_id.txt"
-      break
+      TR_NOW=$(wc -c < "$TRANSCRIPT_PATH" 2>/dev/null | tr -d ' ')
+      if [[ "$TR_NOW" =~ ^[0-9]+$ && "$TR_NOW" -gt "$TRANSCRIPT_BASE_SIZE" ]]; then
+        SAW_TRANSCRIPT=true
+        echo "$PRESET" > "$CALL_DIR/session_id.txt"
+        break
+      fi
     fi
 
     sleep 1

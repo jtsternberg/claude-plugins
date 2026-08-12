@@ -60,6 +60,11 @@ PLUGIN_SCRIPTS="$HOTLINE_ROOT/scripts"
 DIAL_SCRIPTS="$SCRIPT_DIR"
 PICKUP_SCRIPTS="$HOTLINE_ROOT/skills/pickup/scripts"
 
+# Reading the cmux tree lives in exactly one place (see the header there). dial.sh
+# needs it to find the surface inside a workspace-addressed call.
+# shellcheck source=../../../scripts/repl-state.sh
+source "$PLUGIN_SCRIPTS/repl-state.sh"
+
 # Pending-fingerprint state. NOT in /tmp: the file is keyed by the claude PID, so
 # a reused PID would inherit a dead session's fingerprint, and /tmp is
 # world-writable with no GC. ~/.agents-hotline/ is where every other piece of
@@ -392,10 +397,40 @@ else
   # The capability list to read is result.methods. result.capabilities is a
   # different list (*.v1 feature tokens) and never contains terminal.paste —
   # checking the wrong one would degrade every call on a cmux that supports it.
-  CAPS=$(python3 "$PLUGIN_SCRIPTS/cmux-rpc.py" --method system.capabilities 2>/dev/null || true)
-  if ! jq -e '.result.methods // [] | index("terminal.paste")' <<<"$CAPS" >/dev/null 2>&1; then
+  #
+  # FOUR DISTINCT REASONS, not one. The first version of this check swallowed
+  # everything through `2>/dev/null || true` and reported it all as
+  # terminal-paste-unavailable, which sends a reader to upgrade cmux when the real
+  # problem is a missing python3 or a socket nobody is listening on. Each of these
+  # needs a different action, so each gets its own fallback string and the RPC's
+  # own stderr rides along.
+  if ! command -v python3 >/dev/null 2>&1; then
     TRANSPORT="headless"
-    add_fallback "terminal-paste-unavailable→headless"
+    add_fallback "python3-missing→headless"
+  else
+    CAP_ERR=$(mktemp)
+    CAPS=$(python3 "$PLUGIN_SCRIPTS/cmux-rpc.py" --method system.capabilities 2>"$CAP_ERR")
+    CAP_RC=$?
+    CAP_DIAG=$(tr '\n\r\t' '   ' < "$CAP_ERR" | cut -c1-140 | sed 's/[[:space:]]*$//')
+    rm -f "$CAP_ERR"
+    case "$CAP_RC" in
+      0)
+        if ! jq -e '.result.methods // [] | index("terminal.paste")' <<<"$CAPS" >/dev/null 2>&1; then
+          TRANSPORT="headless"
+          add_fallback "terminal-paste-unavailable→headless(cmux answered but does not list terminal.paste in result.methods)"
+        fi
+        ;;
+      3)
+        # No socket, refused connection, timeout, or a reply that was not JSON.
+        TRANSPORT="headless"
+        add_fallback "cmux-socket-unreachable→headless($CAP_DIAG)"
+        ;;
+      *)
+        # ok:false, or a usage error in the helper itself.
+        TRANSPORT="headless"
+        add_fallback "cmux-rpc-error→headless(rc=$CAP_RC $CAP_DIAG)"
+        ;;
+    esac
   fi
 fi
 
@@ -550,17 +585,25 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
   [[ -n "$EFFECTIVE_RESUME" ]] && CONF_ARGS+=(--resume "$EFFECTIVE_RESUME")
   $DO_FORK && CONF_ARGS+=(--fork-session)
   [[ -n "$TOOLS" ]] && CONF_ARGS+=(--tools "$TOOLS")
-  CONF_ARGS+=(--prompt "$SEND_PROMPT")
+  # The file, never argv: conference was the last hotline path handing a whole
+  # payload to `claude` on a command line (claude-plugins-92s5).
+  CONF_ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
 
   CONF=$(bash "$DIAL_SCRIPTS/cmux-call.sh" "${CONF_ARGS[@]}" 2>"$ERR_FILE")
   CONF_FALLBACK=$(jq -r '.fallback // empty' <<<"$CONF" 2>/dev/null)
   CONF_ERROR=$(jq -r '.error // empty' <<<"$CONF" 2>/dev/null)
+  CONF_UNDELIVERED=$(jq -r '.undelivered // false' <<<"$CONF" 2>/dev/null)
 
   if [[ "$CONF_FALLBACK" == "headless" ]]; then
     # cmux is up but cmux-cli isn't installed, so side-by-side placement is
     # unavailable. Re-route through headless rather than bouncing to the model.
     add_fallback "cmux-cli-missing→headless"
     TRANSPORT="headless"
+  elif [[ "$CONF_UNDELIVERED" == "true" ]]; then
+    # The surface is open and its REPL is live, but it was never told anything —
+    # the same situation as a failed first-contact paste, so the same stage.
+    emit_error deliver "$CONF_ERROR" \
+      "The conference pane is live and empty; $(jq -r '.prompt_file // "the prompt file"' <<<"$CONF" 2>/dev/null) still holds the prompt. See references/error-recovery.md § CMUX Failures. Do NOT silently re-dial — the callee may have received it after the confirmation window."
   elif [[ -n "$CONF_ERROR" ]]; then
     emit_error fire "$CONF_ERROR" \
       "See references/error-recovery.md § CMUX Failures. Retry with --placement detached, or force headless with --headless."
@@ -571,6 +614,12 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
     REMOTE_SESSION_ID=$(jq -r '.session_id // empty' <<<"$CONF")
     SURFACE_REF=$(jq -r '.surface_id // .surface_ref // empty' <<<"$CONF")
     [[ "$SURFACE_REF" == "null" ]] && SURFACE_REF=""
+    # cmux-call.sh mints a nonce now (it needs one to confirm its own paste
+    # landed). Recording it gives conference calls what every other path already
+    # had: a call_id the receiver echoes back, and the identity proof
+    # superseded-surface cleanup requires before it will close anything.
+    CALL_ID_OUT=$(jq -r '.call_id // empty' <<<"$CONF" 2>/dev/null)
+    [[ "$CALL_ID_OUT" == "null" ]] && CALL_ID_OUT=""
     PLACEMENT_EFFECTIVE=$(jq -r '.placement // empty' <<<"$CONF")
     [[ "$PLACEMENT_EFFECTIVE" == "workspace" ]] && PLACEMENT_EFFECTIVE="detached"
     [[ "$PLACEMENT_EFFECTIVE" == "surface" ]] && PLACEMENT_EFFECTIVE="$PLACEMENT"
@@ -586,7 +635,8 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
     if $FIRST_CONTACT; then
       bash "$DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
         --caller-session "$MY_SESSION_ID" --session "$REMOTE_SESSION_ID" \
-        --mode "$MODE_TAG" ${SURFACE_REF:+--surface "$SURFACE_REF"} >/dev/null 2>&1
+        --mode "$MODE_TAG" ${SURFACE_REF:+--surface "$SURFACE_REF"} \
+        ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} >/dev/null 2>&1
     else
       # Same clear-vs-leave-untouched distinction as step 6 below: a conference
       # follow-up that produced no surface must not keep pointing at the old one.
@@ -596,6 +646,7 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
       else
         CONF_CACHE+=(--clear-surface)
       fi
+      [[ -n "$CALL_ID_OUT" ]] && CONF_CACHE+=(--call-id "$CALL_ID_OUT")
       bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
         "${CONF_CACHE[@]}" >/dev/null 2>&1
     fi
@@ -612,7 +663,7 @@ fire_headless() {
   [[ -n "$EFFECTIVE_RESUME" ]] && ARGS+=(--resume "$EFFECTIVE_RESUME")
   $DO_FORK && ARGS+=(--fork-session)
   [[ -n "$TOOLS" ]] && ARGS+=(--tools "$TOOLS")
-  ARGS+=(--prompt "$SEND_PROMPT")
+  ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
   bash "$DIAL_SCRIPTS/headless-call-async.sh" "${ARGS[@]}" 2>"$ERR_FILE"
 }
 
@@ -715,15 +766,18 @@ fi
 # caller waiting on a response to a message that does not exist.
 # ---------------------------------------------------------------------------
 if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
+  DELIVER_SURFACE=""
+  DELIVER_WORKSPACE=""
   if [[ -z "$SURFACE_REF" ]]; then
     # Detached placement addresses a workspace, not a surface. Resolve the
-    # workspace's current surface so the paste has a target.
-    DELIVER_SURFACE=$(cmux tree --all --json --id-format both 2>/dev/null | jq -r \
-      --arg w "$(cat "$CALL_DIR/workspace_ref.txt" 2>/dev/null)" '
-      .windows[]?.workspaces[]?
-      | select((.ref // "") == $w or (.id // "") == $w)
-      | .panes[]?
-      | (.selected_surface_id // .surfaces[0].id // empty)' 2>/dev/null | head -1)
+    # workspace's current surface so the paste has a target — through the shared
+    # reader in repl-state.sh, which is also what cmux-paste.sh uses, so there is
+    # one implementation of "read the cmux tree" rather than three.
+    DELIVER_ADDR=$(cmux_workspace_current_surface "$(cat "$CALL_DIR/workspace_ref.txt" 2>/dev/null)")
+    if [[ $? -eq 0 ]]; then
+      DELIVER_WORKSPACE="${DELIVER_ADDR%% *}"
+      DELIVER_SURFACE="${DELIVER_ADDR##* }"
+    fi
   else
     DELIVER_SURFACE="$SURFACE_REF"
   fi
@@ -731,10 +785,17 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
     emit_error deliver "the callee's REPL booted but no surface could be resolved to paste the prompt into" \
       "Check \$call_dir/workspace_ref.txt against \`cmux tree --all --json --id-format both\`. Retry with the default side placement, or force headless with --headless."
   fi
-  DELIVERY=$(bash "$DIAL_SCRIPTS/cmux-paste.sh" --surface "$DELIVER_SURFACE" \
-    --payload-file "$CALL_DIR/pending_paste.md" --call-id "$CALL_ID_OUT" \
-    --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID" \
-    --wait-box "${HOTLINE_PASTE_BOX_TIMEOUT:-20}" 2>/dev/null)
+  # The box wait is bounded by --boot-timeout, not by a separate knob: they are
+  # waiting for the same thing (this callee's REPL becoming usable), and a caller
+  # who raised one because the target machine is slow meant both.
+  # HOTLINE_PASTE_BOX_TIMEOUT still overrides, and is documented.
+  PASTE_BOX_TIMEOUT="${HOTLINE_PASTE_BOX_TIMEOUT:-${BOOT_TIMEOUT:-20}}"
+  DELIVER_ARGS=(--surface "$DELIVER_SURFACE"
+                --payload-file "$CALL_DIR/pending_paste.md" --call-id "$CALL_ID_OUT"
+                --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID"
+                --wait-box "$PASTE_BOX_TIMEOUT")
+  [[ -n "$DELIVER_WORKSPACE" ]] && DELIVER_ARGS+=(--workspace "$DELIVER_WORKSPACE")
+  DELIVERY=$(bash "$DIAL_SCRIPTS/cmux-paste.sh" "${DELIVER_ARGS[@]}" 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then
     emit_error deliver "the callee's REPL booted but the prompt never landed in it: $(reason_of "$DELIVERY")" \
       "The pane is live and empty; \$call_dir/pending_paste.md still holds the prompt. See references/error-recovery.md § CMUX Failures. Do NOT silently re-dial — the callee may have received it after the confirmation window."

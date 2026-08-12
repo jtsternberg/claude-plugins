@@ -13,8 +13,11 @@
 #
 # Wire protocol (cmux CmuxControlSocket): a unix stream socket carrying
 # newline-delimited JSON. One request line {"id","method","params"} in, one
-# response line {"id","ok",...} back. Single-line requests up to 256KB are
-# accepted, which is why the whole payload goes in one paste.
+# response line {"id","ok",...} back. Single-line requests are accepted well past
+# any plausible hotline payload — a live probe put 16MB through in one line — so
+# the whole payload always goes in one paste and there is no size tier to pick.
+# (An earlier comment here said 256KB, which is ~64x low; don't size a guard from
+# that number.)
 #
 # Usage:
 #   cmux-rpc.py --method terminal.paste --workspace <uuid> --surface <uuid>
