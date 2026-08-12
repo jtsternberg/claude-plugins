@@ -1,0 +1,3 @@
+interface:
+  display_name: AgentMail Replying
+  short_description: Reply, reply-all, and forward agent mail in thread, draft-first

@@ -36,8 +36,31 @@ send, read what comes back, reply / reply-all / forward, and stage drafts for re
 Driven entirely by the official `agentmail` CLI.
 
 This is **AgentMail specifically** — an email API built for agents, where every inbox is
-an API resource. It is not the user's own mail: reading or sending JT's Gmail is the
+an API resource. It is not the user's own mail: reading or sending the user's Gmail is the
 `gws` plugin. It is not raw SMTP.
+
+## This is the hub. Four sibling skills go deeper
+
+Use them instead of this file when the task is one of theirs; come back here for setup,
+flags, errors, and anything the others do not cover.
+
+| Skill | For |
+|---|---|
+| `contacts` | the address book — who is who, and which address is actually verified |
+| `check-mail` | what arrived, reading full bodies, and triaging an inbox |
+| `replying` | reply / reply-all / forward, draft-first for anything consequential |
+| `relay-work-order` | handing work to (or taking work from) another agent over email |
+
+Two shared references sit at the plugin root because more than one skill needs each:
+`references/replying.md` (the mechanics of answering mail) and
+`references/agent-mail-protocol.md` (the `[HANDOFF]`/`[ASK]`/`[FYI]`/`[DONE]` contract).
+
+Codex: substitute the installed plugin directory for the path below.
+
+```markdown
+${CLAUDE_PLUGIN_ROOT}/references/replying.md
+${CLAUDE_PLUGIN_ROOT}/references/agent-mail-protocol.md
+```
 
 ## "What is your email address?" — check, don't assume
 
@@ -54,6 +77,7 @@ If it returns an inbox, that address (and its display name) is your answer. If i
 nothing — or the CLI/key isn't set up (run the preflight) — *then* say you have no inbox yet
 and offer to create one. Answering an identity question from memory is how an agent with a
 live `@agentmail.to` inbox came to tell its user, twice, that it had no email.
+
 
 ## The golden rule, split in two
 
@@ -81,13 +105,18 @@ Also: `agentmail help <cmd>` does not exist. Only `<cmd> --help`.
 
 ## Current environment (resolved at skill load)
 
-Codex: this path resolves under Claude Code; substitute the directory containing this `SKILL.md`.
+Codex: this path resolves under Claude Code; substitute the installed plugin directory.
 
 ```!
-# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
-SKILL_DIR="${CLAUDE_SKILL_DIR}"
-bash "$SKILL_DIR/scripts/agentmail-preflight.sh" --local
+# Codex: this path resolves under Claude Code; substitute the installed plugin directory.
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$PLUGIN_ROOT/scripts/agentmail-preflight.sh" --local
 ```
+
+The preflight lives at the **plugin root**, not in this skill's directory: four skills and
+the mail-check hook all run it, and one copy is the repo's rule for that
+(AGENTS.md § Sharing Code or Docs Between Sibling Skills). `agentmail-signup.sh` and
+`agentmail-verify.sh` have one consumer each and stay under this skill's `scripts/`.
 
 Codex does not execute `!` blocks, so under Codex the above has not run: **run the
 preflight script yourself as your first step**, substituting this skill's directory for
@@ -96,11 +125,21 @@ the path.
 `--local` is deliberately offline — CLI presence, version, and whether a key is set. No
 API call at load time: a round trip on every load costs latency and quota and would print
 org and inbox identifiers into context for tasks that never touch email. When you actually
-need to know the key works, run the same script with no flag (one `organizations get`).
+need to know the key works, run the same script with no flag (one `inboxes list`, which
+also prints the inbox id you will need next).
 
 Exit codes, so you can branch without reading prose: `0` ready (with `--local`: CLI + key
-present; without it: key also accepted by a live probe) · `10` no CLI · `11` no key ·
-`12` key rejected · `30` probe inconclusive (network/429/5xx — **not** a bad key).
+present; without it: key also accepted by a live probe, **including a recognized key that
+is merely scope-limited**) · `10` no CLI · `11` no key · `12` key rejected — malformed,
+revoked, or rotated · `30` probe inconclusive (network/429/5xx — **not** a bad key).
+
+**`organizations get` is not the auth probe, and must not be used as one.** It has no
+required flags, which made it look like the cheapest check, but it succeeds *only* on an
+organization-scoped key. Verified live: an inbox-scoped key gets
+`403 missing_permission` from it — a working key, refused. `inboxes list` succeeds on
+inbox-, pod-, and org-scoped keys alike. And by the same logic, a `missing_permission`
+refusal anywhere is a **scope** answer, never a credential answer: the key was recognized
+well enough to be told which permission it lacks.
 
 ## Setup
 
@@ -238,7 +277,7 @@ Flags from `--help`. This table is for *finding* the command, not for calling it
 
 | Task | Command |
 |---|---|
-| Am I authenticated? | `organizations get` (no required flags — cheapest probe) |
+| Am I authenticated? | `inboxes list` — works on any key scope, and returns the inbox id |
 | Sign up an agent | `agent sign-up` — **via the script**, never directly |
 | Verify OTP | `agent verify` — via the script |
 | Create / list / get an inbox | `inboxes create` · `inboxes list` · `inboxes get` |
@@ -256,6 +295,16 @@ Flags from `--help`. This table is for *finding* the command, not for calling it
 
 ### Semantic notes `--help` cannot give you
 
+- **`search` takes `-q`, not `--query`.** `--query` fails with
+  `flag provided but not defined: -query`. It is the one flag in this CLI with no long form.
+- **`count` in a list response is the number of items RETURNED, not the number that
+  match.** `--label unread --limit 1` reports `count: 1` when three messages are unread.
+  Any "how many?" question therefore needs a `--limit` above the plausible answer, and a
+  result equal to the limit means "at least that many", not "exactly that many".
+- **`agentmail auth me` does not exist in 0.7.14**, despite `openapi.json` documenting
+  `/v0/auth/me` with a literal `**CLI:** agentmail auth me` block. There is no `auth`
+  resource. Use `inboxes list` to discover scope; reach `/v0/auth/me` with `curl` only if
+  you genuinely need the org/pod ids behind a scoped key.
 - **There is no org-wide messages list.** Org-wide works for `threads` and `drafts` only.
   To sweep messages across inboxes, iterate inboxes or use `threads`.
 - **`reply` vs `reply-all`.** `reply` has both a sibling `reply-all` command and a

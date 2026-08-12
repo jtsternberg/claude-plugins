@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "enabled": true,
+  "mode": "remind",
+  "check_every_minutes": 15,
+  "session_start_floor_seconds": 60,
+  "renotify_after_minutes": 120,
+  "max_messages": 3,
+  "per_message_bytes": 400,
+  "max_bytes": 2000,
+  "list_ceiling": 25,
+  "timeout_seconds": 8
+}
