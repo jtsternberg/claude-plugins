@@ -218,7 +218,10 @@ fi
 # script first contact uses — so there is exactly one delivery path to reason
 # about and one place a new landing signal has to be taught.
 #
-# The box is already proven present by the gates above, so --wait-box is 0.
+# No --wait-box: this surface has been holding a live REPL since a previous
+# exchange, and the gates above just read its screen. The boot wait belongs to
+# first contact, where the REPL is seconds old and may not be drawn yet.
+#
 # An array, not `${CWD:+--cwd "$CWD"}`: that form word-splits, so a callee cwd
 # containing a space would arrive as two arguments and the transcript path would
 # be derived from half of it.

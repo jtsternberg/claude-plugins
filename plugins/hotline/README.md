@@ -145,6 +145,8 @@ Both flags affect only the `cmux` transport; they're ignored on the headless pat
 
 **Follow-ups reuse the existing surface.** The first call to a workspace opens a surface and leaves it open, holding a live session. A follow-up dial to that same session routes its message *into* that existing surface instead of opening a new one — so an N-turn conversation stays in one surface rather than stacking N. If you've since closed the surface, the follow-up transparently falls back to opening a fresh one.
 
+**Every message is delivered the same way: one paste over cmux's control socket.** First contact and follow-ups both write the payload to an owner-only file and hand cmux a single `terminal.paste`, then confirm the call's nonce reached the callee — in its transcript, or failing that on its screen. Two consequences worth knowing: the payload never appears in a command line, so `ps` cannot leak a work order to other local users; and delivery is proven rather than assumed, so a message that did not land is reported instead of silently waited on. A cmux too old to offer `terminal.paste` is reported as `terminal-paste-unavailable→headless` and the call runs headless, without a visible pane.
+
 ---
 
 ## Configuration
