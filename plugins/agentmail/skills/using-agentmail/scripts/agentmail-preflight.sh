@@ -13,11 +13,14 @@
 #
 # Exit codes are the interface — the calling model branches on them rather than
 # parsing prose:
-#    0  CLI present, key set, key accepted. Verification state UNKNOWN.
+#    0  ready: CLI present and key set. With --local that is all an offline check
+#       can know (verification/reachability UNKNOWN); without --local it also means
+#       the key was accepted by a live probe. Either way the healthy path exits 0 so
+#       the skill can inject it from a load-time `!` block without Claude Code
+#       reporting a spurious "shell command failed" on a non-zero exit.
 #   10  CLI not on PATH
 #   11  CLI present, AGENTMAIL_API_KEY unset
 #   12  key rejected (401-class)
-#   20  --local: CLI present and key set (all an offline check can know)
 #   30  CLI + key present, probe failed for another reason (network/429/5xx).
 #       Reachability unknown — deliberately NOT reported as a bad key.
 #   64  usage error
@@ -41,7 +44,7 @@ usage() {
 Usage: agentmail-preflight.sh [--local]
 
   --local   Offline check only (CLI presence, version, key set). No network.
-            Exits 20 when both are present.
+            Exits 0 when both are present.
 
 With no flag, additionally runs one authenticated probe against the AgentMail
 API and exits 0 (accepted) / 12 (rejected) / 30 (probe inconclusive).
@@ -125,7 +128,7 @@ fi
 
 if [ "$LOCAL_ONLY" -eq 1 ]; then
 	printf '\nlocal check only — no API call made.\n'
-	exit 20
+	exit 0
 fi
 
 # --- 4. one authenticated probe ----------------------------------------------

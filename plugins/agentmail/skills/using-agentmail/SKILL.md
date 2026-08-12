@@ -1,7 +1,7 @@
 ---
 name: using-agentmail
-description: "Sends and receives email for an AI agent via the AgentMail API and the `agentmail` CLI — create inboxes, send mail, read incoming messages and threads, reply / reply-all / forward, manage drafts, and run the agent self-signup + OTP verification flow."
-when_to_use: "Use when the user wants an agent to have its own email address or to act on email: sign up for AgentMail, create or list inboxes, send an email, check for new mail, read a message or thread, reply or forward, prepare or send a draft, or schedule a send. Also use when AgentMail setup is failing — a missing CLI, a missing or rejected AGENTMAIL_API_KEY (a bad key returns a bare 403 with no error code), or a 403 message_rejected on a send, which means the org still needs OTP verification or the recipient is off the send allowlist."
+description: "Send and receive email for an AI agent via the AgentMail API and `agentmail` CLI — create inboxes, send, read messages and threads, reply/forward, manage drafts, run agent self-signup + OTP verification. Also fires when the agent is asked about its own email identity ('what is your email address?', 'do you have an inbox?') — answer from `agentmail inboxes list`, not session context."
+when_to_use: "Use when the user wants an agent to have its own email or to act on email: sign up, create/list inboxes, send, check for new mail, read a message or thread, reply/forward, draft, or schedule a send. Also for questions about the agent's own mail identity ('what is your email address?', 'do you have an inbox?') — no email verb, but still fire: check `agentmail inboxes list` before claiming it has none. Also when setup is failing — missing CLI, missing/rejected AGENTMAIL_API_KEY (a bad key returns a bare 403, no code), or 403 message_rejected on send (org needs OTP verification, or recipient off the allowlist)."
 argument-hint: "[what you want to do with email]"
 allowed-tools:
   - "Bash(command -v agentmail)"
@@ -38,6 +38,22 @@ Driven entirely by the official `agentmail` CLI.
 This is **AgentMail specifically** — an email API built for agents, where every inbox is
 an API resource. It is not the user's own mail: reading or sending JT's Gmail is the
 `gws` plugin. It is not raw SMTP.
+
+## "What is your email address?" — check, don't assume
+
+When you're asked whether you have an email, what your address is, or whether people can
+write to you, the honest answer is not "I'm an agent, I don't have one" and it is **never**
+the user's own address from session context. An inbox may have been provisioned for you
+already. Find out before you answer:
+
+```bash
+agentmail inboxes list
+```
+
+If it returns an inbox, that address (and its display name) is your answer. If it returns
+nothing — or the CLI/key isn't set up (run the preflight) — *then* say you have no inbox yet
+and offer to create one. Answering an identity question from memory is how an agent with a
+live `@agentmail.to` inbox came to tell its user, twice, that it had no email.
 
 ## The golden rule, split in two
 
@@ -82,9 +98,9 @@ API call at load time: a round trip on every load costs latency and quota and wo
 org and inbox identifiers into context for tasks that never touch email. When you actually
 need to know the key works, run the same script with no flag (one `organizations get`).
 
-Exit codes, so you can branch without reading prose: `0` key accepted · `10` no CLI ·
-`11` no key · `12` key rejected · `20` local-only OK · `30` probe inconclusive
-(network/429/5xx — **not** a bad key).
+Exit codes, so you can branch without reading prose: `0` ready (with `--local`: CLI + key
+present; without it: key also accepted by a live probe) · `10` no CLI · `11` no key ·
+`12` key rejected · `30` probe inconclusive (network/429/5xx — **not** a bad key).
 
 ## Setup
 

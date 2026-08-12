@@ -154,7 +154,7 @@ STUB_LOG="$case_home/stub.log"
 out="$(env -i HOME="$case_home" XDG_CONFIG_HOME="$case_home/.config" \
 	PATH="$STUB_BIN:/usr/bin:/bin" STUB_MODE=ok STUB_LOG="$STUB_LOG" \
 	AGENTMAIL_API_KEY="$KEY" bash "$SCRIPTS/agentmail-preflight.sh" --local 2>&1)"; rc=$?
-[ "$rc" -eq 20 ] && ok "--local with CLI + key → exit 20" || bad "--local should exit 20, got $rc"
+[ "$rc" -eq 0 ] && ok "--local with CLI + key → exit 0 (healthy; no operator needed in the ! block)" || bad "--local should exit 0, got $rc"
 if grep -q 'organizations get' "$STUB_LOG" 2>/dev/null; then
 	bad "--local called the API" "$(cat "$STUB_LOG")"
 else
