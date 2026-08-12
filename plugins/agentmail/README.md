@@ -120,7 +120,14 @@ distinguishable from a remembered one, and `kind` (`human`/`agent`) defaults to 
 rather than guessing, because it decides whether the relay protocol applies and who
 approves a destructive action.
 
-The store is never written into a repository, and the script takes no path flag.
+The store is never written into a repository, and the script takes no path flag. With no
+`XDG_CONFIG_HOME` and no absolute `HOME` it **refuses** (exit 64) rather than falling back to a
+relative `./.config/…` in the current directory — which, run from a checkout, is the exact
+outcome the store's location exists to prevent.
+
+The `contacts` skill allowlists only `get` and `list`. `add`, `update`, `remove`, and `init`
+write to the store, so they fall through to a permission prompt like every other mutation in
+this plugin.
 
 ## Mail-check hook
 
@@ -140,10 +147,25 @@ previews under hard count and byte caps. Every tunable is in
 `~/.cache/agentmail/mail-check-state.json`.
 
 What it will not do: print or store the API key, fail a session (every unattended path
-exits 0), call the API more than once per cooldown, or change inbox state — no labels, no
-mark-as-read, no drafts. Missing CLI, missing key, bad config, API error, timeout: silent
-no-op. It re-announces only when the newest unread message changes, or after
-`renotify_after_minutes`, so ignored mail stops nagging.
+exits 0, and there is no `set -e`), call the API more than once per cooldown, or change inbox
+state — no labels, no mark-as-read, no drafts. Missing CLI, missing key, unset `HOME`, bad
+config, API error, timeout: silent no-op. It re-announces only when the newest unread message
+changes, or after `renotify_after_minutes`, so ignored mail stops nagging.
+
+Two things it treats as hostile, because this plugin's whole job is reading text written by
+strangers:
+
+- **Every inbox id is untrusted** — from the API, from your config, from the hook's own cache
+  — and is validated against a strict address pattern before it reaches a command line or a
+  state key. Ids that fail are dropped, not repaired. The plan the hook builds for itself is
+  parsed field-wise, never `eval`'d. An earlier build did `eval` it, and an
+  `inboxes list` response containing `a$(…)@agentmail.to` executed before every prompt.
+- **Message content stays out of shared `/tmp`.** The scratch file holding an API response
+  carries subjects, senders, and previews, so it lives beside the state file under your cache
+  directory rather than in `TMPDIR`.
+
+`python3` (or `python`) is required. There is no `jq` fallback — one implementation of the
+JSON escaping rules, not two — so with no interpreter the hook is silently inert.
 
 ### Harness differences
 

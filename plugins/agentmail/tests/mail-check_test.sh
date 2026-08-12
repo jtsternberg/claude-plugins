@@ -64,6 +64,11 @@ case "${STUB_MODE:-ok}" in
     sleep 10
     echo '{}'
     exit 0 ;;
+  noinbox)
+    case "$*" in
+      *"inboxes list"*) echo '{"count":0,"inboxes":[]}'; exit 0 ;;
+    esac
+    ;;
 esac
 
 case "$*" in
@@ -87,7 +92,10 @@ for i in range(n):
     msgs.append({
         "inbox_id": "my-agent@agentmail.to",
         "thread_id": "thread-%d" % i,
-        "message_id": newest if i == 0 else "msg-%d" % i,
+        # STUB_NEWEST="-" omits message_id entirely: real mail does turn up
+        # without one, and the re-notify logic keyed on it.
+        **({} if (i == 0 and newest == "-") else
+           {"message_id": newest if i == 0 else "msg-%d" % i}),
         "labels": ["received", "unread"],
         "timestamp": "2026-08-11T21:2%d:00.000Z" % (i % 10),
         "from": "Sender %d <sender%d@example.com>" % (i, i),
@@ -135,7 +143,7 @@ write_config() { printf '%s\n' "$1" > "$CONFIG"; }
 # run [--no-json-tools] [--no-cli] [--no-key] [--harness claude|codex] -- <hook args...>
 run() {
 	local path="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin"
-	local with_key="yes" harness="" debug="" mode="${STUB_MODE_OVERRIDE:-ok}"
+	local with_key="yes" harness="" debug="" homeless="" mode="${STUB_MODE_OVERRIDE:-ok}"
 	while [ $# -gt 0 ]; do
 		case "$1" in
 			--no-json-tools) path="$NOJSON_BIN" ;;
@@ -143,24 +151,31 @@ run() {
 			--no-key) with_key="" ;;
 			--harness) shift; harness="$1" ;;
 			--debug) debug=1 ;;
+			--homeless) homeless=1 ;;
 			--) shift; break ;;
 		esac
 		shift
 	done
-	env -i \
-		HOME="$CASE_HOME" \
-		XDG_CONFIG_HOME="$CASE_HOME/.config" \
-		XDG_CACHE_HOME="$CASE_HOME/.cache" \
-		PATH="$path" \
-		STUB_MODE="$mode" \
-		STUB_LOG="$LOG" \
-		${STUB_UNREAD:+STUB_UNREAD="$STUB_UNREAD"} \
-		${STUB_NEWEST:+STUB_NEWEST="$STUB_NEWEST"} \
-		${STUB_PREVIEW:+STUB_PREVIEW="$STUB_PREVIEW"} \
-		${with_key:+AGENTMAIL_API_KEY="$KEY"} \
-		${debug:+AGENTMAIL_MAIL_CHECK_DEBUG=1} \
-		${harness:+$( [ "$harness" = claude ] && echo CLAUDE_CODE_SESSION_ID=sess-1 || echo CODEX_THREAD_ID=thread-1 )} \
-		bash "$HOOK" "$@"
+	# Built as an array: a ${x:+...}/${x:-...} pair cannot conditionally OMIT a
+	# NAME=VALUE word without expanding to a bare word that `env` would try to
+	# execute. --homeless drops HOME and both XDG vars entirely, which is the
+	# environment a harness can genuinely hand a hook.
+	local -a e=()
+	if [ -z "$homeless" ]; then
+		e+=("HOME=$CASE_HOME"
+		    "XDG_CONFIG_HOME=$CASE_HOME/.config"
+		    "XDG_CACHE_HOME=$CASE_HOME/.cache")
+	fi
+	e+=("PATH=$path" "STUB_MODE=$mode" "STUB_LOG=$LOG")
+	[ -n "${STUB_UNREAD:-}" ]  && e+=("STUB_UNREAD=$STUB_UNREAD")
+	[ -n "${STUB_NEWEST:-}" ]  && e+=("STUB_NEWEST=$STUB_NEWEST")
+	[ -n "${STUB_PREVIEW:-}" ] && e+=("STUB_PREVIEW=$STUB_PREVIEW")
+	[ -n "${STUB_INBOX:-}" ]   && e+=("STUB_INBOX=$STUB_INBOX")
+	[ -n "$with_key" ] && e+=("AGENTMAIL_API_KEY=$KEY")
+	[ -n "$debug" ]    && e+=("AGENTMAIL_MAIL_CHECK_DEBUG=1")
+	[ "$harness" = claude ] && e+=("CLAUDE_CODE_SESSION_ID=sess-1")
+	[ "$harness" = codex ]  && e+=("CODEX_THREAD_ID=thread-1")
+	env -i "${e[@]}" bash "$HOOK" "$@"
 	return $?
 }
 
@@ -177,6 +192,8 @@ for v in d.get("inboxes", {}).values():
         v["last_checked_at"] = now - ago
     if v.get("last_notified_at"):
         v["last_notified_at"] = now - ago
+if d.get("unresolved_last_checked_at"):
+    d["unresolved_last_checked_at"] = now - ago
 json.dump(d, open(path, "w"))
 PY
 }
@@ -301,6 +318,128 @@ grep -q 'inboxes:messages list' "$LOG" && ok "zero unread still made its one che
 unset STUB_UNREAD
 
 echo
+echo "== untrusted inbox ids never reach a shell =="
+
+# Reproduction of a real defect. The planner prints INBOX=<value> and the hook
+# used to `eval` those lines, so an inbox id containing a command substitution
+# executed — before every prompt, silently, exit 0. Two live paths existed:
+# an `inboxes list` response (stored as a state key, then read back), and a
+# config value written by the allowlisted `--init --inbox`.
+#
+# Path 1: hostile id from the API.
+fresh_case; write_config "$REMIND"
+STUB_UNREAD=3
+STUB_INBOX='a$(touch '"$CASE_HOME"'/PWNED_API)@agentmail.to'
+out="$(run -- --event UserPromptSubmit)"; rc=$?
+[ "$rc" -eq 0 ] && ok "hostile inbox_id from the API → exit 0" || bad "hostile API id exited $rc"
+[ ! -e "$CASE_HOME/PWNED_API" ] && ok "hostile inbox_id from the API did NOT execute" \
+	|| bad "COMMAND EXECUTION: an inbox_id from an API response ran as shell"
+[ -z "$out" ] && ok "hostile inbox_id from the API injects nothing" || bad "hostile id produced output" "$out"
+if [ -f "$STATE" ] && grep -q 'PWNED_API\|touch' "$STATE"; then
+	bad "the hostile id was stored as state — it would be read back next run" "$(cat "$STATE")"
+else
+	ok "the hostile id was never written to state"
+fi
+grep -q 'inboxes:messages list' "$LOG" \
+	&& bad "the hook queried messages with an unvalidated inbox id" "$(cat "$LOG")" \
+	|| ok "no message query was made with an unvalidated inbox id"
+unset STUB_INBOX STUB_UNREAD
+
+# Path 2: hostile id already in the config (as --init --inbox would have written).
+fresh_case
+printf '%s\n' '{"version":1,"enabled":true,"mode":"remind","inboxes":["a$(touch '"$CASE_HOME"'/PWNED_CFG)@agentmail.to"]}' > "$CONFIG"
+STUB_UNREAD=3
+out="$(run -- --event UserPromptSubmit)"; rc=$?
+[ "$rc" -eq 0 ] && ok "hostile config inbox → exit 0" || bad "hostile config inbox exited $rc"
+[ ! -e "$CASE_HOME/PWNED_CFG" ] && ok "hostile config inbox did NOT execute" \
+	|| bad "COMMAND EXECUTION: a config inbox value ran as shell"
+unset STUB_UNREAD
+
+# Path 3: --init refuses to persist one in the first place. This is the door the
+# check-mail skill allowlists, so it is the one an email can talk an agent into.
+fresh_case
+rm -f "$CONFIG"
+out="$(run -- --init --inbox 'a$(touch '"$CASE_HOME"'/PWNED_INIT)@agentmail.to' 2>&1)"; rc=$?
+[ "$rc" -eq 64 ] && ok "--init with a hostile --inbox → exit 64" || bad "hostile --init exited $rc, expected 64"
+[ ! -f "$CONFIG" ] && ok "--init wrote no config for a hostile --inbox" || bad "--init persisted a hostile inbox" "$(cat "$CONFIG")"
+[ ! -e "$CASE_HOME/PWNED_INIT" ] && ok "--init did not execute the hostile value" || bad "COMMAND EXECUTION via --init --inbox"
+
+# And a plain address still works, so validation is not just a blanket refusal.
+fresh_case
+rm -f "$CONFIG"
+out="$(run -- --init --inbox "$INBOX")"; rc=$?
+[ "$rc" -eq 0 ] && ok "--init accepts a plain address" || bad "--init rejected a valid address, exit $rc"
+grep -qF "$INBOX" "$CONFIG" 2>/dev/null && ok "--init recorded the valid inbox" || bad "--init did not record the valid inbox"
+
+# The source must not contain the sink at all.
+if grep -vE '^[[:space:]]*#' "$HOOK" | grep -qE '\beval\b'; then
+	bad "the hook still uses eval" "$(grep -nvE '^[[:space:]]*#' "$HOOK" | grep -E '\beval\b')"
+else
+	ok "no eval anywhere in the hook"
+fi
+
+echo
+echo "== a failed inbox resolution retries instead of bricking =="
+
+# Reproduction of a real defect. A sentinel inbox ("(unresolved)") was stored as
+# a state KEY, then read back as a perfectly plausible cached inbox — so every
+# later run queried a nonexistent inbox and injected a false count, forever,
+# until the user deleted the cache by hand.
+STUB_MODE_OVERRIDE=noinbox
+fresh_case; write_config "$REMIND"; STUB_UNREAD=3
+out="$(run -- --event UserPromptSubmit)"; rc=$?
+[ "$rc" -eq 0 ] && [ -z "$out" ] && ok "zero inboxes returned → silent, exit 0" \
+	|| bad "zero inboxes should be silent+0, got rc=$rc out='$out'"
+[ -f "$STATE" ] && ok "the failed resolution was recorded (no retry every prompt)" \
+	|| bad "a failed resolution wrote no state"
+if grep -qE '"\(unresolved\)"|unresolved"[[:space:]]*:[[:space:]]*\{' "$STATE" 2>/dev/null; then
+	bad "a sentinel inbox was stored as a state key" "$(cat "$STATE")"
+else
+	ok "no sentinel inbox key in state"
+fi
+python3 -c "
+import json,sys
+d=json.load(open('$STATE'))
+sys.exit(0 if d.get('unresolved_last_checked_at') and not d.get('inboxes') else 1)" 2>/dev/null \
+	&& ok "the attempt is recorded at the top level, not as an inbox" \
+	|| bad "the failed attempt is not recorded as a top-level marker" "$(cat "$STATE")"
+
+: > "$LOG"
+out="$(run -- --event UserPromptSubmit)"; rc=$?
+[ -z "$out" ] && ok "still silent on the next prompt" || bad "false notice after a failed resolution" "$out"
+[ ! -s "$LOG" ] && ok "…and inside the cooldown it makes no call at all" \
+	|| bad "a failed resolution retried before the cooldown expired" "$(cat "$LOG")"
+grep -q -- '--inbox-id unresolved' "$LOG" 2>/dev/null \
+	&& bad "the hook queried the sentinel as if it were an inbox" || ok "no query against a sentinel inbox"
+unset STUB_MODE_OVERRIDE
+
+# Recovery must be automatic once the API starts answering.
+age_state 99999
+: > "$LOG"
+out="$(run --harness claude -- --event UserPromptSubmit)"; rc=$?
+[ -n "$out" ] && ok "recovers by itself once a real inbox comes back" \
+	|| bad "the hook never recovered after a failed resolution" "$(cat "$LOG")"
+printf '%s' "$out" | json_field hookSpecificOutput.additionalContext | grep -qF "$INBOX" \
+	&& ok "…and reports the real inbox, not a sentinel" || bad "recovered notice names the wrong inbox"
+python3 -c "
+import json,sys
+d=json.load(open('$STATE'))
+sys.exit(0 if 'unresolved_last_checked_at' not in d else 1)" 2>/dev/null \
+	&& ok "the stale unresolved marker is cleared on success" \
+	|| bad "the unresolved marker survives a successful check"
+unset STUB_UNREAD
+
+echo
+echo "== no HOME, no XDG: silent, never a relative path =="
+
+fresh_case; write_config "$REMIND"; STUB_UNREAD=3
+out="$(run --homeless -- --event UserPromptSubmit 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && ok "HOME and XDG unset → exit 0 (set -u used to abort here)" \
+	|| bad "homeless environment exited $rc — only hooks.json's '|| true' hid this"
+[ -z "$out" ] && ok "HOME and XDG unset → silent on stdout and stderr" || bad "homeless run produced output" "$out"
+unset STUB_UNREAD
+
+echo
 echo "== remind mode =="
 
 fresh_case; write_config "$REMIND"; STUB_UNREAD=3
@@ -386,6 +525,61 @@ else
 	bad "multibyte truncation broke the output" "$out"
 fi
 unset STUB_PREVIEW STUB_UNREAD
+
+echo
+echo "== the byte cap is a cap, and the caveat survives it =="
+
+# The old clip() reserved 1 byte for a 3-byte ellipsis, so a cap could be
+# overshot; worse, clipping the ASSEMBLED block collapsed the multi-line listing
+# to one line and truncated away the trailing "previews, not full bodies / unread
+# state unchanged" caveat — the one line a reader most needs. The earlier test
+# measured 413B against a 600B cap, so it never reached the clip path at all.
+fresh_case
+write_config '{"version":1,"enabled":true,"mode":"auto","max_messages":3,"per_message_bytes":300,"max_bytes":300}'
+STUB_UNREAD=3
+STUB_PREVIEW="$(python3 -c "print('y'*400)")"
+out="$(run -- --event UserPromptSubmit)"; rc=$?
+ctx="$(printf '%s' "$out" | json_field hookSpecificOutput.additionalContext)"
+bytes="$(printf '%s' "$ctx" | wc -c | tr -d ' ')"
+[ "$rc" -eq 0 ] && [ "$bytes" -le 300 ] && ok "a forcing cap is respected exactly (${bytes}B ≤ 300)" \
+	|| bad "cap overshot: ${bytes}B > 300 (rc=$rc)" "$ctx"
+printf '%s' "$ctx" | grep -qi 'unread state is unchanged' \
+	&& ok "the caveat survives clipping" || bad "clipping dropped the previews/unread caveat" "$ctx"
+nl="$(printf '%s' "$ctx" | wc -l | tr -d ' ')"
+[ "$nl" -ge 1 ] && ok "the listing keeps its line structure under the cap" \
+	|| bad "clipping collapsed the block to a single line" "$ctx"
+
+# A cap too small for even the header and the caveat must degrade to one line,
+# not emit something over budget and not drop the caveat silently.
+fresh_case
+write_config '{"version":1,"enabled":true,"mode":"auto","max_messages":3,"per_message_bytes":300,"max_bytes":160}'
+STUB_UNREAD=3
+out="$(run -- --event UserPromptSubmit)"; rc=$?
+ctx="$(printf '%s' "$out" | json_field hookSpecificOutput.additionalContext)"
+bytes="$(printf '%s' "$ctx" | wc -c | tr -d ' ')"
+[ "$rc" -eq 0 ] && [ "$bytes" -le 160 ] && ok "an impossible cap degrades within budget (${bytes}B ≤ 160)" \
+	|| bad "impossible cap produced ${bytes}B (rc=$rc)" "$ctx"
+unset STUB_PREVIEW STUB_UNREAD
+
+echo
+echo "== a message with no message_id does not re-announce forever =="
+
+fresh_case
+write_config '{"version":1,"enabled":true,"mode":"remind","check_every_minutes":0,"renotify_after_minutes":120}'
+STUB_UNREAD=2; STUB_NEWEST="-"
+out="$(run -- --event UserPromptSubmit)"
+[ -n "$out" ] && ok "mail with no message_id is announced once" || bad "mail with no message_id was never announced"
+out="$(run -- --event UserPromptSubmit)"
+[ -z "$out" ] && ok "…and is NOT announced again inside the renotify window" \
+	|| bad "a message with no id re-announces every cooldown forever" "$out"
+python3 -c "
+import json,sys
+d=json.load(open('$STATE'))
+e=list(d['inboxes'].values())[0]
+sys.exit(0 if e.get('newest_ident') else 1)" 2>/dev/null \
+	&& ok "a fallback identity is recorded when message_id is absent" \
+	|| bad "no fallback identity recorded" "$(cat "$STATE")"
+unset STUB_UNREAD STUB_NEWEST
 
 echo
 echo "== the cooldown really prevents calls, not just output =="
@@ -632,24 +826,62 @@ echo "== every exit is zero =="
 # marker is required: without it the two paths cannot be told apart, and an
 # unreviewable grep over the whole file would either miss a real bug or ban a
 # correct exit.
-MARKER='=== hook path'
-if grep -q "$MARKER" "$HOOK"; then
-	ok "the hook marks where its unattended path begins"
-	hookpath="$(awk "/$MARKER/{f=1} f" "$HOOK" | grep -vE '^[[:space:]]*#')"
-	if printf '%s\n' "$hookpath" | grep -qE '^[[:space:]]*exit[[:space:]]+[1-9]'; then
-		bad "the unattended hook path has a non-zero exit" \
-			"$(printf '%s\n' "$hookpath" | grep -nE '^[[:space:]]*exit[[:space:]]+[1-9]')"
-	else
-		ok "no non-zero exit anywhere in the unattended hook path"
-	fi
-	# And `set -e` would turn any unchecked command into one.
-	if printf '%s\n' "$hookpath" | grep -qE '^[[:space:]]*set[[:space:]]+-[a-z]*e'; then
-		bad "the hook enables 'set -e' — any unchecked command becomes a blocked prompt"
-	else
-		ok "the hook does not enable 'set -e'"
-	fi
+# The static half. It scans the WHOLE file with patterns that match the forms a
+# non-zero exit actually takes — `exit N`, `exit $?`, and a `quit()` that does not
+# exit 0 — because the previous version scanned only after the hook-path marker
+# and matched only a literal `exit <digit>`, so `exit $?` and a redefined `quit`
+# were both invisible. A decorative assertion is worse than none.
+#
+# The admin path legitimately exits 4/6/64, so its region is excluded by line
+# range rather than by trusting the marker alone: everything between the init
+# marker and the hook marker is interactive.
+init_ln="$(grep -n '=== init path' "$HOOK" | head -1 | cut -d: -f1)"
+hook_ln="$(grep -n '=== hook path' "$HOOK" | head -1 | cut -d: -f1)"
+if [ -n "$init_ln" ] && [ -n "$hook_ln" ] && [ "$hook_ln" -gt "$init_ln" ]; then
+	ok "the hook separates its interactive region from its unattended one"
 else
-	bad "the hook has no '$MARKER' marker separating admin exits from the hook path"
+	bad "the hook has no init/hook path markers — the two regions cannot be told apart"
+	init_ln=1; hook_ln=1
+fi
+
+# Region 1: the prologue, BEFORE the init marker. It runs on every invocation
+# including every hook fire, and it used to abort under `set -u` when HOME was
+# unset — which only hooks.json's `|| true` concealed.
+prologue="$(sed -n "1,${init_ln}p" "$HOOK" | grep -vE '^[[:space:]]*#')"
+if printf '%s\n' "$prologue" | grep -qE '^[[:space:]]*(exit[[:space:]]+([1-9]|\$)|return[[:space:]]+[1-9])'; then
+	bad "the prologue can exit non-zero before either path is chosen" \
+		"$(printf '%s\n' "$prologue" | grep -nE '^[[:space:]]*exit')"
+else
+	ok "the prologue has no non-zero exit"
+fi
+if printf '%s\n' "$prologue" | grep -qE '\$\{(HOME|XDG_[A-Z_]+)\}|\$(HOME|XDG_[A-Z_]+)[^:]' \
+	&& ! printf '%s\n' "$prologue" | grep -qE '\$\{(HOME|XDG_[A-Z_]+):-'; then
+	bad "the prologue reads HOME/XDG without a \${VAR:-} guard, so set -u can abort it"
+else
+	ok "every HOME/XDG read in the prologue is \${VAR:-} guarded"
+fi
+
+# Region 2: the unattended path, AFTER the hook marker. Nothing here may exit
+# non-zero, in any form.
+hookpath="$(sed -n "${hook_ln},\$p" "$HOOK" | grep -vE '^[[:space:]]*#')"
+offenders="$(printf '%s\n' "$hookpath" | grep -nE '^[[:space:]]*exit([[:space:]]+([1-9][0-9]*|\$.*))?[[:space:]]*$' | grep -vE 'exit[[:space:]]+0[[:space:]]*$' || true)"
+if [ -n "$offenders" ]; then
+	bad "the unattended hook path has a non-zero or indirect exit" "$offenders"
+else
+	ok "every exit in the unattended path is a literal 'exit 0'"
+fi
+# quit() is the single exit point; if it ever stops exiting 0, every guard above
+# it silently becomes a blocked prompt.
+if grep -qE '^quit\(\)[[:space:]]*\{[[:space:]]*exit[[:space:]]+0[[:space:]]*;?[[:space:]]*\}' "$HOOK"; then
+	ok "quit() is defined as exactly 'exit 0'"
+else
+	bad "quit() is not a literal 'exit 0' — the single exit point is unverifiable"
+fi
+# And `set -e` would turn any unchecked command into a non-zero exit.
+if printf '%s\n' "$hookpath" | grep -qE '^[[:space:]]*set[[:space:]]+-[a-z]*e'; then
+	bad "the hook enables 'set -e' — any unchecked command becomes a blocked prompt"
+else
+	ok "the hook does not enable 'set -e'"
 fi
 
 echo

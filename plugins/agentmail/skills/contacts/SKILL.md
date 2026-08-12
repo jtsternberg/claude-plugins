@@ -4,7 +4,8 @@ description: "Address book for agent email — add, list, update, remove, and lo
 when_to_use: "Use when you need an email address you do not already have in front of you, or when the user wants to record, correct, or remove one — including another agent's inbox. Also use before any send whose recipient came from memory rather than from a message you just read: this store is what distinguishes a verified address from a recollected one. Not for reading or sending mail (that is check-mail, replying, and relay-work-order)."
 argument-hint: "[who you're looking up, or the contact to add/change]"
 allowed-tools:
-  - "Bash(bash */scripts/agentmail-contacts.sh*)"
+  - "Bash(bash */scripts/agentmail-contacts.sh get*)"
+  - "Bash(bash */scripts/agentmail-contacts.sh list*)"
   - "Read"
 ---
 

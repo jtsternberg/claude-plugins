@@ -243,6 +243,52 @@ out="$(c add --name X --email x@example.com --store /tmp/elsewhere.json)"; rc=$?
 [ "$rc" -eq 64 ] && ok "an unknown flag → exit 64" || bad "unknown flag should exit 64, got $rc"
 
 echo
+echo "== no HOME and no XDG: fail closed, never a relative path =="
+
+# The old store_path() joined an empty HOME and produced the RELATIVE path
+# ./.config/agentmail/contacts.json — so, run from a checkout, personal addresses
+# landed inside a git repository. That is precisely the outcome the store's
+# location was chosen to prevent, so refusing is the only correct answer: there is
+# no directory we can guess that is definitely not a repo.
+fresh_case
+probe_dir="$SANDBOX/cwd-probe-$CASE_N"
+mkdir -p "$probe_dir"
+out="$(cd "$probe_dir" && env -i PATH="/usr/bin:/bin" \
+	bash "$CONTACTS" add --name Nobody --email nobody@example.com 2>&1)"; rc=$?
+[ "$rc" -eq 64 ] && ok "no HOME and no XDG_CONFIG_HOME → exit 64, refuses" \
+	|| bad "homeless add should exit 64, got $rc: $out"
+if [ -e "$probe_dir/.config" ]; then
+	bad "a relative .config/ was created in the working directory" "$(find "$probe_dir" -type f)"
+else
+	ok "nothing was written into the working directory"
+fi
+printf '%s' "$out" | grep -qi 'refusing' && ok "the refusal says why" || bad "the refusal does not explain itself" "$out"
+
+out="$(cd "$probe_dir" && env -i PATH="/usr/bin:/bin" bash "$CONTACTS" list 2>&1)"; rc=$?
+[ "$rc" -eq 64 ] && ok "a read also refuses rather than guessing a path" \
+	|| bad "homeless list should exit 64, got $rc"
+
+# A relative XDG_CONFIG_HOME is the same hazard by another name.
+out="$(cd "$probe_dir" && env -i PATH="/usr/bin:/bin" XDG_CONFIG_HOME=".cfg" \
+	bash "$CONTACTS" add --name Nobody --email nobody@example.com 2>&1)"; rc=$?
+[ "$rc" -eq 64 ] && ok "a relative XDG_CONFIG_HOME → exit 64" || bad "relative XDG should exit 64, got $rc"
+[ ! -e "$probe_dir/.cfg" ] && ok "…and wrote nothing" || bad "a relative XDG_CONFIG_HOME was used anyway"
+
+echo
+echo "== provenance timestamps =="
+
+fresh_case
+c add --name "Stamped" --email stamped@example.com --kind agent >/dev/null
+python3 -c "
+import json,re,sys
+d=json.load(open('$STORE'))
+c=d['contacts'][0]
+v=c.get('added_at','')
+sys.exit(0 if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$', v) else 1)" 2>/dev/null \
+	&& ok "add records added_at as a UTC timestamp (the spec's shape)" \
+	|| bad "added_at missing or malformed" "$(cat "$STORE")"
+
+echo
 echo "== usage errors =="
 
 fresh_case

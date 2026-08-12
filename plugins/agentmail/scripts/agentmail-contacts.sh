@@ -46,6 +46,7 @@ if [ -z "$PY" ]; then
 fi
 
 exec "$PY" - "$@" <<'PYEOF'
+import datetime
 import json
 import os
 import re
@@ -66,9 +67,26 @@ def die(msg, code):
 
 
 def store_path():
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
-        os.environ.get("HOME", ""), ".config"
-    )
+    """Fails closed. With no XDG_CONFIG_HOME and no HOME, the old code produced
+    the RELATIVE path ./.config/agentmail/contacts.json and wrote personal
+    addresses into whatever the current directory happened to be — which, run from
+    a checkout, is exactly the one-`git add`-from-published outcome this store's
+    location exists to prevent. Refusing is the only safe answer: there is no
+    directory we can guess that is definitely not a repository."""
+    base = os.environ.get("XDG_CONFIG_HOME") or ""
+    if not base:
+        home = os.environ.get("HOME") or ""
+        if not home or not os.path.isabs(home):
+            die(
+                "cannot locate a config directory: neither XDG_CONFIG_HOME nor an "
+                "absolute HOME is set.\nRefusing to guess — a relative path would "
+                "write personal addresses into the current directory, which may be "
+                "a git repository.",
+                USAGE,
+            )
+        base = os.path.join(home, ".config")
+    if not os.path.isabs(base):
+        die("XDG_CONFIG_HOME must be an absolute path (got %r)" % base, USAGE)
     return os.path.join(base, "agentmail", "contacts.json")
 
 
@@ -264,6 +282,9 @@ def main():
             "notes": opts.get("notes", ""),
             "aliases": opts["aliases"],
             "verified_from": opts.get("verified_from", ""),
+            "added_at": datetime.datetime.now(datetime.timezone.utc)
+                                 .replace(microsecond=0).isoformat()
+                                 .replace("+00:00", "Z"),
         }
         contacts.append(entry)
         save(path, data)

