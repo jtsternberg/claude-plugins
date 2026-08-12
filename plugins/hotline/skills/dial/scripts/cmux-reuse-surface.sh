@@ -219,9 +219,13 @@ fi
 # about and one place a new landing signal has to be taught.
 #
 # The box is already proven present by the gates above, so --wait-box is 0.
-DELIVERY_RESULT=$(bash "$SCRIPT_DIR/cmux-paste.sh" \
-  --surface "$SURFACE_REF" --payload-file "$PAYLOAD_FILE" --call-id "$CALL_ID" \
-  ${CWD:+--cwd "$CWD"} ${SESSION_ID:+--session "$SESSION_ID"} 2>/dev/null)
+# An array, not `${CWD:+--cwd "$CWD"}`: that form word-splits, so a callee cwd
+# containing a space would arrive as two arguments and the transcript path would
+# be derived from half of it.
+PASTE_ARGS=(--surface "$SURFACE_REF" --payload-file "$PAYLOAD_FILE" --call-id "$CALL_ID")
+[[ -n "$CWD"        ]] && PASTE_ARGS+=(--cwd "$CWD")
+[[ -n "$SESSION_ID" ]] && PASTE_ARGS+=(--session "$SESSION_ID")
+DELIVERY_RESULT=$(bash "$SCRIPT_DIR/cmux-paste.sh" "${PASTE_ARGS[@]}" 2>/dev/null)
 
 if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY_RESULT" 2>/dev/null)" != "true" ]]; then
   # The call dir must go. wait-for-response.sh would otherwise poll a surface for

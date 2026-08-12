@@ -669,19 +669,50 @@ fi
 
 [[ -s "$CALL_DIR/surface_ref.txt" ]] && SURFACE_REF=$(cat "$CALL_DIR/surface_ref.txt")
 
+# Follow-ups that had to open a NEW surface: refresh the cached surface_ref so
+# the next follow-up reuses the live one instead of the dead one. (First contact
+# is registered by wait-for-session.sh → register-call.sh.)
+#
+# When this follow-up ended up with NO surface — the cmux→headless fallback
+# above, or side placement degrading to detached — the ref must be CLEARED, not
+# left alone. An omitted --surface means "leave untouched", which would keep
+# pointing the next follow-up at a surface this session has since left, and
+# reuse would type the message into a REPL nobody is reading
+# (claude-plugins-2caw).
+if ! $FIRST_CONTACT; then
+  CACHE_ARGS=(--caller-session "$MY_SESSION_ID")
+  if [[ -n "$SURFACE_REF" ]]; then
+    CACHE_ARGS+=(--surface "$SURFACE_REF")
+  else
+    CACHE_ARGS+=(--clear-surface)
+  fi
+  [[ -n "$CALL_ID_OUT" ]] && CACHE_ARGS+=(--call-id "$CALL_ID_OUT")
+  bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
+    "${CACHE_ARGS[@]}" >/dev/null 2>&1
+fi
+
 # ---------------------------------------------------------------------------
 # Step 6b — Deliver the prompt into the freshly booted REPL.
 #
 # cmux-call-async.sh launches a BARE claude and leaves the prompt in
 # pending_paste.md, so the payload never reaches an argv (claude-plugins-86ka) and
 # first contact uses the SAME verified delivery verb as every follow-up. Boot came
-# first because a paste into a shell that has not yet exec'd claude is lost with
-# no error at all; --wait-box re-proves the input box is drawn right before the
+# first because a paste into a shell that has not yet exec'd claude is lost with no
+# error at all; --wait-box re-proves the input box is drawn immediately before the
 # paste, which is a stronger claim than "the banner appeared once".
 #
-# A failed delivery is an ERROR here, not a fallback: the surface is open and its
-# REPL is live, but it was never told anything. Reporting "connected" would leave
-# the caller waiting on a response to a message that does not exist.
+# AFTER the cache heal above, deliberately: which surface the session now lives in
+# is true the moment that surface booted and resumed it, whether or not our
+# message landed. Leaving the cache pointing at the surface `claude --resume` just
+# took over is how a later follow-up types into a REPL nobody is reading
+# (claude-plugins-2caw) — so the heal must not be skipped by a delivery failure.
+#
+# BEFORE step 7, equally deliberately: a delivery failure exits here, so nothing
+# gets closed while something is wrong.
+#
+# A failed delivery is an ERROR, not a fallback: the surface is open and its REPL
+# is live, but it was never told anything. Reporting "connected" would leave the
+# caller waiting on a response to a message that does not exist.
 # ---------------------------------------------------------------------------
 if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
   if [[ -z "$SURFACE_REF" ]]; then
@@ -710,28 +741,6 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
   fi
   # The callee's transcript is the record now; the vehicle goes.
   rm -f "$CALL_DIR/pending_paste.md"
-fi
-
-# Follow-ups that had to open a NEW surface: refresh the cached surface_ref so
-# the next follow-up reuses the live one instead of the dead one. (First contact
-# is registered by wait-for-session.sh → register-call.sh.)
-#
-# When this follow-up ended up with NO surface — the cmux→headless fallback
-# above, or side placement degrading to detached — the ref must be CLEARED, not
-# left alone. An omitted --surface means "leave untouched", which would keep
-# pointing the next follow-up at a surface this session has since left, and
-# reuse would type the message into a REPL nobody is reading
-# (claude-plugins-2caw).
-if ! $FIRST_CONTACT; then
-  CACHE_ARGS=(--caller-session "$MY_SESSION_ID")
-  if [[ -n "$SURFACE_REF" ]]; then
-    CACHE_ARGS+=(--surface "$SURFACE_REF")
-  else
-    CACHE_ARGS+=(--clear-surface)
-  fi
-  [[ -n "$CALL_ID_OUT" ]] && CACHE_ARGS+=(--call-id "$CALL_ID_OUT")
-  bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
-    "${CACHE_ARGS[@]}" >/dev/null 2>&1
 fi
 
 # ---------------------------------------------------------------------------

@@ -169,7 +169,12 @@ if $CMUX_MODE; then
         echo "$PRESET" > "$CALL_DIR/session_id.txt"
         break
       fi
-      if repl_box_present "$CLEAN"; then
+      # Only the TAIL: the box is drawn at the bottom of the live screen, while
+      # this read is a 9999-line scrollback that may still hold `❯`-prefixed
+      # echoes from a previous session in the same surface. Matching those would
+      # report a REPL booted before it exists, and the paste that follows would
+      # go into a bare shell.
+      if repl_box_present "$(printf '%s\n' "$CLEAN" | tail -12)"; then
         SAW_BOX=true
         echo "$PRESET" > "$CALL_DIR/session_id.txt"
         break
