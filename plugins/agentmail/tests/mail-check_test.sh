@@ -259,6 +259,14 @@ elapsed=$(( $(date +%s) - start ))
 	|| bad "hang should be silent+0, got rc=$rc out='$out'"
 [ "$elapsed" -lt 6 ] && ok "a hanging CLI is abandoned in ${elapsed}s (timeout_seconds honored)" \
 	|| bad "hang took ${elapsed}s — the hook would stall the session"
+
+# Silent means stderr too. Killing a background job makes bash announce
+# "Terminated: 15" unless the job is disowned, and that noise lands in the user's
+# terminal and in every CI log.
+fresh_case; write_config '{"version":1,"enabled":true,"mode":"remind","timeout_seconds":1}'
+err="$(run -- --event UserPromptSubmit 2>&1 >/dev/null)"
+[ -z "$err" ] && ok "a hanging CLI produces no stderr either" \
+	|| bad "the timeout path writes job-control noise to stderr" "$err"
 unset STUB_MODE_OVERRIDE
 
 fresh_case; write_config "$REMIND"; STUB_UNREAD=3

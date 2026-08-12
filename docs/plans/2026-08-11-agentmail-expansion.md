@@ -1,6 +1,7 @@
 # AgentMail expansion: contacts, mail-check hooks, four new skills
 
-**Status:** approved 2026-08-11 (§7). Phase 2 — build.
+**Status:** approved 2026-08-11 (§7); built 2026-08-11. Deviations from the plan are
+marked inline — §1 consequence 1, §1.5 (withdrawn), §1.6 (new), §3, §4 Codex gaps.
 **Branch:** `agentmail-expansion` (worktree `/Users/JT/Code/gittree-agentmail-expansion`)
 **Plugin version:** stays `0.1.0` through testing. The release bump must document the
 preflight exit-code change — §7 Q5, tracked as claude-plugins-hyuk.
@@ -80,7 +81,7 @@ source of truth.
 | Plugin `hooks/hooks.json` | supported | supported (verified in `docs/codex/hooks-under-codex.md`) |
 | `SessionStart` + matcher | supported | supported, matcher enforced |
 | `UserPromptSubmit` | supported, **no matcher** | declared in `config.schema.json` |
-| stdout → context | yes on `SessionStart`/`UserPromptSubmit` only | **not relied on** — see below |
+| stdout → context | yes on `SessionStart`/`UserPromptSubmit` only | **yes** — live-probed, see below |
 | `hookSpecificOutput.additionalContext` | yes | **yes** — same field, same casing |
 | `${CLAUDE_PLUGIN_ROOT}` in a hook command | supported | supported |
 | `timeout` | honored (UserPromptSubmit default drops to 30s) | honored |
@@ -93,14 +94,41 @@ on `openai/codex@main`: both declare `hookSpecificOutput.additionalContext` (str
 
 Two consequences drive the design:
 
-1. **Always emit JSON, never plain text.** Claude Code accepts either; Codex's output
-   schema is strict JSON, so plain stdout is not a context channel there. One JSON object
-   is valid on both — that is the parity mechanism, and it is the whole reason this hook can
-   be one script instead of two.
+1. **Emit JSON.** It is the explicitly specified channel on both harnesses, and it is the
+   only one that also carries `hookEventName` and `suppressOutput`. One object is valid on
+   both, which is why this hook is one script rather than two.
+
+   *Corrected after building:* the spec originally justified this as *necessary* — reasoning
+   that Codex's `additionalProperties: false` made plain stdout a non-channel there. **A
+   live probe disproved that** (§1.6): plain text on stdout reaches the model under Codex
+   too. So JSON is the better choice, not the only working one, and finding §1.5 below was
+   wrong. Schema shape is not a statement about what the harness does with non-JSON output,
+   and inferring one from the other was the mistake.
 2. **`Stop` is the wrong event.** Claude Code does not add `Stop` stdout to context, and
    `Stop`'s `additionalContext` is explicitly *"non-error feedback that continues the
    conversation"* — it would make the agent keep working after it had finished. Use
    `SessionStart` + `UserPromptSubmit`.
+
+### 1.6 The Codex live probe (run during Phase 2)
+
+Two `codex exec` runs, Codex CLI 0.147.0, an ephemeral read-only session in a scratch
+workspace with the hook supplied through `-c` overrides rather than an installed plugin, so
+nothing in JT's real Codex config was touched. Each hook printed a distinct nonce and the
+prompt asked for it, with `NOTOKEN` as the negative answer.
+
+| Hook output shape | Result |
+|---|---|
+| `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"…ZEBRA-7741-QUAIL…"},"suppressOutput":true}` | model answered `ZEBRA-7741-QUAIL` |
+| plain text: `SYSTEM NOTE: … OTTER-3312-MANGO …` | model answered `OTTER-3312-MANGO` |
+
+**Both channels inject.** The JSON shape this hook emits works on Codex exactly as it does
+on Claude Code — that part of the plan is confirmed. But plain stdout injects too, which
+contradicts what §1's original reasoning inferred from the schema. Each run returned only
+its own nonce, and Codex echoed neither, so this is delivery to the model rather than
+terminal bleed.
+
+Codex surfaced both identically in the transcript (`hook: UserPromptSubmit` →
+`hook: UserPromptSubmit Completed`), with no warning about the non-JSON output.
 
 ### Five bugs and gaps found while probing
 
@@ -122,11 +150,13 @@ These are in scope for this change-set except where marked.
    literal `**CLI:** agentmail auth me` block, but there is no `auth` resource in
    `--help`. Not needed — `inboxes list` succeeds on an inbox-scoped key and yields the
    inbox id — but worth recording so nobody plans around it.
-5. **Out of scope, needs its own issue:** `plugins/handoff/hooks/scripts/session-start.sh`
-   injects context by printing plain text. Given the Codex output schema above, that
-   probably never reaches the model under Codex. `docs/codex/hooks-under-codex.md` proved
-   the hook *executes*; it did not prove the text lands. Filed as a beads task, not fixed
-   here.
+5. ~~**Out of scope, needs its own issue:** `plugins/handoff/hooks/scripts/session-start.sh`
+   injects context by printing plain text, which probably never reaches the model under
+   Codex.~~ **WITHDRAWN — this was wrong.** The live probe in §1.6 shows plain stdout does
+   reach the model under Codex. `handoff` works. The claim came from reading
+   `additionalProperties: false` in Codex's hook *output* schema as a statement about what
+   Codex does with output that isn't JSON, which it is not. beads claude-plugins-koht is
+   closed as not-a-bug with the probe recorded on it.
 
 ---
 
@@ -149,7 +179,7 @@ plugins/agentmail/
 │   ├── replying.md                                   + reply/reply-all/forward/draft mechanics
 │   ├── agent-mail-protocol.md                        + the [HANDOFF]/[ASK]/[FYI]/[DONE] contract
 │   ├── mail-check.example.json                       + config template, placeholder addresses
-│   └── contacts.example.json                         + store template, placeholder addresses
+│   └── (no contacts.example.json — see §3)
 ├── skills/
 │   ├── using-agentmail/
 │   │   ├── SKILL.md                                  ~ preflight path, -q, count semantics, pointers
@@ -294,8 +324,12 @@ inbox, and an inbox-scoped key cannot enumerate others — do not send to it unt
 confirms."` The `verified_from` on that alternate reads `JT verbal, not observed`, which is
 the distinction the field exists to carry.
 
-`references/contacts.example.json` — the only contacts file that ships — uses
-`you@example.com` and `partner-agent@agentmail.to`. Rationale in open question **Q1**.
+**Built without the planned `references/contacts.example.json`.** A template file is
+something the model can copy verbatim, and a placeholder contact copied into a real store is
+worse than an empty one — it looks like data. The skill's first-run section instructs seeding
+from *observed* senders instead (read the inbox, use the message or thread as
+`verified_from`), which is the behavior the template was only gesturing at. `safety_test.sh`
+still enforces the no-live-address rule on everything that does ship.
 
 ---
 
@@ -521,23 +555,18 @@ are belt and braces.
 
 ### Codex: what works, what degrades
 
-Achievable and specified above: the same `hooks.json`, the same script, the same two events,
-the same JSON. That parity is a finding, not an assumption — `additionalContext` is in
-Codex's generated output schema for both events.
+Achievable, specified above, and now **live-verified** (§1.6): the same `hooks.json`, the
+same script, the same two events, the same JSON object, and the model reads it. No degraded
+mode is needed — the `SessionStart`-only fallback this spec held in reserve is not required
+and was not built.
 
-Three honest gaps, all going into `README.md`:
+Two honest gaps, both going into `README.md`:
 
 1. **Trust gate.** Codex will not run plugin hooks until the user trusts them, so the first
    Codex session after install is silent by design. Documented as a setup step, never
-   bypassed.
-2. **Schema-verified, not yet live-probed.** The Codex evidence is `openai/codex@main`
-   schemas plus this repo's prior `codex-cli` hook probe. Phase 2 must add a live probe —
-   isolated `CODEX_HOME`, throwaway plugin, marker script, matching the methodology in
-   `docs/codex/hooks-under-codex.md` — confirming `additionalContext` actually reaches the
-   model on `UserPromptSubmit`, and record the result in that doc. If it does not, the
-   degraded mode is `SessionStart`-only under Codex (start-of-session notice, no periodic
-   check), config-gated so the difference is visible rather than mysterious.
-3. **No `Stop`-time nudge on either harness**, for the reason in §1: `Stop`'s
+   bypassed. (The §1.6 probe used `--dangerously-bypass-hook-trust` precisely because the
+   gate is real.)
+2. **No `Stop`-time nudge on either harness**, for the reason in §1: `Stop`'s
    `additionalContext` continues the conversation.
 
 ---

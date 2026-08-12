@@ -9,13 +9,18 @@
 #   {"hookSpecificOutput":{"hookEventName":"UserPromptSubmit",
 #                          "additionalContext":"…"},"suppressOutput":true}
 #
-# Why JSON and never plain text: Claude Code accepts either on these two events,
-# but Codex's generated hook output schemas
-# (codex-rs/hooks/schema/generated/user-prompt-submit.command.output.schema.json
-# and its session-start sibling) declare `hookSpecificOutput.additionalContext`
-# with `additionalProperties: false`. Plain stdout is not a context channel
-# there. One JSON object is valid on both, which is the entire reason this is one
-# script instead of two.
+# Why JSON: it is the explicitly specified channel on both harnesses — Claude
+# Code documents it, and Codex declares the same field in
+# codex-rs/hooks/schema/generated/user-prompt-submit.command.output.schema.json
+# and its session-start sibling — and it is the only shape that also carries
+# hookEventName and suppressOutput.
+#
+# Plain stdout ALSO injects on both, including Codex; that was live-probed on
+# codex-cli 0.147.0 (see docs/codex/hooks-under-codex.md). Do not "simplify" this
+# to a bare printf on the strength of that: without the JSON envelope there is no
+# way to label the event or suppress the transient UI, and a hand-built string
+# would have to escape quotes, newlines, and non-ASCII out of message previews
+# correctly on every path.
 #
 # Why not `Stop`: Claude Code does not add Stop stdout to context at all, and
 # Stop's additionalContext is documented as feedback that CONTINUES the
@@ -286,6 +291,11 @@ guarded() {   # guarded <seconds> <cmd...> ; stdout -> $TMPDIR_RUN/out
 	rm -f "$TMPDIR_RUN/rc"
 	( "$@" >"$TMPDIR_RUN/out" 2>"$TMPDIR_RUN/err"; printf '%s' "$?" >"$TMPDIR_RUN/rc" ) &
 	local pid=$!
+	# Disowned so bash does not print "Terminated: 15" to stderr when the job is
+	# killed below. The status comes from the rc file, not from `wait`, so nothing
+	# is lost — and a hook that prints job-control noise into a CI log or a user's
+	# terminal is not silent, which is the one thing this hook has to be.
+	disown "$pid" 2>/dev/null || true
 	local waited=0
 	local deadline=$(( secs * 10 ))
 	while [ ! -s "$TMPDIR_RUN/rc" ] && [ "$waited" -lt "$deadline" ]; do
@@ -293,7 +303,6 @@ guarded() {   # guarded <seconds> <cmd...> ; stdout -> $TMPDIR_RUN/out
 		waited=$(( waited + 1 ))
 	done
 	if [ -s "$TMPDIR_RUN/rc" ]; then
-		wait "$pid" 2>/dev/null
 		return "$(cat "$TMPDIR_RUN/rc" 2>/dev/null || echo 1)"
 	fi
 	# Take the grandchild with it — killing only the subshell leaves the real
@@ -303,7 +312,6 @@ guarded() {   # guarded <seconds> <cmd...> ; stdout -> $TMPDIR_RUN/out
 	sleep 0.1
 	pkill -KILL -P "$pid" 2>/dev/null
 	kill -KILL "$pid" 2>/dev/null
-	wait "$pid" 2>/dev/null
 	return 124
 }
 

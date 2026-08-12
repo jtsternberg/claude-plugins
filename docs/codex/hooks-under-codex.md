@@ -25,6 +25,38 @@ skill-body shell. A hook can record state for a skill only if the skill
 explicitly reads that state; it cannot inject a persistent per-skill shell
 variable by itself. Reverify this boundary after Codex upgrades.
 
+## Context injection: both channels work (codex-cli 0.147.0, 2026-08-11)
+
+The earlier probes established that a plugin hook *runs* under Codex. They did not establish
+that anything it prints reaches the model. That gap mattered: `handoff`'s `SessionStart` hook
+reports pending handoffs as plain text, and the `agentmail` mail-check hook emits a JSON
+envelope, so the two depend on different answers.
+
+Both work. Two `codex exec` runs, each with a hook printing a distinct nonce and a prompt
+asking for it (`NOTOKEN` as the negative answer):
+
+| `UserPromptSubmit` hook stdout | Model's answer |
+| --- | --- |
+| `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"…ZEBRA-7741-QUAIL…"},"suppressOutput":true}` | `ZEBRA-7741-QUAIL` |
+| plain text: `SYSTEM NOTE: … OTTER-3312-MANGO …` | `OTTER-3312-MANGO` |
+
+Each run returned only its own nonce and Codex echoed neither into the transcript, so this is
+delivery into the model's context rather than terminal bleed. Codex surfaced both identically
+(`hook: UserPromptSubmit` → `hook: UserPromptSubmit Completed`) and warned about neither.
+
+Method: `codex exec --ephemeral --ignore-rules --skip-git-repo-check --sandbox read-only
+--dangerously-bypass-hook-trust`, with the hook supplied through a `-c
+hooks.UserPromptSubmit=[…]` override in a scratch workspace. The override form was chosen
+over installing a throwaway plugin so that nothing in the real `CODEX_HOME` changed; the
+plugin-hooks surface itself is already covered by the probes below. The trust bypass was
+required, which re-confirms the gate.
+
+**The correction worth carrying forward:** before this probe, the `agentmail` spec inferred
+from `additionalProperties: false` in Codex's hook *output* schema that plain stdout could
+not be a context channel, and filed a bug against `handoff` on that basis. The inference was
+wrong. A JSON Schema constrains how a JSON body is parsed; it says nothing about what the
+harness does with output that isn't JSON. Schema shape is not behavior — probe it.
+
 ## Probe results
 
 The initial hook config mirrored handoff's startup entry: `SessionStart`,
