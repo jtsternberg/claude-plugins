@@ -84,10 +84,28 @@ repl_is_interrupted() {
 #
 # input_box_content cannot answer this: it returns "" for an EMPTY box and ""
 # for no box at all, and an empty box is the normal state of a just-booted REPL.
-# First contact needs the distinction, because a payload pasted into a shell that
-# has not yet exec'd claude is lost with no error at all.
+# Callers need the distinction because a payload delivered to a surface that has
+# NOT exec'd claude does not vanish — it goes to the shell.
+#
+# THE NO-BREAK SPACE IS LOAD-BEARING HERE, not a nicety. This match requires the
+# glyph to be followed by U+00A0, the padding claude's box draws and a shell
+# prompt does not. `❯` is the default prompt character of starship, pure and
+# several oh-my-zsh themes, all of which pad with an ordinary space — so a bare
+# `^❯` match says "a shell prompt is on screen" just as readily as "the REPL is
+# up". That is not a missed-delivery bug: `terminal.paste` with
+# submit_key:"return" would type the whole work order at a shell and press
+# Enter, and the shell would run it.
+#
+# input_box_content's fallback to a bare `^❯` (above) is safe for the opposite
+# reason: there, matching a shell prompt makes it report parked text, and every
+# caller treats parked text as a reason to refuse. Presence has no such
+# asymmetry, so it gets the strict form only.
+#
+# The cost of strictness is a claude release that stops padding with NBSP: box
+# presence would stop firing, and delivery would refuse with a diagnostic
+# instead of proceeding. That is the correct direction to fail in.
 repl_box_present() {
-  grep -q "^${REPL_BOX_GLYPH}" <<<"$1"
+  grep -q "^${REPL_BOX_GLYPH}${REPL_BOX_NBSP}" <<<"$1"
 }
 
 # --- Where does a surface live? ----------------------------------------------
@@ -120,6 +138,40 @@ cmux_surface_address() {
              or (.ref // "") == $h
              or ((.id // "") | ascii_downcase) == ($h | ascii_downcase))
     | "\($ws.id) \(.id)"' <<<"$tree" 2>/dev/null | head -1)
+  [[ -z "$addr" || "$addr" == *null* ]] && return 4
+  printf '%s' "$addr"
+}
+
+# Echoes "<workspace-uuid> <surface-uuid>" for a WORKSPACE handle — the surface a
+# payload should go to when the call was placed by workspace rather than by
+# surface (the detached placement, which names a workspace tab and never records a
+# surface).
+#
+# Same tree, same output shape, same exit codes as cmux_surface_address, so a
+# caller can use either and pass the result on unchanged. Both live here because
+# this file is where tree reading is centralised: dial.sh grew its own inline copy
+# of this walk, and a second reader of the same JSON is precisely the drift this
+# repo has already paid for twice in the transcript parser.
+#
+# selected_surface_id is preferred (it is the tab the user is looking at) with the
+# pane's first surface as the fallback, because a tree that reports surfaces
+# without a selection still has exactly one place a fresh launch can be.
+#   0 — resolved; "workspace-uuid surface-uuid" on stdout
+#   3 — the cmux tree could not be read
+#   4 — the workspace is not in the tree, or holds no surface
+cmux_workspace_current_surface() {
+  local handle="$1" tree addr
+  tree=$(cmux tree --all --json --id-format both 2>/dev/null) || return 3
+  [[ -z "$tree" ]] && return 3
+  addr=$(jq -r --arg w "$handle" '
+    .windows[]?.workspaces[]?
+    | select((.ref // "") == $w
+             or (.id // "") == $w
+             or ((.id // "") | ascii_downcase) == ($w | ascii_downcase))
+    | . as $ws
+    | $ws.panes[]?
+    | (.selected_surface_id // .surfaces[0].id // empty) as $s
+    | "\($ws.id) \($s)"' <<<"$tree" 2>/dev/null | head -1)
   [[ -z "$addr" || "$addr" == *null* ]] && return 4
   printf '%s' "$addr"
 }

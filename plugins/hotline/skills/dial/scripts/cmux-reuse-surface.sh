@@ -115,6 +115,22 @@ if ! SCREEN=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || [[ -z "$
   fallback_fresh "surface $SURFACE_REF no longer exists or is not readable"
 fi
 
+# --- Is there still a claude REPL in there? ----------------------------------
+# A readable surface is not a live REPL. If the callee ran /exit, or claude
+# crashed, or the user reused the pane for something else, the surface is alive
+# and its cached handle still resolves — but what is drawn is a SHELL PROMPT. None
+# of the gates below notice: repl_is_interrupted looks for interrupt wording,
+# input_box_content would report the prompt line as parked text at most, and
+# repl_looks_busy looks for a spinner.
+#
+# The consequence is not a lost message. `terminal.paste` with submit_key:"return"
+# would type the whole work order at that shell and press Enter, and the shell
+# would run it — every line, as a command. So box presence is a hard gate, checked
+# before anything else touches this surface.
+if ! repl_box_present "$SCREEN"; then
+  fallback_fresh "surface $SURFACE_REF is readable but shows no claude input box (a ❯ padded with U+00A0) — its REPL has exited or the pane has been repurposed; pasting a payload there would hand it to a shell"
+fi
+
 # --- Decide, BEFORE typing anything, whether this REPL will accept a follow-up
 # and whether its input box needs clearing first (claude-plugins-06ws).
 #
@@ -218,14 +234,23 @@ fi
 # script first contact uses — so there is exactly one delivery path to reason
 # about and one place a new landing signal has to be taught.
 #
-# No --wait-box: this surface has been holding a live REPL since a previous
-# exchange, and the gates above just read its screen. The boot wait belongs to
-# first contact, where the REPL is seconds old and may not be drawn yet.
+# No --wait-box: the box-presence gate above already proved a claude REPL is drawn
+# on this surface. The boot wait belongs to first contact, where the REPL is
+# seconds old and may not exist yet.
+#
+# --baseline hands over the screen those gates read. Three of the four screen-side
+# landing markers are generic chrome that a PREVIOUS exchange leaves in the
+# viewport of a reused surface — and reuse is the only path where that can happen —
+# so confirmation must know which of them were already there. The LAST screen read
+# is the one to pass: the clear (if any) has happened by then.
 #
 # An array, not `${CWD:+--cwd "$CWD"}`: that form word-splits, so a callee cwd
 # containing a space would arrive as two arguments and the transcript path would
 # be derived from half of it.
-PASTE_ARGS=(--surface "$SURFACE_REF" --payload-file "$PAYLOAD_FILE" --call-id "$CALL_ID")
+BASELINE_FILE="$CALL_DIR/screen_baseline.txt"
+printf '%s' "${SCREEN3:-${SCREEN2:-$SCREEN}}" > "$BASELINE_FILE"
+PASTE_ARGS=(--surface "$SURFACE_REF" --payload-file "$PAYLOAD_FILE" --call-id "$CALL_ID"
+            --baseline "$BASELINE_FILE")
 [[ -n "$CWD"        ]] && PASTE_ARGS+=(--cwd "$CWD")
 [[ -n "$SESSION_ID" ]] && PASTE_ARGS+=(--session "$SESSION_ID")
 DELIVERY_RESULT=$(bash "$SCRIPT_DIR/cmux-paste.sh" "${PASTE_ARGS[@]}" 2>/dev/null)
@@ -238,8 +263,8 @@ if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY_RESULT" 2>/dev/null)" != "tru
 fi
 
 # Delivered and confirmed: the vehicle has served its purpose and the callee's
-# transcript now holds the payload.
-rm -f "$PAYLOAD_FILE"
+# transcript now holds the payload. The baseline snapshot goes with it.
+rm -f "$PAYLOAD_FILE" "$BASELINE_FILE"
 
 jq -n --arg dir "$CALL_DIR" \
   --arg confirmed "$(jq -r '.confirmed // empty' <<<"$DELIVERY_RESULT" 2>/dev/null)" \
