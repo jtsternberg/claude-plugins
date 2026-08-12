@@ -155,6 +155,39 @@ submitted it; an extra Enter on a queued or already-submitted payload is a doubl
 submit. If a payload really is sitting unsubmitted in the box, the right move is to
 let the dial fail and recover the prompt from `pending_paste.md`.
 
+#### Do not hand-deliver with `cmux send`
+
+When a delivery fails, the tempting move is to type the payload in yourself with
+`cmux send` plus `cmux send-key Enter`. That is the transport this rework replaced,
+and every reason it was replaced still applies. Read `cmux read-screen` to find out
+what happened; do not send.
+
+- **A trailing `\n` in a `cmux send` does not submit.** The target is a claude
+  TUI/Ink REPL reading through bracketed paste, so the newline lands as a
+  **literal line break in the input box** (stored as CR, `0x0D`) and no submit
+  registers. It does **not** submit early. That is why the old path needed a
+  separate `send-key Enter` at all (claude-plugins-5zhp / -8bfd, claude 2.1.221 /
+  cmux 0.64.20).
+- **`cmux send` loses bytes, and not by size.** There is **no size threshold**.
+  Across 12 controlled sends from 507 B to 16 KB, one silently
+  lost 2,538 contiguous middle bytes from a 3,045 B payload — one user event, no
+  error, the bytes provably absent from the transcript — and a separate ~16 KB
+  trial lost 3,066. Sends have also been seen **fragmenting into 3–7 separately
+  submitted turns** in real traffic while refusing to reproduce under test. The
+  failure is **sporadic** and the trigger is unknown, so a successful `cmux send`
+  means "bytes reached the PTY" and nothing more.
+- **It rewrites `\n`, `\r` and `\t` in its argument**, with **no backslash escape**
+  to opt out (`\\` arrives as two backslashes, so doubling makes it worse). The old
+  path had to **split the payload** just after each backslash preceding `n`/`r`/`t`
+  to get the exact bytes in. For **plain text**, escaping is never the cause of a
+  vanished message — but for a payload containing those sequences it can be, so the
+  reassurance is scoped to plain text only.
+
+`terminal.paste` has none of these properties: one request line, the payload
+JSON-escaped in-process, and a `submit_key` that submits. The right recovery is
+always to re-deliver through it — after establishing from the transcript that the
+first attempt really did not land.
+
 **A surface whose REPL exited is refused, not pasted into.** If a callee ran
 `/exit`, or claude crashed, the surface still exists and its cached handle still
 resolves — but what is drawn is a shell prompt. Reuse checks for the input box (a

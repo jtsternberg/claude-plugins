@@ -39,6 +39,13 @@ CMUX_DOC="$ROOT/plugins/cmux-cli/skills/using-cmux-cli/SKILL.md"
 # caller is sent to when a call misbehaves. The canary follows the prose — what
 # it guards is that the facts stay stated somewhere a caller will actually read,
 # not that they live at one particular path.
+#
+# Hotline no longer DELIVERS through `cmux send` — it pastes over cmux's control
+# socket — so on that side the facts are now framed as "why you must not
+# hand-deliver with `cmux send` when a delivery fails". That is the moment a
+# recovering agent reaches for it, which makes it exactly where these facts still
+# earn their place. This canary caught the first attempt at that rewrite deleting
+# them wholesale; if the framing changes again, keep the facts.
 DIAL_DOC="$ROOT/plugins/hotline/skills/dial/references/error-recovery.md"
 GOTCHA_ANCHOR="gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl"
 
