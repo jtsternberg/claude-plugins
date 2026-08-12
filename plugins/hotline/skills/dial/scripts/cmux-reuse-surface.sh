@@ -11,7 +11,7 @@
 #
 # This script:
 #   1. Verifies the stored surface still exists (the user may have closed it).
-#   2. Types the raw message (prefixed with a fresh [CALL_ID:] nonce) into it.
+#   2. Pastes the raw message (led by a fresh [CALL_ID:] nonce line) into it.
 #   3. Returns a call_dir wired exactly like cmux-call-async.sh's surface mode,
 #      so wait-for-response.sh polls THIS surface and — thanks to the fresh
 #      nonce — ignores the prior exchange's stale STATUS lines in scrollback.
@@ -34,38 +34,23 @@
 # data instead of scraping the screen (its preferred path). Omitting it still
 # works — wait-for-response falls back to screen-scraping.
 #
-# TWO DELIVERY MODES, chosen by payload shape (claude-plugins-i8fb):
+# ONE DELIVERY MODE, whatever the payload's size or shape: the whole message is
+# pasted into the REPL in a single `terminal.paste` over cmux's control socket
+# (cmux-paste.sh), which then proves the nonce reached the callee.
 #
-#   inline — single-line and <= $INLINE_MAX_BYTES. Typed straight into the REPL.
-#     Keeps the follow-up text in the callee's transcript, where a human reading
-#     the session (and the switchboard) can see what was asked.
+# There used to be two modes, split on payload shape: short single-line messages
+# typed straight in, anything larger written to a sidecar file with a one-line
+# pointer typed in its place (claude-plugins-i8fb). Both existed to work around
+# `cmux send`, which interprets \n/\r/\t with no escape hatch and drops
+# contiguous bytes mid-payload with no error — a verified 3,045-byte payload lost
+# 2,538 of them. The socket paste has neither failure mode, so the payload itself
+# rides the wire again and lands in the callee's transcript where a human reading
+# the session (and the switchboard) can see what was actually asked. No sidecar
+# file, no preview to mistake for the request, no size threshold to tune.
 #
-#   nudge  — anything else. The payload is written VERBATIM to
-#     $CALL_DIR/message.md and the REPL receives one short line pointing at it.
-#     Multi-line follow-ups used to skip reuse entirely for fear of keystroke
-#     fragility, which meant every substantive work-order follow-up stacked a new
-#     pane and orphaned the previous one. The fear was justified but the remedy
-#     was backwards: `cmux send` delivery is sporadically lossy in ways that are
-#     NOT size-gated (a verified 3,045-byte payload lost 2,538 contiguous bytes,
-#     one user event, no error), so a work order is exactly the payload you must
-#     not push through it. A file crosses no lossy hop at all, and the one line
-#     that does is short enough to verify landed.
-#
-# The message is typed into a live claude REPL, which reads via bracketed paste.
-# So `cmux send` delivers the literal text and `cmux send-key Enter` submits it as
-# a separate step — a trailing "\n" bundled into the `cmux send` does NOT submit;
-# the REPL takes it as a literal newline in the input box.
-#
-# Two transport hazards are handled below, both verified live (claude 2.1.221 /
-# cmux 0.64.20):
-#
-#   • `cmux send` interprets the two-character sequences \n, \r and \t in its
-#     text argument, and offers no way to escape a backslash — so the payload is
-#     SPLIT so that no single argument ever contains one (claude-plugins-nofy).
-#
-#   • The input-box clear is a raw Ctrl-C byte, which is a real interrupt. It is
-#     now sent only when the box demonstrably holds unsent text AND the REPL
-#     shows no sign of an active turn (claude-plugins-06ws).
+# The one hazard still handled below (claude-plugins-06ws): the input-box clear is
+# a raw Ctrl-C byte, which is a real interrupt. It is sent only when the box
+# demonstrably holds unsent text AND the REPL shows no sign of an active turn.
 #
 # New call caches pass a stable surface UUID. Positional surface:N refs can
 # silently retarget after a tab move or sibling close; they remain accepted only
@@ -84,20 +69,6 @@ PROMPT=""
 PROMPT_FILE=""
 CWD=""
 KEEP_WORKSPACE=true
-
-# Inline delivery ceiling. 507 bytes has gone through clean in controlled
-# testing; the smallest verified loss event was in a 3,045-byte payload. 800 sits
-# inside the proven-clean range with room to spare, and anything bigger is a
-# payload worth protecting rather than a quick reply.
-INLINE_MAX_BYTES="${HOTLINE_INLINE_MAX_BYTES:-800}"
-# How much of the payload the nudge quotes, so a human reading the callee's
-# transcript sees what the exchange was about instead of a bare path.
-PREVIEW_MAX_CHARS="${HOTLINE_NUDGE_PREVIEW_CHARS:-160}"
-# Caller-side durable archive. The call dir is transient — /tmp is GC'd, and
-# cleanup skills remove call dirs once an exchange finishes — so with nudge
-# delivery the payload would otherwise have no lasting home at all: the callee
-# transcript keeps only the nudge and a path to a deleted file.
-EXCHANGES_DIR="${HOTLINE_EXCHANGES_DIR:-$HOME/.agents-hotline/exchanges}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -133,38 +104,6 @@ fallback_fresh() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../../scripts/repl-state.sh
 source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
-
-# --- Delivering a payload through `cmux send` without escape mangling --------
-# `cmux send` documents "Escape sequences: \n and \r send Enter, \t sends Tab",
-# and there is NO backslash escape to opt out with. Verified live on cmux
-# 0.64.20 against a `cat > file` probe: `\\` arrives as TWO backslashes and
-# `\\n` arrives as one backslash + Enter, so doubling backslashes makes the
-# corruption worse rather than fixing it. What DOES work is denying the scanner
-# the two-character sequence in the first place: split the payload just after
-# each backslash that precedes n/r/t and send the pieces back to back. Each
-# `send` is its own bracketed paste appending at the cursor, so the box
-# accumulates the exact bytes (verified: send 'a\' then send 'nb' lands `a\nb`).
-#
-# `cmux set-buffer` + `paste-buffer` also delivers verbatim, but its --surface
-# resolution differs from `send`'s (a bare `surface:N` ref that `send` accepts
-# fails there with "Surface is not a terminal" unless --window is also passed),
-# so it would change targeting semantics for every caller. Splitting keeps the
-# proven targeting. (claude-plugins-nofy)
-CMUX_SEND_CHUNKS=()
-split_for_cmux_send() {
-  local rest="$1" head
-  CMUX_SEND_CHUNKS=()
-  while [[ "$rest" == *\\[nrt]* ]]; do
-    # %% strips the longest matching suffix, i.e. leaves the prefix up to the
-    # FIRST \n/\r/\t. The backslash goes out at the end of this chunk; the n/r/t
-    # starts the next one.
-    head="${rest%%\\[nrt]*}"
-    CMUX_SEND_CHUNKS+=("${head}\\")
-    rest="${rest:${#head}+1}"
-  done
-  [[ -n "$rest" ]] && CMUX_SEND_CHUNKS+=("$rest")
-  return 0
-}
 
 [[ -z "$SURFACE_REF" ]] && fallback_fresh "no surface_ref provided"
 [[ -z "$PROMPT"      ]] && { echo '{"error": "No --prompt or --prompt-file provided"}'; exit 1; }
@@ -239,64 +178,25 @@ CALL_ID=$(
 echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
 
 # Follow-ups never re-wrap with /hotline:hotline-ringing (the ringing skill is already
-# loaded in the remote session), so PROMPT is always a raw message — just prefix
-# the nonce. The receiver echoes it back as `STATUS: <signal> call_id=<nonce>`.
+# loaded in the remote session), so PROMPT is always a raw message — just lead it
+# with the nonce. The receiver echoes it back as `STATUS: <signal> call_id=<nonce>`.
 #
-# Which of the two delivery modes applies is decided here, on payload shape
-# alone. The nonce leads the line in BOTH modes, deliberately: it is what
-# wait-for-response.sh correlates on, and at the start of the input box it can
-# never be split across a rendered line wrap the way a mid-line match could be.
-DELIVERY="inline"
-# BYTES, not characters. ${#PROMPT} counts characters under a UTF-8 locale, so a
-# 700-character CJK or emoji payload is ~2 KB on the wire — three times the
-# ceiling, and outside the range this threshold exists to stay inside.
-PROMPT_BYTES=$(printf '%s' "$PROMPT" | wc -c | tr -d ' ')
-if [[ "$PROMPT" == *$'\n'* || "$PROMPT_BYTES" -gt "$INLINE_MAX_BYTES" ]]; then
-  DELIVERY="nudge"
-fi
-
-if [[ "$DELIVERY" == "inline" ]]; then
-  MSG="[CALL_ID: $CALL_ID] $PROMPT"
-else
-  # The payload itself never crosses the wire. Written verbatim — no trailing
-  # newline added, no re-quoting — so what the callee reads is byte-for-byte what
-  # the caller wrote.
-  printf '%s' "$PROMPT" > "$CALL_DIR/message.md"
-
-  # Durable copy, because the call dir is not durable. Failure here must not fail
-  # the call: the delivery the callee depends on is message.md, not the archive.
-  #
-  # OWNER-ONLY, both the directory and every file in it. These payloads are whole
-  # work orders — the launchers already chmod 700 their launch scripts for exactly
-  # this reason — and a default-umask 0644 archive would hand any local user the
-  # full text of every follow-up ever sent. $CALL_DIR needs no such treatment:
-  # mktemp -d is 0700 already.
-  if mkdir -p "$EXCHANGES_DIR" 2>/dev/null; then
-    chmod 700 "$EXCHANGES_DIR" 2>/dev/null || true
-    ( umask 077
-      printf '%s' "$PROMPT" > "$EXCHANGES_DIR/${CALL_ID}.md"
-      jq -nc --arg id "$CALL_ID" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-             --arg session "$SESSION_ID" --arg cwd "$CWD" \
-             --arg path "$EXCHANGES_DIR/${CALL_ID}.md" \
-             --argjson bytes "$PROMPT_BYTES" \
-        '{call_id:$id, ts:$ts, session_id:$session, cwd:$cwd, bytes:$bytes,
-          delivery:"nudge", path:$path}' >> "$EXCHANGES_DIR/index.jsonl"
-    ) 2>/dev/null || true
-    # umask only governs files this run CREATES; an index.jsonl left 0644 by a
-    # pre-fix version would keep its permissions forever without this.
-    chmod 600 "$EXCHANGES_DIR/${CALL_ID}.md" "$EXCHANGES_DIR/index.jsonl" 2>/dev/null || true
-  fi
-
-  # Instruction BEFORE preview, and the preview labelled as one. A callee that
-  # acts on a truncated gist instead of reading the file is the way this design
-  # fails, so the sentence never opens with the excerpt. Newlines and tabs in the
-  # excerpt collapse to spaces — the nudge must stay exactly one line, both to
-  # submit as a single turn and to keep it short enough to verify.
-  PREVIEW=$(printf '%s' "$PROMPT" | tr '\n\r\t' '   ' | cut -c1-"$PREVIEW_MAX_CHARS")
-  ELLIPSIS=""
-  [[ ${#PROMPT} -gt $PREVIEW_MAX_CHARS ]] && ELLIPSIS="…"
-  MSG="[CALL_ID: $CALL_ID] Next instructions: read $CALL_DIR/message.md in full before acting. (Preview: ${PREVIEW}${ELLIPSIS})"
-fi
+# The nonce gets its OWN first line rather than sharing one with the message:
+# wait-for-response.sh correlates on it, and at the start of a line it can never
+# be broken across a rendered line wrap the way a mid-line match could be. A
+# separate line is safe here because the paste arrives as one atomic bracketed
+# paste — verified live, 76-line payload, one user turn, nonce line intact.
+# (First contact cannot do this: its payload opens with a slash command, which
+# claude only parses at the very start of the input, so cmux-call-async.sh keeps
+# the nonce inline after the command token.)
+#
+# 0600, inside a 0700 mktemp dir: work orders go through here, and a
+# default-umask 0644 payload would hand every follow-up to any local user. It is
+# removed the moment delivery is confirmed — the callee's transcript is the
+# record of the exchange, and this file is only the vehicle.
+PAYLOAD_FILE="$CALL_DIR/payload.txt"
+( umask 077; printf '[CALL_ID: %s]\n%s' "$CALL_ID" "$PROMPT" > "$PAYLOAD_FILE" )
+chmod 600 "$PAYLOAD_FILE" 2>/dev/null || true
 
 # Clear the parked text out of the input box, then PROVE it went — the Ctrl-C is
 # known to silently no-op sometimes (observed while the callee's stop hooks ran).
@@ -314,67 +214,26 @@ if $NEEDS_CLEAR; then
   fi
 fi
 
-# Type into the live REPL, then submit. The target is a claude TUI/Ink REPL that
-# reads via bracketed paste — NOT a shell. Delivering text + a trailing "\n" in
-# one `cmux send` makes the REPL treat the newline as a literal newline inside
-# the input field, not a submit: the text lands but Enter never registers. So we
-# send the text and the Enter as two distinct steps, with a short settle so the
-# REPL finishes ingesting the paste before the submit key arrives (claude-plugins-5zhp).
+# One paste, then proof it landed. cmux-paste.sh owns both halves — the same
+# script first contact uses — so there is exactly one delivery path to reason
+# about and one place a new landing signal has to be taught.
 #
-# The text goes out in one `send` per chunk (usually exactly one — the split only
-# kicks in for payloads containing a literal \n / \r / \t). `--` guards against a
-# payload that starts with a dash. On failure the surface likely died between the
-# check and now — clean up and fall back to a fresh surface.
-split_for_cmux_send "$MSG"
-for CHUNK in "${CMUX_SEND_CHUNKS[@]}"; do
-  if ! SEND_OUTPUT=$(cmux send --surface "$SURFACE_REF" -- "$CHUNK" 2>&1); then
-    rm -rf "$CALL_DIR"
-    fallback_fresh "cmux send into surface $SURFACE_REF failed: $SEND_OUTPUT"
-  fi
-  # Let the REPL ingest each paste before the next one appends to it. Skipped
-  # entirely in the single-chunk common case so the fast path stays fast.
-  if [[ ${#CMUX_SEND_CHUNKS[@]} -gt 1 ]]; then sleep 0.1; fi
-done
-sleep 0.2
-if ! SEND_OUTPUT=$(cmux send-key --surface "$SURFACE_REF" Enter 2>&1); then
-  rm -rf "$CALL_DIR"
-  fallback_fresh "cmux send-key Enter into surface $SURFACE_REF failed: $SEND_OUTPUT"
-fi
+# The box is already proven present by the gates above, so --wait-box is 0.
+DELIVERY_RESULT=$(bash "$SCRIPT_DIR/cmux-paste.sh" \
+  --surface "$SURFACE_REF" --payload-file "$PAYLOAD_FILE" --call-id "$CALL_ID" \
+  ${CWD:+--cwd "$CWD"} ${SESSION_ID:+--session "$SESSION_ID"} 2>/dev/null)
 
-# --- Did it land? ------------------------------------------------------------
-# `cmux send` exits 0 once bytes reach the PTY and has no opinion about what the
-# REPL did with them, and delivery is sporadically lossy. Confirming the nonce is
-# cheap here and expensive later: without this, a dropped message is only noticed
-# by wait-for-response.sh 30-60s on, as a hard failure rather than a fallback.
-#
-# Two screen markers mean "landed" without the nonce being visible, and BOTH must
-# be honoured or this check reintroduces the exact bug it guards against:
-#   • "Jump to bottom" — the user has scrolled the surface up, so read-screen is
-#     returning a stale viewport. cmux exposes no primitive to snap a scrolled
-#     terminal back to the live tail, so absence of the nonce here proves nothing.
-#     Re-sending on this signal is a documented double-submit.
-#   • "Press up to edit queued messages" — the REPL was busy and queued our text.
-#     That IS successful delivery; claude flushes it at the next tool boundary.
-nudge_landed() {
-  local i scr
-  for i in $(seq 1 10); do
-    scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || scr=""
-    if [[ -n "$scr" ]]; then
-      printf '%s' "$scr" | grep -qF "$CALL_ID"                        && return 0
-      printf '%s' "$scr" | grep -qF 'Jump to bottom'                  && return 0
-      printf '%s' "$scr" | grep -qF 'Press up to edit queued'         && return 0
-    fi
-    sleep 0.2
-  done
-  return 1
-}
-
-if ! nudge_landed; then
+if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY_RESULT" 2>/dev/null)" != "true" ]]; then
   # The call dir must go. wait-for-response.sh would otherwise poll a surface for
   # a nonce that was never submitted, and the caller would sit on a corpse.
   rm -rf "$CALL_DIR"
-  fallback_fresh "sent ${DELIVERY} into surface $SURFACE_REF but its nonce never appeared on screen; treating delivery as lost"
+  fallback_fresh "$(jq -r '.reason // "delivery failed with no reason"' <<<"$DELIVERY_RESULT" 2>/dev/null)"
 fi
 
-jq -n --arg dir "$CALL_DIR" --arg delivery "$DELIVERY" \
-  '{call_dir: $dir, delivery: $delivery}'
+# Delivered and confirmed: the vehicle has served its purpose and the callee's
+# transcript now holds the payload.
+rm -f "$PAYLOAD_FILE"
+
+jq -n --arg dir "$CALL_DIR" \
+  --arg confirmed "$(jq -r '.confirmed // empty' <<<"$DELIVERY_RESULT" 2>/dev/null)" \
+  '{call_dir: $dir, delivery: "paste", confirmed: $confirmed}'

@@ -134,14 +134,15 @@ repl_looks_busy "$SCREEN2" && \
   refuse "surface $SURFACE_REF started a turn while we were checking"
 
 # Resolve the owning workspace. cmux needs it (see the header) and we never
-# stored it.
-if ! TREE=$(cmux tree --all --json --id-format uuids 2>/dev/null) || [[ -z "$TREE" ]]; then
-  refuse "could not read the cmux tree to resolve surface $SURFACE_REF's workspace"
-fi
-WS=$(jq -r --arg s "$SURFACE_REF" '
-  .windows[]?.workspaces[]? | select([.panes[]?.surface_ids[]?] | index($s)) | .id' \
-  <<<"$TREE" 2>/dev/null | head -1)
-[[ -z "$WS" ]] && refuse "surface $SURFACE_REF is not in the cmux tree, so its workspace is unknown"
+# stored it. Shared with the paste path via repl-state.sh so one tree lookup
+# serves both and neither can drift from the other's idea of a surface handle.
+ADDR=$(cmux_surface_address "$SURFACE_REF")
+case $? in
+  0) ;;
+  3) refuse "could not read the cmux tree to resolve surface $SURFACE_REF's workspace" ;;
+  *) refuse "surface $SURFACE_REF is not in the cmux tree, so its workspace is unknown" ;;
+esac
+WS="${ADDR%% *}"
 
 # cmux itself refuses to close the last surface in a workspace
 # ("invalid_state: Cannot close the last surface"), which bounds the worst case
