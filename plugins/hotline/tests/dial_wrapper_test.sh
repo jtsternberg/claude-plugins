@@ -56,67 +56,28 @@ PATH="$POISON_BIN:$PATH"
 # Launch scripts and call dirs the launchers create live outside our scratch
 # tree; collect and remove them at the end.
 LEAKED=()
-STUB_PIDS=()
-stop_stubs() {
-  local p
-  for p in ${STUB_PIDS[@]+"${STUB_PIDS[@]}"}; do kill "$p" 2>/dev/null || true; done
-}
-trap 'stop_stubs; rm -rf "$POISON_BIN" "$STRAY_SESSION_CACHE" ${LEAKED[@]+"${LEAKED[@]}"}' EXIT
+trap 'socket_stub_cleanup; rm -rf "$POISON_BIN" "$STRAY_SESSION_CACHE" ${LEAKED[@]+"${LEAKED[@]}"}' EXIT
 
 # --- control-socket stubs ----------------------------------------------------
+# The stub server and the python3 argv shim come from tests/lib/socket-stub-harness.sh,
+# shared with cmux-reuse-surface_test.sh. They were duplicated in both suites
+# before, which is how one copy learns about a new stub option and the other keeps
+# passing against a stale idea of the code.
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOCKET_STUB="$TESTS_DIR/lib/socket-stub.py"
 REAL_PYTHON3="$(command -v python3)"
 if [[ -z "$REAL_PYTHON3" ]]; then
   echo "dial.sh wrapper: SKIP — python3 not available (the control-socket helper needs it)"
   exit 0
 fi
+# shellcheck source=lib/socket-stub-harness.sh
+source "$TESTS_DIR/lib/socket-stub-harness.sh"
 SOCKROOT="$(mktemp -d)"
 LEAKED+=("$SOCKROOT")
+socket_stub_write_responses "$SOCKROOT/responses"
+SOCK_OK_RESPONSES="$SOCKROOT/responses/ok.json"
+SOCK_NO_PASTE_RESPONSES="$SOCKROOT/responses/no-paste.json"
 
-# The canned answers a working cmux gives. system.capabilities must advertise
-# terminal.paste under result.METHODS — result.capabilities is a different list
-# of *.v1 feature tokens and never contains it, so a preflight reading the wrong
-# one would degrade every call on a cmux that supports the verb perfectly well.
-SOCK_OK_RESPONSES="$SOCKROOT/ok.json"
-cat > "$SOCK_OK_RESPONSES" <<'JSON'
-{"system.capabilities": {"ok": true, "result": {
-   "methods": ["system.capabilities", "terminal.paste", "workspace.close"],
-   "capabilities": ["terminal.bytes.v1", "events.v1"]}},
- "terminal.paste": {"ok": true, "result": {"submitted": true}},
- "_default": {"ok": true, "result": {}}}
-JSON
-# A cmux too old to offer the verb: the preflight must catch this and say so.
-SOCK_NO_PASTE_RESPONSES="$SOCKROOT/no-paste.json"
-cat > "$SOCK_NO_PASTE_RESPONSES" <<'JSON'
-{"system.capabilities": {"ok": true, "result": {
-   "methods": ["system.capabilities", "workspace.close"],
-   "capabilities": ["terminal.bytes.v1"]}},
- "_default": {"ok": true, "result": {}}}
-JSON
-
-# start_socket_stub <dir> [responses] [echo-file] — echoes the socket path.
-# Blocks on the stub's own READY line rather than sleeping and hoping.
-start_socket_stub() {
-  local dir="$1" responses="${2:-}" echo_file="${3:-}" reject="${4:-}" sock args=() i
-  mkdir -p "$dir"
-  sock="$dir/cmux.sock"
-  args=(--socket "$sock" --requests "$dir/requests.log")
-  if [[ -n "$responses" ]]; then
-    args+=(--responses "$responses")
-  else
-    args+=(--poison --violations "$POISON_LOG")
-  fi
-  [[ -n "$echo_file" ]] && args+=(--echo-file "$echo_file")
-  [[ -n "$reject" ]] && args+=(--reject-surface "$reject")
-  "$REAL_PYTHON3" "$SOCKET_STUB" "${args[@]}" > "$dir/stub.out" 2>"$dir/stub.err" &
-  STUB_PIDS+=($!)
-  for i in $(seq 1 60); do
-    grep -q READY "$dir/stub.out" 2>/dev/null && break
-    sleep 0.05
-  done
-  printf '%s' "$sock"
-}
+start_socket_stub() { socket_stub_start "$@"; }
 
 POISON_SOCK="$(start_socket_stub "$SOCKROOT/poison")"
 : > "$SOCKROOT/poison/requests.log"
@@ -536,7 +497,7 @@ check "the re-fired headless call is the one we wait on" $? "out=$out"
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"
 # An idle claude REPL: an empty input box, no spinner, no interrupt prompt.
-printf 'some earlier output\n\xe2\x9d\xaf \n' > "$t/screen.txt"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\n' > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-5555" --session "55555555-5555-4555-8555-555555555555" \
   --mode work_order --surface "SURFACE-UUID-777"
@@ -659,7 +620,7 @@ check "the cache is self-healed to the new surface for the next follow-up" $? \
 # a sidecar file and typing a pointer. Now the payload itself is pasted, whole.
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
-printf 'some earlier output\n\xe2\x9d\xaf \nClaude Code v2.1.221\n' > "$t/screen.txt"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\nClaude Code v2.1.221\n' > "$t/screen.txt"
 # A work-order-sized payload with a sentinel at the very END: a delivery that
 # truncates or splits the body loses the tail first, so the sentinel arriving is
 # what proves the whole thing went in one piece.
@@ -722,7 +683,7 @@ check "the reuse bumps the cache and records this exchange's nonce" $? \
 # ===========================================================================
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
-printf 'some earlier output\n\xe2\x9d\xaf \nClaude Code v2.1.221\n' > "$t/screen.txt"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\nClaude Code v2.1.221\n' > "$t/screen.txt"
 # A cached session with NO surface: what a headless or detached first contact
 # leaves behind, and what --clear-surface leaves after a degraded follow-up.
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
@@ -837,7 +798,7 @@ t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
 # The prior exchange's nonce is in scrollback (proof of identity), the REPL is
 # idle, and the banner lets wait-for-session confirm the replacement booted.
-printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-1] the previous follow-up\n\nClaude Code v2.1.221\n\xe2\x9d\xaf \n' \
+printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-1] the previous follow-up\n\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
   > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6e" --session "6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e" \
@@ -894,7 +855,7 @@ check "…and closes nothing" $? "close_calls=$(cat "$t/close_calls" 2>/dev/null
 # repositioned ref could name the replacement rather than the superseded surface.
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
-printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-3] the previous follow-up\n\nClaude Code v2.1.221\n\xe2\x9d\xaf \n' \
+printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-3] the previous follow-up\n\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
   > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6h" --session "6h6h6h6h-6h6h-4h6h-8h6h-6h6h6h6h6h6h" \
@@ -917,7 +878,7 @@ check "…and nothing is closed for it" $? "close_calls=$(cat "$t/close_calls" 2
 # The opt-out reaches the cleanup through dial.sh, not just the script.
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
-printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-2] the previous follow-up\n\nClaude Code v2.1.221\n\xe2\x9d\xaf \n' \
+printf '\xe2\x9d\xaf [CALL_ID: nonce-prev-2] the previous follow-up\n\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
   > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-6g" --session "6g6g6g6g-6g6g-4g6g-8g6g-6g6g6g6g6g6g" \
@@ -967,9 +928,27 @@ check "conference mode emits no call_dir (nothing to poll)" $? "out=$out"
 [[ "$(jq -r .remote_session_id <<<"$out")" =~ ^[0-9a-f]{8}- ]]
 check "conference mode reports the callee session id" $? "out=$out"
 
-unquoted < "$conf_launch" 2>/dev/null | grep -qF '[MODE: conference_call]' 
-check "conference first contact carries the conference_call MODE tag" $? \
-  "launch=$(cat "$conf_launch" 2>/dev/null)"
+# The prompt is PASTED, not launched: conference was the last hotline path putting a
+# payload on claude's argv (claude-plugins-92s5), and its launch script must now be
+# free of it.
+[[ "$(last_paste)" == *'[MODE: conference_call]'* ]]
+check "conference first contact PASTES the conference_call MODE tag" $? \
+  "pasted=$(last_paste) launch=$(cat "$conf_launch" 2>/dev/null)"
+
+if grep -qF 'MODE: conference_call' "$conf_launch" 2>/dev/null; then
+  fail "the conference prompt never reaches claude's argv" "launch=$(cat "$conf_launch")"
+else
+  pass "the conference prompt never reaches claude's argv"
+fi
+
+# cmux-call.sh mints a nonce now — conference calls had none, so the receiver had
+# nothing to echo and superseded-surface cleanup could never prove a conference
+# surface's identity.
+[[ "$(jq -r '.call_id // empty' <<<"$out")" =~ ^[0-9a-f]{16}$ ]]
+check "a conference call carries a call_id nonce" $? "out=$out"
+[[ "$(last_paste)" == *"$(jq -r '.call_id' <<<"$out")"* ]]
+check "…and the nonce is in the pasted prompt, after the slash command" $? \
+  "pasted=$(last_paste)"
 
 # cmux-call.sh registers the session itself, so the wrapper must not have to.
 [[ -s "$t/home/.agents-hotline/sessions/caller-8888.json" ]]
@@ -1091,7 +1070,7 @@ done
 # ===========================================================================
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
-printf 'some earlier conference output\n\xe2\x9d\xaf \n' > "$t/screen.txt"
+printf 'some earlier conference output\n\xe2\x9d\xaf\xc2\xa0\n' > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-conf" --session "cfcfcfcf-cfcf-4fcf-8fcf-cfcfcfcfcfcf" \
   --mode conference_call --surface "SURFACE-UUID-777"
@@ -1124,7 +1103,9 @@ check "conference follow-up bumps exchange_count" $? \
 # registers nothing at all on this path).
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
-printf 'Request interrupted by user\nWhat should Claude do instead?\n' > "$t/screen.txt"
+# Interrupted (so reuse refuses) but with a drawn box (so the FRESH conference
+# surface, read through the same stub, accepts the paste).
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' > "$t/screen.txt"
 HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
   --caller-session "caller-conf2" --session "c2c2c2c2-c2c2-42c2-82c2-c2c2c2c2c2c2" \
   --mode conference_call --surface "SURFACE-UUID-OLD"
@@ -1308,7 +1289,7 @@ out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
 call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 [[ -n "$call_dir" ]] && note_leak "$call_dir"
 
-jq -e '.fallbacks | index("terminal-paste-unavailable→headless")' <<<"$out" >/dev/null 2>&1
+jq -e '.fallbacks | map(startswith("terminal-paste-unavailable→headless")) | any' <<<"$out" >/dev/null 2>&1
 check "a cmux without terminal.paste records the capability miss as a fallback" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
@@ -1365,24 +1346,10 @@ check "…and pending_paste.md is left in place for recovery" $? \
 # ===========================================================================
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
-mkdir -p "$t/bin2"
 # A python3 shim in front of the socket helper: records its argv and the mode of
 # the file it was handed, so "the payload travels as an owner-only path, never as
 # an argument" is asserted rather than assumed.
-cat > "$t/bin2/python3" <<SHIM
-#!/usr/bin/env bash
-printf '%q ' "\$@" >> "$t/python-argv.log"; printf '\n' >> "$t/python-argv.log"
-for _a in "\$@"; do
-  if [[ -n "\${_want:-}" ]]; then
-    printf 'PAYLOAD_MODE %s\n' \
-      "\$(stat -f '%Lp' "\$_a" 2>/dev/null || stat -c '%a' "\$_a" 2>/dev/null)" >> "$t/python-argv.log"
-    _want=""
-  fi
-  [[ "\$_a" == "--payload-file" ]] && _want=1
-done
-exec "$REAL_PYTHON3" "\$@"
-SHIM
-chmod +x "$t/bin2/python3"
+write_python3_shim "$t/bin2" "$t/python-argv.log"
 PROMPTS_BEFORE=$(ls -d /tmp/hotline-prompt-* 2>/dev/null | wc -l | tr -d ' ')
 out=$(PATH="$t/bin2:$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
   HOTLINE_CALLER_SESSION_ID="caller-argv" \
@@ -1408,6 +1375,234 @@ PROMPTS_AFTER=$(ls -d /tmp/hotline-prompt-* 2>/dev/null | wc -l | tr -d ' ')
 [[ "$PROMPTS_AFTER" -le "$PROMPTS_BEFORE" ]]
 check "the dial's own prompt temp file does not outlive the dial" $? \
   "before=$PROMPTS_BEFORE after=$PROMPTS_AFTER: $(ls -d /tmp/hotline-prompt-* 2>/dev/null)"
+
+# ===========================================================================
+# NO PAYLOAD ON ANY argv, on ANY transport. The audit, not a spot check.
+#
+# A `claude` shim records every argv it is ever handed, across all three
+# transports: cmux first contact (bare launch + paste), headless (`claude -p`
+# reading stdin), and conference (bare launch + paste). Then one assertion: the
+# payload sentinel appears in none of them.
+#
+# This is the claim README.md and dial.sh's own comments make, and before this
+# audit two of the three transports quietly contradicted it — headless handed the
+# whole prompt to `claude -p "$PROMPT"`, and conference to a launch script's
+# positional argument (claude-plugins-86ka, -92s5).
+# ===========================================================================
+ARGV_SENTINEL="ARGV-AUDIT-SENTINEL-7Q3"
+ARGV_LOG=""
+argv_audit_env() {   # argv_audit_env <scratch-root> — writes bin/claude, echoes nothing
+  local t="$1"
+  mkdir -p "$t/bin"
+  cat > "$t/bin/claude" <<EOF
+#!/usr/bin/env bash
+# Record the argv of every claude invocation, whatever the transport.
+printf '%q ' "\$@" >> "$ARGV_LOG"; printf '\n' >> "$ARGV_LOG"
+SID="\${FAKE_CLAUDE_SESSION_ID:-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee}"
+printf '{"type":"system","session_id":"%s"}\n' "\$SID"
+printf '{"type":"result","session_id":"%s","result":"ok","num_turns":1}\n' "\$SID"
+EOF
+  chmod +x "$t/bin/claude"
+}
+
+ARGV_LOG=$(mktemp); LEAKED+=("$ARGV_LOG")
+
+# (a) cmux first contact.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"; argv_audit_env "$t"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-audit-1" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "$ARGV_SENTINEL cmux first contact" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+# The launch script is what the pane actually runs — collect its text too.
+launch_script_of "$call_dir" >> "$ARGV_LOG"
+[[ "$(jq -r .status <<<"$out")" == "connected" ]]
+check "argv audit: the cmux dial completed" $? "out=$out stderr=$(cat "$t/err.txt")"
+
+# (b) headless.
+t=$(new_env); note_leak "$t"
+argv_audit_env "$t"; make_ps "$t/bin"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" \
+  HOTLINE_CALLER_SESSION_ID="caller-audit-2" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode quick --headless \
+    --prompt "$ARGV_SENTINEL headless" --boot-timeout 8 2>"$t/err.txt")
+[[ "$(jq -r .status <<<"$out")" == "connected" ]]
+check "argv audit: the headless dial completed" $? "out=$out stderr=$(cat "$t/err.txt")"
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+
+# (c) conference.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"; argv_audit_env "$t"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-audit-3" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$DIAL" --target "$t/target" --mode conference \
+    --prompt "$ARGV_SENTINEL conference" 2>"$t/err.txt")
+[[ "$(jq -r .status <<<"$out")" == "connected" ]]
+check "argv audit: the conference dial completed" $? "out=$out stderr=$(cat "$t/err.txt")"
+conf_launch=$(grep -oE '/tmp/hotline-cmux-launch-[A-Za-z0-9]+' "$t/send_calls" 2>/dev/null | head -1)
+[[ -n "$conf_launch" ]] && { note_leak "$conf_launch"; cat "$conf_launch" >> "$ARGV_LOG" 2>/dev/null; }
+
+# THE ASSERTION.
+if grep -qF "$ARGV_SENTINEL" "$ARGV_LOG"; then
+  fail "NO transport puts payload text on an argv or in a launch script" \
+       "$(grep -F "$ARGV_SENTINEL" "$ARGV_LOG" | head -3)"
+else
+  pass "NO transport puts payload text on an argv or in a launch script"
+fi
+# The audit is only meaningful if claude was actually invoked.
+[[ -s "$ARGV_LOG" ]]
+check "…and the audit actually saw claude invocations (the log is non-empty)" $? \
+  "the argv log is empty — the shim never ran, so the assertion above proves nothing"
+# `claude -p` with no positional prompt: the prompt arrives on stdin.
+grep -qE '^-p ' "$ARGV_LOG" || grep -q "'-p'" "$ARGV_LOG"
+check "…and headless invoked 'claude -p' with no positional prompt" $? \
+  "$(cat "$ARGV_LOG")"
+
+# ===========================================================================
+# The capability preflight distinguishes its failure modes.
+#
+# The first version funnelled a missing python3, an unreachable socket and a
+# genuine capability miss through one `2>/dev/null || true` and reported all three
+# as terminal-paste-unavailable — which sends a reader off to upgrade cmux when the
+# real problem is a socket nobody is listening on.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_claude "$t/bin"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  CMUX_SOCKET_PATH="$SOCKROOT/definitely-not-a-socket" \
+  HOTLINE_CALLER_SESSION_ID="caller-nosock" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "no socket here" --boot-timeout 5 2>"$t/err.txt")
+[[ -n "$(jq -r '.call_dir // empty' <<<"$out")" ]] && note_leak "$(jq -r .call_dir <<<"$out")"
+jq -e '.fallbacks | map(startswith("cmux-socket-unreachable→headless")) | any' <<<"$out" >/dev/null 2>&1
+check "an unreachable control socket is reported as such, not as a capability miss" $? \
+  "out=$out"
+jq -e '.fallbacks | map(test("No such file|refused|socket")) | any' <<<"$out" >/dev/null 2>&1
+check "…and the socket's own diagnostic rides along in the reason" $? "out=$out"
+
+# A PATH with no python3 on it at all. Built by symlinking the tools dial.sh needs
+# rather than by stripping one entry out of the real PATH: python3 shares /usr/bin
+# with most of them, so subtraction is not an option.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_claude "$t/bin"
+mkdir -p "$t/nopy"
+for _tool in bash sh env jq sed grep egrep cat cut tr head tail wc ls mktemp rm \
+             mkdir dirname basename date realpath awk sort uniq find ps openssl \
+             od stat sleep chmod cp mv ln xargs id uname touch printf; do
+  _src="$(command -v "$_tool" 2>/dev/null || true)"
+  [[ -n "$_src" ]] && ln -sf "$_src" "$t/nopy/$_tool"
+done
+if [[ -n "$(PATH="$t/nopy" command -v python3 2>/dev/null)" ]]; then
+  fail "a missing python3 is reported as a missing python3" \
+       "the scratch PATH still resolves python3, so this case proves nothing"
+else
+out=$(PATH="$t/bin:$t/nopy" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-nopy" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "no python here" --boot-timeout 5 2>"$t/err.txt")
+[[ -n "$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)" ]] && note_leak "$(jq -r .call_dir <<<"$out")"
+jq -e '.fallbacks | map(startswith("python3-missing→headless")) | any' <<<"$out" >/dev/null 2>&1
+check "a missing python3 is reported as a missing python3" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+fi
+
+# ===========================================================================
+# Boot signal B needs freshness: a plain resume's transcript ALREADY EXISTS.
+#
+# `[[ -s $transcript ]]` fired on the first poll for every resume, in the same
+# millisecond the launch command was sent — reporting a booted REPL before claude
+# had exec'd. Everything downstream then proceeded against a shell, and with
+# delivery being a paste that is not a lost message but a work order typed at a
+# prompt. Signal B now requires the file to have GROWN.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+# A screen that offers NO boot evidence: no banner, no input box. Only signal B
+# could fire here, and it must not.
+printf 'some old scrollback with no repl on it\n' > "$t/screen.txt"
+RESUME_SID="9a9a9a9a-9b9b-4c9c-8d9d-9e9e9e9e9e9e"
+TARGET_REAL=$(cd "$t/target" && pwd -P)
+STALE_ENC=$(printf '%s' "$TARGET_REAL" | sed 's|[^a-zA-Z0-9]|-|g')
+mkdir -p "$t/home/.claude/projects/$STALE_ENC"
+# The prior session's transcript: present, non-empty, and untouched from here on.
+printf '{"type":"user","message":{"role":"user","content":"a turn from last week"}}\n' \
+  > "$t/home/.claude/projects/$STALE_ENC/${RESUME_SID}.jsonl"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-stale" --session "$RESUME_SID" \
+  --mode work_order --surface "SURFACE-UUID-OLD"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-stale" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "resume into a stale transcript" --boot-timeout 3 2>"$t/err.txt")
+[[ -n "$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)" ]] && note_leak "$(jq -r .call_dir <<<"$out")"
+[[ "$(jq -r '.status // empty' <<<"$out")" == "error" \
+   && "$(jq -r '.stage // empty' <<<"$out")" == "boot" ]]
+check "a pre-existing transcript does NOT count as a booted REPL on resume" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+# Both directions of signal B, driven straight at wait-for-session.sh — the only
+# place the preset session id is an INPUT rather than a random value the launcher
+# picked, which is what makes the fresh case deterministic instead of a race.
+WFS="$HOTLINE_DIR/skills/dial/scripts/wait-for-session.sh"
+signal_b_case() {   # signal_b_case <name> <pre-existing-bytes|""> <grow:yes|no>
+  local name="$1" pre="$2" grow="$3"
+  local d; d=$(mktemp -d /tmp/hotline-sigb-XXXXXX); note_leak "$d"
+  mkdir -p "$d/bin" "$d/home" "$d/call"
+  # A screen with NO banner and NO input box: signal B is the only one that can fire.
+  cat > "$d/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  read-screen) printf 'old scrollback, no repl here\n' ;;
+  *) exit 0 ;;
+esac
+EOF
+  chmod +x "$d/bin/cmux"
+  local sid="7f7f7f7f-7f7f-4f7f-8f7f-7f7f7f7f7f7f"
+  echo "$sid" > "$d/call/session_id_preset.txt"
+  echo "SURFACE-SIGB" > "$d/call/surface_ref.txt"
+  echo "$d/target" > "$d/call/cwd.txt"
+  mkdir -p "$d/target"
+  local enc; enc=$(printf '%s' "$d/target" | sed 's|[^a-zA-Z0-9]|-|g')
+  mkdir -p "$d/home/.claude/projects/$enc"
+  local tr="$d/home/.claude/projects/$enc/${sid}.jsonl"
+  [[ -n "$pre" ]] && printf '%s' "$pre" > "$tr"
+  if [[ "$grow" == "yes" ]]; then
+    ( sleep 1; printf '{"type":"user","message":{"role":"user","content":"fresh turn"}}\n' >> "$tr" ) &
+  fi
+  SIGB_OUT="$(PATH="$d/bin:$PATH" HOME="$d/home" \
+    bash "$WFS" "$d/call" --timeout 6 2>&1)"
+  SIGB_RC=$?
+  wait 2>/dev/null || true
+}
+
+# STALE: the file is already there and never changes. This is every plain resume,
+# and a bare existence check fired on the first poll — reporting a booted REPL in
+# the same millisecond the launch command was sent.
+signal_b_case stale '{"type":"user","message":{"role":"user","content":"a turn from last week"}}
+' no
+[[ "$SIGB_RC" -ne 0 && "$SIGB_OUT" == *"Timed out"* ]]
+check "signal B: a pre-existing, unchanged transcript is NOT a booted REPL" $? \
+  "rc=$SIGB_RC out=$SIGB_OUT"
+
+# FRESH-GROWN: the same pre-existing file, appended to mid-wait. A resume that
+# really does start writing must still be detected.
+signal_b_case grown '{"type":"user","message":{"role":"user","content":"a turn from last week"}}
+' yes
+[[ "$SIGB_RC" -eq 0 && "$SIGB_OUT" == "7f7f7f7f-7f7f-4f7f-8f7f-7f7f7f7f7f7f" ]]
+check "signal B: a transcript that GROWS during the wait is a booted REPL" $? \
+  "rc=$SIGB_RC out=$SIGB_OUT"
+
+# FRESH-CREATED: first contact, where the file does not exist at all beforehand.
+signal_b_case created "" yes
+[[ "$SIGB_RC" -eq 0 ]]
+check "signal B: a transcript that APPEARS during the wait is a booted REPL" $? \
+  "rc=$SIGB_RC out=$SIGB_OUT"
 
 # ===========================================================================
 if [[ -s "$POISON_LOG" ]]; then

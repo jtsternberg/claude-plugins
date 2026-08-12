@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Regression tests for cmux-call.sh command construction without launching cmux.
+#
+# cmux-call.sh is the SYNCHRONOUS conference launcher. Like every other hotline
+# path it now starts a BARE claude REPL and delivers the prompt with one
+# `terminal.paste` over cmux's control socket, so the assertions about the prompt
+# live on the socket REQUEST, and the launch script is asserted to be free of it
+# (claude-plugins-92s5 — conference was the last path putting a whole payload on
+# claude's argv, where `ps` publishes it to every local user).
+#
+# Two stub layers, because a socket write cannot be intercepted on PATH: `cmux`
+# and `claude` are PATH stubs, and $CMUX_SOCKET_PATH points at the shared stub
+# server in tests/lib/socket-stub-harness.sh.
 # =============================================================================
 set -u
 
@@ -30,7 +41,42 @@ POISON
   chmod +x "$POISON_BIN/$_poison"
 done
 PATH="$POISON_BIN:$PATH"
-trap 'rm -rf "$POISON_BIN"' EXIT
+
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REAL_PYTHON3="$(command -v python3)"
+if [[ -z "$REAL_PYTHON3" ]]; then
+  echo "cmux-call: SKIP — python3 not available (the control-socket helper needs it)"
+  exit 0
+fi
+# shellcheck source=lib/socket-stub-harness.sh
+source "$TESTS_DIR/lib/socket-stub-harness.sh"
+SOCKROOT="$(mktemp -d)"
+trap 'socket_stub_cleanup; rm -rf "$POISON_BIN" "$SOCKROOT"' EXIT
+socket_stub_write_responses "$SOCKROOT/responses"
+SOCK_ECHO="$SOCKROOT/typed.txt"; : > "$SOCK_ECHO"
+OK_SOCK="$(socket_stub_start "$SOCKROOT/ok" "$SOCKROOT/responses/ok.json" "$SOCK_ECHO")"
+OK_REQUESTS="$SOCKROOT/ok/requests.log"
+export CMUX_SOCKET_PATH="$OK_SOCK"
+export SOCK_ECHO_FILE="$SOCK_ECHO"
+# Keep the confirmation polls short: no callee writes a transcript in this suite,
+# so the transcript tier legitimately misses and the screen tier answers.
+export HOTLINE_PASTE_CONFIRM_TRIES=2
+export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
+export HOTLINE_PASTE_BOX_TIMEOUT=3
+
+# The params of the LAST terminal.paste, decoded.
+last_paste() {
+  local field="${1:-text}"
+  grep -F '"terminal.paste"' "$OK_REQUESTS" 2>/dev/null | tail -1 \
+    | "$REAL_PYTHON3" -c '
+import json,sys
+line = sys.stdin.read().strip()
+if not line: sys.exit(0)
+if line.startswith("_cmux_capability_v1 "):
+    line = line.split(" ", 2)[2]
+print(json.loads(line)["params"].get(sys.argv[1], ""), end="")
+' "$field" 2>/dev/null
+}
 
 pass() {
   PASS=$((PASS + 1))
@@ -69,6 +115,19 @@ case "$1" in
   send)
     printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args"
     ;;
+  read-screen)
+    # A booted REPL: the input box is a ❯ padded with a NO-BREAK SPACE. A plain
+    # space is what a shell prompt draws, and delivery refuses to paste into that.
+    printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
+    # Whatever the socket stub echoed shows up too, as a pasted payload would.
+    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
+    exit 0
+    ;;
+  tree)
+    jq -nc '{windows:[{workspaces:[{id:"WS-UUID-123",ref:"workspace:123",
+      panes:[{selected_surface_id:"SURF-UUID-123",
+              surfaces:[{id:"SURF-UUID-123",ref:"surface:123"}]}]}]}]}'
+    exit 0 ;;
 esac
 EOF
 chmod +x "$tmp/bin/cmux"
@@ -103,16 +162,30 @@ LAUNCH_SCRIPTS+=("$launch_script")
 launch_body=$(cat "$launch_script" 2>/dev/null || true)
 assert_contains "first-contact launch script runs claude" "$launch_body" "claude"
 assert_contains "first-contact pre-sets session id" "$launch_body" "--session-id"
-assert_contains "first-contact launch script contains conference prompt" "$launch_body" "/hotline:hotline-ringing"
-assert_contains "first-contact preserves conference mode" "$launch_body" "conference_call"
-
-# Regression: --allowedTools is variadic — must be terminated with `--` before
-# the positional prompt or claude swallows the prompt as a tool name.
-if printf '%s' "$launch_body" | grep -qE -- "--allowedTools=.+ -- "; then
-  pass "first-contact launch script puts -- before the positional prompt"
+# THE PROMPT IS PASTED, NOT LAUNCHED (claude-plugins-92s5).
+assert_contains "first-contact PASTES the conference prompt" "$(last_paste)" "/hotline:hotline-ringing"
+assert_contains "first-contact preserves conference mode" "$(last_paste)" "conference_call"
+assert_contains "first-contact pastes the message body" "$(last_paste)" "hello there"
+assert_contains "the paste carries a [CALL_ID:] nonce after the slash command" \
+  "$(last_paste)" "/hotline:hotline-ringing [CALL_ID: "
+if printf '%s' "$launch_body" | grep -q 'hotline-ringing'; then
+  fail "the prompt is NOT in the launch script" "got: $launch_body"
 else
-  fail "first-contact launch script puts -- before the positional prompt" \
+  pass "the prompt is NOT in the launch script"
+fi
+# No positional prompt means no `--` separator either; its presence would mean a
+# prompt came back onto the argv.
+if printf '%s' "$launch_body" | grep -qE -- "--allowedTools=.+ -- "; then
+  fail "the launch line ends at --allowedTools, with no positional prompt" \
        "got: $launch_body"
+else
+  pass "the launch line ends at --allowedTools, with no positional prompt"
+fi
+cid=$(jq -r '.call_id // empty' "$tmp/out.json" 2>/dev/null || true)
+if [[ "$cid" =~ ^[0-9a-f]{16}$ ]]; then
+  pass "a conference call reports its call_id nonce"
+else
+  fail "a conference call reports its call_id nonce" "got: $cid"
 fi
 
 # Regression: --allowedTools must be `=`-joined into ONE argv word. cmux's
@@ -169,7 +242,7 @@ launch_script=$(printf '%s' "$send_args" | sed -E 's/.*bash (\/tmp\/hotline-cmux
 LAUNCH_SCRIPTS+=("$launch_script")
 launch_body=$(cat "$launch_script" 2>/dev/null || true)
 assert_contains "resume call keeps --resume" "$launch_body" "--resume"
-assert_contains "resume call sends follow-up prompt" "$launch_body" "follow\\ up\\ message"
+assert_contains "resume call PASTES the follow-up prompt" "$(last_paste)" "follow up message"
 
 session_id=$(jq -r '.session_id' "$tmp/out2.json" 2>/dev/null || true)
 if [[ "$session_id" == "resume id with spaces" ]]; then
@@ -219,7 +292,17 @@ cat > "$tmp/bin/cmux" <<'EOF'
 ST="${CMUX_FAKE_STATE:?}"
 case "$1" in
   send) echo "$*" >> "$ST/send_calls" ;;
-  read-screen) cat "$ST/screen.txt" 2>/dev/null ;;
+  read-screen)
+    # A drawn input box: ❯ padded with a NO-BREAK SPACE, which is what delivery
+    # requires before it will paste (a plain space is a shell prompt).
+    printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
+    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
+    exit 0 ;;
+  tree)
+    jq -nc '{windows:[{workspaces:[{id:"WS-UUID-5",ref:"workspace:5",
+      panes:[{selected_surface_id:"SURFACE-UUID-777",
+              surfaces:[{id:"SURFACE-UUID-777",ref:"surface:777"}]}]}]}]}'
+    exit 0 ;;
   *) exit 0 ;;
 esac
 EOF
@@ -311,6 +394,15 @@ cat > "$tmpf/bin/cmux" <<'EOF'
 case "$1" in
   new-workspace) echo "OK workspace:123" ;;
   send)          printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args" ;;
+  read-screen)
+    printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
+    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
+    exit 0 ;;
+  tree)
+    jq -nc '{windows:[{workspaces:[{id:"WS-UUID-123",ref:"workspace:123",
+      panes:[{selected_surface_id:"SURF-UUID-123",
+              surfaces:[{id:"SURF-UUID-123",ref:"surface:123"}]}]}]}]}'
+    exit 0 ;;
 esac
 EOF
 chmod +x "$tmpf/bin/cmux"

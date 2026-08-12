@@ -142,8 +142,15 @@ else
 fi
 rm -rf "$tmp"
 
-# Case 3b: no banner, but transcript file exists (Signal B) → session_id.txt
-# promoted from preset. Verifies the second REPL-boot signal independently.
+# Case 3b: no banner, but the transcript file APPEARS during the wait (Signal B) →
+# session_id.txt promoted from preset. Verifies the second REPL-boot signal
+# independently.
+#
+# It has to appear mid-wait rather than be staged beforehand: signal B requires the
+# file to have GROWN since the wait started. A file that was already sitting there
+# is every plain resume, where the transcript predates the dial — and a bare
+# existence check fired on the first poll, reporting a booted REPL in the same
+# millisecond the launch command was sent (Case 3b2 below pins that).
 tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
@@ -157,11 +164,13 @@ RECV_CWD="/Users/fake/Code/proj.name"
 echo "$RECV_CWD" > "$cd/cwd.txt"
 ENC=$(printf '%s' "$RECV_CWD" | sed 's|[/.]|-|g')
 mkdir -p "$tmp/home/.claude/projects/$ENC"
-echo '{"type":"user"}' > "$tmp/home/.claude/projects/$ENC/preset-uuid-3b.jsonl"
+( sleep 1; echo '{"type":"user"}' > "$tmp/home/.claude/projects/$ENC/preset-uuid-3b.jsonl" ) &
+WRITER=$!
 
 out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
-  bash "$WAIT_SESSION" "$cd" --timeout 5 2>"$tmp/err.txt")
+  bash "$WAIT_SESSION" "$cd" --timeout 8 2>"$tmp/err.txt")
 rc=$?
+wait $WRITER 2>/dev/null || true
 if [[ $rc -eq 0 && "$out" == "preset-uuid-3b" ]]; then
   pass "transcript-file signal: prints preset session id without banner"
 else
@@ -172,6 +181,34 @@ if [[ -f "$cd/session_id.txt" && "$(cat "$cd/session_id.txt")" == "preset-uuid-3
   pass "transcript-file signal: promotes session_id_preset.txt → session_id.txt"
 else
   fail "transcript-file signal: promotes session_id_preset.txt → session_id.txt"
+fi
+rm -rf "$tmp"
+
+# Case 3b2: a transcript that was ALREADY there and never changes — the shape of
+# every plain resume. It must NOT count as a booted REPL.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_fake_cmux "$tmp/bin"
+cat > "$tmp/screen.txt" <<'EOF'
+Last login: Thu May 14 16:00:00 on ttys001
+ some shell prompt with no banner yet
+EOF
+cd="$tmp/call"
+stage_call_dir "$cd" "preset-uuid-3b2" "workspace:98"
+RECV_CWD="/Users/fake/Code/proj.name"
+echo "$RECV_CWD" > "$cd/cwd.txt"
+ENC=$(printf '%s' "$RECV_CWD" | sed 's|[/.]|-|g')
+mkdir -p "$tmp/home/.claude/projects/$ENC"
+printf '{"type":"user","message":{"content":"a turn from last week"}}\n' \
+  > "$tmp/home/.claude/projects/$ENC/preset-uuid-3b2.jsonl"
+
+out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 3 2>"$tmp/err.txt")
+rc=$?
+if [[ $rc -ne 0 && ! -f "$cd/session_id.txt" ]]; then
+  pass "a pre-existing, unchanged transcript is NOT a boot signal (resume)"
+else
+  fail "a pre-existing, unchanged transcript is NOT a boot signal (resume)" \
+       "rc=$rc stdout=$out"
 fi
 rm -rf "$tmp"
 

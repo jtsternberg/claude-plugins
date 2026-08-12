@@ -91,49 +91,24 @@ PATH="$POISON_BIN:$PATH"
 STUBROOT="$(mktemp -d)"
 
 # --- Socket stub plumbing ---------------------------------------------------
-STUB_PIDS=()
-stop_stubs() {
-  local p
-  for p in ${STUB_PIDS[@]+"${STUB_PIDS[@]}"}; do kill "$p" 2>/dev/null || true; done
-}
-trap 'stop_stubs; rm -rf "$STUBROOT" "$POISON_BIN"' EXIT
+# Shared with dial_wrapper_test.sh via tests/lib/socket-stub-harness.sh: the stub
+# server and the python3 argv shim were duplicated here before, which is how one
+# copy learns about a new option and the other keeps passing without it.
+# shellcheck source=lib/socket-stub-harness.sh
+source "$TESTS_DIR/lib/socket-stub-harness.sh"
+trap 'socket_stub_cleanup; rm -rf "$STUBROOT" "$POISON_BIN"' EXIT
 
-# start_socket_stub <dir> [responses-json] — echoes the socket path.
-# Blocks until the socket is actually accepting, rather than sleeping and hoping:
-# a fixed sleep here is the classic source of a flaky suite.
-start_socket_stub() {
-  local dir="$1" responses="${2:-}" sock args=() i
-  sock="$dir/cmux.sock"
-  mkdir -p "$dir"
-  args=(--socket "$sock" --requests "$dir/requests.log")
-  if [[ -n "$responses" ]]; then
-    args+=(--responses "$responses")
-  else
-    args+=(--poison --violations "$POISON_LOG")
-  fi
-  "$REAL_PYTHON3" "$SOCKET_STUB" "${args[@]}" > "$dir/stub.out" 2>"$dir/stub.err" &
-  STUB_PIDS+=($!)
-  for i in $(seq 1 60); do
-    grep -q READY "$dir/stub.out" 2>/dev/null && break
-    sleep 0.05
-  done
-  printf '%s' "$sock"
-}
+start_socket_stub() { socket_stub_start "$@"; }
 
 # The default socket every case inherits is the poisoned one.
 POISON_SOCK="$(start_socket_stub "$STUBROOT/poison-socket")"
 : > "$STUBROOT/poison-socket/requests.log"
 
-# Canned responses: a paste the socket accepts, and one it rejects.
-OK_RESPONSES="$STUBROOT/ok.json"
-cat > "$OK_RESPONSES" <<'JSON'
-{"terminal.paste": {"ok": true, "result": {"submitted": true}},
- "_default": {"ok": true, "result": {}}}
-JSON
-REJECT_RESPONSES="$STUBROOT/reject.json"
-cat > "$REJECT_RESPONSES" <<'JSON'
-{"terminal.paste": {"ok": false, "error": {"message": "surface is not a terminal"}}}
-JSON
+# Canned responses come from the shared harness (one definition of what a working
+# cmux answers, so a suite cannot drift into testing against a fictional one).
+socket_stub_write_responses "$STUBROOT/responses"
+OK_RESPONSES="$STUBROOT/responses/ok.json"
+REJECT_RESPONSES="$STUBROOT/responses/reject.json"
 
 # --- Fixture screens -------------------------------------------------------
 # Empty box, idle: prior user turn above (plain space), live box below (NBSP).
@@ -169,6 +144,19 @@ screen_parked_moving_b() {
 screen_interrupted() {
   printf '%s%s Run the earlier thing\n\n  Interrupted · What should Claude do instead?\n\n%s\n%s%s\n%s\n' \
     "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"
+}
+# NO claude REPL AT ALL — the callee ran /exit, or claude crashed, and the surface
+# is now showing a shell prompt. `❯` is the default prompt character of starship,
+# pure and several oh-my-zsh themes, so the glyph alone proves nothing; what
+# distinguishes the real box is the NO-BREAK SPACE padding, which a shell pads with
+# an ordinary space instead. Pasting a work order here with submit_key:"return"
+# would make the SHELL RUN IT, line by line.
+screen_shell_prompt() {
+  printf '~/Code/target on  main\n%s%s\n' "$GLYPH" " "
+}
+# A shell prompt with no path segment above it — the barest possible version.
+screen_shell_prompt_bare() {
+  printf '%s%s\n' "$GLYPH" " "
 }
 # A never-used REPL shows a greyed placeholder hint inside an EMPTY box.
 screen_placeholder() {
@@ -286,24 +274,7 @@ esac
 STUB
   chmod +x "$CASEDIR/bin/cmux"
 
-  # python3 shim: records the helper's argv and the MODE of the file it was
-  # handed, then delegates. Two things this pins that nothing else can:
-  # the payload travels as a path (never as an argument), and that path is
-  # owner-only at the moment it is read.
-  cat > "$CASEDIR/bin/python3" <<STUB
-#!/usr/bin/env bash
-printf '%q ' "\$@" >> "$PYLOG"; printf '\n' >> "$PYLOG"
-for _a in "\$@"; do
-  if [[ -n "\${_want_file:-}" ]]; then
-    printf 'PAYLOAD_MODE %s %s\n' \
-      "\$(stat -f '%Lp' "\$_a" 2>/dev/null || stat -c '%a' "\$_a" 2>/dev/null)" "\$_a" >> "$PYLOG"
-    _want_file=""
-  fi
-  [[ "\$_a" == "--payload-file" ]] && _want_file=1
-done
-exec "$REAL_PYTHON3" "\$@"
-STUB
-  chmod +x "$CASEDIR/bin/python3"
+  write_python3_shim "$CASEDIR/bin" "$PYLOG"
 
   local -a target=()
   if [[ "${CASE_TARGET-unset}" == "unset" ]]; then
@@ -570,21 +541,28 @@ echo "  -- delivery is proven, not assumed --"
 # nonce is an input rather than a secret: that is the only way to plant a
 # transcript containing it before the poll runs.
 PASTE_SCRIPT="$HOTLINE_DIR/skills/dial/scripts/cmux-paste.sh"
-# confirm_case <n> <shape-fn|notarget> <screen-fn>
+# confirm_case <n> <shape-fn|notarget> <post-paste-screen-fn> [baseline-screen-fn]
 #
 # Exercises the confirmation tiers directly against cmux-paste.sh rather than
 # through the reuse script, because that is the only place the nonce is an INPUT:
 # reuse mints its own, so no fixture written beforehand could contain it.
 # "notarget" withholds --cwd/--session, which is what forces the screen tier.
+#
+# TWO screens, in order: what the surface showed BEFORE the paste, then what it
+# shows after. That ordering is the whole point of the recency baseline — a screen
+# marker only counts as evidence if it was not already there. The default baseline
+# is an idle empty box, i.e. a surface with no landing markers on it yet.
 confirm_case() {
-  local shape="$2" screenfn="$3"
+  local shape="$2" screenfn="$3" basefn="${4:-screen_idle_empty}"
   local dir="$STUBROOT/confirm-$1"
   mkdir -p "$dir/bin" "$dir/home" "$dir/screens"
   local sock; sock="$(start_socket_stub "$dir/socket" "$OK_RESPONSES")"
   local nonce="deadbeef0000$1"
   printf '[CALL_ID: %s]\n%s' "$nonce" "$MULTILINE_MSG" > "$dir/payload.txt"
   chmod 600 "$dir/payload.txt"
-  "$screenfn" > "$dir/screens/1.txt"; echo 1 > "$dir/screens/count"; echo 0 > "$dir/screens/cursor"
+  "$basefn"  > "$dir/screens/1.txt"
+  "$screenfn" > "$dir/screens/2.txt"
+  echo 2 > "$dir/screens/count"; echo 0 > "$dir/screens/cursor"
   if [[ "$shape" != "notarget" ]]; then
     local enc; enc=$(printf '%s' "$CALLEE_CWD" | sed 's|[^a-zA-Z0-9]|-|g')
     mkdir -p "$dir/home/.claude/projects/$enc"
@@ -639,6 +617,27 @@ confirm_case 6 notarget screen_idle_empty
 [[ "$CONFIRM_OUT" == *'"delivered":false'* && "$CONFIRM_OUT" == *"never appeared"* ]] \
   && pass "an unconfirmable paste is reported as undelivered, not as success" \
   || fail "an unconfirmable paste is reported as undelivered, not as success" "out: $CONFIRM_OUT"
+
+# STALE MARKERS MUST NOT CONFIRM. `[Pasted text`, `Press up to edit queued` and
+# `Jump to bottom` are generic chrome, and reuse is by definition a surface a
+# PREVIOUS exchange has already been through — so each of them is very often
+# sitting in the viewport before this paste is sent. Matched blind, they confirm a
+# delivery that never happened, and the caller then blocks on wait-for-response
+# until it times out. A marker only counts if it was absent from the pre-paste
+# baseline.
+for stale in screen_pasted_placeholder screen_queued screen_scrolled; do
+  confirm_case "stale-${stale#screen_}" notarget "$stale" "$stale"
+  [[ "$CONFIRM_OUT" == *'"delivered":false'* ]] \
+    && pass "a $stale marker already on screen before the paste does NOT confirm it" \
+    || fail "a $stale marker already on screen before the paste does NOT confirm it" "out: $CONFIRM_OUT"
+done
+
+# …and the nonce is exempt, because a fresh nonce cannot be stale. Baseline and
+# post-paste screen are identical here, yet the nonce still confirms.
+confirm_case nonce-exempt transcript_user_turn screen_idle_empty screen_idle_empty
+[[ "$CONFIRM_OUT" == *'"confirmed":"transcript"'* ]] \
+  && pass "the nonce confirms regardless of the baseline (it cannot be stale)" \
+  || fail "the nonce confirms regardless of the baseline (it cannot be stale)" "out: $CONFIRM_OUT"
 
 # A callee under a SYMLINKED cwd writes its transcript under the resolved path:
 # a session in /tmp/x on macOS lands in ~/.claude/projects/-private-tmp-x, not
@@ -808,6 +807,51 @@ run_case interrupted screen_interrupted -- --prompt "follow up"
 [[ "$(clear_count)" -eq 0 && "$(request_count)" -eq 0 ]] \
   && pass "an interrupted REPL gets neither a Ctrl-C nor a paste" \
   || fail "an interrupted REPL gets neither a Ctrl-C nor a paste" "log:"$'\n'"$(log_view)"
+
+echo ""
+echo "  -- a surface with no REPL left in it is refused, not pasted into --"
+
+# The severe one. A surface whose claude has exited is still readable, and its
+# cached handle still resolves — but what is drawn is a SHELL PROMPT. None of the
+# other gates notice: repl_is_interrupted looks for interrupt wording,
+# repl_looks_busy for a spinner, and input_box_content would at most report the
+# prompt line as parked text. Delivering here does not lose the payload; it hands
+# the whole work order to a shell and presses Return.
+for shellfix in screen_shell_prompt screen_shell_prompt_bare; do
+  CASE_RESPONSES="$OK_RESPONSES" run_case "$shellfix" "$shellfix" -- --prompt "$MULTILINE_MSG"
+  CASE_RESPONSES=""
+  [[ "$OUT" == *'"fallback"'* && "$OUT" == *"no claude input box"* ]] \
+    && pass "$shellfix: a shell prompt is refused with the fresh-surface fallback" \
+    || fail "$shellfix: a shell prompt is refused with the fresh-surface fallback" "out: $OUT"
+  [[ "$(request_count)" -eq 0 ]] \
+    && pass "$shellfix: nothing is pasted at the shell" \
+    || fail "$shellfix: nothing is pasted at the shell" "$(requests)"
+  [[ "$(clear_count)" -eq 0 ]] \
+    && pass "$shellfix: no Ctrl-C is sent to it either" \
+    || fail "$shellfix: no Ctrl-C is sent to it either" "$(log_view)"
+done
+
+# The same discriminator guards the first-contact wait: --wait-box must not accept
+# a shell prompt as "the REPL is up".
+box_dir="$STUBROOT/waitbox-shell"
+mkdir -p "$box_dir/bin" "$box_dir/screens"
+box_sock="$(start_socket_stub "$box_dir/socket" "$OK_RESPONSES")"
+printf '[CALL_ID: waitboxnonce1]\n%s' "$MULTILINE_MSG" > "$box_dir/payload.txt"
+screen_shell_prompt > "$box_dir/screens/1.txt"
+echo 1 > "$box_dir/screens/count"; echo 0 > "$box_dir/screens/cursor"
+cp "$STUBROOT/paste_multiline/bin/cmux" "$box_dir/bin/cmux"
+BOX_OUT="$(STUB_CALLLOG="$box_dir/calls.log" STUB_SCREENS="$box_dir/screens" \
+  STUB_SURF="$SURF_UUID" STUB_WS="$WS_UUID" \
+  CMUX_SOCKET_PATH="$box_sock" HOME="$box_dir" \
+  PATH="$box_dir/bin:$PATH" bash "$PASTE_SCRIPT" \
+  --surface "$SURF_UUID" --payload-file "$box_dir/payload.txt" \
+  --call-id waitboxnonce1 --wait-box 1 2>&1)"
+[[ "$BOX_OUT" == *'"delivered":false'* && "$BOX_OUT" == *"never drew a claude input box"* ]] \
+  && pass "--wait-box refuses a shell prompt rather than pasting into it" \
+  || fail "--wait-box refuses a shell prompt rather than pasting into it" "out: $BOX_OUT"
+[[ ! -s "$box_dir/socket/requests.log" ]] \
+  && pass "…and no paste request is made at all" \
+  || fail "…and no paste request is made at all" "$(cat "$box_dir/socket/requests.log")"
 
 echo ""
 echo "  -- legacy cached handles --"
