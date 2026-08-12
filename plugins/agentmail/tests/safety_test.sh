@@ -20,6 +20,25 @@ cd "$PLUGIN_ROOT" || exit 1
 SKILL="skills/using-agentmail/SKILL.md"
 SCRIPTS="skills/using-agentmail/scripts"
 
+# Enumerate by GLOB, never by a hardcoded list. The preflight moved from a skill's
+# scripts/ to the plugin root and a hardcoded list silently stopped covering it —
+# the suite still reported all-green with two fewer assertions, which is exactly
+# how a security check rots. Same reason tests/run-all.sh discovers suites by glob.
+ALL_SH=()
+while IFS= read -r f; do ALL_SH+=("$f"); done < <(
+	find scripts skills/*/scripts hooks/scripts -name '*.sh' -type f 2>/dev/null | sort
+)
+
+ALL_SKILLS=()
+while IFS= read -r f; do ALL_SKILLS+=("$f"); done < <(
+	find skills -mindepth 2 -maxdepth 2 -name 'SKILL.md' -type f 2>/dev/null | sort
+)
+
+ALL_DOCS=("${ALL_SKILLS[@]}")
+while IFS= read -r f; do ALL_DOCS+=("$f"); done < <(
+	find references skills/*/references -name '*.md' -type f 2>/dev/null | sort
+)
+
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  ✓ $1"; }
 bad() { FAIL=$((FAIL+1)); echo "  ✗ $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
@@ -66,7 +85,7 @@ md_bash_blocks() {   # md_bash_blocks <file>
 echo "== 1. no installer runs without consent =="
 
 install_hits=""
-for f in "$SCRIPTS"/*.sh; do
+for f in "${ALL_SH[@]}"; do
 	[ -f "$f" ] || continue
 	hits="$(exec_lines "$f" | grep -nE '(npm[[:space:]]+(install|i)[[:space:]]|brew[[:space:]]+install|curl[^|]*\|[[:space:]]*(ba)?sh|gh[[:space:]]+release[[:space:]]+download)' || true)"
 	[ -n "$hits" ] && install_hits="$install_hits$f: $hits"$'\n'
@@ -98,12 +117,12 @@ echo "== 2. no credential reaches stdout or an unsafe file =="
 # bash blocks in the docs (a command the model might copy). Prose that names the
 # command in order to FORBID it is not a violation — the docs do exactly that.
 bare_signup=""
-for f in "$SCRIPTS"/*.sh; do
+for f in "${ALL_SH[@]}"; do
 	[ -f "$f" ] || continue
 	hits="$(exec_lines "$f" | grep -E 'agentmail[[:space:]]+agent[[:space:]]+sign-up' | grep -vE '\$\(|=\$' || true)"
 	[ -n "$hits" ] && bare_signup="$bare_signup$f: $hits"$'\n'
 done
-for f in "$SKILL" skills/using-agentmail/references/*.md; do
+for f in "${ALL_DOCS[@]}"; do
 	[ -f "$f" ] || continue
 	hits="$(md_bash_blocks "$f" | grep -nE 'agentmail[[:space:]]+agent[[:space:]]+sign-up' | grep -vE '\$\(|=\$|^[[:space:]]*#' || true)"
 	[ -n "$hits" ] && bare_signup="$bare_signup$f (bash block): $hits"$'\n'
@@ -123,7 +142,7 @@ fi
 
 # Anything printing a key-shaped variable must mask it.
 leak_hits=""
-for f in "$SCRIPTS"/*.sh; do
+for f in "${ALL_SH[@]}"; do
 	[ -f "$f" ] || continue
 	hits="$(exec_lines "$f" | grep -nE '(echo|printf)[^#]*\$\{?(AGENTMAIL_)?API_KEY|(echo|printf)[^#]*\$\{?KEY\}?[[:space:]]*$' | grep -v 'mask' || true)"
 	[ -n "$hits" ] && leak_hits="$leak_hits$f: $hits"$'\n'
@@ -146,7 +165,7 @@ done
 
 # A project .env is exactly the wrong place for this — it gets committed.
 env_hits=""
-for f in "$SCRIPTS"/*.sh; do
+for f in "${ALL_SH[@]}"; do
 	[ -f "$f" ] || continue
 	hits="$(exec_lines "$f" | grep -nE '>[[:space:]]*[^[:space:]]*\.env' || true)"
 	[ -n "$hits" ] && env_hits="$env_hits$f: $hits"$'\n'
@@ -250,7 +269,7 @@ fi
 
 # A literal retry loop wrapped around a send would defeat all of the above.
 retry_hits=""
-for f in "$SKILL" skills/using-agentmail/references/*.md; do
+for f in "${ALL_DOCS[@]}"; do
 	[ -f "$f" ] || continue
 	hits="$(grep -nE '(for|while).*(retry|attempt).*(send)|send.*\|\|.*(send|retry)' "$f" || true)"
 	[ -n "$hits" ] && retry_hits="$retry_hits$f: $hits"$'\n'
@@ -264,12 +283,12 @@ fi
 echo
 echo "== 5. scripts are runnable and honest =="
 
-for f in "$SCRIPTS"/*.sh "$SCRIPT_DIR"/*_test.sh; do
+for f in "${ALL_SH[@]}" "$SCRIPT_DIR"/*_test.sh; do
 	[ -f "$f" ] || continue
 	bash -n "$f" 2>/dev/null && ok "$(basename "$f") parses" || bad "$(basename "$f") has a syntax error"
 done
 
-for f in "$SCRIPTS"/*.sh; do
+for f in "${ALL_SH[@]}"; do
 	[ -f "$f" ] || continue
 	[ -x "$f" ] && ok "$(basename "$f") is executable" || bad "$(basename "$f") is not executable"
 done
@@ -277,7 +296,7 @@ done
 # Merging stderr into a parser's stdin is a mistake this repo has already paid
 # for once (gws auth_check_drift). Don't re-grow it here.
 merge_hits=""
-for f in "$SCRIPTS"/*.sh; do
+for f in "${ALL_SH[@]}"; do
 	[ -f "$f" ] || continue
 	hits="$(exec_lines "$f" | grep -nE 'agentmail[^#]*2>&1[[:space:]]*\|' || true)"
 	[ -n "$hits" ] && merge_hits="$merge_hits$f: $hits"$'\n'

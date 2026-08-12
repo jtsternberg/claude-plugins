@@ -13,7 +13,11 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SCRIPTS="$PLUGIN_ROOT/skills/using-agentmail/scripts"
+# The preflight is shared by four skills plus the mail-check hook, so it lives at
+# the plugin root (AGENTS.md § Sharing Code or Docs Between Sibling Skills).
+# signup/verify have exactly one consumer and stay with it.
+SCRIPTS="$PLUGIN_ROOT/scripts"
+SKILL_SCRIPTS="$PLUGIN_ROOT/skills/using-agentmail/scripts"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  ✓ $1"; }
@@ -40,6 +44,9 @@ esac
 case "${STUB_MODE:-ok}" in
   ok)
     case "$*" in
+      *"inboxes list"*)
+        echo '{"count":1,"inboxes":[{"inbox_id":"my-agent@agentmail.to","email":"my-agent@agentmail.to","display_name":"Stub"}]}'
+        exit 0 ;;
       *"organizations get"*) echo '{"organization_id":"org_stub","inbox_count":1}'; exit 0 ;;
       *"agent sign-up"*)
         echo '{"api_key":"am_us_STUBKEY0123456789abcdef","inbox_id":"my-agent@agentmail.to","organization_id":"org_stub"}'
@@ -54,12 +61,16 @@ case "${STUB_MODE:-ok}" in
     # The REAL shape for an invalid key, captured live from api.agentmail.to.
     # 403 (not the documented 401), and NO `code` field at all — which is why the
     # preflight classifies on HTTP status rather than on `code`.
-    echo 'GET "https://api.agentmail.to/v0/organizations": 403 Forbidden' >&2
+    echo 'GET "https://api.agentmail.to/v0/inboxes": 403 Forbidden' >&2
     echo '{ "message": "Forbidden" }' >&2
     exit 1 ;;
   forbidden_permission)
+    # ALSO captured live, from JT's real inbox-scoped key against
+    # `organizations get`. A recognized key that simply does not carry a
+    # permission is a WORKING key, and reporting it as rejected sent a user
+    # hunting a credential problem they did not have.
     echo 'GET "https://api.agentmail.to/v0/organizations": 403 Forbidden' >&2
-    echo '{"name":"ForbiddenError","code":"missing_permission","message":"Forbidden","fix":"needs organization_read"}' >&2
+    echo '{"name":"ForbiddenError","code":"missing_permission","message":"Forbidden","fix":"Organization details require an organization-scoped credential; this permission cannot be granted to an inbox- or pod-scoped API key."}' >&2
     exit 1 ;;
   ratelimited)
     echo '{"name":"RateLimitError","code":"rate_limit_exceeded","message":"Too Many Requests"}' >&2
@@ -128,16 +139,51 @@ out="$(run_case forbidden_bare 1 "$KEY" -- "$SCRIPTS/agentmail-preflight.sh")"; 
 printf '%s' "$out" | grep -q 'HTTP 403' \
 	&& ok "bare 403 reports the status it classified on" || bad "bare 403 does not name the status"
 
+# Regression guard for the bug this suite was extended to catch. JT's real key is
+# inbox-scoped. `organizations get` returns 403 missing_permission for it, and the
+# old classifier called that CREDENTIAL REJECTED — for a key that works. A
+# recognized-but-scope-limited key is a working key: exit 0, say so, and quote the
+# `fix` rather than telling the user their key was rotated.
 out="$(run_case forbidden_permission 1 "$KEY" -- "$SCRIPTS/agentmail-preflight.sh")"; rc=$?
-[ "$rc" -eq 12 ] && ok "403 missing_permission → exit 12" || bad "missing_permission should exit 12, got $rc"
-printf '%s' "$out" | grep -qi 'lacks a required permission' \
-	&& ok "missing_permission gets its own remedy, not the rotation story" \
-	|| bad "missing_permission reuses the wrong remedy text"
+[ "$rc" -eq 0 ] && ok "403 missing_permission → exit 0 (a scope gap is not a bad key)" \
+	|| bad "missing_permission should exit 0, got $rc"
+printf '%s' "$out" | grep -qi 'scope-limited' \
+	&& ok "missing_permission is reported as scope-limited" \
+	|| bad "missing_permission is not described as a scope limit"
+# `grep -v` would pass on any multi-line output that has one clean line, so this
+# has to be a negated match on the whole stream.
+if printf '%s' "$out" | grep -qi 'CREDENTIAL REJECTED'; then
+	bad "missing_permission still claims the credential was rejected"
+else
+	ok "missing_permission does not say the credential was rejected"
+fi
+printf '%s' "$out" | grep -qi 'organization-scoped credential' \
+	&& ok "missing_permission reads the API's own fix back" \
+	|| bad "missing_permission does not surface the fix field"
 
 out="$(run_case ok 1 "$KEY" -- "$SCRIPTS/agentmail-preflight.sh")"; rc=$?
 [ "$rc" -eq 0 ] && ok "valid key → exit 0" || bad "valid key should exit 0, got $rc"
 printf '%s' "$out" | grep -qi 'does NOT mean the org is OTP-verified' \
 	&& ok "exit 0 refuses to imply verification" || bad "exit 0 does not caveat verification"
+
+# The probe must be `inboxes list`, which succeeds on inbox-, pod-, AND org-scoped
+# keys. `organizations get` succeeds only on org-scoped ones, which is what
+# produced the false negative above.
+case_home="$SANDBOX/home-probe"
+mkdir -p "$case_home"
+PROBE_LOG="$case_home/stub.log"
+out="$(env -i HOME="$case_home" XDG_CONFIG_HOME="$case_home/.config" \
+	PATH="$STUB_BIN:/usr/bin:/bin" STUB_MODE=ok STUB_LOG="$PROBE_LOG" \
+	AGENTMAIL_API_KEY="$KEY" bash "$SCRIPTS/agentmail-preflight.sh" 2>&1)"; rc=$?
+grep -q 'inboxes list' "$PROBE_LOG" 2>/dev/null \
+	&& ok "the auth probe calls 'inboxes list'" \
+	|| bad "the auth probe does not call 'inboxes list'" "$(cat "$PROBE_LOG" 2>/dev/null)"
+grep -q 'organizations get' "$PROBE_LOG" 2>/dev/null \
+	&& bad "the auth probe still calls 'organizations get'" "$(cat "$PROBE_LOG")" \
+	|| ok "the auth probe no longer calls 'organizations get'"
+printf '%s' "$out" | grep -q 'my-agent@agentmail.to' \
+	&& ok "a successful probe prints the resolved inbox id" \
+	|| bad "a successful probe does not print the inbox id — every other consumer needs it"
 
 # The distinction that matters: a rate limit is not a bad credential.
 out="$(run_case ratelimited 1 "$KEY" -- "$SCRIPTS/agentmail-preflight.sh")"; rc=$?
@@ -155,7 +201,7 @@ out="$(env -i HOME="$case_home" XDG_CONFIG_HOME="$case_home/.config" \
 	PATH="$STUB_BIN:/usr/bin:/bin" STUB_MODE=ok STUB_LOG="$STUB_LOG" \
 	AGENTMAIL_API_KEY="$KEY" bash "$SCRIPTS/agentmail-preflight.sh" --local 2>&1)"; rc=$?
 [ "$rc" -eq 20 ] && ok "--local with CLI + key → exit 20" || bad "--local should exit 20, got $rc"
-if grep -q 'organizations get' "$STUB_LOG" 2>/dev/null; then
+if grep -qE 'inboxes list|organizations get' "$STUB_LOG" 2>/dev/null; then
 	bad "--local called the API" "$(cat "$STUB_LOG")"
 else
 	ok "--local invoked no API command (only --version)"
@@ -185,18 +231,18 @@ printf '%s' "$out" | grep -q 'am_us_…cdef' \
 echo
 echo "== signup: the rotation guard =="
 
-out="$(run_case ok 1 "$KEY" -- "$SCRIPTS/agentmail-signup.sh" --human-email a@b.com --username agent)"; rc=$?
+out="$(run_case ok 1 "$KEY" -- "$SKILL_SCRIPTS/agentmail-signup.sh" --human-email a@b.com --username agent)"; rc=$?
 [ "$rc" -eq 40 ] && ok "key already set → refuses with exit 40" || bad "should refuse with 40, got $rc"
 printf '%s' "$out" | grep -qi 'ROTATES the API key' \
 	&& ok "refusal explains key rotation" || bad "refusal does not explain rotation"
 
-out="$(run_case ok 1 "" -- "$SCRIPTS/agentmail-signup.sh" --username agent)"; rc=$?
+out="$(run_case ok 1 "" -- "$SKILL_SCRIPTS/agentmail-signup.sh" --username agent)"; rc=$?
 [ "$rc" -eq 64 ] && ok "missing --human-email → exit 64" || bad "missing arg should exit 64, got $rc"
 
-out="$(run_case ok 1 "" -- "$SCRIPTS/agentmail-signup.sh" --human-email notanemail --username agent)"; rc=$?
+out="$(run_case ok 1 "" -- "$SKILL_SCRIPTS/agentmail-signup.sh" --human-email notanemail --username agent)"; rc=$?
 [ "$rc" -eq 64 ] && ok "malformed email → exit 64 before any call" || bad "bad email should exit 64, got $rc"
 
-out="$(run_case ok 1 "" -- "$SCRIPTS/agentmail-signup.sh" --human-email a@b.com --username '.bad')"; rc=$?
+out="$(run_case ok 1 "" -- "$SKILL_SCRIPTS/agentmail-signup.sh" --human-email a@b.com --username '.bad')"; rc=$?
 [ "$rc" -eq 64 ] && ok "username leading with a separator → exit 64" || bad "bad username should exit 64, got $rc"
 
 echo
@@ -206,7 +252,7 @@ case_home="$SANDBOX/home-signup"
 mkdir -p "$case_home"
 out="$(env -i HOME="$case_home" XDG_CONFIG_HOME="$case_home/.config" \
 	PATH="$STUB_BIN:/usr/bin:/bin" STUB_MODE=ok \
-	bash "$SCRIPTS/agentmail-signup.sh" --human-email you@example.com --username my-agent 2>&1)"; rc=$?
+	bash "$SKILL_SCRIPTS/agentmail-signup.sh" --human-email you@example.com --username my-agent 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "signup happy path → exit 0" || bad "signup should exit 0, got $rc: $out"
 
 cred="$(ls "$case_home/.config/agentmail"/signup-*.json 2>/dev/null | head -1)"
@@ -234,7 +280,7 @@ printf '%s' "$out" | grep -q 'my-agent@agentmail.to' && ok "signup reported the 
 printf '%s' "$out" | grep -qi 'only email you@example.com' && ok "signup warns sends are restricted pre-verification" || bad "signup omits the pre-verification restriction"
 printf '%s' "$out" | grep -qi 'do not read it into this conversation' && ok "signup tells the agent not to read the file back" || bad "signup omits the do-not-read instruction"
 
-out="$(run_case signup_fail 1 "" -- "$SCRIPTS/agentmail-signup.sh" --human-email a@b.com --username agent)"; rc=$?
+out="$(run_case signup_fail 1 "" -- "$SKILL_SCRIPTS/agentmail-signup.sh" --human-email a@b.com --username agent)"; rc=$?
 [ "$rc" -eq 1 ] && ok "sign-up API failure → exit 1 with the CLI message" || bad "signup failure should exit 1, got $rc"
 
 echo
@@ -245,7 +291,7 @@ for badotp in "12345" "1234567" "12x456" ""; do
 	log="$case_home/stub.log"
 	out="$(env -i HOME="$case_home" XDG_CONFIG_HOME="$case_home/.config" \
 		PATH="$STUB_BIN:/usr/bin:/bin" STUB_MODE=ok STUB_LOG="$log" \
-		bash "$SCRIPTS/agentmail-verify.sh" --otp-code "$badotp" 2>&1)"; rc=$?
+		bash "$SKILL_SCRIPTS/agentmail-verify.sh" --otp-code "$badotp" 2>&1)"; rc=$?
 	if [ "$rc" -eq 64 ] && ! grep -q 'agent verify' "$log" 2>/dev/null; then
 		ok "OTP '${badotp:-<empty>}' rejected locally, no attempt spent"
 	else
@@ -264,7 +310,7 @@ chmod 600 "$case_home/.config/agentmail/signup-20260811T000000Z.json"
 
 out="$(env -i HOME="$case_home" XDG_CONFIG_HOME="$case_home/.config" \
 	PATH="$STUB_BIN:/usr/bin:/bin" STUB_MODE=ok \
-	bash "$SCRIPTS/agentmail-verify.sh" --otp-code 123456 2>&1)"; rc=$?
+	bash "$SKILL_SCRIPTS/agentmail-verify.sh" --otp-code 123456 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "verify happy path → exit 0" || bad "verify should exit 0, got $rc: $out"
 printf '%s' "$out" | grep -qF "$KEY" && bad "verify leaked the key" || ok "verify did not leak the key"
 
@@ -292,13 +338,13 @@ echo "== verify: no key anywhere, and exhausted attempts =="
 case_home="$SANDBOX/home-nokey"; mkdir -p "$case_home"
 out="$(env -i HOME="$case_home" XDG_CONFIG_HOME="$case_home/.config" \
 	PATH="$STUB_BIN:/usr/bin:/bin" STUB_MODE=ok \
-	bash "$SCRIPTS/agentmail-verify.sh" --otp-code 123456 2>&1)"; rc=$?
+	bash "$SKILL_SCRIPTS/agentmail-verify.sh" --otp-code 123456 2>&1)"; rc=$?
 [ "$rc" -eq 41 ] && ok "no key from any source → exit 41" || bad "no key should exit 41, got $rc"
 
 case_home="$SANDBOX/home-exhausted"; mkdir -p "$case_home"
 out="$(env -i HOME="$case_home" XDG_CONFIG_HOME="$case_home/.config" \
 	PATH="$STUB_BIN:/usr/bin:/bin" STUB_MODE=otp_exhausted AGENTMAIL_API_KEY="$KEY" \
-	bash "$SCRIPTS/agentmail-verify.sh" --otp-code 123456 2>&1)"; rc=$?
+	bash "$SKILL_SCRIPTS/agentmail-verify.sh" --otp-code 123456 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] && ok "exhausted OTP attempts → exit 1" || bad "exhausted attempts should exit 1, got $rc"
 printf '%s' "$out" | grep -qi 'including the correct one' \
 	&& ok "exhaustion message explains the correct code is also rejected" \
