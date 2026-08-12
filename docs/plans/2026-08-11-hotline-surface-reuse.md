@@ -275,6 +275,45 @@ suites match the discovered-by-glob paths, so the runner picks them up without e
    idle hotline surfaces whose session is cached elsewhere, or leave them to the user?
 5. **C's string, if it ships first** — see the note under C.
 
+## Phase 2 — what landed
+
+Approved in the order C, F4, A2, B. All four are on `hotline-surface-reuse`.
+
+| Unit | Commit | Notes |
+|---|---|---|
+| C — every skip reports | `dcf3427` | Plus the fallback table in the dial SKILL.md. |
+| F4 — clear a stale `surface_ref` | `dcf3427` | `--clear-surface`, distinct from an empty `--surface`; also records `last_call_id`. |
+| A2 — nudge delivery | `3617572` | Inline stays for single-line ≤ 800 B; larger goes via `message.md`. |
+| B — close the superseded surface | `b9d0314` | Four-condition gate, `HOTLINE_CLOSE_SUPERSEDED=0` opt-out. |
+| Durable record + switchboard | `1083c46` | Merge-bar item. |
+
+**The durable record** is `~/.agents-hotline/exchanges/<call_id>.md`, written at
+delivery time with an `index.jsonl` (call_id, timestamp, session, cwd, bytes,
+delivery mode). It sits outside the call dir because the call dir is transient,
+and it is keyed by the nonce the callee echoes on every STATUS line. The
+switchboard resolves a pointer through live call dir → archive → the pointer's own
+text, and marks resolved entries `via file`. Inline payloads are not archived —
+they are already durable in the callee's transcript, which is why they stay inline.
+
+Two things the reviewer's design notes changed from the proposal above: the
+inline/file split is threshold-based rather than always-file (quick exchanges stay
+readable in the transcript), and cleanup is default-on.
+
+Answers to the open questions are in the approving review; nothing above is left
+undecided.
+
+### Deferred
+
+- **claude-plugins-9rzn** — manual sweep for zombie surfaces already accumulated.
+  Filed rather than built, with the caller's authorisation: it is the lowest-value
+  unit and was not worth risking the rest.
+- **claude-plugins-38xm** — follow-up exchanges still never reach dial history. The
+  archive covers the payload; the history entry does not exist either way.
+- **claude-plugins-86ka** — found while debugging this: every launch script passes
+  the full prompt as argv, so `ps` exposes complete work orders to any local
+  process. Follow-ups no longer do this; first contact still does.
+- **claude-plugins-3paw** — `workspace_ref.txt` still stores a positional ref.
+
 ## STATUS
 
-Phase 1 complete. Awaiting review before any behavior change.
+Phase 2 complete for the four approved units. Awaiting review.
