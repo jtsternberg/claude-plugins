@@ -1,0 +1,3 @@
+interface:
+  display_name: AgentMail Relay Work Order
+  short_description: Hand work to another AI agent over email using the tagged protocol

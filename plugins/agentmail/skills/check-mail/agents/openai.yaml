@@ -1,0 +1,3 @@
+interface:
+  display_name: AgentMail Check Mail
+  short_description: List unread agent mail, read full bodies, and triage the inbox

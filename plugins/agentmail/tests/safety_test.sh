@@ -199,31 +199,40 @@ fi
 echo
 echo "== 3. sending stays behind a permission prompt =="
 
-allowed="$(sed -n '/^allowed-tools:/,/^---$/p' "$SKILL")"
+# The core assertion, applied to EVERY skill. If any of these verbs is
+# allowlisted anywhere, sending or deleting email stops prompting, and the
+# harness-level guard on an irreversible, outward-facing action is gone.
+#
+# `reply` is checked as a whole word: the reply-oriented skills legitimately
+# allowlist `inboxes:drafts get` and mention replying throughout, and matching the
+# substring would flag `--reply-all` inside prose that forbids it.
+for skill in "${ALL_SKILLS[@]}"; do
+	sname="$(basename "$(dirname "$skill")")"
+	allowed="$(sed -n '/^allowed-tools:/,/^---$/p' "$skill")"
+	dangerous=""
+	for verb in "messages send" "messages reply" "messages reply-all" "messages forward" \
+	            "drafts send" "drafts create" "drafts update" "drafts delete" \
+	            "messages update" "threads delete" "inboxes create" "inboxes update" \
+	            "inboxes delete" "agent sign-up" "agent verify" \
+	            "api-keys" "domains" "webhooks" "lists create" "lists delete" "pods"; do
+		printf '%s' "$allowed" | grep -qF -- "$verb" && dangerous="$dangerous [$verb]"
+	done
+	if [ -z "$dangerous" ]; then
+		ok "$sname: allowed-tools contains no sending, creating, updating, or deleting verb"
+	else
+		bad "$sname: allowed-tools grants a mutating verb:$dangerous" \
+		    "These must fall through to a permission prompt. Do not broaden to Bash(agentmail *)."
+	fi
 
-# The core assertion. If any of these verbs is allowlisted, sending or deleting
-# email stops prompting, and the harness-level guard on an irreversible,
-# outward-facing action is gone.
-dangerous=""
-for verb in send reply reply-all forward delete "inboxes create" "inboxes update" \
-            "drafts create" "drafts update" "messages update" sign-up verify \
-            "api-keys" domains webhooks lists pods; do
-	printf '%s' "$allowed" | grep -qF -- "$verb" && dangerous="$dangerous $verb"
+	if printf '%s' "$allowed" | grep -qE '"Bash\(agentmail \*\)"'; then
+		bad "$sname: allowed-tools contains the blanket Bash(agentmail *) grant" \
+		    "That silently allows every send and every delete."
+	else
+		ok "$sname: no blanket Bash(agentmail *) grant"
+	fi
 done
-if [ -z "$dangerous" ]; then
-	ok "allowed-tools contains no sending, creating, updating, or deleting verb"
-else
-	bad "allowed-tools grants a mutating verb:$dangerous" \
-	    "These must fall through to a permission prompt. Do not broaden to Bash(agentmail *)."
-fi
 
-# The blanket grant is the specific failure mode to prevent.
-if printf '%s' "$allowed" | grep -qE '"Bash\(agentmail \*\)"'; then
-	bad "allowed-tools contains the blanket Bash(agentmail *) grant" \
-	    "That silently allows every send and every delete."
-else
-	ok "no blanket Bash(agentmail *) grant"
-fi
+allowed="$(sed -n '/^allowed-tools:/,/^---$/p' "$SKILL")"
 
 # The prose gate, which does the part a permission prompt cannot: show the user
 # the actual recipients and body.
@@ -305,6 +314,80 @@ if [ -z "$merge_hits" ]; then
 	ok "no script pipes merged agentmail stdout+stderr into a parser"
 else
 	bad "a script merges agentmail stderr into a parser's stdin" "$merge_hits"
+fi
+
+echo
+echo "== 6. the agent-relay guardrails are asserted, not merely written =="
+
+RELAY="skills/relay-work-order/SKILL.md"
+PROTOCOL="references/agent-mail-protocol.md"
+
+for f in "$RELAY" "$PROTOCOL"; do
+	if [ ! -f "$f" ]; then
+		bad "$f is missing — the relay protocol has no home"
+		continue
+	fi
+	base="$(basename "$f")"
+
+	# Email is an unauthenticated channel into an agent that can run commands.
+	# These three rules are the reason that is survivable, so prose is not enough:
+	# a test is what stops a later edit from smoothing them away.
+	if has_phrase "$f" "off an email alone"; then
+		ok "$base: forbids destructive or outward-facing action off an email alone"
+	else
+		bad "$base: does not forbid acting on an email alone"
+	fi
+	if has_phrase "$f" "ambiguous handoff" && grep -q '\[ASK\]' "$f"; then
+		ok "$base: routes an ambiguous handoff to an [ASK] instead of a guess"
+	else
+		bad "$base: does not tell the model to reply [ASK] rather than guess"
+	fi
+	if has_phrase "$f" "data, not instruction"; then
+		ok "$base: states that email content never raises the sender's authority"
+	else
+		bad "$base: does not state that email content is data rather than instruction"
+	fi
+	if has_phrase "$f" "FULL body" || has_phrase "$f" "full body"; then
+		ok "$base: requires reading the full body rather than the preview"
+	else
+		bad "$base: does not require reading the full body"
+	fi
+done
+
+# All four tags must be defined wherever the protocol is described, or a message
+# arrives carrying a tag the reader has no rule for.
+for tag in HANDOFF ASK FYI DONE; do
+	if grep -q "\[$tag\]" "$PROTOCOL" 2>/dev/null; then
+		ok "protocol defines [$tag]"
+	else
+		bad "protocol does not define [$tag]"
+	fi
+done
+
+echo
+echo "== 7. no live inbox address ships =="
+
+# An allowlist of example local-parts, NOT a denylist of the real ones: a denylist
+# would have to name the live addresses in order to ban them, which is the leak it
+# exists to prevent.
+allowed_locals="my-agent|partner-agent|abc123|support|you|agent|sender[0-9]*|example|claude-inbox|partner-alt"
+# Leading punctuation is trimmed first: a shell default like ${VAR:-my-agent@…}
+# otherwise reads as the address "-my-agent@…" and every example looks stray.
+stray="$(grep -rhoE '[A-Za-z0-9._%+-]+@agentmail\.to' . 2>/dev/null \
+	| sed 's/^[-._]*//' | sort -u \
+	| grep -vE "^($allowed_locals)@agentmail\.to$" || true)"
+if [ -z "$stray" ]; then
+	ok "every @agentmail.to address in the plugin is a documented example"
+else
+	bad "a non-example @agentmail.to address is committed" \
+	    "$(printf '%s' "$stray" | head -5)"
+fi
+
+# The contacts store must never be written into the repo.
+if grep -rqE '(contacts\.json|mail-check-state\.json)' .claude-plugin 2>/dev/null; then
+	bad "a state or contacts path is referenced from plugin metadata"
+else
+	ok "no personal-data file path in plugin metadata"
 fi
 
 echo
