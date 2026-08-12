@@ -640,6 +640,37 @@ confirm_case 6 notarget screen_idle_empty
   && pass "an unconfirmable paste is reported as undelivered, not as success" \
   || fail "an unconfirmable paste is reported as undelivered, not as success" "out: $CONFIRM_OUT"
 
+# A callee under a SYMLINKED cwd writes its transcript under the resolved path:
+# a session in /tmp/x on macOS lands in ~/.claude/projects/-private-tmp-x, not
+# -tmp-x. Deriving the project dir only from the path the caller passed made this
+# tier miss every time for such a callee, and miss silently — the screen tier
+# answered and a delivery that had landed perfectly reported confirmed:"screen".
+# Caught live, not in a stub.
+sym_dir="$STUBROOT/confirm-symlink"
+mkdir -p "$sym_dir/bin" "$sym_dir/home" "$sym_dir/screens" "$sym_dir/real"
+ln -s "$sym_dir/real" "$sym_dir/link"
+sym_sock="$(start_socket_stub "$sym_dir/socket" "$OK_RESPONSES")"
+sym_nonce="deadbeefsymlink1"
+printf '[CALL_ID: %s]\nthe payload' "$sym_nonce" > "$sym_dir/payload.txt"
+chmod 600 "$sym_dir/payload.txt"
+# The screen offers NO landing signal, so only the transcript tier can confirm.
+screen_idle_empty > "$sym_dir/screens/1.txt"
+echo 1 > "$sym_dir/screens/count"; echo 0 > "$sym_dir/screens/cursor"
+sym_enc=$(printf '%s' "$(cd "$sym_dir/real" && pwd -P)" | sed 's|[^a-zA-Z0-9]|-|g')
+mkdir -p "$sym_dir/home/.claude/projects/$sym_enc"
+transcript_user_turn "$sym_nonce" > "$sym_dir/home/.claude/projects/$sym_enc/${CALLEE_SESSION}.jsonl"
+cp "$STUBROOT/paste_multiline/bin/cmux" "$sym_dir/bin/cmux"
+SYM_OUT="$(STUB_CALLLOG="$sym_dir/calls.log" STUB_SCREENS="$sym_dir/screens" \
+  STUB_SURF="$SURF_UUID" STUB_WS="$WS_UUID" \
+  CMUX_SOCKET_PATH="$sym_sock" HOME="$sym_dir/home" \
+  HOTLINE_PASTE_CONFIRM_TRIES=3 HOTLINE_PASTE_CONFIRM_SLEEP=0.05 \
+  PATH="$sym_dir/bin:$PATH" bash "$PASTE_SCRIPT" \
+  --surface "$SURF_UUID" --payload-file "$sym_dir/payload.txt" --call-id "$sym_nonce" \
+  --cwd "$sym_dir/link" --session "$CALLEE_SESSION" 2>&1)"
+[[ "$SYM_OUT" == *'"confirmed":"transcript"'* ]] \
+  && pass "a callee under a symlinked cwd is still confirmed from its transcript" \
+  || fail "a callee under a symlinked cwd is still confirmed from its transcript" "out: $SYM_OUT"
+
 echo ""
 echo "  -- an unconfirmed paste falls back and leaves no corpse --"
 

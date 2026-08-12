@@ -142,16 +142,33 @@ rm -f "$RPC_ERR"
 # enumeration is how the old verifier read a landed queued paste as lost — and
 # the live smoke test found a third shape (`queue-operation`) the design had not
 # predicted, which a shape whitelist would also have missed.
-TRANSCRIPT=""
+#
+# BOTH SPELLINGS OF THE CWD are tried. Claude Code derives the project directory
+# from the cwd it actually resolved, so a callee under a symlinked path writes to
+# the REALPATH encoding: a session in /tmp/x on macOS lands in
+# ~/.claude/projects/-private-tmp-x, not -tmp-x. Deriving only from the path the
+# caller happened to pass makes this tier miss every time for such a callee, and
+# miss SILENTLY — the screen tier answers and nothing looks wrong (observed live:
+# a delivery that landed perfectly reported confirmed:"screen").
+TRANSCRIPTS=()
 if [[ -n "$CWD" && -n "$SESSION_ID" ]]; then
-  TRANSCRIPT=$(bash "$HOTLINE_SCRIPTS/transcript-path.sh" --cwd "$CWD" --session "$SESSION_ID" 2>/dev/null) || TRANSCRIPT=""
+  for _cwd in "$CWD" "$(realpath "$CWD" 2>/dev/null || true)"; do
+    [[ -z "$_cwd" ]] && continue
+    _p=$(bash "$HOTLINE_SCRIPTS/transcript-path.sh" --cwd "$_cwd" --session "$SESSION_ID" 2>/dev/null) || continue
+    [[ -z "$_p" ]] && continue
+    _seen=false
+    for _e in ${TRANSCRIPTS[@]+"${TRANSCRIPTS[@]}"}; do [[ "$_e" == "$_p" ]] && _seen=true; done
+    $_seen || TRANSCRIPTS+=("$_p")
+  done
 fi
 
 confirmed_by_transcript() {
-  local i
-  [[ -z "$TRANSCRIPT" ]] && return 1
+  local i t
+  [[ ${#TRANSCRIPTS[@]} -eq 0 ]] && return 1
   for ((i = 0; i < CONFIRM_TRIES; i++)); do
-    [[ -s "$TRANSCRIPT" ]] && grep -qF "$CALL_ID" "$TRANSCRIPT" 2>/dev/null && return 0
+    for t in "${TRANSCRIPTS[@]}"; do
+      [[ -s "$t" ]] && grep -qF "$CALL_ID" "$t" 2>/dev/null && return 0
+    done
     sleep "$CONFIRM_SLEEP"
   done
   return 1
@@ -190,7 +207,7 @@ if confirmed_by_transcript; then
 elif confirmed_by_screen; then
   CONFIRMED="screen"
 else
-  undelivered "pasted into surface $SURFACE_REF but nonce $CALL_ID never appeared in the callee's transcript${TRANSCRIPT:+ ($TRANSCRIPT)} or on its screen; treating delivery as lost"
+  undelivered "pasted into surface $SURFACE_REF but nonce $CALL_ID never appeared in the callee's transcript${TRANSCRIPTS[0]:+ (${TRANSCRIPTS[*]})} or on its screen; treating delivery as lost"
 fi
 
 jq -nc --arg c "$CONFIRMED" --arg w "$WS_ID" --arg s "$SURF_ID" \
