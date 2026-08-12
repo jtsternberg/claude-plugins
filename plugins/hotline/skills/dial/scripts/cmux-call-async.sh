@@ -17,6 +17,10 @@
 #                          banner appears (then promoted to session_id.txt)
 #   launch_script.txt    — absolute path of the /tmp/hotline-launch-* file
 #                          (wait-for-response.sh cleans it up after STATUS)
+#   pending_paste.md     — the prompt, 0600, awaiting delivery into the booted
+#                          REPL by cmux-paste.sh. Present in cmux surface/workspace
+#                          mode only; its presence is the signal to the caller
+#                          that a delivery step is still owed (see below).
 #   keep_workspace.txt   — 'true'/'false'; if true, wait-for-response.sh
 #                          leaves the workspace open after STATUS (used by
 #                          conference-call mode handed off to the user)
@@ -28,11 +32,25 @@
 #   error.txt            — written by this script on early failures
 #                          (new-workspace fail, send fail)
 #
+# THE PROMPT IS NOT LAUNCHED WITH CLAUDE. This script starts a BARE `claude`
+# REPL and leaves the prompt in pending_paste.md for cmux-paste.sh to deliver
+# once the REPL's input box is up. It used to pass the prompt as claude's
+# positional argument, which put whole work orders in an argv every local user
+# can read out of `ps` (claude-plugins-86ka) — and meant first contact and
+# follow-ups used two entirely different delivery mechanisms, only one of which
+# was ever verified byte-exact. Now both paste over the control socket.
+#
+# The caller owes the delivery step: launch here, boot wait (wait-for-session.sh),
+# then paste. That ordering is why the prompt cannot be delivered from inside this
+# script — it returns before the REPL exists.
+#
 # Usage:
-#   cmux-call-async.sh --cwd <path> --prompt <text> [--resume <id>]
-#                      [--name <name>] [--fork-session] [--tools <list>]
-#                      [--keep-workspace]
+#   cmux-call-async.sh --cwd <path> (--prompt <text> | --prompt-file <path>)
+#                      [--resume <id>] [--name <name>] [--fork-session]
+#                      [--tools <list>] [--keep-workspace]
 #   # Returns immediately with: {"call_dir": "/tmp/hotline-call-xxxxx"}
+#
+# --prompt-file is preferred: it keeps the payload out of argv end to end.
 # =============================================================================
 set -euo pipefail
 
@@ -64,6 +82,7 @@ fi
 
 CWD=""
 PROMPT=""
+PROMPT_FILE=""
 RESUME_ID=""
 SESSION_NAME=""
 FORK_SESSION=false
@@ -82,6 +101,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --cwd)            CWD="$2";            shift 2 ;;
     --prompt)         PROMPT="$2";         shift 2 ;;
+    --prompt-file)    PROMPT_FILE="$2";    shift 2 ;;
     --resume)         RESUME_ID="$2";      shift 2 ;;
     --name)           SESSION_NAME="$2";   shift 2 ;;
     --fork-session)   FORK_SESSION=true;   shift   ;;
@@ -100,8 +120,16 @@ if [[ -z "$CWD" && -z "$RESUME_ID" ]]; then
   exit 1
 fi
 
+if [[ -n "$PROMPT_FILE" ]]; then
+  if [[ ! -f "$PROMPT_FILE" ]]; then
+    jq -nc --arg p "$PROMPT_FILE" '{error: ("--prompt-file does not exist: " + $p)}'
+    exit 1
+  fi
+  PROMPT=$(cat "$PROMPT_FILE")
+fi
+
 if [[ -z "$PROMPT" ]]; then
-  echo '{"error": "No --prompt provided"}'
+  echo '{"error": "No --prompt or --prompt-file provided"}'
   exit 1
 fi
 
@@ -140,7 +168,12 @@ echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 [[ -n "$CWD" ]] && echo "$CWD" > "$CALL_DIR/cwd.txt"
 # Persist [MODE:]/[CALLER:]/[SESSION:] tags from the ringing prompt so
 # wait-for-session.sh can register the call in the sessions registry itself.
-bash "$(dirname "${BASH_SOURCE[0]}")/persist-call-meta.sh" "$CALL_DIR" "$CWD" "$PROMPT"
+# Via the file when we have one, so the payload does not take an argv detour.
+if [[ -n "$PROMPT_FILE" ]]; then
+  bash "$SCRIPT_DIR/persist-call-meta.sh" "$CALL_DIR" "$CWD" --prompt-file "$PROMPT_FILE"
+else
+  bash "$SCRIPT_DIR/persist-call-meta.sh" "$CALL_DIR" "$CWD" "$PROMPT"
+fi
 
 # Determine the session ID upfront. We don't write it to session_id.txt yet —
 # wait-for-session.sh promotes session_id_preset.txt → session_id.txt only
@@ -209,6 +242,11 @@ echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
 # (e.g. /hotline:hotline-ringing), the CALL_ID must go AFTER the command token —
 # otherwise the leading bracket prevents claude from parsing the slash command
 # at all. For non-slash prompts, prepend as before.
+#
+# Inline, on the same line, either way — NOT on its own leading line the way
+# cmux-reuse-surface.sh does it. claude parses a slash command only at the very
+# start of the input, so a header line above it would turn the whole ringing
+# invocation into plain text.
 if [[ "$PROMPT" == /* ]]; then
   # Split on first space: "<cmd> <rest>" -> "<cmd> [CALL_ID: ...] <rest>"
   CMD_TOKEN="${PROMPT%% *}"
@@ -223,9 +261,16 @@ else
   PROMPT="[CALL_ID: $CALL_ID] $PROMPT"
 fi
 
-# Write a launch script so the full prompt reaches claude without escaping
-# issues. printf %q produces bash-safe quoting for newlines, brackets, etc.
-# chmod 700 prevents other local users from reading prompt contents.
+# The prompt waits here for delivery, and never reaches claude's argv. 0600 in a
+# 0700 mktemp dir: a work order is exactly the payload other local users must not
+# be able to read.
+PENDING_PASTE="$CALL_DIR/pending_paste.md"
+( umask 077; printf '%s' "$PROMPT" > "$PENDING_PASTE" )
+chmod 600 "$PENDING_PASTE" 2>/dev/null || true
+
+# The launch script exists to keep claude's flags off the `cmux send` line (which
+# interprets \n/\r/\t) and to cd into the target dir. It carries no prompt.
+# chmod 700 because it still names the session and the resume target.
 LAUNCH_SCRIPT=$(mktemp /tmp/hotline-launch-XXXXX)
 chmod 700 "$LAUNCH_SCRIPT"
 {
@@ -261,12 +306,12 @@ chmod 700 "$LAUNCH_SCRIPT"
   # "option '--allowedTools' argument missing". The `=` form keeps flag and
   # value in one argv element, which the recorder preserves byte-for-byte
   # (verified on cmux 0.64.22). claude accepts either form.
-  printf ' --allowedTools=%q' "$ALLOWED_TOOLS"
-  # `--` is REQUIRED before the positional prompt because --allowedTools is
-  # variadic (`<tools...>`) and would otherwise swallow the prompt as an
-  # extra "tool" name. Reproduced live: omitting `--` causes claude to start
-  # with an empty REPL ("No conversation yet"), losing the prompt entirely.
-  printf ' -- %q\n' "$PROMPT"
+  #
+  # No positional prompt follows, and so no `--` separator is needed: the REPL
+  # comes up empty and receives the prompt by paste. (When a prompt DID ride here,
+  # omitting `--` let variadic --allowedTools swallow it, which is how a call
+  # could boot into "No conversation yet". That whole failure mode is gone.)
+  printf ' --allowedTools=%q\n' "$ALLOWED_TOOLS"
 } > "$LAUNCH_SCRIPT"
 echo "$LAUNCH_SCRIPT" > "$CALL_DIR/launch_script.txt"
 

@@ -11,6 +11,12 @@
 #
 # Usage:
 #   persist-call-meta.sh <call_dir> <receiver_cwd> <prompt>
+#   persist-call-meta.sh <call_dir> <receiver_cwd> --prompt-file <path>
+#
+# --prompt-file is preferred wherever the caller already has the prompt on disk:
+# the tags this script wants are a handful of bytes, but the prompt they are
+# embedded in is the whole work order, and an argv copy of it is readable by any
+# local user through `ps` (claude-plugins-86ka).
 #
 # Never fails the caller: missing tags simply produce no files.
 # =============================================================================
@@ -19,6 +25,10 @@ set -uo pipefail
 CALL_DIR="${1:-}"
 RECV_CWD="${2:-}"
 PROMPT="${3:-}"
+if [[ "${3:-}" == "--prompt-file" ]]; then
+  PROMPT=""
+  [[ -f "${4:-}" ]] && PROMPT=$(cat "$4")
+fi
 
 [[ -d "$CALL_DIR" ]] || exit 0
 

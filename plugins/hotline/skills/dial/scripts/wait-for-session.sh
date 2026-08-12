@@ -11,14 +11,23 @@
 #   session_id_preset.txt but does NOT confirm claude actually booted —
 #   under cmux access_mode=cmuxOnly, the script's own background poller
 #   can't talk to cmux. This script (running as a child of the caller's
-#   cmux-spawned bash) confirms REPL liveness via EITHER of two signals:
+#   cmux-spawned bash) confirms REPL liveness via ANY of three signals:
 #     A) `cmux read-screen` matches the Claude Code REPL banner.
 #     B) The claude transcript file
 #        ~/.claude/projects/<encoded-cwd>/<preset-session-id>.jsonl exists
 #        and is non-empty (created the instant claude opens the session).
-#   Either signal promotes session_id_preset.txt → session_id.txt. Signal B
+#     C) The REPL has drawn its input box on screen.
+#   Any signal promotes session_id_preset.txt → session_id.txt. Signal B
 #   exists because banner regex is fragile (scrollback eviction, ANSI weirdness,
 #   --resume banner variance can defeat it even when claude DID boot fine).
+#
+#   Signal C exists because first contact now launches a BARE REPL and delivers
+#   its prompt by paste afterwards: a REPL with no prompt yet may write nothing
+#   to its transcript until the first turn arrives, so signal B can stay silent
+#   for a session that is perfectly up. The input box is the signal that actually
+#   matters to the step that follows — a paste into a shell that has not exec'd
+#   claude is lost silently — and it is strictly stronger than "the banner is
+#   somewhere in scrollback", which stays true long after a REPL has died.
 #
 # Prints the session ID to stdout on success.
 #
@@ -30,6 +39,10 @@
 #   wait-for-session.sh <call_dir> [--timeout <seconds>]
 # =============================================================================
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../../../scripts/repl-state.sh
+source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
 
 CALL_DIR="${1:-}"
 TIMEOUT=""
@@ -127,6 +140,7 @@ if $CMUX_MODE; then
 
   SAW_BANNER=false
   SAW_TRANSCRIPT=false
+  SAW_BOX=false
   ELAPSED=0
   while [[ ! -f "$CALL_DIR/session_id.txt" ]]; do
     check_early_fail
@@ -136,22 +150,27 @@ if $CMUX_MODE; then
         if $SAW_TRANSCRIPT; then
           DIAG=" (transcript file appeared at ${TRANSCRIPT_PATH} but logic still failed — investigate)"
         else
-          DIAG=" (no banner matched on screen AND no transcript file at ${TRANSCRIPT_PATH})"
+          DIAG=" (no banner and no input box matched on screen AND no transcript file at ${TRANSCRIPT_PATH})"
         fi
       else
-        DIAG=" (no banner matched on screen; transcript-file check skipped — cwd.txt absent)"
+        DIAG=" (no banner and no input box matched on screen; transcript-file check skipped — cwd.txt absent)"
       fi
-      echo "Timed out waiting for Claude REPL to boot in cmux ${REF} (${TIMEOUT}s).${DIAG} Common causes: launch-script claude invocation is malformed (e.g. a missing -- separator before the positional prompt, or --allowedTools split into two argv words instead of --allowedTools=<list>), or the surface/workspace lost its tty." >&2
+      echo "Timed out waiting for Claude REPL to boot in cmux ${REF} (${TIMEOUT}s).${DIAG} Common causes: the launch-script claude invocation is malformed (e.g. --allowedTools split into two argv words instead of --allowedTools=<list>), or the surface/workspace lost its tty." >&2
       exit 1
     fi
 
-    # Signal A: banner on cmux read-screen.
+    # Signal A: banner on cmux read-screen. Signal C: the input box is drawn.
     SCREEN=$(cmux read-screen "${READ_TARGET[@]}" --scrollback --lines 9999 \
       2>/dev/null || true)
     if [[ -n "$SCREEN" ]]; then
       CLEAN=$(echo "$SCREEN" | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
       if echo "$CLEAN" | grep -qE 'Claude Code v|Welcome back'; then
         SAW_BANNER=true
+        echo "$PRESET" > "$CALL_DIR/session_id.txt"
+        break
+      fi
+      if repl_box_present "$CLEAN"; then
+        SAW_BOX=true
         echo "$PRESET" > "$CALL_DIR/session_id.txt"
         break
       fi

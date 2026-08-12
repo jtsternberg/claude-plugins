@@ -377,6 +377,26 @@ if $FORCE_HEADLESS; then
 elif ! bash "$DIAL_SCRIPTS/check-cmux.sh" >/dev/null 2>&1; then
   TRANSPORT="headless"
   add_fallback "cmux-unavailable→headless"
+else
+  # Capability preflight — ONE system.capabilities call over the control socket.
+  # Every cmux delivery, first contact and follow-up alike, is a terminal.paste;
+  # a cmux too old to advertise it (or a socket we cannot reach) cannot carry a
+  # hotline call at all, so the honest move is to say so here rather than open a
+  # pane and discover it after the REPL has booted.
+  #
+  # Headless is the fallback, NOT a resurrection of the old argv launch or the
+  # send-split/nudge machinery. Those are what this rework exists to remove; a
+  # silent fallback tier that reopens the argv leak would give back exactly what
+  # was paid for. Headless loses the visible pane and says so in .fallbacks.
+  #
+  # The capability list to read is result.methods. result.capabilities is a
+  # different list (*.v1 feature tokens) and never contains terminal.paste —
+  # checking the wrong one would degrade every call on a cmux that supports it.
+  CAPS=$(python3 "$PLUGIN_SCRIPTS/cmux-rpc.py" --method system.capabilities 2>/dev/null || true)
+  if ! jq -e '.result.methods // [] | index("terminal.paste")' <<<"$CAPS" >/dev/null 2>&1; then
+    TRANSPORT="headless"
+    add_fallback "terminal-paste-unavailable→headless"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -423,6 +443,16 @@ if $FIRST_CONTACT; then
 else
   SEND_PROMPT="$MESSAGE"
 fi
+
+# On disk, always, 0600 — even when the caller passed --prompt. Every launcher and
+# the reuse path then take --prompt-file, so the payload never rides an argv where
+# `ps` would publish it to any local user (claude-plugins-86ka). A --prompt-file
+# caller's own file is not reused directly: first contact wraps the message in the
+# ringing invocation, so the bytes to deliver are not the bytes it handed us.
+SEND_PROMPT_FILE=$(mktemp /tmp/hotline-prompt-XXXXX)
+chmod 600 "$SEND_PROMPT_FILE"
+printf '%s' "$SEND_PROMPT" > "$SEND_PROMPT_FILE"
+trap 'rm -f "$ERR_FILE" "$SEND_PROMPT_FILE"' EXIT
 
 SESSION_NAME="hotline: $(basename "$MY_CWD") → $(basename "$TARGET_PATH") ($MODE_TAG)"
 
@@ -485,13 +515,12 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
     # follow-up may have cleared a stale one.
     add_fallback "surface-reuse-skipped(no-cached-surface)"
   else
-    # Hand over the file when we have one: a follow-up's SEND_PROMPT is the raw
-    # message, so --prompt-file is the same bytes without an argv round-trip.
-    REUSE_PROMPT_ARGS=(--prompt "$SEND_PROMPT")
-    [[ -n "$PROMPT_FILE" ]] && REUSE_PROMPT_ARGS=(--prompt-file "$PROMPT_FILE")
+    # Always the file, never --prompt: a work order handed over on argv is
+    # readable by any local user through `ps`, and the reuse path used to take
+    # that route whenever the caller had used --prompt (claude-plugins-86ka).
     REUSE=$(bash "$DIAL_SCRIPTS/cmux-reuse-surface.sh" \
       --surface "$SURFACE_REF" --session "$REMOTE_SESSION_ID" \
-      "${REUSE_PROMPT_ARGS[@]}" --cwd "$TARGET_PATH" 2>/dev/null)
+      --prompt-file "$SEND_PROMPT_FILE" --cwd "$TARGET_PATH" 2>/dev/null)
     REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
     if [[ -n "$REUSE_DIR" ]]; then
       CALL_DIR="$REUSE_DIR"
@@ -594,7 +623,7 @@ fire_cmux() {
   [[ -n "$EFFECTIVE_RESUME" ]] && ARGS+=(--resume "$EFFECTIVE_RESUME")
   $DO_FORK && ARGS+=(--fork-session)
   [[ -n "$TOOLS" ]] && ARGS+=(--tools "$TOOLS")
-  ARGS+=(--prompt "$SEND_PROMPT")
+  ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
   bash "$DIAL_SCRIPTS/cmux-call-async.sh" "${ARGS[@]}" 2>"$ERR_FILE"
 }
 
@@ -639,6 +668,48 @@ if ! REMOTE_SESSION_ID=$(bash "$DIAL_SCRIPTS/wait-for-session.sh" "${WAIT_ARGS[@
 fi
 
 [[ -s "$CALL_DIR/surface_ref.txt" ]] && SURFACE_REF=$(cat "$CALL_DIR/surface_ref.txt")
+
+# ---------------------------------------------------------------------------
+# Step 6b — Deliver the prompt into the freshly booted REPL.
+#
+# cmux-call-async.sh launches a BARE claude and leaves the prompt in
+# pending_paste.md, so the payload never reaches an argv (claude-plugins-86ka) and
+# first contact uses the SAME verified delivery verb as every follow-up. Boot came
+# first because a paste into a shell that has not yet exec'd claude is lost with
+# no error at all; --wait-box re-proves the input box is drawn right before the
+# paste, which is a stronger claim than "the banner appeared once".
+#
+# A failed delivery is an ERROR here, not a fallback: the surface is open and its
+# REPL is live, but it was never told anything. Reporting "connected" would leave
+# the caller waiting on a response to a message that does not exist.
+# ---------------------------------------------------------------------------
+if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
+  if [[ -z "$SURFACE_REF" ]]; then
+    # Detached placement addresses a workspace, not a surface. Resolve the
+    # workspace's current surface so the paste has a target.
+    DELIVER_SURFACE=$(cmux tree --all --json --id-format both 2>/dev/null | jq -r \
+      --arg w "$(cat "$CALL_DIR/workspace_ref.txt" 2>/dev/null)" '
+      .windows[]?.workspaces[]?
+      | select((.ref // "") == $w or (.id // "") == $w)
+      | .panes[]?.selected_surface_id // empty' 2>/dev/null | head -1)
+  else
+    DELIVER_SURFACE="$SURFACE_REF"
+  fi
+  if [[ -z "$DELIVER_SURFACE" ]]; then
+    emit_error deliver "the callee's REPL booted but no surface could be resolved to paste the prompt into" \
+      "Check \$call_dir/workspace_ref.txt against \`cmux tree --all --json --id-format both\`. Retry with the default side placement, or force headless with --headless."
+  fi
+  DELIVERY=$(bash "$DIAL_SCRIPTS/cmux-paste.sh" --surface "$DELIVER_SURFACE" \
+    --payload-file "$CALL_DIR/pending_paste.md" --call-id "$CALL_ID_OUT" \
+    --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID" \
+    --wait-box "${HOTLINE_PASTE_BOX_TIMEOUT:-20}" 2>/dev/null)
+  if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then
+    emit_error deliver "the callee's REPL booted but the prompt never landed in it: $(reason_of "$DELIVERY")" \
+      "The pane is live and empty; \$call_dir/pending_paste.md still holds the prompt. See references/error-recovery.md § CMUX Failures. Do NOT silently re-dial — the callee may have received it after the confirmation window."
+  fi
+  # The callee's transcript is the record now; the vehicle goes.
+  rm -f "$CALL_DIR/pending_paste.md"
+fi
 
 # Follow-ups that had to open a NEW surface: refresh the cached surface_ref so
 # the next follow-up reuses the live one instead of the dead one. (First contact
