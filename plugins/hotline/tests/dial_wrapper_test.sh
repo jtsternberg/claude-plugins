@@ -1321,6 +1321,43 @@ check "…and no paste is attempted against a cmux that cannot do it" $? \
   "$(cat "$SOCKROOT/nopaste/requests.log" 2>/dev/null)"
 
 # ===========================================================================
+# A prompt that never lands is stage `deliver` — an ERROR, not a fallback.
+#
+# The surface is open and its REPL is live, but it was never told anything.
+# Reporting "connected" would leave the caller polling for a response to a message
+# that does not exist, which is the failure mode the confirmation exists to catch.
+# The recovery line must warn against a blind re-dial: the paste can land just
+# after the confirmation window, and re-dialling then double-delivers.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  CMUX_SOCKET_PATH="$NOECHO_SOCK" SOCK_ECHO_FILE="" \
+  HOTLINE_CALLER_SESSION_ID="caller-undelivered" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "this one never lands" --boot-timeout 5 2>"$t/err.txt")
+rc=$?
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+
+[[ "$rc" -eq 1 && "$(jq -r .status <<<"$out")" == "error" \
+   && "$(jq -r .stage <<<"$out")" == "deliver" ]]
+check "a prompt that cannot be confirmed is an error at stage 'deliver'" $? \
+  "rc=$rc out=$out"
+
+grep -qi 'never landed' <<<"$(jq -r '.detail // empty' <<<"$out")"
+check "…and the detail says the REPL booted but the prompt never landed" $? "out=$out"
+
+grep -qi 'not silently re-dial' <<<"$(jq -r '.recovery // empty' <<<"$out")"
+check "…and the recovery warns against a blind re-dial (double-delivery)" $? "out=$out"
+
+# The prompt stays on disk: it is the only copy, and the caller may want it.
+[[ -s "$call_dir/pending_paste.md" ]]
+check "…and pending_paste.md is left in place for recovery" $? \
+  "call_dir contents: $(ls -A "$call_dir" 2>/dev/null | tr '\n' ' ')"
+
+# ===========================================================================
 # The prompt is written to a 0600 temp file and cleaned up, even when the caller
 # passed --prompt. Handing the launchers a file is what keeps the payload out of
 # every argv downstream (claude-plugins-86ka); leaving the file behind would
