@@ -247,7 +247,11 @@ echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
 # wait-for-response.sh correlates on, and at the start of the input box it can
 # never be split across a rendered line wrap the way a mid-line match could be.
 DELIVERY="inline"
-if [[ "$PROMPT" == *$'\n'* || ${#PROMPT} -gt $INLINE_MAX_BYTES ]]; then
+# BYTES, not characters. ${#PROMPT} counts characters under a UTF-8 locale, so a
+# 700-character CJK or emoji payload is ~2 KB on the wire — three times the
+# ceiling, and outside the range this threshold exists to stay inside.
+PROMPT_BYTES=$(printf '%s' "$PROMPT" | wc -c | tr -d ' ')
+if [[ "$PROMPT" == *$'\n'* || "$PROMPT_BYTES" -gt "$INLINE_MAX_BYTES" ]]; then
   DELIVERY="nudge"
 fi
 
@@ -266,7 +270,7 @@ else
     jq -nc --arg id "$CALL_ID" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
            --arg session "$SESSION_ID" --arg cwd "$CWD" \
            --arg path "$EXCHANGES_DIR/${CALL_ID}.md" \
-           --argjson bytes "${#PROMPT}" \
+           --argjson bytes "$PROMPT_BYTES" \
       '{call_id:$id, ts:$ts, session_id:$session, cwd:$cwd, bytes:$bytes,
         delivery:"nudge", path:$path}' >> "$EXCHANGES_DIR/index.jsonl" 2>/dev/null || true
   fi

@@ -501,6 +501,22 @@ run_case nudge_oversize screen_idle_empty -- --prompt "$BIG_MSG"
   && pass "an oversize SINGLE-line payload also goes via message.md" \
   || fail "an oversize SINGLE-line payload also goes via message.md" "out: $OUT"
 
+# A single-line payload under the ceiling in CHARACTERS but over it in BYTES must
+# still take the file route: ${#PROMPT} counts characters under a UTF-8 locale, so
+# measuring the wrong one puts a ~2 KB payload on a transport this threshold
+# exists to keep it off.
+WIDE_MSG="$(printf '日%.0s' {1..400})"   # 400 chars, 1200 bytes
+run_case nudge_wide_chars screen_idle_empty -- --prompt "$WIDE_MSG"
+[[ "$OUT" == *'"delivery": "nudge"'* ]] \
+  && pass "the inline ceiling is measured in bytes, not characters" \
+  || fail "the inline ceiling is measured in bytes, not characters" "out: $OUT"
+
+arch_idx="$STUBROOT/nudge_wide_chars/exchanges/index.jsonl"
+[[ "$(jq -r '.bytes' < "$arch_idx" 2>/dev/null)" == "1200" ]] \
+  && pass "the archive index records a real byte count" \
+  || fail "the archive index records a real byte count" \
+          "$(cat "$arch_idx" 2>/dev/null)"
+
 # --- Short single-line payloads stay inline (regression guard) --------------
 # This is the whole reason the split exists: a quick follow-up stays visible in
 # the callee's transcript rather than becoming a pointer to a file.
