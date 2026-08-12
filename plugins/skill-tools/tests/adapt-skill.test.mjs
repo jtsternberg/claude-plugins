@@ -11,8 +11,8 @@ const readme = fs.readFileSync(path.join(pluginRoot, 'README.md'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf8'));
 
 test('packages one reusable adaptation skill', () => {
-	assert.equal(manifest.name, 'skill-adapter');
-	assert.equal(manifest.version, '0.1.0');
+	assert.equal(manifest.name, 'skill-tools');
+	assert.equal(manifest.version, '1.3.6');
 	assert.match(skill, /^---\nname: adapt-skill\ndescription: .+\nargument-hint: .+\n---\n/);
 	assert.doesNotMatch(skill, /\b(?:judge|court|legal)\b/i);
 });
@@ -61,6 +61,6 @@ test('chooses a verified target or labels a portable fallback', () => {
 	assert.match(skill, /direct target-format compatibility was not verified rather than guessing/);
 	assert.match(skill, /This skill's own instructions are not evidence that a target format is current/);
 	assert.match(openai, /default_prompt: "Use \$adapt-skill /);
-	assert.match(readme, /\/skill-adapter:adapt-skill/);
+	assert.match(readme, /\/skill-tools:adapt-skill/);
 	assert.match(readme, /\$adapt-skill/);
 });

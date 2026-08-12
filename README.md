@@ -16,7 +16,7 @@ installing.
 
 ### Claude Code
 
-Add the marketplace and install any of its 29 listed plugins:
+Add the marketplace and install any of its 28 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
@@ -48,7 +48,7 @@ installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
 
 To install one self-contained repository skill instead of a whole plugin, see
 [standalone Codex skills](docs/codex/standalone-skills.md). For commands,
-updates, catalog scope, and all 30 plugin names, see the
+updates, catalog scope, and all 29 plugin names, see the
 [compatibility guide](docs/compatibility.md).
 
 ---
@@ -57,7 +57,7 @@ updates, catalog scope, and all 30 plugin names, see the
 
 These are selected plugins and workflows. The
 [support matrix](docs/compatibility.md#plugin-support-matrix) is the complete
-30-name inventory and the authority for harness availability.
+29-name inventory and the authority for harness availability.
 
 ### Skills
 
@@ -150,11 +150,6 @@ Give an agent its own email address — send, receive, reply, forward, and draft
 
 **Install:** `claude plugin install agentmail@jtsternberg`
 
-#### 🧭 [skill-adapter](plugins/skill-adapter)
-Adapt a source skill's durable reasoning method to another job or workflow. `adapt-skill` separates invariants from domain details, maps recipient-specific replacements for approval, and drafts a Claude Code skill or portable instruction bundle without silently persisting sensitive context.
-
-**Install:** `claude plugin install skill-adapter@jtsternberg`
-
 ### Workflow skills
 
 #### 💬 [git-commits](plugins/git-commits)
@@ -176,9 +171,9 @@ Available in both the Claude Code and Codex-native catalogs.
 **Install:** `claude plugin install pr-workflow@jtsternberg` or `codex plugin add pr-workflow@jtsternberg`
 
 #### 🛠️ [skill-tools](plugins/skill-tools)
-Skills for creating and reviewing Claude Code skills, slash commands, and subagents.
+Skills for creating, adapting, reviewing, and validating agent skills, slash commands, and subagents. `adapt-skill` preserves a source skill's durable reasoning method while mapping it to another job or workflow with privacy and approval gates.
 
-**Skills:** `create-slash-command`, `create-subagent`, `review-skill`, `review-slash-command`
+**Skills:** `adapt-skill`, `create-skill`, `create-slash-command`, `create-subagent`, `review-skill`, `review-slash-command`, `validate-dual-harness-skill`
 
 **Install:** `claude plugin install skill-tools@jtsternberg`
 
