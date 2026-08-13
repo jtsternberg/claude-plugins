@@ -17,11 +17,14 @@
 #      hosted. This is the identity proof: it distinguishes "the pane hotline was
 #      using" from "a pane the user has since repurposed". Without it a recycled
 #      handle could point anywhere.
-#   4. Its REPL is not mid-turn — no in-flight markers, and a screen that has not
+#   4. A claude REPL is still drawn there at all. If claude has exited, the
+#      foreground process this would kill is a SHELL — and the pane still carries
+#      our nonce in its scrollback, so every other check happily agrees.
+#   5. Its REPL is not mid-turn — no in-flight markers, and a screen that has not
 #      changed across a short window.
-#   5. It is not sitting in the post-interrupt "what should Claude do instead?"
+#   6. It is not sitting in the post-interrupt "what should Claude do instead?"
 #      state, where a human is mid-decision.
-#   6. Its input box holds no unsent text. Reuse refuses to type over parked
+#   7. Its input box holds no unsent text. Reuse refuses to type over parked
 #      text; closing would delete it, which is worse.
 #
 # Every refusal is a reason string, never an error: cleanup failing to run must
@@ -105,6 +108,23 @@ fi
 
 if ! SCREEN=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || [[ -z "$SCREEN" ]]; then
   refuse "surface $SURFACE_REF became unreadable while checking whether its REPL was idle"
+fi
+
+# --- Is there still a REPL in there at all? ----------------------------------
+# FIRST, before any other liveness judgement. Closing a surface KILLS its
+# foreground process, and if the claude that used to live here has exited, that
+# process is a SHELL — quite possibly one the human is now using, in a pane that
+# still carries our nonce in its scrollback from when it was ours.
+#
+# Nothing below catches it: the nonce check passes (the scrollback is unchanged),
+# repl_is_interrupted looks for interrupt wording, repl_looks_busy for a spinner,
+# and an idle shell prompt reads as an empty box. Every gate says "safe to close".
+#
+# Checking it first also fixes a second, quieter failure: input_box_content falls
+# back to a bare `^❯` line, so a themed shell prompt (starship, pure) gets reported
+# as parked input and the surface is skipped forever with a misleading reason.
+if ! repl_box_present "$SCREEN"; then
+  refuse "no-repl-box: surface $SURFACE_REF shows no claude input box (a ❯ padded with U+00A0), so its REPL has exited — what would be killed is a shell, possibly one in use"
 fi
 
 repl_is_interrupted "$SCREEN" && \

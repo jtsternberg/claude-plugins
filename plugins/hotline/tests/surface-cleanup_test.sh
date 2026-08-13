@@ -74,6 +74,21 @@ screen_interrupted() {
   printf '  Interrupted · What should Claude do instead?\n\n%s\n%s%s\n%s\n' \
     "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
+# NO REPL LEFT: the callee ran /exit or claude crashed, and the surface is now a
+# SHELL. Closing it kills that shell — possibly one the human is using — and every
+# other gate here agrees it is safe: the nonce is still in the scrollback from when
+# this pane was ours, there is no spinner, and a shell prompt reads as an empty box.
+# `❯` + ordinary space is the starship/pure/oh-my-zsh shape; claude pads with U+00A0.
+screen_shell_prompt() {
+  printf '~/Code/target on  main\n%s%s\n' "$GLYPH" " "
+}
+# The themed variant, which also used to be misreported: input_box_content's
+# bare-glyph fallback returned the prompt's own text as "parked input", so the
+# surface was skipped forever with a reason that pointed at a human's half-typed
+# thought that does not exist.
+screen_shell_prompt_themed() {
+  printf '%s%s~/Code/target  main !2 ?1\n' "$GLYPH" " "
+}
 
 # run_case <name> [--no-nonce] [--moving] [--busy] [--interrupted]
 #          [--no-tree] [--orphan-tree] [--close-fails <msg>] [--unreadable]
@@ -89,6 +104,8 @@ run_case() {
       --busy)        screen="screen_busy"; shift ;;
       --interrupted) screen="screen_interrupted"; shift ;;
       --parked)      screen="screen_idle_parked"; shift ;;
+      --shell)       screen="screen_shell_prompt"; shift ;;
+      --shell-themed) screen="screen_shell_prompt_themed"; shift ;;
       --no-tree)     no_tree=1; shift ;;
       --orphan-tree) orphan=1; shift ;;
       --unreadable)  unreadable=1; shift ;;
@@ -164,6 +181,30 @@ reason() { jq -r '.reason // ""' <<<"$OUT" 2>/dev/null; }
 close_calls() { grep -c '^close-surface' "$CALLLOG" || true; }
 
 echo "close-superseded-surface:"
+
+# --- A surface with no REPL left in it is NEVER closed ----------------------
+# The severe one. Reuse refuses an exited-REPL surface and opens a fresh one, which
+# means the closer then runs on exactly that pane — and closing it kills the shell
+# now living there, which the human may be using. Every other gate says yes: the
+# nonce is still in the scrollback from when the pane was ours, there is no spinner,
+# and a shell prompt reads as an empty box.
+run_case shell_prompt --shell -- --surface "$SURF" --expect-call-id "$NONCE"
+! closed && [[ "$(reason)" == *"no-repl-box"* ]] && [[ "$(close_calls)" -eq 0 ]] \
+  && pass "a surface showing a shell prompt is refused with no-repl-box, and NOT closed" \
+  || fail "a surface showing a shell prompt is refused with no-repl-box, and NOT closed" \
+          "out=$OUT closes=$(close_calls)"
+
+# The themed variant. Before the box gate ran first, input_box_content's bare-glyph
+# fallback returned the prompt's own segments and this was reported as parked-input —
+# a permanent skip with a reason describing a human thought that does not exist.
+run_case shell_prompt_themed --shell-themed -- --surface "$SURF" --expect-call-id "$NONCE"
+! closed && [[ "$(reason)" == *"no-repl-box"* ]] && [[ "$(close_calls)" -eq 0 ]] \
+  && pass "a themed shell prompt is refused as no-repl-box, not as parked-input" \
+  || fail "a themed shell prompt is refused as no-repl-box, not as parked-input" \
+          "out=$OUT closes=$(close_calls)"
+[[ "$(reason)" != *"parked-input"* ]] \
+  && pass "…so the reason does not blame a half-typed human thought" \
+  || fail "…so the reason does not blame a half-typed human thought" "out=$OUT"
 
 # --- The happy path ---------------------------------------------------------
 run_case happy -- --surface "$SURF" --expect-call-id "$NONCE"
