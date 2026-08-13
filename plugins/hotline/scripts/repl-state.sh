@@ -108,6 +108,68 @@ repl_box_present() {
   grep -q "^${REPL_BOX_GLYPH}${REPL_BOX_NBSP}" <<<"$1"
 }
 
+# --- Boot-wait budget --------------------------------------------------------
+# ONE definition of how long we wait for a callee's REPL to become usable.
+#
+# wait-for-session.sh waits for the REPL to exist; cmux-paste.sh waits for its
+# input box to be drawn. Same event, so the same budget — and it lived in two
+# places with two different values, so the documented 60s default and the actual
+# 20s box wait disagreed.
+HOTLINE_BOOT_TIMEOUT_CMUX="${HOTLINE_BOOT_TIMEOUT_CMUX:-60}"
+HOTLINE_BOOT_TIMEOUT_HEADLESS="${HOTLINE_BOOT_TIMEOUT_HEADLESS:-30}"
+
+# --- The per-call nonce ------------------------------------------------------
+# Every hotline delivery carries a [CALL_ID: <nonce>] the receiver echoes back in
+# its STATUS lines. wait-for-response.sh correlates on it, delivery confirmation
+# proves itself with it, and superseded-surface cleanup uses it as identity proof.
+#
+# Both halves live here because all three delivery paths need them identically and
+# the copies had already drifted: two of them split the prompt on the first space
+# ANYWHERE in it, so a multi-line follow-up beginning with "/" got the nonce
+# spliced into the middle of its second line.
+hotline_mint_call_id() {
+  openssl rand -hex 8 2>/dev/null \
+    || od -A n -N 8 -t x1 /dev/urandom 2>/dev/null | tr -d ' \n' \
+    || date +%s%N | sha256sum 2>/dev/null | cut -c1-16
+}
+
+# hotline_inject_call_id <nonce> <prompt> → the prompt with the nonce in it.
+#
+# Two placements, and which one applies is not a style choice:
+#
+#   Slash-command prompt → INLINE, immediately after the command token. claude
+#     parses a slash command only at the very start of the input, so a header line
+#     above `/hotline:hotline-ringing` turns the whole invocation into plain text.
+#
+#   Anything else → its OWN leading line. wait-for-response.sh matches the nonce
+#     on screen, and at the start of a line it can never be broken across a
+#     rendered line wrap the way a mid-line match could be. Safe because the paste
+#     arrives as one atomic bracketed paste (verified live: 76-line payload, one
+#     user turn, nonce line intact).
+#
+# "Slash command" is judged on the FIRST TOKEN OF THE FIRST LINE, and only when
+# that token looks like a command name. `/Users/JT/Code/x` starts with a slash and
+# is not one — the character class excludes `/` after the first character, so a
+# path falls through to the header-line form instead of having the nonce spliced
+# after its first directory component.
+hotline_inject_call_id() {
+  local nonce="$1" prompt="$2" first_line rest_lines token remainder
+  first_line="${prompt%%$'\n'*}"
+  token="${first_line%%[[:space:]]*}"
+  if [[ "$token" =~ ^/[A-Za-z0-9][A-Za-z0-9:._-]*$ ]]; then
+    # Everything after the command token, first line only; the rest is untouched.
+    remainder="${first_line#"$token"}"
+    if [[ "$prompt" == *$'\n'* ]]; then
+      rest_lines="${prompt#*$'\n'}"
+      printf '%s [CALL_ID: %s]%s\n%s' "$token" "$nonce" "$remainder" "$rest_lines"
+    else
+      printf '%s [CALL_ID: %s]%s' "$token" "$nonce" "$remainder"
+    fi
+  else
+    printf '[CALL_ID: %s]\n%s' "$nonce" "$prompt"
+  fi
+}
+
 # --- Where does a surface live? ----------------------------------------------
 # Echoes "<workspace-uuid> <surface-uuid>" for a cmux surface handle.
 #

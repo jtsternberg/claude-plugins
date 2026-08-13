@@ -145,6 +145,8 @@ if $FORK_SESSION && [[ -z "$RESUME_ID" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../../../scripts/repl-state.sh
+source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
 
 # Side-by-side placement delegates to cmux-cli's canonical open-side-surface.sh
 # (single source of truth — no vendored copy). cmux can be present without the
@@ -231,35 +233,12 @@ fi
 # back as `STATUS: <signal> call_id=<nonce>`; wait-for-response.sh ignores
 # any STATUS line whose nonce doesn't match. 16 hex chars is plenty for
 # disambiguation and keeps the marker compact in scrollback.
-CALL_ID=$(
-  openssl rand -hex 8 2>/dev/null \
-  || od -A n -N 8 -t x1 /dev/urandom 2>/dev/null | tr -d ' \n' \
-  || date +%s%N | sha256sum 2>/dev/null | cut -c1-16
-)
+CALL_ID=$(hotline_mint_call_id)
 echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
-# Insert [CALL_ID: ...] into the prompt so the receiver can parse it and
-# include it in its STATUS markers. If the prompt begins with a slash command
-# (e.g. /hotline:hotline-ringing), the CALL_ID must go AFTER the command token —
-# otherwise the leading bracket prevents claude from parsing the slash command
-# at all. For non-slash prompts, prepend as before.
-#
-# Inline, on the same line, either way — NOT on its own leading line the way
-# cmux-reuse-surface.sh does it. claude parses a slash command only at the very
-# start of the input, so a header line above it would turn the whole ringing
-# invocation into plain text.
-if [[ "$PROMPT" == /* ]]; then
-  # Split on first space: "<cmd> <rest>" -> "<cmd> [CALL_ID: ...] <rest>"
-  CMD_TOKEN="${PROMPT%% *}"
-  REST="${PROMPT#* }"
-  if [[ "$CMD_TOKEN" == "$PROMPT" ]]; then
-    # No space — prompt is just the slash command itself
-    PROMPT="$CMD_TOKEN [CALL_ID: $CALL_ID]"
-  else
-    PROMPT="$CMD_TOKEN [CALL_ID: $CALL_ID] $REST"
-  fi
-else
-  PROMPT="[CALL_ID: $CALL_ID] $PROMPT"
-fi
+# Placement of the nonce inside the prompt is a shared rule, not a local one — see
+# hotline_inject_call_id in repl-state.sh. Three copies of it had already drifted
+# apart on where to split a slash command.
+PROMPT=$(hotline_inject_call_id "$CALL_ID" "$PROMPT")
 
 # The prompt waits here for delivery, and never reaches claude's argv. 0600 in a
 # 0700 mktemp dir: a work order is exactly the payload other local users must not
