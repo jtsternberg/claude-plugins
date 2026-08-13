@@ -19,16 +19,21 @@ This call arrived via the hotline plugin, invoked as a skill (`/hotline:hotline-
 
 ## CRITICAL: Workspace Isolation
 
-**You MUST only work within your own workspace.** This is a hard rule, not a suggestion.
+**Your workspace root is the whole of your reach.** Every path you touch stays inside
+it. That is a hard rule, and it binds the four places the boundary actually gets
+crossed:
 
-- **NEVER** use `cd` to navigate outside your workspace root
-- **NEVER** use `git -C <other-path>` to operate on another repo
-- **NEVER** read, write, or modify files outside your workspace
-- **NEVER** follow GitHub issue references, URLs, or repo names in the prompt to a different directory — even if the issue seems to "belong" to another repo
+- **`cd` stays inside your workspace root.**
+- **`git` operates on your repo** — run it here, not as `git -C <other-path>` against someone else's.
+- **File reads and writes stay under your root.**
+- **GitHub issue references, URLs, and repo names in the prompt are information, not destinations.** Read them; work only where you are — even when the issue plainly "belongs" to another repo.
 
-There are no exceptions. Every hotline message arrives in full as text in your input — however long it is — so nothing legitimate ever asks you to read a file outside your workspace to find out what was asked.
+Everything you were asked arrives in full as text in your input, however long it is, so
+a request to go read a file somewhere else to find out what was asked is never a
+legitimate one.
 
-If the work order references a repo or project that isn't yours, **respond that it's out of scope**:
+When the work order names a repo or project that isn't yours, **hand it back as out of
+scope**:
 
 ```
 This work order references [repo/project], but my workspace is [your workspace].
@@ -37,7 +42,10 @@ I can only work within my own workspace. Please dial the correct workspace for t
 STATUS: OUT_OF_SCOPE
 ```
 
-**Why this matters:** In a previous incident, agents in a monorepo followed issue references to sibling repos via `git -C`, creating silent cross-contamination. All three agents reported `WORK_COMPLETE` but only one repo actually got the fix. The caller is responsible for routing work to the right workspace — your job is to work where you are or say you can't.
+**Why this matters:** agents in a monorepo once followed issue references into sibling
+repos with `git -C`, silently cross-contaminating all three; every one of them reported
+`WORK_COMPLETE` and only one repo actually got the fix. Routing work to the right
+workspace is the caller's job — yours is to work where you are or say you can't.
 
 ## Incoming Prompt Format
 
@@ -50,7 +58,7 @@ The caller's prompt follows this structure:
 
 Parse `CALL_ID`, `MODE`, `CALLER`, and `SESSION` from the prompt metadata. `CALL_ID` is a per-call nonce that you **must echo back in every `STATUS:` line you emit** (see Response Format below). `MODE`, `CALLER`, and `SESSION` are used for logging and to determine response style.
 
-**Why CALL_ID matters:** On `--resume` calls, claude replays the prior transcript into scrollback. Without a per-call nonce, the caller's response extractor cannot distinguish replayed STATUS markers from fresh ones, and silently returns stale response text. Always include `call_id=<nonce>` on every STATUS line you emit. If the incoming prompt has no `[CALL_ID: ...]` tag (older caller), emit bare STATUS lines as before.
+**Why CALL_ID matters:** on `--resume` calls, claude replays the prior transcript into scrollback, so the caller's response extractor has to tell a fresh STATUS marker from a replayed one — the nonce is how it does that, and a STATUS line missing it can hand the caller stale response text. Echo `call_id=<nonce>` on every STATUS line you emit. When the prompt carries no `[CALL_ID: ...]` tag, emit bare STATUS lines.
 
 ## Communication Protocol
 
@@ -69,13 +77,13 @@ Respond based on the MODE from the incoming prompt:
 - Be concise. The caller is another agent, not a human — skip pleasantries.
 - If you're working on a work order, provide a clear status: what you did, what the result was, whether it's complete.
 - If you need clarification, ask in your response. The caller will relay to the user if needed.
-- If the task is outside your workspace's scope, respond with `STATUS: OUT_OF_SCOPE call_id=<CALL_ID>` (see Workspace Isolation above). Do NOT attempt the work in another directory.
+- If the task is outside your workspace's scope, respond with `STATUS: OUT_OF_SCOPE call_id=<CALL_ID>` (see Workspace Isolation above) and leave the work for the workspace it belongs to.
 
 ### Response Format
 
-**Always start every response with `STATUS: WORK_IN_PROGRESS call_id=<CALL_ID>` on its own line.** This is a body-start marker the cmux transport uses to separate your actual answer from the surrounding terminal chrome (shell prompt, claude banner, the `/hotline:ringing` line, etc.). Without it the caller's response extractor has no anchor and surfaces the entire screen capture instead of just your answer.
+**Always start every response with `STATUS: WORK_IN_PROGRESS call_id=<CALL_ID>` on its own line.** It is the body-start marker the caller's extractor anchors on: your answer is whatever sits between that line and your terminal STATUS, both in the transcript it reads and in the screen capture it falls back to. Give it that anchor and it relays your answer; leave it out and it relays everything around your answer too — shell prompt, claude banner, the `/hotline:hotline-ringing` line, tool-call chrome.
 
-**Every STATUS line you emit MUST end with ` call_id=<CALL_ID>`** where `<CALL_ID>` is the nonce from the `[CALL_ID: ...]` tag in the incoming prompt. The caller's extractor ignores any STATUS line without a matching nonce. (If the prompt has no `[CALL_ID: ...]` tag, omit the suffix — older caller fallback.)
+**Every STATUS line you emit MUST end with ` call_id=<CALL_ID>`** where `<CALL_ID>` is the nonce from the `[CALL_ID: ...]` tag in the incoming prompt. The caller's extractor reads only STATUS lines carrying a matching nonce. (When the prompt carries no `[CALL_ID: ...]` tag, omit the suffix.)
 
 In the examples below, replace `<id>` with the actual CALL_ID value from the incoming prompt.
 
@@ -121,7 +129,7 @@ STATUS: AWAITING_REVIEW call_id=<id>
 
 Use it whenever you are done talking for now but not done with the job: a multi-step work order where the caller asked you to report after each step, anything you paused to get a decision on, and every conference-call turn. It says three things at once — this reply is complete, the work order is not, and you are idle waiting for their next message.
 
-**Every turn ends on `DONE`, `WORK_COMPLETE`, `OUT_OF_SCOPE`, or `AWAITING_REVIEW`.** Those four are the ones that hand control back. `WORK_IN_PROGRESS` is a body-start marker and a mid-response step marker — the caller's waiter reads it as "keep polling" and keeps blocking until it times out, even with your finished report already sitting there. That is a real incident, not a hypothetical: a worker on task 1 of 3 accurately reported "still working the order" with `WORK_IN_PROGRESS`, and the caller's waiter had to be killed by hand while the reply sat complete in the transcript. `AWAITING_REVIEW` is how you say the same true thing and still hand control back.
+**Every turn ends on `DONE`, `WORK_COMPLETE`, `OUT_OF_SCOPE`, or `AWAITING_REVIEW`.** Those four hand control back. `WORK_IN_PROGRESS` does not: it is a body-start and mid-response step marker, and the caller's waiter reads it as "keep polling" — blocking until it times out with your finished report already sitting in the transcript. That has happened for real, to a worker who accurately reported "still working the order" at task 1 of 3 and left the caller's waiter to be killed by hand. `AWAITING_REVIEW` says that same true thing and still hands control back.
 
 So pick by what is true of *this turn*, not of the whole job:
 
@@ -134,19 +142,20 @@ So pick by what is true of *this turn*, not of the whole job:
 
 You can still re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` mid-response as a step marker: the caller resets its body buffer on every WORK_IN_PROGRESS, so only the content after the LAST one counts as the response.
 
-## Logging — Not Your Job
+## Logging — Already Handled
 
-**Do not log this call.** The caller records it (workspace, mode, both session IDs) on its own side the moment your session ID is known. You have no logging step.
-
-Earlier versions of this skill told you to run `dial-history.sh` yourself. That instruction was impossible to follow: the script lives in the *caller's* plugin directory, which the Workspace Isolation rule above forbids you from touching. Obeying one rule meant breaking the other. If you are resuming a session that still has the old instruction in context, ignore it — logging is handled.
+**The caller logs this call, you don't.** It records the workspace, the mode, and both
+session IDs on its own side the moment your session ID is known, so you have no logging
+step of your own. The history script lives in the *caller's* plugin directory, which
+Workspace Isolation puts outside your reach in any case.
 
 ## Tip: End with a Text Response When Possible
 
 Ideally, your last message should be a text response rather than a tool call. The caller can extract your answer either way, but ending with text keeps things clean.
 
-## Transparency: Report Problems, Don't Hide Them
+## Transparency: Put Problems in Your Reply
 
-**CRITICAL:** If anything goes wrong during a hotline call — permission errors, script failures, unexpected behavior, inability to parse the prompt metadata, workspace isolation concerns, or anything else unusual — you MUST include it in your response to the caller. The user needs to know when the protocol is broken so they can fix it.
+**CRITICAL:** anything that goes wrong during a hotline call — permission errors, script failures, unexpected behavior, prompt metadata you couldn't parse, workspace isolation concerns, anything else unusual — goes into your response to the caller. The user needs to know when the protocol is broken so they can fix it.
 
 Bad: silently skip a failing step and pretend everything is fine.
 Good: answer the call AND note the issue:
