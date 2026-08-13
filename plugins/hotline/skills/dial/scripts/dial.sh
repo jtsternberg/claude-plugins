@@ -400,10 +400,12 @@ else
   # hotline call at all, so the honest move is to say so here rather than open a
   # pane and discover it after the REPL has booted.
   #
-  # Headless is the fallback, NOT a resurrection of the old argv launch or the
-  # send-split/nudge machinery. Those are what this rework exists to remove; a
-  # silent fallback tier that reopens the argv leak would give back exactly what
-  # was paid for. Headless loses the visible pane and says so in .fallbacks.
+  # Headless is the ONLY fallback here, deliberately. Every cmux path carries the
+  # payload over the socket, so there is no paste-free cmux delivery left to degrade
+  # to; the alternatives would be launching claude with the payload on its argv,
+  # which publishes the work order to any local `ps` (claude-plugins-86ka), or
+  # opening a pane nothing can speak to. Losing the visible pane is the cheaper
+  # loss, and .fallbacks says so.
   #
   # The capability list to read is result.methods. result.capabilities is a
   # different list (*.v1 feature tokens) and never contains terminal.paste —

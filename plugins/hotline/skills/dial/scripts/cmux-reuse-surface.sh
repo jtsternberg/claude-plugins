@@ -7,7 +7,7 @@
 # side-by-side (or windowed) surface and leaves it open. That surface holds a
 # LIVE, idle claude REPL for that exact session. So a follow-up doesn't need to
 # `claude --resume` in a fresh surface (which stacks N surfaces over N turns) —
-# it just types the next message into the REPL that's already sitting there.
+# it pastes the next message into the REPL that's already sitting there.
 #
 # This script:
 #   1. Verifies the stored surface still exists (the user may have closed it).
@@ -16,8 +16,8 @@
 #      so wait-for-response.sh polls THIS surface and — thanks to the fresh
 #      nonce — ignores the prior exchange's stale STATUS lines in scrollback.
 #
-# If the surface is gone, emits {"fallback":"fresh"} so the caller falls back to
-# opening a new surface via cmux-call-async.sh --resume (the pre-reuse path).
+# If the surface is gone, emits {"fallback":"fresh"} so the caller opens a new
+# surface via cmux-call-async.sh --resume instead.
 #
 # No --resume / no relaunch: the live REPL IS the session. Re-launching claude
 # inside it would nest a second REPL.
@@ -41,15 +41,14 @@
 # pasted into the REPL in a single `terminal.paste` over cmux's control socket
 # (cmux-paste.sh), which then proves the nonce reached the callee.
 #
-# There used to be two modes, split on payload shape: short single-line messages
-# typed straight in, anything larger written to a sidecar file with a one-line
-# pointer typed in its place (claude-plugins-i8fb). Both existed to work around
-# `cmux send`, which interprets \n/\r/\t with no escape hatch and drops
-# contiguous bytes mid-payload with no error — a verified 3,045-byte payload lost
-# 2,538 of them. The socket paste has neither failure mode, so the payload itself
-# rides the wire again and lands in the callee's transcript where a human reading
-# the session (and the switchboard) can see what was actually asked. No sidecar
-# file, no preview to mistake for the request, no size threshold to tune.
+# Size- or shape-dependent delivery is off the table, and so is `cmux send` as the
+# carrier: it interprets \n/\r/\t with no escape hatch and drops contiguous bytes
+# mid-payload with no error — a verified 3,045-byte payload lost 2,538 of them. The
+# socket paste has neither failure mode, so the payload itself rides the wire and
+# lands in the callee's transcript, where a human reading the session (and the
+# switchboard) can see what was actually asked. No sidecar file for the callee to go
+# read, no preview to mistake for the request, no size threshold to tune
+# (claude-plugins-i8fb).
 #
 # The one hazard still handled below (claude-plugins-06ws): the input-box clear is
 # a raw Ctrl-C byte, which is a real interrupt. It is sent only when the box
