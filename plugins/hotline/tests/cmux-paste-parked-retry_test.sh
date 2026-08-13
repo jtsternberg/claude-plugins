@@ -67,8 +67,25 @@ collapsed_baseline() { printf '%s%s [Pasted text #1 +5 lines]\n%s\n%s%s\n%s\n' \
 # box, the nonce is not visible, and the stale '#1' is still in scrollback.
 collapsed_parked() { printf '%s%s [Pasted text #1 +5 lines]\n%s\n%s%s[Pasted text #2 +6 lines]\n%s\n' \
   "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
+# Scrolled-viewport screens. Baseline keeps a live NBSP box (so box-wait passes) but
+# already shows "Jump to bottom" + a "[Pasted text #1" echo (so both are stale, not
+# fresh, and the screen tier cannot confirm on them). The target is what the box read
+# returns once the user has scrolled up: NO live NBSP box, only a bare-❯ history echo
+# — the exact shape whose input_box_content bare-❯ fallback would otherwise be
+# mistaken for a live parked payload (claude-plugins-fkgv review 2).
+scrolled_baseline() { printf '%s%s [Pasted text #1 +5 lines]\nJump to bottom (click) ↓\n%s\n%s%s\n%s\n' \
+  "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
+scrolled_target() { printf '%s%s [Pasted text #1 +5 lines]\nJump to bottom (click) ↓\n' "$GLYPH" " "; }
 
-# make_cmux <bindir> <baseline-file> <target-file> <counter> <sendkey-log> <transcript> <submit-on-enter>
+# make_cmux <bindir> <baseline-file> <target-file> <counter> <sendkey-log> <transcript> <submit-mode>
+# submit-mode governs what an Enter keystroke does (models the retry's outcome):
+#   yes       → append the nonce to the transcript AND empty the box (retry submitted)
+#   emptybox  → empty the box only, NO transcript write (retry submitted; caller has
+#               no transcript path — the box clearing is the only evidence)
+#   no        → nothing (retry failed; payload stays parked)
+#   readfail  → touch a flag so every subsequent read-screen exits non-zero (a
+#               surface that closed / cmux hiccup between the gate read and re-check)
+#   keyfail   → the send-key itself exits non-zero (the keystroke never left)
 make_cmux() {
   local bindir="$1" base="$2" tgt="$3" cnt="$4" sk="$5" tr="$6" submit="$7"
   mkdir -p "$bindir"; echo 0 > "$cnt"
@@ -76,15 +93,21 @@ make_cmux() {
 #!/usr/bin/env bash
 case "\$1" in
   read-screen)
+    [[ -f "$bindir/.readfail" ]] && exit 1
     n=\$(cat "$cnt" 2>/dev/null || echo 0)
     if [[ "\$n" -lt 1 ]]; then cat "$base"; else cat "$tgt"; fi
     echo \$((n+1)) > "$cnt"
     exit 0 ;;
   send-key)
     echo "\$*" >> "$sk"
-    if [[ "$submit" == "yes" ]] && printf '%s' "\$*" | grep -qiE '(enter|return)'; then
-      printf '{"type":"user","nonce":"%s"}\n' "\$HOTLINE_TEST_NONCE" >> "$tr"
-      printf '%s\n%s%s\n%s\n' '$RULE' '$GLYPH' '$NBSP' '$RULE' > "$tgt"
+    if printf '%s' "\$*" | grep -qiE '(enter|return)'; then
+      case "$submit" in
+        keyfail)  exit 1 ;;
+        yes)      printf '{"type":"user","nonce":"%s"}\n' "\$HOTLINE_TEST_NONCE" >> "$tr"
+                  printf '%s\n%s%s\n%s\n' '$RULE' '$GLYPH' '$NBSP' '$RULE' > "$tgt" ;;
+        emptybox) printf '%s\n%s%s\n%s\n' '$RULE' '$GLYPH' '$NBSP' '$RULE' > "$tgt" ;;
+        readfail) touch "$bindir/.readfail" ;;
+      esac
     fi
     exit 0 ;;
   *) exit 0 ;;
@@ -93,26 +116,30 @@ EOF
   chmod +x "$bindir/cmux"
 }
 
-# run_case <dir> <call-id> <target-screen> <transcript-seed> <submit-on-enter> [baseline-screen]
+# run_case <dir> <call-id> <target-screen> <transcript-seed> <submit-mode> [baseline-screen] [no-transcript]
 #   plants transcript + baseline/target screens, runs cmux-paste.sh, echoes JSON.
+#   no-transcript="notx" → run WITHOUT --cwd/--session (TRANSCRIPTS empty), so the
+#   only post-retry evidence is the box clearing.
 run_case() {
-  local dir="$1" cid="$2" target="$3" seed="$4" submit="$5" baseline="${6:-$(empty_box)}"
-  local bin="$dir/bin" home="$dir/home" sock proj
+  local dir="$1" cid="$2" target="$3" seed="$4" submit="$5" baseline="${6:-$(empty_box)}" notx="${7:-}"
+  local bin="$dir/bin" home="$dir/home" sock proj tx_args=()
   mkdir -p "$dir/cwd" "$home"
   SENDKEY_LOG="$dir/sendkey"; : > "$SENDKEY_LOG"
   printf '%s' "$baseline" > "$dir/baseline"
   printf '%s' "$target" > "$dir/target"
-  # plant the transcript where transcript-path.sh (under this HOME) will look
-  proj=$(HOME="$home" bash "$HOTLINE_DIR/scripts/transcript-path.sh" --cwd "$dir/cwd" --session "sess-$cid" 2>/dev/null)
-  [[ -n "$proj" ]] && { mkdir -p "$(dirname "$proj")"; printf '%s' "$seed" > "$proj"; }
-  make_cmux "$bin" "$dir/baseline" "$dir/target" "$dir/cnt" "$SENDKEY_LOG" "$proj" "$submit"
+  if [[ "$notx" != "notx" ]]; then
+    proj=$(HOME="$home" bash "$HOTLINE_DIR/scripts/transcript-path.sh" --cwd "$dir/cwd" --session "sess-$cid" 2>/dev/null)
+    [[ -n "$proj" ]] && { mkdir -p "$(dirname "$proj")"; printf '%s' "$seed" > "$proj"; }
+    tx_args=(--cwd "$dir/cwd" --session "sess-$cid")
+  fi
+  make_cmux "$bin" "$dir/baseline" "$dir/target" "$dir/cnt" "$SENDKEY_LOG" "${proj:-$dir/none}" "$submit"
   write_python3_shim "$bin" "$dir/py-argv"
   sock="$(socket_stub_start "$dir/sock" "$OK_RESPONSES" "$dir/echo-unused")"
   printf '[CALL_ID: %s]\nline one\nline two\nline three\nline four\nline five\n' "$cid" > "$dir/payload.md"
   HOME="$home" HOTLINE_TEST_NONCE="$cid" PATH="$bin:$PATH" CMUX_SOCKET_PATH="$sock" \
     bash "$SCRIPT_UNDER_TEST" --surface "$SURF_UUID" --workspace "$WS_UUID" \
       --payload-file "$dir/payload.md" --call-id "$cid" \
-      --cwd "$dir/cwd" --session "sess-$cid" --wait-box 3 2>/dev/null
+      ${tx_args[@]+"${tx_args[@]}"} --wait-box 3 2>/dev/null
 }
 
 echo "cmux-paste.sh parked-payload retry:"
@@ -162,6 +189,42 @@ OUT5=$(run_case "$c5" "$N5" "$(box_holding "push it")" "" no)
 check "ghost box text → delivery not faked" $? "out=$OUT5"
 [[ ! -s "$c5/sendkey" ]]
 check "ghost box text → NO Enter (no phantom submit, ff6g-safe)" $? "sendkey=$(cat "$c5/sendkey")"
+
+# 6. READ-SCREEN FAILS during the post-retry re-check → undelivered, NOT a fabricated
+#    delivered:true (review 1). Parked at the gate; after the Enter, reads error out.
+c6="$STUBROOT/readfail"; N6="park0000000000a6"
+OUT6=$(run_case "$c6" "$N6" "$(collapsed_parked)" "" readfail "$(collapsed_baseline)")
+[[ "$(jq -r '.delivered' <<<"$OUT6" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$OUT6" 2>/dev/null)" == "true" ]]
+check "read failure during re-check → undelivered sent:true (no fabricated success)" $? "out=$OUT6"
+[[ "$(grep -ciE 'enter|return' "$c6/sendkey")" -eq 1 ]]
+check "read failure during re-check → the one Enter still went out" $? "sendkey=$(cat "$c6/sendkey")"
+
+# 7. SCROLLED VIEWPORT at the gate → NO retry, no blind Enter (review 2).
+c7="$STUBROOT/scrolled"; N7="park0000000000a7"
+OUT7=$(run_case "$c7" "$N7" "$(scrolled_target)" "" no "$(scrolled_baseline)")
+[[ "$(jq -r '.delivered' <<<"$OUT7" 2>/dev/null)" == "false" ]]
+check "scrolled viewport → not treated as parked; delivery not faked" $? "out=$OUT7"
+[[ ! -s "$c7/sendkey" ]]
+check "scrolled viewport → NO Enter fired blind into the unseen box" $? "sendkey=$(cat "$c7/sendkey")"
+
+# 8. NO TRANSCRIPT PATH, retry actually WORKED → confirmed via the polled box-clear
+#    re-check, not misreported as undelivered (review 3).
+c8="$STUBROOT/notx"; N8="park0000000000a8"
+OUT8=$(run_case "$c8" "$N8" "$(collapsed_parked)" "" emptybox "$(collapsed_baseline)" notx)
+[[ "$(jq -r '.delivered' <<<"$OUT8" 2>/dev/null)" == "true" \
+   && "$(jq -r '.retried_enter' <<<"$OUT8" 2>/dev/null)" == "true" ]]
+check "no transcript path + retry submitted → delivered via polled box-clear" $? "out=$OUT8"
+[[ "$(grep -ciE 'enter|return' "$c8/sendkey")" -eq 1 ]]
+check "no transcript path → exactly ONE Enter" $? "sendkey=$(cat "$c8/sendkey")"
+
+# 9. The retry Enter keystroke itself FAILS to send → undelivered (review 1, send-key
+#    exit code is checked).
+c9="$STUBROOT/keyfail"; N9="park0000000000a9"
+OUT9=$(run_case "$c9" "$N9" "$(collapsed_parked)" "" keyfail "$(collapsed_baseline)")
+[[ "$(jq -r '.delivered' <<<"$OUT9" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$OUT9" 2>/dev/null)" == "true" ]]
+check "retry keystroke fails → undelivered sent:true (not fabricated success)" $? "out=$OUT9"
 
 [[ ! -s "$POISON_LOG" ]]
 check "no test reached the real cmux or control socket" $? "$(cat "$POISON_LOG" 2>/dev/null)"

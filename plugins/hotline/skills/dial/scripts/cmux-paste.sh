@@ -351,18 +351,57 @@ confirmed_by_screen() {
 #                    firing Enter on it would submit a phantom turn.
 # "Ours" is the nonce on the box line (a small paste, including the [CALL_ID:] line
 # a collapsed multi-line follow-up leaves as its first box line) or a `[Pasted text`
-# placeholder ON the box line. input_box_content reads only the box, so a prior
-# turn's `[Pasted text` echoed down in scrollback is never mistaken for a live one.
+# placeholder ON the box line.
+#   scrolled viewport ("Jump to bottom") → read-screen is a STALE capture, not the
+#                    live box. input_box_content's bare-`❯` fallback (repl-state.sh)
+#                    could then match a prior turn's "❯ [Pasted text #1 …" scrolled up
+#                    from history, and we'd fire Enter blind into the unseen live box
+#                    — where a ghost suggested-prompt would become a phantom turn
+#                    (ff6g). Absence of the live box proves nothing; refuse. Same
+#                    rationale as the screen tier's Jump-to-bottom handling.
 payload_is_parked() {
   local scr box
   scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || return 1
   [[ -z "$scr" ]] && return 1
+  printf '%s' "$scr" | grep -qF 'Jump to bottom' && return 1
   repl_looks_busy "$scr" && return 1
   repl_is_interrupted "$scr" && return 1
   box=$(input_box_content "$scr")
   [[ -z "$box" ]] && return 1
   printf '%s' "$box" | grep -qF "$CALL_ID" && return 0
   printf '%s' "$box" | grep -qF '[Pasted text' && return 0
+  return 1
+}
+
+# retry_landed — after the one Enter, poll (reusing the confirmation budget) for
+# POSITIVE evidence the payload actually submitted, and echo the tier that proved it.
+# Never treats absence as success, which is the whole point of this review round:
+#   • the nonce reaching the transcript, OR
+#   • a GOOD, non-scrolled read where the REPL is now busy/queued (the Enter kicked
+#     off a turn), OR the box no longer holds our payload (it left the box).
+# A read that FAILS or returns empty is NO evidence (NOT "the box emptied"), and a
+# scrolled viewport is stale — both just keep polling, and time out to "not landed"
+# so the caller gets undelivered (sent:true) rather than a fabricated success. The
+# budget also covers a caller with no transcript path, whose only signal is the box
+# clearing as the TUI re-renders after the Enter (claude-plugins-fkgv review 3).
+retry_landed() {
+  local i scr box t
+  for ((i = 0; i < CONFIRM_TRIES; i++)); do
+    for t in ${TRANSCRIPTS[@]+"${TRANSCRIPTS[@]}"}; do
+      [[ -s "$t" ]] && grep -qF "$CALL_ID" "$t" 2>/dev/null && { echo "transcript"; return 0; }
+    done
+    scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || scr=""
+    if [[ -n "$scr" ]] && ! printf '%s' "$scr" | grep -qF 'Jump to bottom'; then
+      if repl_looks_busy "$scr" || printf '%s' "$scr" | grep -qF 'Press up to edit queued'; then
+        echo "screen"; return 0
+      fi
+      box=$(input_box_content "$scr")
+      if ! printf '%s' "$box" | grep -qF "$CALL_ID" && ! printf '%s' "$box" | grep -qF '[Pasted text'; then
+        echo "screen"; return 0
+      fi
+    fi
+    sleep "$CONFIRM_SLEEP"
+  done
   return 1
 }
 
@@ -383,19 +422,20 @@ elif payload_is_parked; then
   # dropped (claude-plugins-fkgv; reproduced ~5% on collapsing multi-line payloads
   # into a reused surface, always recovered by one manual Enter). Fire that one
   # Enter, then re-verify.
-  cmux send-key --surface "$SURFACE_REF" Enter >/dev/null 2>&1
-  RETRIED_ENTER=true
-  # Re-verify via the transcript, or the box having emptied — NOT confirmed_by_screen's
-  # nonce match: a retry that FAILED leaves the payload parked with the nonce still in
-  # the box, which that match would read as success.
-  if confirmed_by_transcript; then
-    CONFIRMED="transcript"
-  elif payload_is_parked; then
-    undelivered "pasted into surface $SURFACE_REF; the payload parked unsubmitted and one Enter retry still did not submit it (nonce $CALL_ID still parked in the box, not in the transcript${TRANSCRIPTS[0]:+ (${TRANSCRIPTS[*]})})"
-  else
-    # The box no longer holds our payload — the Enter took. Transcript will catch up.
-    CONFIRMED="screen"
+  #
+  # The Enter's own exit code is checked (like the other send-key call sites): if the
+  # keystroke never left this machine, there is nothing to re-verify and claiming
+  # success would be inventing it. The payload is still parked in the box, so this is
+  # sent:true — the caller must not blindly re-deliver.
+  if ! cmux send-key --surface "$SURFACE_REF" Enter >/dev/null 2>&1; then
+    undelivered "pasted into surface $SURFACE_REF; the payload parked and the one Enter retry keystroke itself failed to send, so submission is unproven"
   fi
+  RETRIED_ENTER=true
+  # Re-verify by POSITIVE evidence only, polled over the budget. A read failure or a
+  # scrolled viewport is not "the box emptied", and a slow re-render is not a failure.
+  landed=$(retry_landed) \
+    && CONFIRMED="$landed" \
+    || undelivered "pasted into surface $SURFACE_REF; the payload parked unsubmitted and one Enter retry produced no evidence of submission within the confirmation budget — the nonce $CALL_ID never reached the transcript${TRANSCRIPTS[0]:+ (${TRANSCRIPTS[*]})} and the box was never observed to clear"
 else
   undelivered "pasted into surface $SURFACE_REF but nonce $CALL_ID never appeared in the callee's transcript${TRANSCRIPTS[0]:+ (${TRANSCRIPTS[*]})} or on its screen; treating delivery as lost"
 fi
