@@ -117,12 +117,23 @@ Identity normally resolves inline from `$CLAUDE_CODE_SESSION_ID` (Claude Code >=
 
 ### Delivery: `stage: "deliver"` and messages that appear to vanish
 
-Every cmux message — first contact, follow-up, conference — is delivered the same
-way: `cmux-paste.sh` writes the payload as one `terminal.paste` over cmux's control
-socket, then proves the call's nonce reached the callee. Nothing is typed, no
-submit key is sent separately, and there is no size threshold or escaping hazard to
-reason about (`json.dumps` escapes the payload in-process; a live probe put 16MB
-through one request line).
+Every cmux message — first contact, follow-up, conference — is delivered by
+`cmux-paste.sh` over cmux's control socket via `terminal.paste`, which then proves
+the call's nonce reached the callee. There is no escaping hazard to reason about
+(`json.dumps` escapes the payload in-process; a live probe put 16MB through one
+request line).
+
+Almost every payload goes in one paste with its submit key. The one exception is
+first contact, where the payload is a `/hotline:…-ringing` slash command with a
+work-order body: CC collapses a single large paste to a `[Pasted text +N lines]`
+placeholder, and a placeholder at the start of the input has no leading `/`, so the
+slash never parses and the callee gets the work order as plain text with no
+protocol (claude-plugins-pmgb). For that case `cmux-paste.sh` sends the invocation
+line as its own small paste (it renders verbatim, so the command parses), then the
+body as a second paste (CC expands its placeholder inside the command args on
+submit), then a separate Enter key event to submit. So for first contact a submit
+key IS sent separately; for everything else nothing is typed and no separate submit
+is sent.
 
 **`stage: "deliver"` means: the REPL is up, and it was never told anything.** The
 pane is live and empty. This is the one error stage that leaves something running

@@ -486,8 +486,19 @@ fi
 # First contact wraps the ringing slash command + protocol tags. Follow-ups send
 # the raw message: the remote session already loaded the ringing skill, and
 # re-invoking it would re-run first-contact setup.
+#
+# The slash command + tags go on their OWN line, with the work-order message on
+# the line(s) below. This is what lets cmux-paste.sh deliver first contact as two
+# pastes — the invocation line pasted alone stays small enough to render verbatim
+# (a ❯-line starting with `/`), so the slash command parses; the message rides a
+# second paste that CC may collapse to a `[Pasted text +N lines]` placeholder,
+# which it expands back inside the command args on submit (claude-plugins-pmgb).
+# Keeping the message ON this line would let a long first message push the
+# invocation line past CC's ~800-char collapse threshold and take the `/` down
+# with it — the whole regression.
 if $FIRST_CONTACT; then
-  SEND_PROMPT="/hotline:hotline-ringing [MODE: $MODE_TAG] [CALLER: $MY_CWD] [SESSION: $MY_SESSION_ID] $MESSAGE"
+  SEND_PROMPT=$(printf '/hotline:hotline-ringing [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s' \
+    "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE")
 else
   SEND_PROMPT="$MESSAGE"
 fi
