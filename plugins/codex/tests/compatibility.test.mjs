@@ -159,8 +159,16 @@ function invocationPolicyErrors(pluginsRoot) {
 	const errors = [];
 	for (const skillFile of filesBelow(pluginsRoot).filter(file => file.endsWith('/SKILL.md'))) {
 		const metadataFile = path.join(path.dirname(skillFile), 'agents/openai.yaml');
-		if (!fs.existsSync(metadataFile)) continue;
 		const disabled = frontmatterBoolean(fs.readFileSync(skillFile, 'utf8'), 'disable-model-invocation');
+		// A skill that opts out of Claude model-invocation MUST mirror that in Codex.
+		// A *missing* openai.yaml is the mirror silently absent — the exact gap that let
+		// skills ship the flag with no Codex counterpart and a green suite
+		// (claude-plugins-i7tv). A prior version `continue`d here, so it only ever fired
+		// when the file existed and disagreed.
+		if (!fs.existsSync(metadataFile)) {
+			if (disabled === true) errors.push(path.relative(pluginsRoot, skillFile));
+			continue;
+		}
 		const allowed = openaiPolicyBoolean(fs.readFileSync(metadataFile, 'utf8'));
 		if (disabled !== undefined && allowed !== undefined && allowed === disabled) {
 			errors.push(path.relative(pluginsRoot, skillFile));
@@ -305,6 +313,13 @@ test('invocation-policy guard rejects Claude/Codex disagreement', () => {
 		fs.writeFileSync(path.join(skillRoot, 'agents/openai.yaml'), 'interface:\n  display_name: Example\npolicy:\n  allow_implicit_invocation: true\n');
 		assert.deepEqual(invocationPolicyErrors(path.join(root, 'plugins')), ['example/skills/example/SKILL.md']);
 		fs.writeFileSync(path.join(skillRoot, 'agents/openai.yaml'), 'interface:\n  display_name: Example\npolicy:\n  allow_implicit_invocation: false\n');
+		assert.deepEqual(invocationPolicyErrors(path.join(root, 'plugins')), []);
+		// A missing openai.yaml under an explicit-only skill is a failure, not a skip
+		// (claude-plugins-i7tv): remove the mirror and the guard must flag the skill.
+		fs.rmSync(path.join(skillRoot, 'agents/openai.yaml'));
+		assert.deepEqual(invocationPolicyErrors(path.join(root, 'plugins')), ['example/skills/example/SKILL.md']);
+		// ...but a skill with no flag and no yaml is fine — the guard is opt-in.
+		fs.writeFileSync(path.join(skillRoot, 'SKILL.md'), '---\nname: example\n---\n');
 		assert.deepEqual(invocationPolicyErrors(path.join(root, 'plugins')), []);
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
