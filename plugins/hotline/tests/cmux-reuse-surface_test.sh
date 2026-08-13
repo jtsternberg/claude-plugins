@@ -16,8 +16,16 @@
 #   3. DELIVERY IS PROVEN, NOT ASSUMED — ok:true from the socket is an ack. The
 #      nonce must show up in the callee's transcript (a user turn OR a
 #      queued_command attachment, since a busy REPL writes only the latter) or,
-#      failing that, on screen. An unconfirmed paste returns the fresh-surface
-#      fallback and leaves no call dir behind.
+#      failing that, on screen, and a screen marker only counts if it was not
+#      already there before the paste.
+#
+#      THE TWO FAILURE OUTCOMES ARE NOT INTERCHANGEABLE, and that is the point:
+#        refused BEFORE anything was sent → fallback:fresh, call dir removed. The
+#          callee received nothing, so delivering elsewhere is safe.
+#        sent but UNCONFIRMED → undelivered:true, call dir and prompt KEPT. The
+#          payload may already be in the callee's queue, and the fresh path would
+#          re-deliver the same prompt into a --resume of the same session — running
+#          the work order twice. Reported as a hard stop instead.
 #
 # Plus the pre-send gates, unchanged by the delivery swap: an interrupted REPL,
 # a busy REPL with parked text, and a box that will not clear are all refused
@@ -199,6 +207,7 @@ REQLOG=""
 PYLOG=""
 CASE_CALL_DIR=""
 CASE_HAD_PAYLOAD_FILE=false
+CASE_PAYLOAD_MODE=""
 CASE_HAS_MESSAGE=false
 
 run_case() {
@@ -294,12 +303,17 @@ STUB
   # need out of it BEFORE removing it, so no case has to leave one behind.
   CASE_CALL_DIR=""
   CASE_HAD_PAYLOAD_FILE=false
+  CASE_PAYLOAD_MODE=""
   CASE_HAS_MESSAGE=false
   local cd_path
   cd_path="$(printf '%s' "$OUT" | sed -n 's/.*"call_dir": *"\([^"]*\)".*/\1/p')"
   if [[ -n "$cd_path" ]]; then
     CASE_CALL_DIR="$cd_path"
-    [[ -f "$cd_path/payload.txt" ]] && CASE_HAD_PAYLOAD_FILE=true
+    if [[ -f "$cd_path/pending_paste.md" ]]; then
+      CASE_HAD_PAYLOAD_FILE=true
+      CASE_PAYLOAD_MODE=$(stat -f '%Lp' "$cd_path/pending_paste.md" 2>/dev/null \
+        || stat -c '%a' "$cd_path/pending_paste.md" 2>/dev/null)
+    fi
     [[ -f "$cd_path/message.md" ]] && CASE_HAS_MESSAGE=true
     [[ -d "$cd_path" ]] && rm -rf "$cd_path"
   fi
@@ -617,6 +631,11 @@ confirm_case 6 notarget screen_idle_empty
 [[ "$CONFIRM_OUT" == *'"delivered":false'* && "$CONFIRM_OUT" == *"never appeared"* ]] \
   && pass "an unconfirmable paste is reported as undelivered, not as success" \
   || fail "an unconfirmable paste is reported as undelivered, not as success" "out: $CONFIRM_OUT"
+# sent:true is what tells the caller re-delivering is unsafe. Without it, an
+# unconfirmed paste is indistinguishable from one the socket refused.
+[[ "$CONFIRM_OUT" == *'"sent":true'* ]] \
+  && pass "…and reports sent:true, so the caller knows it may already have landed" \
+  || fail "…and reports sent:true, so the caller knows it may already have landed" "out: $CONFIRM_OUT"
 
 # STALE MARKERS MUST NOT CONFIRM. `[Pasted text`, `Press up to edit queued` and
 # `Jump to bottom` are generic chrome, and reuse is by definition a surface a
@@ -673,21 +692,48 @@ SYM_OUT="$(STUB_CALLLOG="$sym_dir/calls.log" STUB_SCREENS="$sym_dir/screens" \
 echo ""
 echo "  -- an unconfirmed paste falls back and leaves no corpse --"
 
+# THE FALSE-NEGATIVE DIRECTION, which is the dangerous one. The socket ACCEPTED the
+# paste and confirmation could not prove where it went. That must NOT become
+# fallback:fresh: the caller answers a fresh fallback by opening a new surface and
+# re-delivering the SAME prompt into a --resume of the SAME session, so a payload
+# that actually landed gets executed TWICE. (The round-1 tests pinned only the
+# false-positive direction — stale markers must not confirm — which is how this
+# stayed open.)
 CASE_RESPONSES="$OK_RESPONSES" run_case lost_paste screen_idle_empty -- --prompt "$MULTILINE_MSG"
 CASE_RESPONSES=""
-[[ "$OUT" == *'"fallback"'* && "$OUT" == *"never appeared"* ]] \
-  && pass "a paste nobody can confirm returns the fresh-surface fallback" \
-  || fail "a paste nobody can confirm returns the fresh-surface fallback" "out: $OUT"
-[[ -n "$CASE_CALL_DIR" && -d "$CASE_CALL_DIR" ]] \
-  && fail "the unconfirmed call dir is removed" "still present: $CASE_CALL_DIR" \
-  || pass "the unconfirmed call dir is removed"
+[[ "$OUT" == *'"undelivered": true'* || "$OUT" == *'"undelivered":true'* ]] \
+  && pass "an accepted-but-unconfirmed paste reports undelivered, NOT a fresh fallback" \
+  || fail "an accepted-but-unconfirmed paste reports undelivered, NOT a fresh fallback" "out: $OUT"
+[[ "$OUT" != *'"fallback"'* ]] \
+  && pass "…and never says fallback:fresh (which would re-deliver the same prompt)" \
+  || fail "…and never says fallback:fresh (which would re-deliver the same prompt)" "out: $OUT"
 
-# ok:false from the socket: fall back, and do not pretend the screen said anything.
+# The prompt is the only copy left, so the payload survives in the call dir — the
+# opposite of the pre-paste refusals, which delete it. (run_case snapshots the dir
+# and then removes it, so these read the snapshot.)
+[[ -n "$CASE_CALL_DIR" ]] \
+  && pass "the call dir survives an unconfirmed paste (it holds the only copy)" \
+  || fail "the call dir survives an unconfirmed paste (it holds the only copy)" "out: $OUT"
+$CASE_HAD_PAYLOAD_FILE \
+  && pass "…and pending_paste.md is still in it" \
+  || fail "…and pending_paste.md is still in it" "call_dir=$CASE_CALL_DIR"
+[[ "$CASE_PAYLOAD_MODE" == "600" ]] \
+  && pass "…still owner-only" \
+  || fail "…still owner-only" "mode=$CASE_PAYLOAD_MODE"
+[[ "$OUT" == *"$CASE_CALL_DIR/pending_paste.md"* ]] \
+  && pass "…and the outcome names it, so the caller can recover the prompt" \
+  || fail "…and the outcome names it, so the caller can recover the prompt" "out: $OUT"
+
+# A paste the SOCKET refused never reached the callee, so the fresh fallback is
+# safe here — this is the line between the two outcomes.
 CASE_RESPONSES="$REJECT_RESPONSES" run_case rejected_paste screen_idle_empty -- --prompt "$MULTILINE_MSG"
 CASE_RESPONSES=""
 [[ "$OUT" == *'"fallback"'* && "$OUT" == *"terminal.paste"* ]] \
   && pass "a rejected terminal.paste returns the fallback and names the failure" \
   || fail "a rejected terminal.paste returns the fallback and names the failure" "out: $OUT"
+[[ "$OUT" != *'"undelivered"'* ]] \
+  && pass "…and is NOT reported as undelivered (nothing left this machine)" \
+  || fail "…and is NOT reported as undelivered (nothing left this machine)" "out: $OUT"
 
 # Unresolvable surface: fall back BEFORE any socket traffic.
 CASE_ORPHAN_TREE=1 run_case orphan_tree screen_idle_empty -- --prompt "$MULTILINE_MSG"

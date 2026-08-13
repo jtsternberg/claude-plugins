@@ -200,6 +200,17 @@ if [[ -n "$BOOT_TIMEOUT" && ! "$BOOT_TIMEOUT" =~ ^[0-9]+$ ]]; then
     "wait-for-session.sh compares it arithmetically; a non-numeric value would break its poll loop."
 fi
 
+# The box wait, resolved ONCE here and threaded to every delivery site.
+#
+# Two waits, one event: wait-for-session.sh waits for the callee's REPL to exist,
+# and cmux-paste.sh waits for its input box to be drawn. So --boot-timeout governs
+# both — a caller who raised it for a slow machine meant both. The final default is
+# the shared HOTLINE_BOOT_TIMEOUT_CMUX from repl-state.sh, which is also what
+# wait-for-session.sh falls back to: the documented 60 now has ONE definition. The
+# old code read ${BOOT_TIMEOUT:-20} against an unset variable, so the real default
+# was 20 while the docs promised 60.
+PASTE_BOX_TIMEOUT="${HOTLINE_PASTE_BOX_TIMEOUT:-${BOOT_TIMEOUT:-$HOTLINE_BOOT_TIMEOUT_CMUX}}"
+
 if [[ -z "$TARGET_REF" && -n "$RESUME_ARG" ]]; then
   # Dialing a session ID the user handed us: the session ID is itself a
   # resolvable reference (resolve-workspace.sh reverse-looks-up its workspace).
@@ -556,6 +567,22 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
     REUSE=$(bash "$DIAL_SCRIPTS/cmux-reuse-surface.sh" \
       --surface "$SURFACE_REF" --session "$REMOTE_SESSION_ID" \
       --prompt-file "$SEND_PROMPT_FILE" --cwd "$TARGET_PATH" 2>/dev/null)
+
+    # UNDELIVERED IS CHECKED FIRST, before the call_dir success test below. The
+    # undelivered outcome carries a call_dir too (it holds the only copy of the
+    # prompt), so testing for call_dir first read a failed delivery as a successful
+    # one — reported "connected" and left the caller polling a surface that may
+    # never answer.
+    #
+    # The paste went out and could not be confirmed: NOT a fallback. The fresh path
+    # would re-deliver the same prompt into a --resume of the same session, so a
+    # payload that actually landed would run twice.
+    if [[ "$(jq -r '.undelivered // false' <<<"$REUSE" 2>/dev/null)" == "true" ]]; then
+      CALL_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
+      emit_error deliver "the follow-up was pasted into surface $SURFACE_REF but could not be confirmed: $(reason_of "$REUSE")" \
+        "The REPL is live and may ALREADY have the message; $(jq -r '.prompt_file // "the prompt file"' <<<"$REUSE" 2>/dev/null) still holds it. Read the callee's transcript for the call_id before doing anything. See references/error-recovery.md § Delivery. Do NOT re-dial — that would deliver it twice."
+    fi
+
     REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
     if [[ -n "$REUSE_DIR" ]]; then
       CALL_DIR="$REUSE_DIR"
@@ -566,7 +593,8 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
         ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} >/dev/null 2>&1
       emit_connected true
     fi
-    # {"fallback":"fresh"} — surface gone, or not accepting the message right now.
+    # {"fallback":"fresh"} — refused BEFORE anything was sent, so a fresh surface is
+    # safe: the callee received nothing.
     add_fallback "surface-reuse→fresh($(reason_of "$REUSE"))"
     SURFACE_REF=""
   fi
@@ -585,6 +613,7 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
   [[ -n "$EFFECTIVE_RESUME" ]] && CONF_ARGS+=(--resume "$EFFECTIVE_RESUME")
   $DO_FORK && CONF_ARGS+=(--fork-session)
   [[ -n "$TOOLS" ]] && CONF_ARGS+=(--tools "$TOOLS")
+  CONF_ARGS+=(--box-timeout "$PASTE_BOX_TIMEOUT")
   # The file, never argv: conference was the last hotline path handing a whole
   # payload to `claude` on a command line (claude-plugins-92s5).
   CONF_ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
@@ -603,7 +632,7 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
     # The surface is open and its REPL is live, but it was never told anything —
     # the same situation as a failed first-contact paste, so the same stage.
     emit_error deliver "$CONF_ERROR" \
-      "The conference pane is live and empty; $(jq -r '.prompt_file // "the prompt file"' <<<"$CONF" 2>/dev/null) still holds the prompt. See references/error-recovery.md § CMUX Failures. Do NOT silently re-dial — the callee may have received it after the confirmation window."
+      "The conference pane is live and empty; $(jq -r '.prompt_file // "the prompt file"' <<<"$CONF" 2>/dev/null) still holds the prompt (call dir $(jq -r '.call_dir // "n/a"' <<<"$CONF" 2>/dev/null)). See references/error-recovery.md § Delivery — NOT § CMUX Failures. Do NOT silently re-dial — the callee may have received it after the confirmation window."
   elif [[ -n "$CONF_ERROR" ]]; then
     emit_error fire "$CONF_ERROR" \
       "See references/error-recovery.md § CMUX Failures. Retry with --placement detached, or force headless with --headless."
@@ -785,11 +814,6 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
     emit_error deliver "the callee's REPL booted but no surface could be resolved to paste the prompt into" \
       "Check \$call_dir/workspace_ref.txt against \`cmux tree --all --json --id-format both\`. Retry with the default side placement, or force headless with --headless."
   fi
-  # The box wait is bounded by --boot-timeout, not by a separate knob: they are
-  # waiting for the same thing (this callee's REPL becoming usable), and a caller
-  # who raised one because the target machine is slow meant both.
-  # HOTLINE_PASTE_BOX_TIMEOUT still overrides, and is documented.
-  PASTE_BOX_TIMEOUT="${HOTLINE_PASTE_BOX_TIMEOUT:-${BOOT_TIMEOUT:-20}}"
   DELIVER_ARGS=(--surface "$DELIVER_SURFACE"
                 --payload-file "$CALL_DIR/pending_paste.md" --call-id "$CALL_ID_OUT"
                 --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID"
@@ -798,7 +822,7 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
   DELIVERY=$(bash "$DIAL_SCRIPTS/cmux-paste.sh" "${DELIVER_ARGS[@]}" 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then
     emit_error deliver "the callee's REPL booted but the prompt never landed in it: $(reason_of "$DELIVERY")" \
-      "The pane is live and empty; \$call_dir/pending_paste.md still holds the prompt. See references/error-recovery.md § CMUX Failures. Do NOT silently re-dial — the callee may have received it after the confirmation window."
+      "The pane is live and empty; \$call_dir/pending_paste.md still holds the prompt. See references/error-recovery.md § Delivery — NOT § CMUX Failures, which describes the launch. Do NOT silently re-dial — the callee may have received it after the confirmation window."
   fi
   # The callee's transcript is the record now; the vehicle goes.
   rm -f "$CALL_DIR/pending_paste.md"

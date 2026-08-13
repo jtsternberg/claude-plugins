@@ -26,8 +26,11 @@
 #   cmux-reuse-surface.sh --surface <uuid-or-ref> --session <id>
 #                         (--prompt <text> | --prompt-file <path>)
 #                         [--cwd <path>] [--keep-workspace]
-#   # → {"call_dir": "/tmp/hotline-call-XXXXX"}   (reused)
-#   # → {"fallback": "fresh", "reason": "..."}     (surface gone / send failed)
+#   # → {"call_dir": "/tmp/hotline-call-XXXXX"}   (reused, delivery confirmed)
+#   # → {"fallback": "fresh", "reason": "..."}     (refused BEFORE anything was sent)
+#   # → {"undelivered": true, "reason": "...", "call_dir": …, "prompt_file": …}
+#         the paste went out and could not be confirmed. NOT a fallback: the
+#         payload may have landed, so re-delivering would run it twice.
 #
 # --cwd is the CALLEE session's working directory. It lets wait-for-response.sh
 # derive the callee's JSONL transcript path and read the response from structured
@@ -184,34 +187,19 @@ echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 [[ -n "$CWD" ]] && echo "$CWD" > "$CALL_DIR/cwd.txt"
 
 # Fresh per-call nonce so wait-for-response.sh distinguishes THIS turn's STATUS
-# from the prior exchange's markers still in the surface's scrollback. Same
-# generation ladder as cmux-call-async.sh.
-CALL_ID=$(
-  openssl rand -hex 8 2>/dev/null \
-  || od -A n -N 8 -t x1 /dev/urandom 2>/dev/null | tr -d ' \n' \
-  || date +%s%N | sha256sum 2>/dev/null | cut -c1-16
-)
+# from the prior exchange's markers still in the surface's scrollback. Minting and
+# placement are shared with both launchers (repl-state.sh) — a follow-up is never a
+# slash command, so in practice the nonce lands on its own leading line here.
+CALL_ID=$(hotline_mint_call_id)
 echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
 
-# Follow-ups never re-wrap with /hotline:hotline-ringing (the ringing skill is already
-# loaded in the remote session), so PROMPT is always a raw message — just lead it
-# with the nonce. The receiver echoes it back as `STATUS: <signal> call_id=<nonce>`.
-#
-# The nonce gets its OWN first line rather than sharing one with the message:
-# wait-for-response.sh correlates on it, and at the start of a line it can never
-# be broken across a rendered line wrap the way a mid-line match could be. A
-# separate line is safe here because the paste arrives as one atomic bracketed
-# paste — verified live, 76-line payload, one user turn, nonce line intact.
-# (First contact cannot do this: its payload opens with a slash command, which
-# claude only parses at the very start of the input, so cmux-call-async.sh keeps
-# the nonce inline after the command token.)
-#
 # 0600, inside a 0700 mktemp dir: work orders go through here, and a
-# default-umask 0644 payload would hand every follow-up to any local user. It is
-# removed the moment delivery is confirmed — the callee's transcript is the
-# record of the exchange, and this file is only the vehicle.
-PAYLOAD_FILE="$CALL_DIR/payload.txt"
-( umask 077; printf '[CALL_ID: %s]\n%s' "$CALL_ID" "$PROMPT" > "$PAYLOAD_FILE" )
+# default-umask 0644 payload would hand every follow-up to any local user. Named
+# pending_paste.md like every other path's undelivered prompt, so one recovery
+# instruction covers all of them. Removed the moment delivery is confirmed — the
+# callee's transcript is the record, and this file is only the vehicle.
+PAYLOAD_FILE="$CALL_DIR/pending_paste.md"
+( umask 077; hotline_inject_call_id "$CALL_ID" "$PROMPT" > "$PAYLOAD_FILE" )
 chmod 600 "$PAYLOAD_FILE" 2>/dev/null || true
 
 # Clear the parked text out of the input box, then PROVE it went — the Ctrl-C is
@@ -256,10 +244,26 @@ PASTE_ARGS=(--surface "$SURFACE_REF" --payload-file "$PAYLOAD_FILE" --call-id "$
 DELIVERY_RESULT=$(bash "$SCRIPT_DIR/cmux-paste.sh" "${PASTE_ARGS[@]}" 2>/dev/null)
 
 if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY_RESULT" 2>/dev/null)" != "true" ]]; then
-  # The call dir must go. wait-for-response.sh would otherwise poll a surface for
-  # a nonce that was never submitted, and the caller would sit on a corpse.
+  DELIVERY_REASON=$(jq -r '.reason // "delivery failed with no reason"' <<<"$DELIVERY_RESULT" 2>/dev/null)
+  if [[ "$(jq -r '.sent // false' <<<"$DELIVERY_RESULT" 2>/dev/null)" == "true" ]]; then
+    # THE SOCKET ACCEPTED THE PASTE and we could not prove where it went. This must
+    # NOT become fallback:fresh: the caller answers that by opening a new surface
+    # and re-delivering the SAME prompt into a --resume of the SAME session, so a
+    # payload that actually landed gets executed twice. Every other path treats
+    # this exact state as a hard stop; so does this one now.
+    #
+    # The call dir and pending_paste.md stay put — the prompt is what the human or
+    # the caller needs in order to decide, and it is the only copy left.
+    jq -nc --arg reason "$DELIVERY_REASON" --arg dir "$CALL_DIR" --arg pf "$PAYLOAD_FILE" \
+      '{undelivered: true, reason: $reason, call_dir: $dir, prompt_file: $pf}'
+    exit 0
+  fi
+  # Nothing left this machine (no input box, unresolvable surface, an RPC the
+  # socket refused), so a fresh surface is safe. The call dir must go:
+  # wait-for-response.sh would otherwise poll a surface for a nonce that was never
+  # submitted, and the caller would sit on a corpse.
   rm -rf "$CALL_DIR"
-  fallback_fresh "$(jq -r '.reason // "delivery failed with no reason"' <<<"$DELIVERY_RESULT" 2>/dev/null)"
+  fallback_fresh "$DELIVERY_REASON"
 fi
 
 # Delivered and confirmed: the vehicle has served its purpose and the callee's

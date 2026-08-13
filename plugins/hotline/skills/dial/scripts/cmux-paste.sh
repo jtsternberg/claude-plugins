@@ -31,11 +31,17 @@
 #                 [--cwd <callee-cwd>] [--session <callee-session-id>]
 #                 [--wait-box <seconds>] [--workspace <uuid>] [--baseline <path>]
 #
-#   # → {"delivered":true,"confirmed":"transcript"|"screen","workspace":"…","surface":"…"}
-#   # → {"delivered":false,"reason":"…"}
+#   # → {"delivered":true,"sent":true,"confirmed":"transcript"|"screen","workspace":"…","surface":"…"}
+#   # → {"delivered":false,"sent":false,"reason":"…"}   nothing left this machine
+#   # → {"delivered":false,"sent":true,"reason":"…"}    the socket took it; landing unproven
 #
 # Always exits 0 with JSON: whether a failed delivery means "fall back to a
 # fresh surface" or "fail the dial" is the caller's decision, not this script's.
+#
+# `sent` is what makes that decision safe. delivered:false with sent:false means
+# the callee received nothing, so delivering somewhere else is fine. delivered:false
+# with sent:TRUE means the payload may already be in the callee's input queue and
+# only the confirmation missed — re-delivering it runs the work order twice.
 #
 # --wait-box polls until the REPL has drawn its input box. This is not politeness
 # about a slow boot: a payload delivered to a surface that has not exec'd claude
@@ -92,7 +98,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-undelivered() { jq -nc --arg reason "$1" '{delivered: false, reason: $reason}'; exit 0; }
+# undelivered <reason> [sent]
+#
+# `sent` is the whole safety distinction, and it is not cosmetic. A failure BEFORE
+# the paste went out (no input box, unresolvable surface, an RPC the socket
+# refused) means the callee received nothing, so re-delivering somewhere else is
+# safe. A failure AFTER the socket accepted it means the payload may well have
+# landed and only the confirmation missed — re-delivering then runs the work order
+# TWICE. Callers branch on this, so it is reported rather than inferred.
+PASTE_SENT=false
+undelivered() {
+  jq -nc --arg reason "$1" --argjson sent "${2:-$PASTE_SENT}" \
+    '{delivered: false, sent: $sent, reason: $reason}'
+  exit 0
+}
 
 [[ -z "$SURFACE_REF"  ]] && undelivered "no surface handle given"
 [[ -z "$CALL_ID"      ]] && undelivered "no --call-id nonce given; delivery could not be confirmed even if it landed"
@@ -163,9 +182,12 @@ if ! RPC_OUT=$(python3 "$CMUX_RPC" --method terminal.paste \
                  --payload-file "$PAYLOAD_FILE" --submit-key return 2>"$RPC_ERR"); then
   REASON=$(tr '\n\r\t' '   ' < "$RPC_ERR" | cut -c1-160)
   rm -f "$RPC_ERR"
-  undelivered "terminal.paste into surface $SURF_ID failed: ${REASON:-no diagnostic}"
+  # The socket refused it, so nothing reached the callee: safe to try elsewhere.
+  undelivered "terminal.paste into surface $SURF_ID failed: ${REASON:-no diagnostic}" false
 fi
 rm -f "$RPC_ERR"
+# From here on the payload may be in the callee's input queue whatever we observe.
+PASTE_SENT=true
 
 # --- Did the callee actually get it? ----------------------------------------
 # ok:true is the socket's ack, not delivery proof. The no-trusting-exit-codes
@@ -266,4 +288,4 @@ else
 fi
 
 jq -nc --arg c "$CONFIRMED" --arg w "$WS_ID" --arg s "$SURF_ID" \
-  '{delivered: true, confirmed: $c, workspace: $w, surface: $s}'
+  '{delivered: true, sent: true, confirmed: $c, workspace: $w, surface: $s}'
