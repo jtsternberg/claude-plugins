@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 10,
+            "statusMessage": "checking agent mail",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/mail-check.sh\" --event SessionStart || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 10,
+            "statusMessage": "checking agent mail",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/mail-check.sh\" --event UserPromptSubmit || true"
+          }
+        ]
+      }
+    ]
+  }
+}

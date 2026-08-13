@@ -9,8 +9,25 @@ is an API resource, built for agents rather than people.
 
 **Install:** `claude plugin install agentmail@jtsternberg`
 
-Ships one skill: `using-agentmail` — `/agentmail:using-agentmail` in Claude Code,
-`$agentmail:using-agentmail` in Codex.
+Ships five skills and one hook. Invoke a skill as `/agentmail:<name>` in Claude Code,
+`$agentmail:<name>` in Codex.
+
+| Skill | For |
+|---|---|
+| `using-agentmail` | the hub — setup, keys, flags, errors, the whole command surface |
+| `contacts` | the address book, and which addresses are actually verified |
+| `check-mail` | what arrived, reading full bodies, triaging an inbox |
+| `replying` | reply / reply-all / forward, draft-first for anything consequential |
+| `relay-work-order` | handing work to (or taking it from) another agent over email |
+
+The hook notices unread mail during a session. It does nothing until you turn it on — see
+[Mail-check hook](#mail-check-hook).
+
+**Codex availability caveat.** Everything here is built to the repo's dual-harness contract
+and the hook is live-verified on Codex, but `agentmail` is not in this repo's Codex-native
+marketplace catalog (`.agents/plugins/marketplace.json` lists three plugins), so
+`codex plugin add agentmail@jtsternberg` does not resolve today. That is a repo-wide catalog
+gap, tracked separately as beads claude-plugins-0way, not a property of this plugin.
 
 ## Setup
 
@@ -38,6 +55,28 @@ bash skills/using-agentmail/scripts/agentmail-signup.sh \
 # → a 6-digit code is emailed to you
 bash skills/using-agentmail/scripts/agentmail-verify.sh --otp-code 123456
 ```
+
+To check what you have, without signing anything up:
+
+```bash
+bash scripts/agentmail-preflight.sh          # one API call; prints your inbox id
+bash scripts/agentmail-preflight.sh --local  # offline: CLI + key presence only
+```
+
+Exit `0` means ready — with `--local`, CLI + key present; without it, the key was also
+accepted by a live probe, **including a key that is merely scope-limited**. An
+inbox-scoped key cannot read organization details, and a `403 missing_permission` for
+something out of scope is not a rejected credential. Exit `12` is reserved for a key that
+is actually malformed, revoked, or rotated. `10` no CLI, `11` no key,
+`30` inconclusive (network/429/5xx).
+
+> **Changed in 0.2.0** — the preflight's exit-code contract. A recognized but
+> scope-limited key (`403 missing_permission`, e.g. an inbox-scoped key) now exits `0`
+> "accepted, scope-limited" instead of `12` "CREDENTIAL REJECTED"; anything branching on
+> exit `12` to mean "bad key" will behave differently. The probe also moved from
+> `organizations get` to `inboxes list` (so scoped keys pass their own probe), the script
+> now prints the resolved inbox id, and a healthy `--local` run exits `0` (previously
+> `20`, which no longer exists).
 
 The signup script writes the credential to a `0600` file under
 `~/.config/agentmail/` and prints only a masked fingerprint plus the path. Storing the
@@ -71,13 +110,100 @@ here specifically:
 
 `tests/safety_test.sh` fails if a send or delete verb appears in `allowed-tools`.
 
-## What the skill covers
+## Contacts
+
+An address book at `~/.config/agentmail/contacts.json` (mode `0600`), because AgentMail has
+no contacts resource — zero hits for `contact` across the 82 paths in its OpenAPI spec, and
+`Lists` are send/receive ACLs rather than an address book.
+
+```bash
+bash scripts/agentmail-contacts.sh init
+bash scripts/agentmail-contacts.sh add --name "Some Agent" --email partner-agent@agentmail.to \
+  --kind agent --verified-from "thread abc123, 4 messages"
+bash scripts/agentmail-contacts.sh get "some agent"
+```
+
+Nothing is seeded and nothing personal ships in this repo. Two fields carry weight:
+`verified_from` records *how* an address was confirmed, so an observed address stays
+distinguishable from a remembered one, and `kind` (`human`/`agent`) defaults to `unknown`
+rather than guessing, because it decides whether the relay protocol applies and who
+approves a destructive action.
+
+The store is never written into a repository, and the script takes no path flag. With no
+`XDG_CONFIG_HOME` and no absolute `HOME` it **refuses** (exit 64) rather than falling back to a
+relative `./.config/…` in the current directory — which, run from a checkout, is the exact
+outcome the store's location exists to prevent.
+
+The `contacts` skill allowlists only `get` and `list`. `add`, `update`, `remove`, and `init`
+write to the store, so they fall through to a permission prompt like every other mutation in
+this plugin.
+
+## Mail-check hook
+
+A `SessionStart` + `UserPromptSubmit` hook that mentions unread mail during a session. It is
+**inert until you activate it** — installing the plugin does not start making network calls
+before every prompt.
+
+```bash
+bash hooks/scripts/mail-check.sh --init                # remind mode (default)
+bash hooks/scripts/mail-check.sh --init --mode auto     # also inject capped previews
+rm ~/.config/agentmail/mail-check.json                  # off again
+```
+
+`remind` injects one line — count, inbox, newest subject, timestamp. `auto` adds truncated
+previews under hard count and byte caps. Every tunable is in
+[`references/mail-check.example.json`](references/mail-check.example.json); state lives at
+`~/.cache/agentmail/mail-check-state.json`.
+
+What it will not do: print or store the API key, fail a session (every unattended path
+exits 0, and there is no `set -e`), call the API more than once per cooldown, or change inbox
+state — no labels, no mark-as-read, no drafts. Missing CLI, missing key, unset `HOME`, bad
+config, API error, timeout: silent no-op. It re-announces only when the newest unread message
+changes, or after `renotify_after_minutes`, so ignored mail stops nagging.
+
+Two things it treats as hostile, because this plugin's whole job is reading text written by
+strangers:
+
+- **Every inbox id is untrusted** — from the API, from your config, from the hook's own cache
+  — and is validated against a strict address pattern before it reaches a command line or a
+  state key. Ids that fail are dropped, not repaired. The plan the hook builds for itself is
+  parsed field-wise, never `eval`'d. An earlier build did `eval` it, and an
+  `inboxes list` response containing `a$(…)@agentmail.to` executed before every prompt.
+- **Message content stays out of shared `/tmp`.** The scratch file holding an API response
+  carries subjects, senders, and previews, so it lives beside the state file under your cache
+  directory rather than in `TMPDIR`.
+
+`python3` (or `python`) is required. There is no `jq` fallback — one implementation of the
+JSON escaping rules, not two — so with no interpreter the hook is silently inert.
+
+### Harness differences
+
+Both harnesses run the same `hooks.json` and the same script, and both inject the
+`hookSpecificOutput.additionalContext` object it emits. That is live-verified on Claude Code
+2.1.x and Codex CLI 0.147.0, not inferred — see
+[`docs/codex/hooks-under-codex.md`](../../docs/codex/hooks-under-codex.md).
+
+Two real differences:
+
+- **Codex gates plugin hooks behind a trust prompt.** The first Codex session after
+  installing this plugin is silent until you trust its hooks. That is Codex working as
+  intended and the plugin does not try to work around it.
+- **Claude Code replays saved injected text on `--resume`** rather than re-running the hook
+  for past turns, so a stale notice can reappear in a resumed session. Every notice is
+  timestamped for exactly this reason — treat it as a pointer, not a live count.
+
+`Stop` is deliberately not used on either harness: Claude Code does not add `Stop` stdout to
+context, and `Stop`'s `additionalContext` is documented as feedback that *continues* the
+conversation, which would restart a turn the agent had just finished.
+
+## What the skills cover
 
 Inboxes, messages (send / list / get / search / raw), threads (per-inbox and org-wide),
-replies and forwards, drafts including scheduled sends, labels as read/unread state, and
-attachment **downloads**.
+replies and forwards, drafts including scheduled sends, labels as read/unread state,
+attachment **downloads**, a local address book, inbox triage, and the agent-to-agent
+work-order protocol.
 
-Deliberately out of scope for v0.1, named in the skill and routed to the docs: webhooks
+Deliberately out of scope, named in the skills and routed to the docs: webhooks
 and WebSockets (both need a public URL or a long-lived process, which is not something a
 CLI skill should stand up), pods and multi-tenancy, custom domains and DNS verification,
 allow/block lists, and attachment **sending** — the published docs and the installed
@@ -102,11 +228,18 @@ Use whichever fits. They are not meant to be run together.
 ## Tests
 
 ```bash
-bash plugins/agentmail/tests/skill-contract_test.sh   # dual-harness contract
-bash plugins/agentmail/tests/safety_test.sh           # consent, secrets, send gate
+bash plugins/agentmail/tests/skill-contract_test.sh   # dual-harness contract, every skill
+bash plugins/agentmail/tests/safety_test.sh           # consent, secrets, send gate, guardrails
 bash plugins/agentmail/tests/preflight_test.sh        # script behavior vs. a stubbed CLI
+bash plugins/agentmail/tests/contacts_test.sh         # the contacts store
+bash plugins/agentmail/tests/mail-check_test.sh        # the hook, including every silent path
 ```
 
-All three run under `bash tests/run-all.sh`. Nothing touches the real API: the
-behavioral suite stubs `agentmail` via `PATH` and redirects `HOME`/`XDG_CONFIG_HOME`
-into a temp dir, so no real key is needed and no real credential file is touched.
+All five run under `bash tests/run-all.sh`. Nothing touches the real API: the behavioral
+suites stub `agentmail` via `PATH` and redirect `HOME`, `XDG_CONFIG_HOME`, and
+`XDG_CACHE_HOME` into a temp dir, so no real key is needed and no real credential, contacts
+file, or cache is read or written.
+
+Skills and shell files are discovered by **glob**, not by a hardcoded list. That is not
+style: moving the preflight to the plugin root silently dropped two safety assertions while
+the suite still reported all-green, which is how a security check rots unnoticed.

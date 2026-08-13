@@ -88,10 +88,32 @@ function validateCatalogs(root) {
 	const pluginsRoot = path.join(root, 'plugins');
 	const legacy = catalogEntries(path.join(root, '.claude-plugin/marketplace.json'));
 	const native = catalogEntries(path.join(root, '.agents/plugins/marketplace.json'));
-	assert.deepEqual([...new Set(legacy)].sort(), legacy.slice().sort(), 'legacy catalog contains duplicate names');
-	assert.deepEqual([...new Set(native)].sort(), native.slice().sort(), 'native catalog contains duplicate names');
-	assert.deepEqual(legacy.slice().sort(), manifestPlugins(pluginsRoot, '.claude-plugin'));
-	assert.deepEqual(native.slice().sort(), manifestPlugins(pluginsRoot, '.codex-plugin'));
+	const legacySet = new Set(legacy);
+	const nativeSet = new Set(native);
+	assert.deepEqual([...legacySet].sort(), legacy.slice().sort(), 'legacy catalog contains duplicate names');
+	assert.deepEqual([...nativeSet].sort(), native.slice().sort(), 'native catalog contains duplicate names');
+	// The legacy catalog is exactly the Claude-manifest-bearing plugins.
+	assert.deepEqual(legacy.slice().sort(), manifestPlugins(pluginsRoot, '.claude-plugin'),
+		'legacy catalog must list exactly the .claude-plugin manifest-bearing plugins');
+	// The Codex-native catalog is a GENERATED full-inventory catalog (ADR-002):
+	// it must offer every legacy plugin — Codex reads their .claude-plugin
+	// manifest by fallback — plus any native-only extras.
+	for (const name of legacy) {
+		assert.ok(nativeSet.has(name), `native catalog is missing legacy plugin ${name}`);
+	}
+	// A native-only extra (in the native catalog, absent from legacy) has no
+	// Claude manifest to fall back to, so it must ship its own .codex-plugin one.
+	const codexManifest = new Set(manifestPlugins(pluginsRoot, '.codex-plugin'));
+	for (const name of native) {
+		if (legacySet.has(name)) continue;
+		assert.ok(codexManifest.has(name),
+			`native-only catalog entry ${name} must ship a .codex-plugin/plugin.json`);
+	}
+	// Every native entry must resolve to an existing plugin directory.
+	for (const name of native) {
+		assert.ok(fs.existsSync(path.join(pluginsRoot, name)),
+			`native catalog entry ${name} has no plugin directory`);
+	}
 }
 
 function runtimeReferenceErrors(pluginsRoot) {
@@ -154,7 +176,7 @@ function fixtureRoot() {
 	return root;
 }
 
-test('catalog guard rejects drift and accepts harness-specific inventories', () => {
+test('catalog guard requires full Codex inventory and native manifests for extras', () => {
 	const root = fixtureRoot();
 	try {
 		for (const [name, manifestDir] of [['legacy-only', '.claude-plugin'], ['codex-only', '.codex-plugin']]) {
@@ -162,15 +184,33 @@ test('catalog guard rejects drift and accepts harness-specific inventories', () 
 			fs.mkdirSync(dir, { recursive: true });
 			fs.writeFileSync(path.join(dir, 'plugin.json'), '{}');
 		}
-		fs.writeFileSync(path.join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ plugins: [] }));
+		fs.writeFileSync(path.join(root, '.claude-plugin/marketplace.json'), JSON.stringify({
+			plugins: [{ name: 'legacy-only', source: './plugins/legacy-only' }],
+		}));
+		// Reject: the native catalog omits a legacy plugin (the 0way regression).
 		fs.writeFileSync(path.join(root, '.agents/plugins/marketplace.json'), JSON.stringify({
 			plugins: [{ name: 'codex-only', source: { path: './plugins/codex-only' } }],
 		}));
 		assert.throws(() => validateCatalogs(root));
-		fs.writeFileSync(path.join(root, '.claude-plugin/marketplace.json'), JSON.stringify({
-			plugins: [{ name: 'legacy-only', source: './plugins/legacy-only' }],
+		// Accept: native offers every legacy plugin plus a native-only extra that
+		// carries its own .codex-plugin manifest.
+		fs.writeFileSync(path.join(root, '.agents/plugins/marketplace.json'), JSON.stringify({
+			plugins: [
+				{ name: 'legacy-only', source: { path: './plugins/legacy-only' } },
+				{ name: 'codex-only', source: { path: './plugins/codex-only' } },
+			],
 		}));
 		assert.doesNotThrow(() => validateCatalogs(root));
+		// Reject: a native-only extra with no .codex-plugin manifest to resolve.
+		fs.mkdirSync(path.join(root, 'plugins/extra-no-manifest'), { recursive: true });
+		fs.writeFileSync(path.join(root, '.agents/plugins/marketplace.json'), JSON.stringify({
+			plugins: [
+				{ name: 'legacy-only', source: { path: './plugins/legacy-only' } },
+				{ name: 'codex-only', source: { path: './plugins/codex-only' } },
+				{ name: 'extra-no-manifest', source: { path: './plugins/extra-no-manifest' } },
+			],
+		}));
+		assert.throws(() => validateCatalogs(root));
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
@@ -180,10 +220,15 @@ test('marketplace catalogs match the current manifest-bearing plugin directories
 	assert.doesNotThrow(() => validateCatalogs(REPO));
 });
 
-test('dual-published plugins keep manifest versions aligned', () => {
-	const legacy = new Set(catalogEntries(path.join(REPO, '.claude-plugin/marketplace.json')));
-	const native = new Set(catalogEntries(path.join(REPO, '.agents/plugins/marketplace.json')));
-	const dualPublished = [...legacy].filter(name => native.has(name));
+test('plugins that ship both manifests keep versions aligned', () => {
+	// "Dual-published" is a manifest fact, not a catalog fact: every legacy plugin
+	// now appears in the native catalog too (served by .claude-plugin fallback), so
+	// the version-alignment obligation applies only to plugins that actually ship
+	// BOTH a .claude-plugin and a .codex-plugin manifest. See docs/release.md §1.
+	const dualPublished = directories(PLUGINS).filter(name =>
+		fs.existsSync(path.join(PLUGINS, name, '.claude-plugin/plugin.json')) &&
+		fs.existsSync(path.join(PLUGINS, name, '.codex-plugin/plugin.json')),
+	);
 
 	for (const [name, rationale] of DUAL_PUBLISHED_VERSION_EXCEPTIONS) {
 		assert.ok(dualPublished.includes(name), `version exception is not dual-published: ${name}`);

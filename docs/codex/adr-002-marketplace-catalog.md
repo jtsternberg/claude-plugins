@@ -1,6 +1,6 @@
 # ADR 002: Codex-native marketplace catalog
 
-**Status:** Proposed — JT decides
+**Status:** Accepted and implemented (2026-08-12) — see the amendment note at the end.
 
 ## Decision being asked
 
@@ -84,3 +84,45 @@ This adds a second published file but not a second authored catalog. It makes
 the command-only exclusion visible to Codex while preserving `pr-workflow`'s
 working skills. It also deliberately stops short of native plugin manifests:
 that larger compatibility and validator problem remains ADR 001's decision.
+
+## Amendment note (2026-08-12) — as implemented
+
+Implemented per the recommendation (generated full-inventory native catalog with
+a `--check` drift guard), fixing bug `claude-plugins-0way` where a hand-authored
+3-entry native catalog silently shadowed the legacy catalog and made every other
+plugin uninstallable in Codex. Three facts discovered during implementation
+changed the details above; recording them so the next reader does not have to
+rediscover them:
+
+1. **No native plugin manifests are required.** Codex reads a plugin's manifest
+   by fallback — `.codex-plugin/plugin.json` if present, else
+   `.claude-plugin/plugin.json`. Verified live on Codex CLI 0.147.0: a
+   native-catalog entry for a manifest-less plugin (`thinking-tools`) installed
+   and reported its Claude manifest version. So the generator emits only the
+   catalog; per-plugin native manifests stay out of scope, consistent with
+   ADR 001. Version alignment across the two harnesses is therefore automatic.
+
+2. **The command-only premise is stale, so the policy set changed.** When this
+   ADR was written, `beads-workflow` was command-only and slated for
+   `NOT_AVAILABLE`. Every plugin has since migrated to skills — there are now
+   **zero `commands/` directories repo-wide**, and `beads-workflow` ships the
+   `fix-findings-beads-tasks` and `tackle-epic` skills, which work in Codex. Its
+   override was **dropped**. The plugins that genuinely have nothing Codex can
+   run are `publish-insights` (README-only, no `SKILL.md`) and `workspace-status`
+   (a Claude Code statusline `.php`, no skills/commands/hooks). Those two carry
+   `policy.installation: NOT_AVAILABLE`; nothing else does. `pr-workflow` remains
+   available, as this ADR intended, because its skills work in Codex.
+
+3. **Inventory is dynamic, not 27.** The legacy catalog now has 28 entries
+   (`agentmail` was added after this ADR), plus the native-only `codex` plugin
+   (it ships a `.codex-plugin` manifest and is absent from the legacy catalog),
+   for 29 native entries. The generator preserves such native-only extras via a
+   `nativeOnly` list in its config; the drift guard asserts against the *current*
+   legacy count, never a hardcoded number.
+
+Artifacts: generator `scripts/gen-codex-catalog.mjs` (run bare to write, `--check`
+to verify), config `scripts/codex-catalog.config.json` (the only hand-edited
+input — policy overlay + native-only extras), output `.agents/plugins/marketplace.json`,
+drift guard `tests/codex-catalog-drift.test.mjs` (registered by an explicit line
+in `tests/run-all.sh`, since repo-root suites are not glob-discovered). `docs/release.md`
+§1 was corrected to describe this resolution behavior.

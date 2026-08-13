@@ -1,6 +1,6 @@
 {
   "name": "codex",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Codex model stances and delegation discipline for testing frontier-model behavior across Sol, Terra, and supporting models.",
   "author": {
     "name": "Justin Sternberg",
