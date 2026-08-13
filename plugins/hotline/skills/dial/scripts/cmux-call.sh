@@ -58,6 +58,11 @@ ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
 #   window               — a surface in a specific window (find-or-create).
 PLACEMENT="sidebyside"
 WINDOW_REF=""
+# How long delivery waits for the callee's REPL to draw its input box. dial.sh
+# resolves this once for the whole call (HOTLINE_PASTE_BOX_TIMEOUT, else
+# --boot-timeout, else the shared default) and passes it in; the fallback chain here
+# is for direct callers only.
+BOX_TIMEOUT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -70,6 +75,7 @@ while [[ $# -gt 0 ]]; do
     --tools) ALLOWED_TOOLS="$2"; shift 2 ;;
     --detached|--new-workspace) PLACEMENT="detached"; shift ;;
     --window) PLACEMENT="window"; WINDOW_REF="$2"; shift 2 ;;
+    --box-timeout) BOX_TIMEOUT="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -101,6 +107,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Tree reading (and the input-box judgement) live in one place.
 # shellcheck source=../../../scripts/repl-state.sh
 source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
+BOX_TIMEOUT="${BOX_TIMEOUT:-${HOTLINE_PASTE_BOX_TIMEOUT:-$HOTLINE_BOOT_TIMEOUT_CMUX}}"
 
 # Side-by-side delegates to cmux-cli's canonical open-side-surface.sh (single
 # source of truth — no vendored copy). cmux can be present without the cmux-cli
@@ -192,24 +199,8 @@ fi
 # a leading line of its own: claude parses a slash command only at the very start
 # of the input, so a header above `/hotline:hotline-ringing` would turn the whole
 # invocation into plain text. Same rule as cmux-call-async.sh.
-CALL_ID=$(
-  openssl rand -hex 8 2>/dev/null \
-  || od -A n -N 8 -t x1 /dev/urandom 2>/dev/null | tr -d ' \n' \
-  || date +%s%N | sha256sum 2>/dev/null | cut -c1-16
-)
-if [[ -n "$PROMPT" ]]; then
-  if [[ "$PROMPT" == /* ]]; then
-    CMD_TOKEN="${PROMPT%% *}"
-    REST="${PROMPT#* }"
-    if [[ "$CMD_TOKEN" == "$PROMPT" ]]; then
-      PROMPT="$CMD_TOKEN [CALL_ID: $CALL_ID]"
-    else
-      PROMPT="$CMD_TOKEN [CALL_ID: $CALL_ID] $REST"
-    fi
-  else
-    PROMPT="[CALL_ID: $CALL_ID] $PROMPT"
-  fi
-fi
+CALL_ID=$(hotline_mint_call_id)
+[[ -n "$PROMPT" ]] && PROMPT=$(hotline_inject_call_id "$CALL_ID" "$PROMPT")
 
 LAUNCH_SCRIPT=$(mktemp /tmp/hotline-cmux-launch-XXXXX)
 chmod 700 "$LAUNCH_SCRIPT"
@@ -256,18 +247,55 @@ if ! SEND_OUTPUT=$(cmux send "${SEND_TARGET[@]}" "bash $LAUNCH_SCRIPT\n" 2>&1); 
   exit 1
 fi
 
+# --- Register the call BEFORE delivering -------------------------------------
+# Everything registration needs (the callee session id, and the tags parsed out of
+# the prompt) is known the moment the launch command went out. Registering after
+# delivery meant an undelivered conference left a LIVE REPL that nothing recorded:
+# the next dial to that workspace found no cached session, treated it as first
+# contact, and opened a second surface beside the abandoned one.
+#
+# Best-effort, as before: skipped silently when the prompt carries no ringing tags.
+EFFECTIVE_SID="${RESUME_ID:-$SESSION_ID_PRESET}"
+if [[ -n "$EFFECTIVE_SID" && -n "$PROMPT" ]]; then
+  REG_MODE=$(sed -n 's/.*\[MODE: \([a-z_]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
+  REG_CALLER_SESSION=$(sed -n 's/.*\[SESSION: \([^]]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
+  if [[ -n "$REG_MODE" && -n "$REG_CALLER_SESSION" ]]; then
+    bash "$SCRIPT_DIR/session-cache.sh" set "$CWD" \
+      --caller-session "$REG_CALLER_SESSION" --session "$EFFECTIVE_SID" \
+      --mode "$REG_MODE" ${CALL_ID:+--call-id "$CALL_ID"} >/dev/null 2>&1 || true
+  fi
+fi
+
 # --- Deliver the prompt into the REPL that is now booting --------------------
 # Same verb as every other hotline delivery. Synchronous here: nobody polls a
 # conference call, so if this script returned before the prompt landed there would
 # be no second chance to notice.
+#
+# The undelivered prompt lands in a CALL DIR, in the same shape every other path
+# uses (pending_paste.md alongside call_id/cwd/session ids, in a 0700 mktemp dir).
+# It used to be a bare /tmp/hotline-conf-prompt-* file: nothing GC'd it, no
+# recovery tooling knew to look for it, and error-recovery.md had to carry a
+# conference-only exception to describe it.
 if [[ -n "$PROMPT" ]]; then
-  PASTE_PROMPT=$(mktemp /tmp/hotline-conf-prompt-XXXXX)
-  chmod 600 "$PASTE_PROMPT"
-  printf '%s' "$PROMPT" > "$PASTE_PROMPT"
+  CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
+  PASTE_PROMPT="$CALL_DIR/pending_paste.md"
+  ( umask 077; printf '%s' "$PROMPT" > "$PASTE_PROMPT" )
+  chmod 600 "$PASTE_PROMPT" 2>/dev/null || true
+  echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
+  [[ -n "$CWD"               ]] && echo "$CWD" > "$CALL_DIR/cwd.txt"
+  [[ -n "$SESSION_ID_PRESET" ]] && {
+    echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id_preset.txt"
+    echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id.txt"
+  }
+  echo true > "$CALL_DIR/keep_workspace.txt"
 
-  # Which surface? A surface placement already knows. The detached placement named
-  # a workspace, so its surface comes out of the shared tree reader.
-  PASTE_SURFACE="$PLACE_ID"
+  # Which surface? A surface placement already knows — but ${PLACE_ID} alone is not
+  # enough: open-window-surface.sh emits no surface_id at all, and
+  # open-side-surface.sh emits null when its own tree lookup misses, so every
+  # --window conference failed here and side placement failed intermittently. Fall
+  # back to the display ref exactly as SEND_TARGET does; cmux-paste.sh resolves a
+  # ref through the tree.
+  PASTE_SURFACE="${PLACE_ID:-$PLACE_REF}"
   PASTE_WORKSPACE=""
   if [[ "$PLACE_KIND" == "workspace" ]]; then
     if CONF_ADDR=$(cmux_workspace_current_surface "$PLACE_REF"); then
@@ -277,41 +305,28 @@ if [[ -n "$PROMPT" ]]; then
   fi
   if [[ -z "$PASTE_SURFACE" ]]; then
     jq -n --arg err "the conference REPL was launched but no surface could be resolved to paste the prompt into (placement $PLACE_KIND $PLACE_REF)" \
-          --arg pf "$PASTE_PROMPT" \
-      '{error: $err, undelivered: true, prompt_file: $pf}'
+          --arg pf "$PASTE_PROMPT" --arg dir "$CALL_DIR" \
+      '{error: $err, undelivered: true, prompt_file: $pf, call_dir: $dir}'
     exit 1
   fi
 
   CONF_PASTE_ARGS=(--surface "$PASTE_SURFACE" --payload-file "$PASTE_PROMPT"
                    --call-id "$CALL_ID" --cwd "$CWD"
-                   --wait-box "${HOTLINE_PASTE_BOX_TIMEOUT:-20}")
+                   --wait-box "$BOX_TIMEOUT")
   [[ -n "$PASTE_WORKSPACE"    ]] && CONF_PASTE_ARGS+=(--workspace "$PASTE_WORKSPACE")
   [[ -n "$SESSION_ID_PRESET"  ]] && CONF_PASTE_ARGS+=(--session "$SESSION_ID_PRESET")
   CONF_DELIVERY=$(bash "$SCRIPT_DIR/cmux-paste.sh" "${CONF_PASTE_ARGS[@]}" 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$CONF_DELIVERY" 2>/dev/null)" != "true" ]]; then
-    # The surface stays open: its REPL is live, and the prompt file is left behind
-    # so a human (or the caller) can still deliver it.
+    # The surface stays open: its REPL is live, and the prompt stays in the call dir
+    # so a human (or the caller) can still deliver it. The session is already
+    # registered above, so the next dial finds it instead of opening a second pane.
     jq -n --arg err "the conference REPL booted but the prompt never landed in it: $(jq -r '.reason // "no reason given"' <<<"$CONF_DELIVERY" 2>/dev/null | tr '\n\r\t' '   ' | cut -c1-200)" \
-          --arg pf "$PASTE_PROMPT" \
-      '{error: $err, undelivered: true, prompt_file: $pf}'
+          --arg pf "$PASTE_PROMPT" --arg dir "$CALL_DIR" \
+      '{error: $err, undelivered: true, prompt_file: $pf, call_dir: $dir}'
     exit 1
   fi
   # Delivered and confirmed — the callee's transcript is the record now.
   rm -f "$PASTE_PROMPT"
-fi
-
-# Register the call in the sessions registry (script-level — conference mode
-# has no call_dir/wait-for-session flow, so registration happens right here).
-# Best-effort: skipped silently when the prompt lacks ringing tags.
-EFFECTIVE_SID="${RESUME_ID:-$SESSION_ID_PRESET}"
-if [[ -n "$EFFECTIVE_SID" && -n "$PROMPT" ]]; then
-  REG_MODE=$(sed -n 's/.*\[MODE: \([a-z_]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
-  REG_CALLER_SESSION=$(sed -n 's/.*\[SESSION: \([^]]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
-  if [[ -n "$REG_MODE" && -n "$REG_CALLER_SESSION" ]]; then
-    bash "$(dirname "${BASH_SOURCE[0]}")/session-cache.sh" set "$CWD" \
-      --caller-session "$REG_CALLER_SESSION" --session "$EFFECTIVE_SID" \
-      --mode "$REG_MODE" >/dev/null 2>&1 || true
-  fi
 fi
 
 # Emit both workspace_ref and surface_ref keys (one null) so callers can read

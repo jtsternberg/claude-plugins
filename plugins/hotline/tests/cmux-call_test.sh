@@ -290,6 +290,149 @@ fi
 rm -f "${LAUNCH_SCRIPTS[@]}"
 rm -rf "$tmp"
 
+# --- Finding 4: registration happens BEFORE delivery -------------------------
+# An undelivered conference used to leave a LIVE REPL that nothing had recorded:
+# registration sat after the delivery gate, so the next dial to that workspace found
+# no cached session, called it first contact, and opened a SECOND surface beside the
+# abandoned one. Everything registration needs is known once the launch went out.
+tmp=$(mktemp -d /tmp/hotline-cmux-call-test-XXXXXX)
+mkdir -p "$tmp/bin" "$tmp/cwd" "$tmp/home"
+# A socket that accepts nothing: delivery cannot be confirmed, so the script exits 1.
+NODELIVER_SOCK="$(socket_stub_start "$SOCKROOT/nodeliver" "$SOCKROOT/responses/reject.json")"
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  new-workspace) echo "OK workspace:123" ;;
+  send) printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args"; echo "OK workspace:123" ;;
+  read-screen) printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'; exit 0 ;;
+  tree)
+    jq -nc '{windows:[{workspaces:[{id:"WS-UUID-123",ref:"workspace:123",
+      panes:[{selected_surface_id:"SURF-UUID-123",
+              surfaces:[{id:"SURF-UUID-123",ref:"surface:123"}]}]}]}]}'
+    exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/bin/cmux"
+out_undel=$(PATH="$tmp/bin:$PATH" HOME="$tmp/home" CMUX_FAKE_STATE="$tmp" \
+  CMUX_SOCKET_PATH="$NODELIVER_SOCK" \
+  bash "$SCRIPT_UNDER_TEST" --detached --cwd "$tmp/cwd" \
+  --prompt "/hotline:hotline-ringing [MODE: conference_call] [SESSION: caller-reg] register me first" \
+  2>"$tmp/stderr.txt")
+rc=$?
+if [[ $rc -ne 0 ]] && [[ "$(jq -r '.undelivered // false' <<<"$out_undel" 2>/dev/null)" == "true" ]]; then
+  pass "an undelivered conference exits non-zero with undelivered:true"
+else
+  fail "an undelivered conference exits non-zero with undelivered:true" "rc=$rc out=$out_undel"
+fi
+REG_FILE="$tmp/home/.agents-hotline/sessions/caller-reg.json"
+if [[ -s "$REG_FILE" ]] && jq -e '.connections | length > 0' "$REG_FILE" >/dev/null 2>&1; then
+  pass "…and the session is STILL registered, so the next dial finds it"
+else
+  fail "…and the session is STILL registered, so the next dial finds it" \
+       "$(ls -R "$tmp/home/.agents-hotline" 2>/dev/null || echo 'no registry')"
+fi
+
+# Finding 9: the undelivered prompt lives in a CALL DIR, in the shape every other
+# path uses — not a bare /tmp/hotline-conf-prompt-* nothing GCs or knows about.
+UNDEL_DIR=$(jq -r '.call_dir // empty' <<<"$out_undel" 2>/dev/null)
+if [[ -n "$UNDEL_DIR" && -d "$UNDEL_DIR" && "$UNDEL_DIR" == /tmp/hotline-call-* ]]; then
+  pass "the undelivered prompt is in a /tmp/hotline-call-* dir, like every other path"
+else
+  fail "the undelivered prompt is in a /tmp/hotline-call-* dir, like every other path" \
+       "call_dir=$UNDEL_DIR"
+fi
+if [[ -s "$UNDEL_DIR/pending_paste.md" ]] \
+   && grep -q 'register me first' "$UNDEL_DIR/pending_paste.md"; then
+  pass "…named pending_paste.md, holding the prompt"
+else
+  fail "…named pending_paste.md, holding the prompt" "$(ls -A "$UNDEL_DIR" 2>/dev/null | tr '\n' ' ')"
+fi
+UNDEL_MODE=$(stat -f '%Lp' "$UNDEL_DIR/pending_paste.md" 2>/dev/null || stat -c '%a' "$UNDEL_DIR/pending_paste.md" 2>/dev/null)
+if [[ "$UNDEL_MODE" == "600" ]]; then
+  pass "…owner-only (0600)"
+else
+  fail "…owner-only (0600)" "mode=$UNDEL_MODE"
+fi
+if [[ -s "$UNDEL_DIR/call_id.txt" && -s "$UNDEL_DIR/cwd.txt" ]]; then
+  pass "…with the call_id and cwd recovery tooling expects beside it"
+else
+  fail "…with the call_id and cwd recovery tooling expects beside it" \
+       "$(ls -A "$UNDEL_DIR" 2>/dev/null | tr '\n' ' ')"
+fi
+# Scoped to THIS run: the old code left these behind on every failure, so a bare
+# glob would report other runs' litter rather than this one's behavior. (There were
+# four of them on this machine when the check was written — the finding was real.)
+CONF_ORPHANS=$(find /tmp -maxdepth 1 -name 'hotline-conf-prompt-*' -newer "$SOCKROOT" 2>/dev/null)
+if [[ -z "$CONF_ORPHANS" ]]; then
+  pass "no bare /tmp/hotline-conf-prompt-* orphan is created"
+else
+  fail "no bare /tmp/hotline-conf-prompt-* orphan is created" "$CONF_ORPHANS"
+fi
+launch_script=$(grep -oE '/tmp/hotline-cmux-launch-[A-Za-z0-9]+' "$tmp/send_args" 2>/dev/null | head -1)
+[[ -n "$launch_script" ]] && LAUNCH_SCRIPTS+=("$launch_script")
+rm -rf "$tmp" "$UNDEL_DIR"
+
+# --- Finding 2: an opener that emits NO surface_id ---------------------------
+# open-window-surface.sh never emits surface_id at all, and open-side-surface.sh
+# emits null when its own tree lookup misses — so a conference that reads only
+# .surface_id had nothing to paste into. Every --window conference failed here, and
+# side placement failed nondeterministically. The delivery target must fall back to
+# the display ref exactly as SEND_TARGET does; cmux-paste.sh resolves a ref through
+# the tree. The other stubs in this file all emit a surface_id, which is why this
+# needs its own.
+tmp=$(mktemp -d /tmp/hotline-cmux-call-test-XXXXXX)
+mkdir -p "$tmp/bin" "$tmp/cwd"
+cat > "$tmp/open-side.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "invoked: $*" >> "${SIDE_STUB_LOG:?}"
+# No surface_id key, and a null one would behave identically.
+printf '%s\n' '{"surface_ref":"surface:777","pane_ref":"pane:55","workspace_ref":"workspace:5","ready":"ready"}'
+EOF
+chmod +x "$tmp/open-side.sh"
+cat > "$tmp/bin/cmux" <<'EOF'
+#!/usr/bin/env bash
+ST="${CMUX_FAKE_STATE:?}"
+case "$1" in
+  send) echo "$*" >> "$ST/send_calls"; echo "OK surface:777" ;;
+  read-screen)
+    printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
+    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
+    exit 0 ;;
+  tree)
+    # The ref the opener DID give us resolves here to the pair the paste needs.
+    jq -nc '{windows:[{workspaces:[{id:"WS-UUID-5",ref:"workspace:5",
+      panes:[{surfaces:[{id:"SURFACE-UUID-777",ref:"surface:777"}]}]}]}]}'
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/bin/cmux"
+out_noid=$(env -u HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS \
+  PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" \
+  --prompt "/hotline:hotline-ringing [MODE: conference_call] [SESSION: abc] no surface id" 2>"$tmp/stderr.txt")
+rc=$?
+if [[ $rc -eq 0 ]] && jq -e . <<<"$out_noid" >/dev/null 2>&1; then
+  pass "an opener that emits no surface_id still delivers (ref resolved via the tree)"
+else
+  fail "an opener that emits no surface_id still delivers (ref resolved via the tree)" \
+       "rc=$rc out=$out_noid stderr=$(cat "$tmp/stderr.txt")"
+fi
+if [[ "$(last_paste)" == *"no surface id"* ]]; then
+  pass "…and the prompt reached the paste"
+else
+  fail "…and the prompt reached the paste" "pasted=$(last_paste)"
+fi
+if [[ "$(last_paste surface_id)" == "SURFACE-UUID-777" ]]; then
+  pass "…addressed by the UUID the tree resolved from the display ref"
+else
+  fail "…addressed by the UUID the tree resolved from the display ref" "got: $(last_paste surface_id)"
+fi
+launch_script=$(grep -oE '/tmp/hotline-cmux-launch-[A-Za-z0-9]+' "$tmp/send_calls" 2>/dev/null | head -1)
+[[ -n "$launch_script" ]] && LAUNCH_SCRIPTS+=("$launch_script")
+rm -rf "$tmp"
+
 # --- Default placement: side-by-side surface ---------------------------------
 # With no --detached, cmux-call.sh RESOLVES and calls cmux-cli's canonical
 # open-side-surface.sh (injected here via a stub), then sends the launch script
