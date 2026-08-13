@@ -339,14 +339,66 @@ confirmed_by_screen() {
   return 1
 }
 
+# payload_is_parked — true iff OUR unsubmitted payload is still sitting in the
+# input box and the REPL is idle enough that an Enter would submit THAT payload and
+# nothing else. This is the double-submit guard for the retry below (claude-plugins-fkgv).
+#   busy / queued  → already submitted (phase-2); an Enter would submit the NEXT
+#                    thing, not this one. Never parked.
+#   interrupted    → an Enter answers the "what should Claude do instead?" prompt.
+#   empty box      → the payload left the box (submitted). Nothing to resend.
+#   foreign box text — a ghost suggested-prompt like `push it` (claude-plugins-ff6g)
+#                    that reappears in an emptied box after a submit — is not ours;
+#                    firing Enter on it would submit a phantom turn.
+# "Ours" is the nonce on the box line (a small paste, including the [CALL_ID:] line
+# a collapsed multi-line follow-up leaves as its first box line) or a `[Pasted text`
+# placeholder ON the box line. input_box_content reads only the box, so a prior
+# turn's `[Pasted text` echoed down in scrollback is never mistaken for a live one.
+payload_is_parked() {
+  local scr box
+  scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || return 1
+  [[ -z "$scr" ]] && return 1
+  repl_looks_busy "$scr" && return 1
+  repl_is_interrupted "$scr" && return 1
+  box=$(input_box_content "$scr")
+  [[ -z "$box" ]] && return 1
+  printf '%s' "$box" | grep -qF "$CALL_ID" && return 0
+  printf '%s' "$box" | grep -qF '[Pasted text' && return 0
+  return 1
+}
+
+# The confirmation tiers are unchanged (transcript, then screen). The fkgv retry
+# sits AFTER them, just before the delivery is called lost: only a delivery the
+# existing tiers could NOT confirm is a candidate for "the return was dropped and
+# the payload is parked". Ordering it after the screen tier keeps every already-
+# confirming path (reuse follow-ups included) byte-for-byte as it was.
 CONFIRMED=""
+RETRIED_ENTER=false
 if confirmed_by_transcript; then
   CONFIRMED="transcript"
 elif confirmed_by_screen; then
   CONFIRMED="screen"
+elif payload_is_parked; then
+  # Neither tier confirmed AND the payload is still sitting unsubmitted in the box:
+  # submit_key:return intermittently races the paste render and its return is
+  # dropped (claude-plugins-fkgv; reproduced ~5% on collapsing multi-line payloads
+  # into a reused surface, always recovered by one manual Enter). Fire that one
+  # Enter, then re-verify.
+  cmux send-key --surface "$SURFACE_REF" Enter >/dev/null 2>&1
+  RETRIED_ENTER=true
+  # Re-verify via the transcript, or the box having emptied — NOT confirmed_by_screen's
+  # nonce match: a retry that FAILED leaves the payload parked with the nonce still in
+  # the box, which that match would read as success.
+  if confirmed_by_transcript; then
+    CONFIRMED="transcript"
+  elif payload_is_parked; then
+    undelivered "pasted into surface $SURFACE_REF; the payload parked unsubmitted and one Enter retry still did not submit it (nonce $CALL_ID still parked in the box, not in the transcript${TRANSCRIPTS[0]:+ (${TRANSCRIPTS[*]})})"
+  else
+    # The box no longer holds our payload — the Enter took. Transcript will catch up.
+    CONFIRMED="screen"
+  fi
 else
   undelivered "pasted into surface $SURFACE_REF but nonce $CALL_ID never appeared in the callee's transcript${TRANSCRIPTS[0]:+ (${TRANSCRIPTS[*]})} or on its screen; treating delivery as lost"
 fi
 
-jq -nc --arg c "$CONFIRMED" --arg w "$WS_ID" --arg s "$SURF_ID" \
-  '{delivered: true, sent: true, confirmed: $c, workspace: $w, surface: $s}'
+jq -nc --arg c "$CONFIRMED" --arg w "$WS_ID" --arg s "$SURF_ID" --argjson r "$RETRIED_ENTER" \
+  '{delivered: true, sent: true, confirmed: $c, retried_enter: $r, workspace: $w, surface: $s}'
