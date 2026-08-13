@@ -56,6 +56,11 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   only user turns reads a landed-but-queued paste as lost; a shape whitelist missed
   the third shape a live run produced. A per-delivery nonce matched anywhere beats
   a whitelist. (claude-plugins-gxar, -xick)
+- **Live smokes use real-sized payloads.** A smoke with a toy payload proves the
+  toy: 300-byte test payloads sailed under Claude Code's 800-char/3-line paste
+  collapse while every real work order crossed it, shipping a silent
+  protocol-drop. Size smoke inputs like production inputs — or above.
+  (claude-plugins-pmgb)
 - **Accept/reject guards get one fixture per direction.** A recency check tested
   only against stale markers silently asserts the false-negative bug — the old
   single-screen fixtures asserted the bug they existed to prevent.
