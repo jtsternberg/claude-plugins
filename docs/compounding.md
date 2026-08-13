@@ -88,15 +88,6 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
 
 ## Process
 
-- **Agents commit in a worktree each; the shared main checkout belongs to no one.**
-  Two same-day collisions: uncommitted cjgn edits in the shared tree blocked an
-  unrelated merge, and a HEAD switch between two sessions' git ops landed one
-  session's commit (7f612ae) on another's branch. This repo doubles the stakes:
-  the marketplace serves the working tree live, so whatever is checked out there
-  IS the installed plugin. (7f612ae mis-landing on hotline-herdr-transport-plan;
-  cjgn/zrq1 merge block, 2026-08-13)
-
-
 - **A suite that can skip must be satisfiable, and skip counts get read.** Owned by
   CLAUDE.md § Testing (the gws incident) — kept here as a headline only so the
   preflight scans for it; the rule text lives there, not here.
