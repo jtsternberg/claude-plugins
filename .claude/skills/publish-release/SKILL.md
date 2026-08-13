@@ -75,6 +75,10 @@ Follow `docs/release.md` for the full detail of each; the short form:
    bash tests/run-all.sh
    ```
    (release.md §2)
+3b. **Compound.** Run the `compounding-preflight` skill over the change-set: fix
+   any violations of [`docs/compounding.md`](../../../docs/compounding.md), add
+   the entry the change-set taught (per the doc's write gate), and prune entries
+   it made obsolete. A release that learned nothing states that in one line.
 4. **Commit, push, and merge** the complete change to the ref installers use.
    (release.md §2)
 5. **Refresh Codex** and confirm the new version materialized in the cache.

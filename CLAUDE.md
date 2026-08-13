@@ -46,6 +46,21 @@ bash "$SKILL_DIR/scripts/<script-name>" [args]
 
 Use that form in every executable block in `SKILL.md`. Under Claude Code the bare token is mechanically resolved; under Codex the model substitutes the installed skill directory described in the adjacent prose. Keep any `allowed-tools` matcher aligned with the resulting Claude command. See `plugins/research-tools/skills/fetch-docs/SKILL.md` for a working example.
 
+## Compounding Gotchas — consult before you build, add when you learn
+
+[`docs/compounding.md`](docs/compounding.md) is this repo's ledger of
+expensively-learned rules. Three mechanical triggers keep it live: the beads
+`compounding-ledger` memory (injected each session by `bd prime`'s hooks) points
+here, the repo-private `compounding-preflight` skill scans any change-set against
+the rule headlines (run it when reviewing or creating a PR), and the
+`publish-release` runbook runs that scan at ship time. The doc carries each
+rule's provenance and a Known False Positives section listing what not to flag.
+When a review round, correction, or cleanup teaches a durable, repeatable rule,
+add an entry through the doc's write gate (provenance required) — and prune
+entries a change makes obsolete. The ledger must not only grow. An entry that
+duplicates a rule this file already states gets a pointer here instead of a
+restatement — two sources for one rule is itself entry-one's failure mode.
+
 ## Adding a New Plugin
 
 1. Create a new directory under `plugins/<plugin-name>/`
