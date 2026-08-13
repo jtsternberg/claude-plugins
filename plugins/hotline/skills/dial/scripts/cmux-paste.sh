@@ -172,22 +172,78 @@ if [[ -z "$BASELINE" ]]; then
   BASELINE=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || BASELINE=""
 fi
 
-# --- One paste. -------------------------------------------------------------
-# submit_key "return" submits an idle REPL and queues against a busy one; cmux
-# upgrades it to ctrl+enter itself for multi-line Claude payloads, so there is no
-# per-payload choice to make here.
-RPC_ERR=$(mktemp)
-if ! RPC_OUT=$(python3 "$CMUX_RPC" --method terminal.paste \
-                 --workspace "$WS_ID" --surface "$SURF_ID" \
-                 --payload-file "$PAYLOAD_FILE" --submit-key return 2>"$RPC_ERR"); then
-  REASON=$(tr '\n\r\t' '   ' < "$RPC_ERR" | cut -c1-160)
-  rm -f "$RPC_ERR"
-  # The socket refused it, so nothing reached the callee: safe to try elsewhere.
-  undelivered "terminal.paste into surface $SURF_ID failed: ${REASON:-no diagnostic}" false
+# --- Deliver the paste(s). ---------------------------------------------------
+# ONE paste for an ordinary payload; TWO for a first-contact slash command whose
+# body would otherwise sink the whole invocation.
+#
+# One paste, submit_key "return": submits an idle REPL and queues against a busy
+# one; cmux upgrades it to ctrl+enter itself for multi-line Claude payloads, so
+# there is no per-payload choice to make in that case.
+#
+# TWO pastes — the first-contact slash case (claude-plugins-pmgb). CC's TUI
+# collapses any single paste over ~800 chars or 3 lines into a
+# `[Pasted text +N lines]` placeholder. When that placeholder is the START of the
+# input the leading `/` is gone, the slash command never parses, and the callee
+# gets the work order as PLAIN TEXT with no ringing protocol — no STATUS, no
+# call_id — so the caller's wait-for-response misreads the silence as a reassigned
+# callee. Delivering the invocation line in its own small paste keeps the buffer
+# starting with `/` so the command parses; the body rides a second paste whose
+# placeholder CC expands back inside the command args on submit (probe-verified
+# live on CC 2.1.226: slash parsed AND every body marker present in
+# <command-args>, both when the body was glued to the invocation and when it sat
+# on its own line below it). The split fires only for a slash-command first line
+# that HAS a body beneath it; single-line invocations and all follow-ups take the
+# one-paste path unchanged.
+#
+# The two-paste sequence does NOT let either paste submit (submit_key none); a
+# real Enter KEY EVENT after both land is what submits, because it arrives outside
+# the bracketed paste (phase-2 + the pmgb probe both confirmed this submits the
+# whole box as one turn where an in-paste submit key would not).
+paste_one() { # <payload-file> <submit-key>  — undelivered() exits on socket refusal
+  local _file="$1" _submit="$2" _err _out _reason
+  _err=$(mktemp)
+  if ! _out=$(python3 "$CMUX_RPC" --method terminal.paste \
+                --workspace "$WS_ID" --surface "$SURF_ID" \
+                --payload-file "$_file" --submit-key "$_submit" 2>"$_err"); then
+    _reason=$(tr '\n\r\t' '   ' < "$_err" | cut -c1-160)
+    rm -f "$_err"
+    # PASTE_SENT is false before the first paste (nothing reached the callee, so a
+    # retry elsewhere is safe) and true once any paste has gone out (a retry could
+    # double-run). undelivered reads it so the reason reports the truth either way.
+    undelivered "terminal.paste into surface $SURF_ID failed: ${_reason:-no diagnostic}" "$PASTE_SENT"
+  fi
+  rm -f "$_err"
+}
+
+FIRST_LINE=$(sed -n '1p' "$PAYLOAD_FILE")
+FIRST_TOKEN="${FIRST_LINE%%[[:space:]]*}"
+SPLIT_PASTE=false
+if [[ "$FIRST_TOKEN" =~ ^/[A-Za-z0-9][A-Za-z0-9:._-]*$ ]] \
+   && [[ $(sed -n '2,$p' "$PAYLOAD_FILE" | wc -c) -gt 0 ]]; then
+  SPLIT_PASTE=true
 fi
-rm -f "$RPC_ERR"
-# From here on the payload may be in the callee's input queue whatever we observe.
-PASTE_SENT=true
+
+if $SPLIT_PASTE; then
+  HEAD_FILE=$(mktemp); BODY_FILE=$(mktemp)
+  # HEAD keeps its trailing newline so the body lands on its own line below the
+  # invocation; the two halves together reconstruct the payload byte-for-byte.
+  sed -n '1p' "$PAYLOAD_FILE" > "$HEAD_FILE"
+  tail -n +2  "$PAYLOAD_FILE" > "$BODY_FILE"
+  paste_one "$HEAD_FILE" none
+  # The invocation line is in the callee's box now; a later failure must not claim
+  # nothing was sent.
+  PASTE_SENT=true
+  paste_one "$BODY_FILE" none
+  rm -f "$HEAD_FILE" "$BODY_FILE"
+  # Submit with a real key event, outside any bracketed paste.
+  if ! cmux send-key --surface "$SURFACE_REF" Enter >/dev/null 2>&1; then
+    undelivered "pasted both halves into surface $SURF_ID but the submit Enter keystroke failed" true
+  fi
+else
+  paste_one "$PAYLOAD_FILE" return
+  # From here on the payload may be in the callee's input queue whatever we observe.
+  PASTE_SENT=true
+fi
 
 # --- Did the callee actually get it? ----------------------------------------
 # ok:true is the socket's ack, not delivery proof. The no-trusting-exit-codes

@@ -138,8 +138,14 @@ hotline_mint_call_id() {
 # Two placements, and which one applies is not a style choice:
 #
 #   Slash-command prompt → INLINE, immediately after the command token. claude
-#     parses a slash command only at the very start of the input, so a header line
-#     above `/hotline:hotline-ringing` turns the whole invocation into plain text.
+#     parses a slash command only when the input STARTS with it, and only while it
+#     is still literal `/…` text: a header line above `/hotline:hotline-ringing`,
+#     or a paste large enough that CC collapses the whole buffer to a
+#     `[Pasted text +N lines]` placeholder, both leave the input not starting with
+#     `/` and turn the invocation into plain text. Keeping the nonce inline is only
+#     half of what protects the slash; the other half is delivery — cmux-paste.sh
+#     sends first contact as two pastes so the invocation line renders verbatim
+#     while the body's placeholder expands inside the command args (claude-plugins-pmgb).
 #
 #   Anything else → its OWN leading line. wait-for-response.sh matches the nonce
 #     on screen, and at the start of a line it can never be broken across a

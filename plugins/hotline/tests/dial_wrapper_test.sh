@@ -120,6 +120,21 @@ if line.startswith("_cmux_capability_v1 "):
 print(json.loads(line)["params"].get(sys.argv[1], ""), end="")
 ' "$field" 2>/dev/null
 }
+# The params of the Nth terminal.paste request (1-based), decoded. First contact
+# for a slash command with a body is delivered as TWO pastes — the invocation line
+# (nth 1) then the work-order body (nth 2) — so a caller needs to reach either.
+nth_paste() {  # nth_paste <n> [field]  (field defaults to the pasted text)
+  local n="$1" field="${2:-text}"
+  grep -F '"terminal.paste"' "$OK_REQUESTS" 2>/dev/null | sed -n "${n}p" \
+    | "$REAL_PYTHON3" -c '
+import json,sys
+line = sys.stdin.read().strip()
+if not line: sys.exit(0)
+if line.startswith("_cmux_capability_v1 "):
+    line = line.split(" ", 2)[2]
+print(json.loads(line)["params"].get(sys.argv[1], ""), end="")
+' "$field" 2>/dev/null
+}
 paste_count() { grep -cF '"terminal.paste"' "$OK_REQUESTS" 2>/dev/null || true; }
 capability_count() { grep -cF '"system.capabilities"' "$OK_REQUESTS" 2>/dev/null || true; }
 # Keep the confirmation polls short: the transcript tier legitimately misses in
@@ -284,6 +299,9 @@ echo "dial.sh wrapper regression:"
 # ===========================================================================
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+# The OK socket log accumulates across cases; reset it so this case's paste count
+# and paste indices (nth_paste) are its own.
+: > "$OK_REQUESTS"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
   HOTLINE_CALLER_SESSION_ID="caller-1111" \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
@@ -317,22 +335,34 @@ check "clean cmux path records no fallbacks" $? "out=$out"
 [[ "$(jq -r .awaiting_response <<<"$out")" == "true" ]]
 check "async modes flag awaiting_response=true (wait-for-response is a separate step)" $? "out=$out"
 
-# First contact is PASTED, not launched. The ringing invocation and its tags are
-# asserted against the terminal.paste request, and the launch script is asserted
-# to be free of them: the prompt on claude's argv is the claude-plugins-86ka leak,
-# and it is what scope B of the paste rework exists to close.
-pasted="$(last_paste)"
-grep -q '/hotline:hotline-ringing' <<<"$pasted" \
-  && grep -qF '[MODE: work_order]' <<<"$pasted" \
-  && grep -qF '[SESSION: caller-1111]' <<<"$pasted" \
-  && grep -qF '[CALLER: ' <<<"$pasted" \
-  && grep -qF 'run the suite' <<<"$pasted"
-check "first contact PASTES the ringing command with MODE/CALLER/SESSION tags" $? \
-  "pasted=$pasted"
+# First contact is PASTED, not launched, and in TWO pastes: the slash invocation +
+# its protocol tags ride paste 1 ALONE so it renders verbatim and the command
+# parses; the work-order body rides paste 2, whose placeholder CC expands back
+# inside the command args on submit (claude-plugins-pmgb). A single paste of the
+# whole thing is the regression — a body over CC's ~800-char / 3-line threshold
+# collapses the invocation's leading `/` and the ringing protocol never loads.
+# The launch script is asserted free of the prompt: the prompt on claude's argv is
+# the claude-plugins-86ka leak that scope B of the paste rework exists to close.
+invite="$(nth_paste 1)"
+body="$(nth_paste 2)"
+[[ "$(paste_count)" -eq 2 ]] \
+  && grep -q '/hotline:hotline-ringing' <<<"$invite" \
+  && grep -qF '[MODE: work_order]' <<<"$invite" \
+  && grep -qF '[SESSION: caller-1111]' <<<"$invite" \
+  && grep -qF '[CALLER: ' <<<"$invite" \
+  && grep -qF 'run the suite' <<<"$body"
+check "first contact PASTES the ringing command + tags on paste 1, body on paste 2" $? \
+  "invite=$invite body=$body count=$(paste_count)"
 
-[[ "$pasted" == '/hotline:hotline-ringing [CALL_ID: '* ]]
+[[ "$invite" == '/hotline:hotline-ringing [CALL_ID: '* ]]
 check "the nonce follows the slash command (a leading header would break parsing)" $? \
-  "pasted=$pasted"
+  "invite=$invite"
+
+# The invocation line carries no work-order body, so nothing can push it past CC's
+# collapse threshold and take the leading `/` down with it.
+[[ "$invite" != *$'\n'* && "$invite" != *'run the suite'* ]]
+check "the invocation paste is one line with no body glued on" $? \
+  "invite=$invite"
 
 launch_plain=$(unquoted <<<"$launch")
 if grep -qF 'run the suite' <<<"$launch_plain" \
@@ -342,11 +372,17 @@ else
   pass "the prompt never reaches claude's argv"
 fi
 
-[[ "$(last_paste surface_id)" == "SURFACE-UUID-777" \
-   && "$(last_paste workspace_id)" == "WORKSPACE-UUID-1" \
-   && "$(last_paste submit_key)" == "return" ]]
-check "the paste is addressed to the new surface by UUID, submit_key=return" $? \
-  "surface=$(last_paste surface_id) ws=$(last_paste workspace_id) key=$(last_paste submit_key)"
+[[ "$(nth_paste 1 surface_id)" == "SURFACE-UUID-777" \
+   && "$(nth_paste 1 workspace_id)" == "WORKSPACE-UUID-1" \
+   && "$(nth_paste 1 submit_key)" == "none" \
+   && "$(nth_paste 2 submit_key)" == "none" ]]
+check "both pastes go to the new surface by UUID, submit_key=none" $? \
+  "surf=$(nth_paste 1 surface_id) ws=$(nth_paste 1 workspace_id) k1=$(nth_paste 1 submit_key) k2=$(nth_paste 2 submit_key)"
+
+# The two-paste sequence is submitted by a real Enter key event, outside any paste.
+grep -qiE '(^| )(enter|return)( |$)' "$t/sendkey_calls" 2>/dev/null
+check "first contact submits with a separate Enter keystroke" $? \
+  "sendkey_calls=$(cat "$t/sendkey_calls" 2>/dev/null)"
 
 [[ "$(capability_count)" -ge 1 ]]
 check "the dial preflights terminal.paste over the socket" $? \
@@ -904,6 +940,8 @@ check "…and nothing is closed when it is off" $? \
 # ===========================================================================
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+# Reset the shared OK socket log so nth_paste indexes this case's pastes.
+: > "$OK_REQUESTS"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
   HOTLINE_CALLER_SESSION_ID="caller-8888" \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
@@ -931,9 +969,10 @@ check "conference mode reports the callee session id" $? "out=$out"
 # The prompt is PASTED, not launched: conference was the last hotline path putting a
 # payload on claude's argv (claude-plugins-92s5), and its launch script must now be
 # free of it.
-[[ "$(last_paste)" == *'[MODE: conference_call]'* ]]
-check "conference first contact PASTES the conference_call MODE tag" $? \
-  "pasted=$(last_paste) launch=$(cat "$conf_launch" 2>/dev/null)"
+# First contact splits into two pastes; the MODE tag rides paste 1 (the invocation).
+[[ "$(nth_paste 1)" == *'[MODE: conference_call]'* ]]
+check "conference first contact PASTES the conference_call MODE tag on paste 1" $? \
+  "invite=$(nth_paste 1) launch=$(cat "$conf_launch" 2>/dev/null)"
 
 if grep -qF 'MODE: conference_call' "$conf_launch" 2>/dev/null; then
   fail "the conference prompt never reaches claude's argv" "launch=$(cat "$conf_launch")"
@@ -946,9 +985,9 @@ fi
 # surface's identity.
 [[ "$(jq -r '.call_id // empty' <<<"$out")" =~ ^[0-9a-f]{16}$ ]]
 check "a conference call carries a call_id nonce" $? "out=$out"
-[[ "$(last_paste)" == *"$(jq -r '.call_id' <<<"$out")"* ]]
-check "…and the nonce is in the pasted prompt, after the slash command" $? \
-  "pasted=$(last_paste)"
+[[ "$(nth_paste 1)" == *"$(jq -r '.call_id' <<<"$out")"* ]]
+check "…and the nonce is in paste 1, after the slash command" $? \
+  "invite=$(nth_paste 1)"
 
 # cmux-call.sh registers the session itself, so the wrapper must not have to.
 [[ -s "$t/home/.agents-hotline/sessions/caller-8888.json" ]]
