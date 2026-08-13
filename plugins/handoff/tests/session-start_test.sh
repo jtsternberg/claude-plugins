@@ -27,6 +27,14 @@ fail() { FAIL=$((FAIL+1)); printf '  FAIL %s\n' "$1"; }
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# Isolate the session cache. Both hooks walk their ancestry to the real
+# claude/codex PID and write /tmp/claude-handoff/<pid>.json — so running them
+# directly here would overwrite the LIVE session's cache with fixture values,
+# which session-info.sh would then feed the next agent (claude-plugins-d4ux).
+# Every hook/nudge/session-info run below inherits this scratch dir instead.
+export CLAUDE_HANDOFF_CACHE_DIR="$TMP/handoff-cache"
+mkdir -p "$CLAUDE_HANDOFF_CACHE_DIR"
+
 # PostCompact is shared by both harnesses. SessionStart must not also match
 # compact, or each compaction would run the nudge twice.
 HOOK_CONFIG="$ROOT/hooks/hooks.json"
@@ -50,8 +58,8 @@ SESSION_INFO="$ROOT/skills/handoff/scripts/session-info.sh"
 for harness in claude codex; do
 	cp "$(command -v bash)" "$TMP/$harness"
 	if OUT=$("$TMP/$harness" -c '
-		cache="/tmp/claude-handoff/$$.json"
-		mkdir -p /tmp/claude-handoff
+		cache="$CLAUDE_HANDOFF_CACHE_DIR/$$.json"
+		mkdir -p "$CLAUDE_HANDOFF_CACHE_DIR"
 		printf "%s\\n" "{\"session_id\":\"'$harness'-session\"}" >"$cache"
 		bash "$1"
 		status=$?
@@ -216,6 +224,25 @@ if printf 'not json at all' | PATH="$BIN:$PATH" bash "$HOOK" >/dev/null 2>&1; th
 else
   fail "exits 0 on malformed stdin"
 fi
+
+# --- the cache override is honored: no write escapes to the default dir -----
+# Regression for claude-plugins-d4ux: with CLAUDE_HANDOFF_CACHE_DIR set, a hook
+# run must write ONLY under it. If a future edit hardcodes /tmp/claude-handoff
+# again, this test's own claude/codex ancestor PID lands a fixture file there
+# and the snapshot diff catches it.
+DEFAULT_DIR="/tmp/claude-handoff"
+printf '{"session_id":"leak-probe","transcript_path":"/tmp/probe.jsonl","cwd":"%s"}' "$EMPTY" \
+  | PATH="$BIN:$PATH" bash "$HOOK" >/dev/null 2>&1
+printf '{"session_id":"leak-probe","transcript_path":"/tmp/probe.jsonl","cwd":"/tmp","hook_event_name":"PostCompact","trigger":"manual"}' \
+  | CLAUDE_CODE_SESSION_ID=leak-probe bash "$POST_COMPACT" >/dev/null 2>&1
+if grep -rlq 'leak-probe' "$DEFAULT_DIR" 2>/dev/null; then
+  fail "a hook wrote to $DEFAULT_DIR despite CLAUDE_HANDOFF_CACHE_DIR being set"
+else
+  pass "hooks write only to CLAUDE_HANDOFF_CACHE_DIR, never the default dir"
+fi
+grep -rlq 'leak-probe' "$CLAUDE_HANDOFF_CACHE_DIR" 2>/dev/null \
+  && pass "the override dir received the write" \
+  || fail "the override dir did not receive the hook write"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

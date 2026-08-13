@@ -18,7 +18,10 @@ while [ -n "$pid" ] && [ "$pid" != "1" ] && [ "$pid" != "0" ]; do
   # bare command name. Strip the path prefix so the check works on both.
   case "${comm##*/}" in
   claude|codex)
-    cache="/tmp/claude-handoff/${pid}.json"
+    # CLAUDE_HANDOFF_CACHE_DIR must match what the SessionStart/PostCompact
+    # hooks wrote with (default /tmp/claude-handoff). Tests set it to a scratch
+    # dir so a direct hook run can't poison the live cache (claude-plugins-d4ux).
+    cache="${CLAUDE_HANDOFF_CACHE_DIR:-/tmp/claude-handoff}/${pid}.json"
     [ -f "$cache" ] && cat "$cache" 2>/dev/null
     exit 0
     ;;

@@ -65,11 +65,16 @@ while [ -n "$pid" ] && [ "$pid" != "1" ] && [ "$pid" != "0" ]; do
   pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)
 done
 
+# CLAUDE_HANDOFF_CACHE_DIR overrides the cache location; see session-start.sh
+# for why (a direct-invocation test would otherwise clobber the live session's
+# cache, claude-plugins-d4ux). session-info.sh reads the same variable.
+HANDOFF_CACHE_DIR="${CLAUDE_HANDOFF_CACHE_DIR:-/tmp/claude-handoff}"
+
 if [ -n "$AGENT_PID" ] && [ -n "$SESSION_ID" ]; then
-  mkdir -p /tmp/claude-handoff 2>/dev/null || true
+  mkdir -p "$HANDOFF_CACHE_DIR" 2>/dev/null || true
   printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s"}\n' \
     "$SESSION_ID" "$TRANSCRIPT" "$CWD" \
-    > "/tmp/claude-handoff/${AGENT_PID}.json" 2>/dev/null || true
+    > "$HANDOFF_CACHE_DIR/${AGENT_PID}.json" 2>/dev/null || true
 fi
 
 printf 'Context was just compacted. If mid-task, running %s now will bank fresh context into a handoff before details fade.\n' "$handoff_command"

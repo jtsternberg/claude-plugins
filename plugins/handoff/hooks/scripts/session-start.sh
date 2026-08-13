@@ -80,11 +80,19 @@ while [ -n "$pid" ] && [ "$pid" != "1" ] && [ "$pid" != "0" ]; do
   pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)
 done
 
+# CLAUDE_HANDOFF_CACHE_DIR overrides the cache location. The default is shared
+# by every session on the box, keyed by the ancestor PID — so a test that runs
+# this hook directly (its own ancestry still reaches the real claude/codex PID)
+# would clobber the LIVE session's cache with fixture values, and session-info.sh
+# would then hand the next agent a poisoned transcript target (claude-plugins-d4ux).
+# Tests point this at a scratch dir; session-info.sh reads the same variable.
+HANDOFF_CACHE_DIR="${CLAUDE_HANDOFF_CACHE_DIR:-/tmp/claude-handoff}"
+
 if [ -n "$AGENT_PID" ] && [ -n "$SESSION_ID" ]; then
-  mkdir -p /tmp/claude-handoff 2>/dev/null || true
+  mkdir -p "$HANDOFF_CACHE_DIR" 2>/dev/null || true
   printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s"}\n' \
     "$SESSION_ID" "$TRANSCRIPT" "$CWD" \
-    > "/tmp/claude-handoff/${AGENT_PID}.json" 2>/dev/null || true
+    > "$HANDOFF_CACHE_DIR/${AGENT_PID}.json" 2>/dev/null || true
 fi
 
 # --- scan for pending handoffs ----------------------------------------------
