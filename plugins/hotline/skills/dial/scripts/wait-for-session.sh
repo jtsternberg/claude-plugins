@@ -81,8 +81,11 @@ if [[ -f "$CALL_DIR/surface_ref.txt" ]]; then
 elif [[ -f "$CALL_DIR/workspace_ref.txt" ]]; then
   CMUX_MODE=true
 fi
+# The defaults live in repl-state.sh, not here. dial.sh derives the paste's
+# input-box wait from the same numbers — they are waiting for the same event — and
+# with two definitions the documented 60 was true of this wait and not of that one.
 if [[ -z "$TIMEOUT" ]]; then
-  $CMUX_MODE && TIMEOUT=60 || TIMEOUT=30
+  $CMUX_MODE && TIMEOUT="$HOTLINE_BOOT_TIMEOUT_CMUX" || TIMEOUT="$HOTLINE_BOOT_TIMEOUT_HEADLESS"
 fi
 
 # Common early-fail check: if the launcher already wrote done+error.txt, bail.

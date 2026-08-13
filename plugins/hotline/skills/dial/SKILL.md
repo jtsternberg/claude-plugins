@@ -102,7 +102,10 @@ expected, say).
 |---|---|
 | `cmux-cli-missing→headless` | cmux is up but cmux-cli isn't installed, so the call was re-fired headless. |
 | `cmux-unavailable→headless` | No cmux at all. |
-| `terminal-paste-unavailable→headless` | cmux is up but its control socket doesn't offer `terminal.paste` — the verb every cmux delivery uses. The call went headless, so there is no visible pane. Upgrading cmux fixes it. |
+| `terminal-paste-unavailable→headless(...)` | cmux is up and answered, but does not list `terminal.paste` in `result.methods` — the verb every cmux delivery uses. **Upgrade cmux.** |
+| `python3-missing→headless` | No `python3` on PATH. The control-socket helper is python3-stdlib, so cmux delivery cannot run at all. **Install python3** (nothing to do with cmux). |
+| `cmux-socket-unreachable→headless(<diag>)` | The control socket could not be reached — no socket file, connection refused, timeout, or a reply that wasn't JSON. The diagnostic is the real OS error. Usually cmux is not actually running, or `$CMUX_SOCKET_PATH` points somewhere stale; `~/.local/state/cmux/last-socket-path` names the live one. **Do not upgrade cmux for this.** |
+| `cmux-rpc-error→headless(rc=N <diag>)` | The socket answered but refused the preflight (`rc=1` = `ok:false`, `rc=2` = a bad call from us). The diagnostic carries its error. This one is worth reporting — it usually means the helper and cmux disagree about the protocol. |
 | `surface-context→detached` | Side-by-side needs the caller's own surface context and it wouldn't resolve, so the callee landed in its own workspace tab. |
 | `surface-reuse→fresh(<reason>)` | A follow-up tried to speak to the live surface and that surface refused (gone, mid-turn, post-interrupt, dirty input box), or the paste went out and could not be confirmed. It opened a fresh one instead; `<reason>` says which. |
 | `surface-reuse-skipped(no-cached-surface)` | A follow-up had no surface to reuse — first contact was headless or detached, or a previous degraded follow-up cleared a stale ref. |

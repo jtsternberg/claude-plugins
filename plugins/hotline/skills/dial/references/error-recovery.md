@@ -127,8 +127,9 @@ behind it. Three rules:
    the reasons are materially different: a surface that never drew an input box, a
    `terminal.paste` the socket rejected, a nonce that turned up nowhere.
 2. **`$call_dir/pending_paste.md` still holds the prompt** — after a `deliver`
-   failure it is the only copy (a conference failure names its file in
-   `.recovery` instead). Do not discard the call dir before recovering it.
+   failure it is the only copy. That is true of every transport: first contact,
+   follow-up and conference all leave the same file in the same place, and
+   `.recovery` names it. Do not discard the call dir before recovering it.
 3. **Do NOT re-dial blind.** Confirmation gives up after a bounded poll; a paste
    that landed a moment later is indistinguishable from one that never landed, and
    re-dialling then delivers the work order **twice**.
@@ -136,6 +137,14 @@ behind it. Three rules:
 To find out which happened, read the callee's transcript for the nonce
 (`jq` the JSONL under `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`) —
 that is byte-definitive, where the screen is not.
+
+**A follow-up gets this too, and that is deliberate.** When reuse cannot confirm its
+paste it reports `deliver` rather than falling back to a fresh surface, because the
+fresh path would re-deliver the same prompt into a `--resume` of the same session —
+so a payload that actually landed would be executed **twice**. The fresh-surface
+fallback is reserved for refusals that happen BEFORE anything is sent (no input box,
+surface gone, an RPC the socket rejected); those are safe, because the callee
+received nothing.
 
 **Two things are NOT proof that a message failed to arrive:**
 

@@ -1377,6 +1377,78 @@ check "the dial's own prompt temp file does not outlive the dial" $? \
   "before=$PROMPTS_BEFORE after=$PROMPTS_AFTER: $(ls -d /tmp/hotline-prompt-* 2>/dev/null)"
 
 # ===========================================================================
+# AN UNCONFIRMED FOLLOW-UP PASTE MUST NOT BECOME A SECOND DELIVERY.
+#
+# The reuse path pastes, cannot confirm, and used to answer with fallback:fresh —
+# which dial.sh serves by opening a NEW surface and re-delivering the SAME prompt
+# into a --resume of the SAME session. A payload that actually landed then runs
+# TWICE. It reaches this state on its own: a previous exchange leaves
+# "[Pasted text +N lines]" in the viewport, the recency baseline correctly discards
+# that marker as stale, a new large paste renders as the same placeholder so the
+# nonce is not on screen, and the transcript tier misses inside its poll budget.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+# A live REPL with a stale placeholder already on screen, and a socket that accepts
+# the paste but echoes nothing back — so confirmation has nothing fresh to find.
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\n[Pasted text +40 lines]\nClaude Code v2.1.221\n' \
+  > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-dup" --session "dddddddd-dddd-4ddd-8ddd-dddddddddddd" \
+  --mode work_order --surface "SURFACE-UUID-777"
+printf 'DUPLICATE-DELIVERY-SENTINEL work order body\nsecond line\n' > "$t/msg.txt"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  CMUX_SOCKET_PATH="$NOECHO_SOCK" SOCK_ECHO_FILE="" \
+  HOTLINE_CALLER_SESSION_ID="caller-dup" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt-file "$t/msg.txt" --boot-timeout 5 2>"$t/err.txt")
+rc=$?
+DUP_CALL_DIR=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$DUP_CALL_DIR" ]] && note_leak "$DUP_CALL_DIR"
+
+[[ "$rc" -eq 1 && "$(jq -r .status <<<"$out")" == "error" \
+   && "$(jq -r .stage <<<"$out")" == "deliver" ]]
+check "an unconfirmed follow-up paste is stage 'deliver', not a fresh fallback" $? \
+  "rc=$rc out=$out"
+
+# THE POINT: no second surface was opened, so the prompt was not delivered twice.
+[[ ! -f "$t/side_log" ]] || [[ -z "$(cat "$t/side_log" 2>/dev/null)" ]]
+check "…and NO fresh surface was opened (the payload is not delivered twice)" $? \
+  "side_log=$(cat "$t/side_log" 2>/dev/null)"
+[[ "$(grep -c 'DUPLICATE-DELIVERY-SENTINEL' "$SOCKROOT/noecho/requests.log" 2>/dev/null || echo 0)" -eq 1 ]]
+check "…and the payload crossed the socket exactly ONCE" $? \
+  "pastes: $(grep -c 'DUPLICATE-DELIVERY-SENTINEL' "$SOCKROOT/noecho/requests.log" 2>/dev/null || echo 0)"
+
+jq -e '.recovery | test("Do NOT re-dial")' <<<"$out" >/dev/null 2>&1
+check "…and the recovery forbids re-dialling rather than suggesting a retry" $? "out=$out"
+jq -e '.recovery | test("transcript")' <<<"$out" >/dev/null 2>&1
+check "…and points at the callee's transcript as the way to find out what happened" $? "out=$out"
+[[ -s "$DUP_CALL_DIR/pending_paste.md" ]]
+check "…and the prompt survives in the call dir (it is the only copy)" $? \
+  "call dir: $(ls -A "$DUP_CALL_DIR" 2>/dev/null | tr '\n' ' ')"
+
+# The other side of the line: a refusal BEFORE anything was sent still falls back to
+# a fresh surface, because the callee received nothing.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
+  > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-presend" --session "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" \
+  --mode work_order --surface "SURFACE-UUID-OLD"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-presend" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "refused before anything was sent" --boot-timeout 5 2>"$t/err.txt")
+[[ -n "$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)" ]] && note_leak "$(jq -r .call_dir <<<"$out")"
+[[ "$(jq -r .status <<<"$out")" == "connected" ]] \
+  && jq -e '.fallbacks | map(startswith("surface-reuse→fresh")) | any' <<<"$out" >/dev/null 2>&1
+check "a pre-send refusal still takes the fresh-surface fallback (nothing was sent)" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+# ===========================================================================
 # NO PAYLOAD ON ANY argv, on ANY transport. The audit, not a spot check.
 #
 # A `claude` shim records every argv it is ever handed, across all three
@@ -1603,6 +1675,55 @@ signal_b_case created "" yes
 [[ "$SIGB_RC" -eq 0 ]]
 check "signal B: a transcript that APPEARS during the wait is a booted REPL" $? \
   "rc=$SIGB_RC out=$SIGB_OUT"
+
+# ===========================================================================
+# ONE definition of the boot budget, and the docs must match it.
+#
+# The box wait and the boot wait are waiting for the same event, and they lived in
+# two places with two values: wait-for-session.sh hardcoded 60 while dial.sh read
+# ${BOOT_TIMEOUT:-20} against a variable that is empty unless --boot-timeout was
+# passed — so the real default box wait was 20s while README and SKILL.md promised
+# 60. A string canary, because what broke was agreement between files.
+# ===========================================================================
+REPL_STATE="$HOTLINE_DIR/scripts/repl-state.sh"
+SHARED_CMUX_DEFAULT=$(sed -n 's/^HOTLINE_BOOT_TIMEOUT_CMUX="\${HOTLINE_BOOT_TIMEOUT_CMUX:-\([0-9]*\)}"/\1/p' "$REPL_STATE")
+[[ "$SHARED_CMUX_DEFAULT" == "60" ]]
+check "repl-state.sh defines the cmux boot budget as 60" $? "got: '$SHARED_CMUX_DEFAULT'"
+
+grep -q 'TIMEOUT="\$HOTLINE_BOOT_TIMEOUT_CMUX"' "$HOTLINE_DIR/skills/dial/scripts/wait-for-session.sh"
+check "wait-for-session.sh takes its default from the shared constant" $? \
+  "$(grep -n 'TIMEOUT=6\|TIMEOUT=3\|HOTLINE_BOOT_TIMEOUT' "$HOTLINE_DIR/skills/dial/scripts/wait-for-session.sh")"
+
+grep -q 'PASTE_BOX_TIMEOUT="\${HOTLINE_PASTE_BOX_TIMEOUT:-\${BOOT_TIMEOUT:-\$HOTLINE_BOOT_TIMEOUT_CMUX}}"' "$DIAL"
+check "dial.sh resolves the box wait from the same constant, once" $? \
+  "$(grep -n 'PASTE_BOX_TIMEOUT=' "$DIAL")"
+
+# No hardcoded 20 left at either delivery site — that was the untrue default.
+# Comment lines are excluded: the fix's own comment quotes the old
+# ${BOOT_TIMEOUT:-20} to explain what was wrong, and a canary that cannot tell code
+# from prose fails on its own explanation.
+HARDCODED=$(grep -nE 'BOOT_TIMEOUT:-2?0\}|PASTE_BOX_TIMEOUT:-2?0\}' \
+  "$DIAL" "$HOTLINE_DIR/skills/dial/scripts/cmux-call.sh" 2>/dev/null \
+  | grep -vE ':[0-9]+:[[:space:]]*#' || true)
+if [[ -n "$HARDCODED" ]]; then
+  fail "no delivery site hardcodes a 20s box wait any more" "$HARDCODED"
+else
+  pass "no delivery site hardcodes a 20s box wait any more"
+fi
+
+# Conference is a delivery site too, and dial.sh never forwarded the budget to it.
+grep -q -- '--box-timeout "\$PASTE_BOX_TIMEOUT"' "$DIAL"
+check "dial.sh forwards the box wait to the conference launcher" $? \
+  "$(grep -n 'CONF_ARGS+=' "$DIAL")"
+
+# And the documented number is the shared one, in both places a reader looks.
+for doc in "$HOTLINE_DIR/skills/dial/SKILL.md" "$HOTLINE_DIR/README.md"; do
+  rel="${doc#"$HOTLINE_DIR/"}"
+  grep -qi 'HOTLINE_PASTE_BOX_TIMEOUT' "$doc"
+  check "$rel documents HOTLINE_PASTE_BOX_TIMEOUT" $? "not mentioned"
+  grep -qiE 'boot-timeout' "$doc"
+  check "$rel ties it to --boot-timeout rather than naming a second number" $? "no --boot-timeout reference"
+done
 
 # ===========================================================================
 if [[ -s "$POISON_LOG" ]]; then
