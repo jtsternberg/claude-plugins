@@ -34,23 +34,25 @@ Resume work from a handoff written by a previous agent. The companion `handoff` 
    below if the identifier turns out not to resolve, and say so when you do.
 
    **With no argument**, search in this order:
-   - `HANDOFF*.md` in the current working directory — prefer the one matching the current branch (`git branch --show-current`), then `HANDOFF.md`.
+   - `HANDOFF*.md` in the current working directory — in a git repo, prefer the one matching the current branch (`git branch --show-current`); otherwise fall back to `HANDOFF.md`.
    - If bd is available (`command -v bd >/dev/null 2>&1 && [ -d .beads ]`): open issues titled `pending-handoff:` — `bd list --status open,in_progress --title-contains "pending-handoff:" --json`.
    - Multiple candidates and no clear match → list them and ask which to use.
 
 2. **Read it in full** (file, or `bd show <id>`).
 
-3. **Reconcile against reality.** The doc describes the past; check the present:
+3. **Reconcile against reality.** The doc describes the past; check the present. **In a git repo** (`git rev-parse --git-dir` succeeds):
    - If it has an **Anchor** section, run `git log --oneline <anchor-sha>..HEAD` — report "N commits since the handoff was written" and what they touched.
    - Run `git status`; spot-check the doc's "Files Changed" claims.
    - Note anything the doc claims that the repo contradicts.
+
+   **Outside a repo** (knowledge work, docs, research, a plain directory — the git commands would just fail): reconcile against the filesystem instead. Spot-check the doc's "Files Changed" entries for existence and recent mtime, and note anything the doc claims that the directory contradicts. There is no commit history to diff, so drift is whatever the files themselves show.
 
 4. **Brief the user**, plainly (they haven't seen the doc):
    - **Where things stand**: the goal and what's already done, in a few sentences.
    - **Drift**: commits/changes since the handoff was written and whether they affect the plan.
    - **Your plan**: concrete, ordered next steps — the doc's "Next Steps" reconciled with what you actually found.
    - **Anything that doesn't add up**: discrepancies or open questions the doc left unresolved.
-   - **Stale sweep**: list any *other* `HANDOFF*.md` files in the directory with mechanical facts only — file age, commits since their anchor SHA, whether their branch is merged or deleted (`git branch --merged`) — and flag obvious corpses for deletion. Cheap git commands only; no subagents for this.
+   - **Stale sweep**: list any *other* `HANDOFF*.md` files in the directory with mechanical facts only — file age, and in a git repo also commits since their anchor SHA and whether their branch is merged or deleted (`git branch --merged`) — and flag obvious corpses for deletion. Outside a repo, fall back to file age alone. Cheap commands only; no subagents for this.
 
 5. **If the doc is thin on a detail you need**: its **Session** section (when present) names the previous session's transcript JSONL — grep it for the missing specifics (decisions, error messages, exact commands). If the `hotline:dial` skill is available, you can also offer to dial a fresh agent seeded with that transcript for interactive questioning; read hotline's dial skill for how.
 
