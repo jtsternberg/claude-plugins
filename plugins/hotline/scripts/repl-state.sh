@@ -158,11 +158,24 @@ hotline_mint_call_id() {
 # is not one — the character class excludes `/` after the first character, so a
 # path falls through to the header-line form instead of having the nonce spliced
 # after its first directory component.
+#
+# ONE predicate owns that judgement because two callers must agree on it forever:
+# hotline_inject_call_id places the nonce INLINE only for a slash command, and
+# cmux-paste.sh splits delivery into two pastes only for a slash command. The
+# inline-nonce placement and the split-paste delivery are the same design invariant
+# seen from two ends — a regex that drifted between them would break it silently.
+# ("Extract the helper the moment a second caller appears.")
+hotline_is_slash_command_first_line() {
+  local first_line="$1" token
+  token="${first_line%%[[:space:]]*}"
+  [[ "$token" =~ ^/[A-Za-z0-9][A-Za-z0-9:._-]*$ ]]
+}
+
 hotline_inject_call_id() {
   local nonce="$1" prompt="$2" first_line rest_lines token remainder
   first_line="${prompt%%$'\n'*}"
   token="${first_line%%[[:space:]]*}"
-  if [[ "$token" =~ ^/[A-Za-z0-9][A-Za-z0-9:._-]*$ ]]; then
+  if hotline_is_slash_command_first_line "$first_line"; then
     # Everything after the command token, first line only; the rest is untouched.
     remainder="${first_line#"$token"}"
     if [[ "$prompt" == *$'\n'* ]]; then

@@ -183,6 +183,28 @@ for f in cmux-call.sh cmux-call-async.sh cmux-reuse-surface.sh; do
 done
 
 echo ""
+echo "  -- the slash-command predicate is single-sourced --"
+# Inline nonce placement (repl-state.sh) and split-paste delivery (cmux-paste.sh)
+# turn on the SAME "is the first line a slash command?" judgement. It lives in one
+# predicate so the two can never disagree; a private regex copy in cmux-paste.sh is
+# exactly the drift this guards (claude-plugins-pmgb review).
+PASTE_SRC="$HOTLINE_DIR/skills/dial/scripts/cmux-paste.sh"
+grep -q 'hotline_is_slash_command_first_line' "$PASTE_SRC" \
+  && pass "cmux-paste.sh decides the split via the shared predicate" \
+  || fail "cmux-paste.sh decides the split via the shared predicate" \
+          "no hotline_is_slash_command_first_line call in cmux-paste.sh"
+if grep -qE '\^/\[A-Za-z0-9\]' "$PASTE_SRC"; then
+  fail "cmux-paste.sh has no local copy of the slash-command regex" \
+       "the ^/[A-Za-z0-9] regex is back in cmux-paste.sh"
+else
+  pass "cmux-paste.sh has no local copy of the slash-command regex"
+fi
+REGEX_HITS=$(grep -cE '\^/\[A-Za-z0-9\]\[A-Za-z0-9:._-\]' "$HOTLINE_DIR/scripts/repl-state.sh" || true)
+[[ "$REGEX_HITS" -eq 1 ]] \
+  && pass "the slash-command regex is defined exactly once, in repl-state.sh" \
+  || fail "the slash-command regex is defined exactly once, in repl-state.sh" "hits=$REGEX_HITS"
+
+echo ""
 echo "call-id injection: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
   printf '  - %s\n' "${FAILED_CASES[@]}"

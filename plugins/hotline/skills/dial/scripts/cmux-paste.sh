@@ -215,16 +215,21 @@ paste_one() { # <payload-file> <submit-key>  — undelivered() exits on socket r
   rm -f "$_err"
 }
 
+# Whether to split turns on the SAME predicate that decides inline-vs-leading-line
+# nonce placement in repl-state.sh — they are one design invariant (a slash command
+# gets an inline nonce AND a split delivery), so both read it from one place.
 FIRST_LINE=$(sed -n '1p' "$PAYLOAD_FILE")
-FIRST_TOKEN="${FIRST_LINE%%[[:space:]]*}"
 SPLIT_PASTE=false
-if [[ "$FIRST_TOKEN" =~ ^/[A-Za-z0-9][A-Za-z0-9:._-]*$ ]] \
+if hotline_is_slash_command_first_line "$FIRST_LINE" \
    && [[ $(sed -n '2,$p' "$PAYLOAD_FILE" | wc -c) -gt 0 ]]; then
   SPLIT_PASTE=true
 fi
 
 if $SPLIT_PASTE; then
   HEAD_FILE=$(mktemp); BODY_FILE=$(mktemp)
+  # paste_one calls undelivered (which exits) on a socket refusal, before the rm
+  # below runs — so a trap owns the cleanup, or the temp files leak on that path.
+  trap 'rm -f "$HEAD_FILE" "$BODY_FILE"' EXIT
   # HEAD keeps its trailing newline so the body lands on its own line below the
   # invocation; the two halves together reconstruct the payload byte-for-byte.
   sed -n '1p' "$PAYLOAD_FILE" > "$HEAD_FILE"
@@ -234,7 +239,7 @@ if $SPLIT_PASTE; then
   # nothing was sent.
   PASTE_SENT=true
   paste_one "$BODY_FILE" none
-  rm -f "$HEAD_FILE" "$BODY_FILE"
+  rm -f "$HEAD_FILE" "$BODY_FILE"; trap - EXIT
   # Submit with a real key event, outside any bracketed paste.
   if ! cmux send-key --surface "$SURFACE_REF" Enter >/dev/null 2>&1; then
     undelivered "pasted both halves into surface $SURF_ID but the submit Enter keystroke failed" true
