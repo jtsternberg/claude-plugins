@@ -328,7 +328,7 @@ Flags from `--help`. This table is for *finding* the command, not for calling it
   `text/plain` MIME part, and Gmail/Outlook forwards are frequently HTML-only — so `text`
   can be absent entirely. Code that assumes `text` exists will break on real mail.
 - **There is no mark-as-read endpoint.** Read/unread is just labels:
-  `inboxes:messages update --add-label read --remove-label unread`, then filter with
+  `inboxes:messages update --add-labels read --remove-labels unread`, then filter with
   `--label unread`. This is the standard guard against reprocessing the same message.
 - **A message that "isn't there" may be filtered.** `list` hides spam, trash, blocked, and
   unauthenticated mail by default. Add `--include-spam`, `--include-trash`,
@@ -362,16 +362,28 @@ JSON quotes.
 
 ## Quoting, `@`, and multi-line bodies
 
-- **A leading `@` on an argument loads a file.** `@file://x.txt` forces string encoding,
-  `@data://x.bin` forces base64, and absolute paths take a third slash
-  (`@file:///tmp/x.txt`). To pass a literal leading `@`, escape it: `--username '\@abe'`.
-- **Email addresses are safe unquoted** — `--to user@example.com` — because only a
-  *leading* `@` triggers the file path. (Worth one probe the first time you send.)
-- **For bodies, use `--text` and `--html` flags.** The CLI is documented to accept a
-  JSON/YAML request body on stdin via heredoc, which would be the cleaner answer for long
-  HTML, but that path is unverified here — confirm it works before relying on it.
+- **Pass a body as `--text "$(cat body.txt)"`** (and `--html "$(cat body.html)"`). Command
+  substitution inside double quotes is not re-expanded by the shell, so it carries
+  arbitrary prose — quotes, backticks, `@`, newlines — verbatim. This is the reliable way
+  to send a long or multi-line body; short bodies can be inline string literals.
+- **Do not use the CLI's `@file://` / `@data://` argument-loading for bodies.** It is
+  documented, but on 0.7.14 it does not expand: `--text "@file:///abs/path"` — and the
+  relative `@file://x.txt` form — is stored and sent as that literal string, with exit 0
+  and a valid message-id and no warning. Verified broken on `messages reply`,
+  `messages send`, and `drafts create`. The recipient gets the path text, not the file.
+- **Email addresses are safe unquoted** — `--to user@example.com` — the `@` is mid-string,
+  not leading, so nothing tries to treat it as a path.
 - **Send both `text` and `html`** when you send HTML at all. The plain-text part is the
   fallback for clients that will not render HTML, and it measurably helps deliverability.
+- **Verify the body after every send.** Exit 0 and a returned message-id do *not* prove the
+  body went out intact (see the `@file` trap above). Immediately `get` the sent message and
+  compare its stored `text` length against your source — this is the only check that catches
+  a silently corrupted body, and it catches it while you can still correct in-thread:
+
+  ```bash
+  agentmail inboxes:messages get --inbox-id "$INBOX" --message-id "$SENT_ID" --format json \
+    | jq -r '.text' | wc -c   # compare against `wc -c < body.txt`
+  ```
 
 ## Attachments
 

@@ -66,7 +66,7 @@ jq -r '.extracted_text // .text // .html' /tmp/am-msg.json
 
 # Then flip the state so a restart doesn't reprocess it.
 agentmail inboxes:messages update --inbox-id "$INBOX" --message-id "$MSG" \
-  --add-label processed --remove-label unread
+  --add-labels processed --remove-labels unread
 ```
 
 `extracted_text` / `extracted_html` strip quoted history. Note the fallback order:

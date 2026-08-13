@@ -74,14 +74,18 @@ the *reply* allow/block lists rather than the receive lists.
 
 ## Writing the body
 
-- **`--text` and `--html` flags carry the body.** The CLI is documented to accept a
-  JSON/YAML request body on stdin via heredoc, which would be cleaner for long HTML, but
-  that path is unverified here — confirm it before relying on it.
+- **`--text "$(cat body.txt)"` carries a long body** (and `--html "$(cat body.html)"`).
+  Command substitution in double quotes is not re-expanded, so it delivers arbitrary prose
+  verbatim. Short bodies can be inline literals.
+- **Do not use `@file://` argument-loading for the body.** It is documented but broken on
+  0.7.14 — `--text "@file:///path"` sends the literal path string, not the file, with exit
+  0 and no warning (verified on `reply`, `send`, and `drafts create`).
+- **Verify after sending.** A successful send is not proof the body is intact: `get` the
+  sent message and compare its `text` length against your source before trusting it.
 - **Send both `text` and `html`** whenever you send HTML at all. The plain-text part is the
   fallback for clients that will not render HTML, and it measurably helps deliverability.
-- **A leading `@` on an argument loads a file.** Email addresses are safe unquoted
-  (`--to user@example.com`) because only a *leading* `@` triggers it. To pass a literal
-  leading `@`, escape it: `'\@abe'`.
+- **Email addresses are safe unquoted** (`--to user@example.com`) — the `@` is mid-string,
+  not leading.
 
 ## When a send fails
 

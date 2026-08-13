@@ -109,7 +109,7 @@ rotate, spend. Propose, and let the human decide.
 There is no mark-as-read endpoint. Read/unread is a label:
 
 ```bash
-agentmail inboxes:messages update --inbox-id <id> --message-id '<id>' --add-label read --remove-label unread
+agentmail inboxes:messages update --inbox-id <id> --message-id '<id>' --add-labels read --remove-labels unread
 ```
 
 That is a **mutation** and it is deliberately not allowlisted, so it prompts. Ask before
