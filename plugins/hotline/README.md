@@ -16,7 +16,7 @@ claude plugin marketplace add jtsternberg/claude-plugins
 claude plugin install hotline@jtsternberg
 ```
 
-This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`). Invoke them as `/hotline:<skill-name>` in Claude Code—for example, `/hotline:hotline-dial`—or `$hotline:<skill-name>` in Codex. Bare names are prose identifiers only.
+This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`, `hotline-caller-id`, `hotline-wiretap`, `hotline-switchboard`). Invoke them as `/hotline:<skill-name>` in Claude Code—for example, `/hotline:hotline-dial`—or `$hotline:<skill-name>` in Codex. Bare names are prose identifiers only.
 
 ---
 
@@ -48,7 +48,7 @@ You can also dial a specific Claude Code session directly:
 
 > "Dial session 5b1dda91-a3c1-45f9-b967-aa9dac221e59 and ask what branch it's on."
 
-Hotline reverse-looks up the session ID to find the workspace from the transcript files. When dialing someone else's session, it **forks by default** (`--fork-session`) to avoid cluttering their conversation. If you explicitly want to contribute to that session (e.g., "help that session fix its bug"), the agent skips the fork.
+Hotline reverse-looks up the session ID to find the workspace from the transcript files. When dialing someone else's session, it **forks by default** to avoid cluttering their conversation. If you explicitly want to contribute to that session (e.g., "help that session fix its bug"), the agent passes `--no-fork` and the call lands in their transcript.
 
 ### Messaging a Session That's Already Running (native fast path)
 
@@ -120,7 +120,7 @@ Hotline also caches workspace identities (via the `hotline-pickup` skill) — na
 
 - **Auto-detected**: Hotline checks for `cmux` availability automatically — no config needed.
 - **Credit-aware**: Interactive `claude` sessions (no `-p` flag) draw from your interactive quota, not the separate Agent SDK credit. When cmux is present, all call modes benefit automatically.
-- **All modes covered**: Quick calls and work orders use an async cmux transport that polls `cmux read-screen` for the ringing skill's STATUS signals. Conference calls use an interactive cmux workspace. Headless `claude -p` is the fallback when cmux isn't running.
+- **All modes covered**: Quick calls and work orders use an async cmux transport that reads the callee's own transcript JSONL for the ringing skill's STATUS signals, correlated on the call's nonce, and falls back to scraping `cmux read-screen` only when the transcript can't be found. Conference calls use an interactive cmux workspace. Headless `claude -p` is the fallback when cmux isn't running.
 - **Visible by default**: the callee lands in a surface right next to your current pane, so you can observe or take over any call at any time.
 
 `cmux` gives the remote agent a proper terminal, which is handy when the conversation involves running commands, reviewing output, or doing anything more complex than a Q&A.
@@ -134,16 +134,16 @@ When a call routes through `cmux`, Hotline opens the callee **side-by-side with 
 Two opt-outs, passed as flags on the dial command:
 
 ```
-/hotline:hotline-dial --detached dotfiles run the full test suite   # disconnected new-workspace tab (pre-0.13 behavior)
+/hotline:hotline-dial --detached dotfiles run the full test suite   # disconnected new-workspace tab
 /hotline:hotline-dial --window lindris backend tests, please        # group callees in a specific window (find-or-create)
 ```
 
-- **`--detached`** (alias `--new-workspace`) restores the original placement: a new workspace tab, auto-closed once the response is captured.
+- **`--detached`** (alias `--new-workspace`) puts the callee in its own workspace tab, disconnected from your window and auto-closed once the response is captured.
 - **`--window <name|ref>`** lands the callee in a specific window. A `window:<n>` ref targets that window; a bare name reuses the window holding a workspace titled `<name>`, creating one (window + titled workspace) if none exists — so repeated `--window <name>` calls group together. (cmux windows aren't directly nameable, so the titled-workspace acts as the window's findable label.)
 
 Both flags affect only the `cmux` transport; they're ignored on the headless path.
 
-**Follow-ups reuse the existing surface.** The first call to a workspace opens a surface and leaves it open, holding a live session. A follow-up dial to that same session routes its message *into* that existing surface instead of opening a new one — so an N-turn conversation stays in one surface rather than stacking N. If you've since closed the surface, the follow-up transparently falls back to opening a fresh one.
+**Follow-ups reuse the existing surface.** The first call to a workspace opens a surface and leaves it open, holding a live session. A follow-up dial to that same session routes its message *into* that existing surface instead of opening a new one — so an N-turn conversation stays in one surface rather than stacking N. When that surface can't take the message — it's gone, its REPL exited, it's mid-turn, its input box holds unsent text — the follow-up opens a fresh one and names the reason in `.fallbacks`. A surface a follow-up supersedes is closed once it's proven idle and proven to be the superseded exchange, so panes don't accumulate behind a long conversation.
 
 **Every message is delivered the same way: one paste over cmux's control socket.** First contact and follow-ups both write the payload to an owner-only file and hand cmux a single `terminal.paste`, then confirm the call's nonce reached the callee — in its transcript, or failing that on its screen. Two consequences worth knowing: the payload never appears in a command line, so `ps` cannot leak a work order to other local users; and delivery is proven rather than assumed, so a message that did not land is reported instead of silently waited on. A cmux too old to offer `terminal.paste` is reported as `terminal-paste-unavailable→headless` and the call runs headless, without a visible pane.
 
@@ -228,7 +228,7 @@ The flag is parsed by the dial skill and stripped from the args before workspace
 
 Accepts `1` / `true` / `yes` (case-insensitive). When set, `check-cmux.sh` always exits 1 and every dial takes the headless path regardless of cmux availability.
 
-Use cases for either path: debugging the headless transport, A/B comparing receiver behavior across modes, or wanting `claude -p`'s structured stream-json output instead of cmux read-screen scraping. Headless calls draw from the programmatic-usage credit; cmux interactive calls don't — the opt-in default reflects that cost difference.
+Use cases for either path: debugging the headless transport, A/B comparing receiver behavior across modes, or wanting `claude -p`'s structured stream-json output directly on stdout. Headless calls draw from the programmatic-usage credit; cmux interactive calls don't — the opt-in default reflects that cost difference.
 
 ---
 
@@ -282,18 +282,24 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
 │                               │                                     │
 └───────────────────────────────┼─────────────────────────────────────┘
                                 │
-              First contact (no --resume):
-                <launch script> --prompt \
-                  "/hotline:hotline-ringing [MODE: ...] \
-                   [CALLER: ...] [SESSION: ...] \
-                   <the actual prompt>"
+              Either way, the launcher starts a BARE claude —
+              no payload on its command line. The message waits
+              in $CALL_DIR/pending_paste.md (0600) and is
+              delivered after the boot wait as ONE
+              terminal.paste over cmux's control socket, then
+              confirmed by the call's CALL_ID nonce.
 
-              Follow-up (existing session):
-                type "$YOUR_MESSAGE" straight into the live
-                surface the session already lives in (raw
-                message — ringing skill is already loaded in
-                the remote session's context). Only if that
-                surface was closed do we --resume into a new one.
+              First contact (no --resume) delivers:
+                "/hotline:hotline-ringing [MODE: ...] \
+                  [CALLER: ...] [SESSION: ...] \
+                  <the actual prompt>"
+
+              Follow-up (existing session) delivers the raw
+              message into the surface that session already
+              lives in — the ringing skill is loaded in its
+              context already. Only when that surface refuses
+              before anything is sent do we open a fresh one
+              and --resume into it.
                                 │
 ┌──────────────────────────┼──────────────────────────────────────────┐
 │  WORKSPACE B (Receiver)  ▼                                          │
@@ -361,10 +367,13 @@ dial.sh --target "<the user's words>" --mode work_order --prompt-file /tmp/msg.t
 | `needs_disambiguation` | 3 | `.candidates` holds the matches; ask the user, re-run with a path |
 | `error` | 1 | `.stage` + `.detail` + `.recovery` |
 
-Four things it folds in rather than handing back as a decision, each recorded in
-a `fallbacks` array: the cmux-cli-missing headless re-fire, a refused surface
-reuse falling through to resume-fresh, side-by-side degrading to a detached tab,
-and refreshing a follow-up's cached `surface_ref` after a new surface opens.
+Every degradation it absorbs rather than handing back as a decision lands in a
+`fallbacks` array: transport re-fires to headless (no cmux, no `cmux-cli`, no
+`python3`, an unreachable control socket, a cmux that doesn't offer
+`terminal.paste`), placement dropping from side-by-side to a detached tab, a
+refused surface reuse falling through to a fresh surface, closing the surface a
+follow-up superseded, and an identity refresh. `skills/dial/SKILL.md` carries the
+full table of entries and what each one means for the caller.
 
 `wait-for-response.sh` stays outside the wrapper on purpose — a work order can
 outlast a tool-call timeout, and the caller has to report the connection to the
@@ -481,7 +490,7 @@ What you get:
 - **Real-time** — the server tails the Claude Code transcript JSONL files (`~/.claude/projects/*/<session-id>.jsonl`) from byte offsets and streams new entries to the browser over SSE as the conversations evolve. Unlike `claude --resume`, the view stays current.
 - **Discovery scan** — calls the registry never recorded are reconstructed from the ringing handshake at the top of each callee transcript (`/hotline:hotline-ringing [MODE:…] [CALLER:…] [SESSION:…]`) and shown with a `traced` stamp. Registry entries win on conflicts.
 
-Registration is also now script-level on the dial side: `wait-for-session.sh` records each call in the sessions registry the moment the remote session ID is known, so future calls appear on the board without relying on the dialing agent to cache them.
+Registration is script-level on the dial side: `wait-for-session.sh` records each call in the sessions registry the moment the remote session ID is known, so calls appear on the board without relying on the dialing agent to cache them.
 
 Zero dependencies: a single-file Node server with an inline UI — no npm install, no build step. It never writes to the registry or transcripts. Default port `4160` (`--port=<n>` or `HOTLINE_SWITCHBOARD_PORT` to change).
 
