@@ -84,6 +84,6 @@ fi
 
 ## Important
 
-- **Do not skip the script and hand-build the path from `$CLAUDE_CODE_SESSION_ID` yourself** — the script also handles overrides, legacy clients, and the project-directory munging, and validates the value.
-- On the legacy fallback only: steps must stay **two separate tool calls**. Never combine `planted` handling and `discover` into a single Bash invocation.
+- **Let the script build the path, even when `$CLAUDE_CODE_SESSION_ID` is right there in your environment.** It applies Claude Code's project-directory encoding, resolves the override and legacy rungs, and validates the value — a hand-built path skips all of that and lands on a file that doesn't exist.
+- **On the legacy fallback, `planted` and `discover` go in two separate Bash tool calls.** The fingerprint only reaches the transcript when the first call returns, so a single combined invocation searches for something that isn't written yet.
 - The legacy path caches the discovered ID, so subsequent calls return instantly from cache.

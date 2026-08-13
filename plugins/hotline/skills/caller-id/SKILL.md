@@ -70,6 +70,6 @@ Tell the user their session ID:
 
 ## Important
 
-- **Do not skip the script in favor of echoing `$CLAUDE_CODE_SESSION_ID` yourself** — the script also handles overrides, Codex callers, and legacy clients, and validates the value.
-- On the legacy fallback only: Steps must stay **two separate tool calls**. Never combine `planted` handling and `discover` into a single Bash invocation.
+- **Let the script report the ID, even when `$CLAUDE_CODE_SESSION_ID` is right there in your environment.** It resolves the override and Codex rungs too, falls through to the legacy path when the native value is missing, and validates what it finds — echoing the variable yourself gets none of that, and passes a malformed value straight through.
+- **On the legacy fallback, `planted` and `discover` go in two separate Bash tool calls.** The fingerprint only reaches the transcript when the first call returns, so a single combined invocation searches for something that isn't written yet.
 - The legacy path caches the discovered ID, so subsequent calls return instantly from cache.
