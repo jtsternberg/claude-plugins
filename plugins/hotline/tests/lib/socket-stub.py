@@ -34,6 +34,7 @@ import os
 import socket
 import sys
 import threading
+import time
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--socket", required=True)
@@ -42,6 +43,10 @@ ap.add_argument("--responses")
 ap.add_argument("--poison", action="store_true")
 ap.add_argument("--violations")
 ap.add_argument("--pidfile")
+# The PID whose death means this stub has been abandoned and should exit. The
+# harness passes the durable SUITE shell ($$), never its own parent — see the
+# watchdog below for why the parent can't be inferred.
+ap.add_argument("--watch-pid", type=int)
 # Appends a terminal.paste's `text` to a file, so a `cmux read-screen` stub can
 # cat it and the pasted nonce shows up on the fake screen exactly as it would in
 # a real REPL. Omit it to model a paste whose bytes never arrived.
@@ -139,6 +144,33 @@ def handle(conn):
         except OSError:
             pass
 
+
+# Self-terminate when the owner passed via --watch-pid goes away. The suites reap
+# stubs from an EXIT trap, but a shell killed abnormally (SIGKILL, a timeout, a
+# crash) never runs it — the stub would then run forever, reparented to init, and
+# 1391 piled up across three checkouts before this existed (claude-plugins-r7di).
+#
+# We watch an EXPLICIT pid, not our own parent, because the parent can't be
+# trusted: the harness launches us inside a $(...) command substitution whose
+# subshell exits immediately, and bash reparents us to init right then — so on a
+# perfectly healthy run getppid() already reads 1, identical to true abandonment.
+# The harness therefore hands us the durable SUITE shell ($$), which outlives the
+# launching subshell and dies only when the run really ends. No --watch-pid (e.g.
+# a manual invocation) keeps the original behavior: run until killed.
+if args.watch_pid:
+    _watchdog_secs = float(os.environ.get("SOCKET_STUB_WATCHDOG_SECS", "2"))
+
+    def _exit_when_owner_gone(pid):
+        while True:
+            time.sleep(_watchdog_secs)
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                os._exit(0)
+            except OSError:
+                pass  # e.g. EPERM — the pid still exists, owner is alive
+
+    threading.Thread(target=_exit_when_owner_gone, args=(args.watch_pid,), daemon=True).start()
 
 while True:
     try:

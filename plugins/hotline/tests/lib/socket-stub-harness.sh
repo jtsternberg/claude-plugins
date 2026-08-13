@@ -44,7 +44,11 @@ socket_stub_start() {
   local sock args=() i
   mkdir -p "$dir"
   sock="$dir/cmux.sock"
-  args=(--socket "$sock" --requests "$dir/requests.log")
+  # --watch-pid is the SUITE shell ($$), not this subshell: socket_stub_start is
+  # usually called inside $(...) whose subshell exits at once, so the stub must
+  # watch the durable owner to know when the run is truly over. $$ stays the main
+  # shell's pid even inside a command substitution; BASHPID would not.
+  args=(--socket "$sock" --requests "$dir/requests.log" --watch-pid "$$")
   if [[ -n "$responses" ]]; then
     args+=(--responses "$responses")
   else
