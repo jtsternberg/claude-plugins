@@ -162,7 +162,9 @@ if [[ "$PLACEMENT" == "sidebyside" ]]; then
   fi
 fi
 
-CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
+# HOTLINE_CALL_HOME overrides the base dir (default /tmp) so test suites can own
+# and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
+CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 # Persist CWD so wait-for-session.sh can compute the claude transcript path
 # (~/.claude/projects/<encoded-cwd>/<session-id>.jsonl) as a second REPL-boot

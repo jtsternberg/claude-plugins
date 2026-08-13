@@ -6,7 +6,7 @@
 # it appears in the stream, writes it to a known file, and continues
 # collecting the full response.
 #
-# Output files (written to $HOTLINE_CALL_DIR or /tmp/hotline-call-<random>/):
+# Output files (written under ${HOTLINE_CALL_HOME:-/tmp}/hotline-call-<random>/):
 #   session_id.txt  — written as soon as session ID appears in stream
 #   response.json   — written when call completes: {"session_id":"..","response":".."}
 #   error.txt       — written if the call fails
@@ -80,8 +80,11 @@ if $FORK_SESSION && [[ -z "$RESUME_ID" ]]; then
   exit 1
 fi
 
-# Create call directory
-CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
+# Create call directory. HOTLINE_CALL_HOME overrides the base (default /tmp) so
+# test suites can point every call dir at a directory they own and wipe on exit,
+# instead of leaving hundreds of /tmp/hotline-call-* dirs behind (claude-plugins-cjgn).
+# Production is unchanged: unset → /tmp.
+CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 # Persist receiver cwd + [MODE:]/[CALLER:]/[SESSION:] tags from the ringing
 # prompt so wait-for-session.sh can register the call in the sessions registry.
 # The prompt goes on STDIN, so it needs a file inside the call dir either way:

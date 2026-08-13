@@ -174,7 +174,9 @@ if [[ -n "$PARKED" ]]; then
   NEEDS_CLEAR=true
 fi
 
-CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
+# HOTLINE_CALL_HOME overrides the base dir (default /tmp) so test suites can own
+# and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
+CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 echo "$SURFACE_REF" > "$CALL_DIR/surface_ref.txt"
 echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 [[ -n "$SESSION_ID" ]] && {

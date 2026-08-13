@@ -277,7 +277,9 @@ fi
 # recovery tooling knew to look for it, and error-recovery.md had to carry a
 # conference-only exception to describe it.
 if [[ -n "$PROMPT" ]]; then
-  CALL_DIR=$(mktemp -d /tmp/hotline-call-XXXXX)
+  # HOTLINE_CALL_HOME overrides the base dir (default /tmp) so test suites can own
+  # and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
+  CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
   PASTE_PROMPT="$CALL_DIR/pending_paste.md"
   ( umask 077; printf '%s' "$PROMPT" > "$PASTE_PROMPT" )
   chmod 600 "$PASTE_PROMPT" 2>/dev/null || true

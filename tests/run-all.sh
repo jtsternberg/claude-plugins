@@ -18,6 +18,13 @@ set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO" || exit 1
 
+# Hotline's call scripts create scratch dirs under ${HOTLINE_CALL_HOME:-/tmp}.
+# Point them at a run-scoped dir we own and wipe on exit, so a full suite run
+# stops leaving hundreds of /tmp/hotline-call-* dirs behind (claude-plugins-cjgn).
+# Only hotline scripts read this var, so it is inert for every other suite.
+export HOTLINE_CALL_HOME="$(mktemp -d "${TMPDIR:-/tmp}/hotline-test-home-XXXXXX")"
+trap 'rm -rf "$HOTLINE_CALL_HOME"' EXIT
+
 PASS=0; FAIL=0; SKIP=0
 FAILED=()
 

@@ -335,11 +335,15 @@ fi
 # Finding 9: the undelivered prompt lives in a CALL DIR, in the shape every other
 # path uses — not a bare /tmp/hotline-conf-prompt-* nothing GCs or knows about.
 UNDEL_DIR=$(jq -r '.call_dir // empty' <<<"$out_undel" 2>/dev/null)
-if [[ -n "$UNDEL_DIR" && -d "$UNDEL_DIR" && "$UNDEL_DIR" == /tmp/hotline-call-* ]]; then
-  pass "the undelivered prompt is in a /tmp/hotline-call-* dir, like every other path"
+# The base is ${HOTLINE_CALL_HOME:-/tmp}: /tmp in production and for a direct run,
+# a suite-owned scratch dir under run-all.sh (claude-plugins-cjgn). Assert the
+# hotline-call-* shape under whichever base is active, not a hardcoded /tmp.
+CALL_BASE="${HOTLINE_CALL_HOME:-/tmp}"
+if [[ -n "$UNDEL_DIR" && -d "$UNDEL_DIR" && "$UNDEL_DIR" == "$CALL_BASE"/hotline-call-* ]]; then
+  pass "the undelivered prompt is in a hotline-call-* dir, like every other path"
 else
-  fail "the undelivered prompt is in a /tmp/hotline-call-* dir, like every other path" \
-       "call_dir=$UNDEL_DIR"
+  fail "the undelivered prompt is in a hotline-call-* dir, like every other path" \
+       "call_dir=$UNDEL_DIR base=$CALL_BASE"
 fi
 if [[ -s "$UNDEL_DIR/pending_paste.md" ]] \
    && grep -q 'register me first' "$UNDEL_DIR/pending_paste.md"; then
