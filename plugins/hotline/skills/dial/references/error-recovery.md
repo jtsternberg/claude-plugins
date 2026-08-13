@@ -82,11 +82,16 @@ Identity normally resolves inline from `$CLAUDE_CODE_SESSION_ID` (Claude Code >=
 
 **`cmux ping` fails**
 - CMUX is installed but not running.
-- Recovery: Fall back to headless silently. This is the expected behavior — CMUX is optional.
+- Recovery: nothing to do by hand. Transport selection happens before the launch, so
+  `dial.sh` fires the call headless itself and records `cmux-unavailable→headless` in
+  `.fallbacks`. cmux is optional; tell the user about the degradation when a visible
+  pane was the point.
 
-**"Failed to create CMUX workspace"**
+**"Failed to create CMUX workspace"** (`stage: "fire"`)
 - CMUX couldn't open a new workspace (maybe at workspace limit).
-- Recovery: Fall back to headless for this call. Log the failure for debugging.
+- Recovery: this one does *not* auto-degrade — the launcher failed after transport was
+  already chosen. Report `.detail`, then re-dial with `--headless` to get the call
+  through without a pane.
 
 ### Surface placement (side-by-side / `--window`)
 
@@ -129,10 +134,11 @@ behind it. Three rules:
 2. **`$call_dir/pending_paste.md` still holds the prompt** — after a `deliver`
    failure it is the only copy. That is true of every transport: first contact,
    follow-up and conference all leave the same file in the same place, and
-   `.recovery` names it. Do not discard the call dir before recovering it.
-3. **Do NOT re-dial blind.** Confirmation gives up after a bounded poll; a paste
-   that landed a moment later is indistinguishable from one that never landed, and
-   re-dialling then delivers the work order **twice**.
+   `.recovery` names it. Recover it before you remove the call dir.
+3. **Establish whether it landed before any re-dial.** Confirmation gives up after a
+   bounded poll, so a paste that arrived a moment later is indistinguishable from one
+   that never arrived — and re-dialling on that ambiguity delivers the work order
+   **twice**.
 
 To find out which happened, read the callee's transcript for the nonce
 (`jq` the JSONL under `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`) —
@@ -164,19 +170,19 @@ submitted it; an extra Enter on a queued or already-submitted payload is a doubl
 submit. If a payload really is sitting unsubmitted in the box, the right move is to
 let the dial fail and recover the prompt from `pending_paste.md`.
 
-#### Do not hand-deliver with `cmux send`
+#### Recover by re-delivering, never by hand-typing with `cmux send`
 
 When a delivery fails, the tempting move is to type the payload in yourself with
-`cmux send` plus `cmux send-key Enter`. That is the transport this rework replaced,
-and every reason it was replaced still applies. Read `cmux read-screen` to find out
-what happened; do not send.
+`cmux send` plus `cmux send-key Enter`. Read `cmux read-screen` to find out what
+happened, then re-deliver through `terminal.paste`. `cmux send` cannot carry a work
+order intact, for three independent reasons.
 
 - **A trailing `\n` in a `cmux send` does not submit.** The target is a claude
   TUI/Ink REPL reading through bracketed paste, so the newline lands as a
   **literal line break in the input box** (stored as CR, `0x0D`) and no submit
-  registers. It does **not** submit early. That is why the old path needed a
-  separate `send-key Enter` at all (claude-plugins-5zhp / -8bfd, claude 2.1.221 /
-  cmux 0.64.20).
+  registers. It does **not** submit early. Submitting anything through `cmux send`
+  therefore takes a separate `send-key Enter` (claude-plugins-5zhp / -8bfd, claude
+  2.1.221 / cmux 0.64.20).
 - **`cmux send` loses bytes, and not by size.** There is **no size threshold**.
   Across 12 controlled sends from 507 B to 16 KB, one silently
   lost 2,538 contiguous middle bytes from a 3,045 B payload — one user event, no
@@ -186,16 +192,14 @@ what happened; do not send.
   failure is **sporadic** and the trigger is unknown, so a successful `cmux send`
   means "bytes reached the PTY" and nothing more.
 - **It rewrites `\n`, `\r` and `\t` in its argument**, with **no backslash escape**
-  to opt out (`\\` arrives as two backslashes, so doubling makes it worse). The old
-  path had to **split the payload** just after each backslash preceding `n`/`r`/`t`
-  to get the exact bytes in. For **plain text**, escaping is never the cause of a
-  vanished message — but for a payload containing those sequences it can be, so the
-  reassurance is scoped to plain text only.
+  to opt out (`\\` arrives as two backslashes, so doubling makes it worse). Getting
+  exact bytes through it means **splitting the payload** just after each backslash
+  preceding `n`/`r`/`t`.
+  For **plain text**, escaping is never the cause of a vanished message — but for a payload containing those sequences it can be, so the reassurance is scoped to plain text only.
 
 `terminal.paste` has none of these properties: one request line, the payload
-JSON-escaped in-process, and a `submit_key` that submits. The right recovery is
-always to re-deliver through it — after establishing from the transcript that the
-first attempt really did not land.
+JSON-escaped in-process, and a `submit_key` that submits. Re-deliver through it —
+after establishing from the transcript that the first attempt really did not land.
 
 **A surface whose REPL exited is refused, not pasted into.** If a callee ran
 `/exit`, or claude crashed, the surface still exists and its cached handle still
@@ -227,7 +231,11 @@ through, on a fresh surface.
 
 ## General Principles
 
-1. **Retry once, then report.** Don't loop endlessly.
-2. **Fall back gracefully.** CMUX → headless. Cached session → fresh session. Fuzzy match → ask user.
-3. **Surface errors clearly.** Include the actual error message when reporting to the user.
-4. **Don't guess.** If resolution is ambiguous, ask. If a session is stale, start fresh.
+1. **Report, then let the user decide on a retry.** A `deliver` failure is the one that
+   never gets re-dialled on ambiguity — see [Delivery](#delivery-stage-deliver-and-messages-that-appear-to-vanish).
+2. **The wrapper degrades; you explain which degradation happened.** cmux → headless,
+   cached session → fresh session, refused surface reuse → fresh surface: `dial.sh`
+   takes each of those itself and names it in `.fallbacks`.
+3. **Quote the actual error message** when reporting to the user, not a paraphrase.
+4. **Ask when resolution is ambiguous.** Several fuzzy candidates is the user's call.
+   A stale session gets started fresh.

@@ -19,7 +19,7 @@ status it returns.
 - **`$0`** (optional): Workspace reference — a dirmap ID, path, session ID, or fuzzy name.
 - **`$1+`** (optional): The task/question for the remote workspace.
 - **`--headless`**: force the headless transport (`claude -p`) for this dial even when cmux is up. Debugging the headless path, A/B-ing transports, or wanting `claude -p`'s structured output. Costs programmatic-usage credit; the cmux default doesn't. → `--headless`
-- **`--detached`** / **`--new-workspace`**: spawn the callee in a disconnected new workspace tab instead of a side-by-side surface (the pre-0.13 behavior). → `--placement detached`
+- **`--detached`** / **`--new-workspace`**: spawn the callee in a disconnected new workspace tab instead of a side-by-side surface. The tab auto-closes once the response is captured, so nothing is left to watch or clean up. → `--placement detached`
 - **`--window <name|ref>`**: land the callee as a surface in a specific cmux window (find-or-create), for grouping workers by project. A `window:<n>` ref targets that window; a bare name reuses the window holding a workspace titled `<name>`. Wins over `--detached` if both are given. → `--window <name|ref>`
 
 ```
@@ -86,7 +86,7 @@ Exactly one JSON object on stdout, always. Read `.status`:
 | `connected` | 0 | The callee is up. `.remote_session_id`, `.workspace`, `.transport`, `.call_dir`, `.surface_ref`, `.first_contact`, `.fallbacks` describe the call. | Report the connection to the user, then wait for the response (below) — unless `.awaiting_response` is `false`. |
 | `replay` | 2 | Identity needed a second pass. `.fingerprint` is now in the transcript. | Run **the identical command again**. Nothing else. Don't explain it to the user. |
 | `needs_disambiguation` | 3 | The reference matched several workspaces; `.candidates` has them. | Ask the user which one, then re-run with `--target <their chosen path>`. |
-| `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`fire`/`boot`/`deliver`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user. **Never silently retry.** |
+| `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`fire`/`boot`/`deliver`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user, and leave the retry to them. |
 
 `deliver` is the one stage that leaves something live behind: the callee's REPL
 booted but the message never landed in it, so there is an open pane sitting empty.
@@ -134,11 +134,11 @@ or something to work on together?"
 | `work_order` | Need autonomous work done | "Run the test suite and tell me what broke." |
 | `conference` | Need back-and-forth | "Let's pair on this API integration." |
 
-**Do NOT pre-resolve the workspace.** Pass the user's *exact words* to
-`--target`. "Dial the writing workspace" goes in as `the writing workspace`, not
-as your guess at which repo that is. The resolver plus dirmap exist to do that
-matching; substituting your own guess bypasses the whole chain and dials the
-wrong place.
+**Pass the user's *exact words* to `--target`, and let the wrapper resolve them.**
+"Dial the writing workspace" goes in as `the writing workspace`, not as your guess
+at which repo that is. The resolver plus dirmap exist to do that matching, and they
+see dirmap entries and cached identities you don't; a guess substituted here
+bypasses the whole chain and dials the wrong place.
 
 **Then sanity-check what came back.** If `.workspace` doesn't obviously relate to
 what the user said, confirm before relaying anything:
@@ -273,10 +273,10 @@ transport depends on, which beats guessing at connection failures.
 
 ## Transparency: always surface problems
 
-**Never silently work around, skip, or swallow an error.** If something goes
-wrong — a nonzero `.status`, an unexpected response, a permission issue, a
-resolution that doesn't match what the user said — tell the user immediately,
-with the specific error and the stage it failed at.
+**Every problem reaches the user, in the same turn you hit it.** A nonzero
+`.status`, an unexpected response, a permission issue, a resolution that doesn't
+match what the user said — report each one with the specific error and the stage
+it failed at, then say what you did about it.
 
 **Bad:** "CMUX failed, falling back to headless."
 **Good:** "The side-by-side surface couldn't be opened — `.detail` says
