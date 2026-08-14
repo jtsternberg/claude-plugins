@@ -10,6 +10,9 @@
 # every `cmux` call returns "Broken pipe", silently breaking detection.
 #
 # Same call_dir interface as headless-call-async.sh:
+#   transport.txt        — 'cmux'. The explicit backend signal the wait-for-*
+#                          scripts read first; coarse (cmux vs headless), so the
+#                          ref files below still pick the cmux sub-mode.
 #   workspace_ref.txt    — the cmux workspace ref (signals "cmux mode" to
 #                          the wait-for-* scripts)
 #   session_id_preset.txt — the UUID we passed to `claude --session-id`,
@@ -171,6 +174,12 @@ fi
 # HOTLINE_CALL_HOME overrides the base dir (default /tmp) so test suites can own
 # and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
 CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
+# Which backend owns this call dir. Written here, with the dir, so it is present
+# for every later reader no matter where this launcher gets to — the host handle
+# (surface_ref.txt / workspace_ref.txt) is not placed until much further down.
+# Coarse selector only: it names cmux, not which cmux sub-mode. See
+# wait-for-session.sh's dispatch block for the whole contract.
+echo cmux > "$CALL_DIR/transport.txt"
 echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 # Persist CWD so wait-for-session.sh can compute the claude transcript path
 # (~/.claude/projects/<encoded-cwd>/<session-id>.jsonl) as a second REPL-boot

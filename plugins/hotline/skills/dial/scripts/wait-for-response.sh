@@ -2,10 +2,15 @@
 # =============================================================================
 # Wait for Response: poll until an async hotline call completes.
 #
-# Two modes, auto-detected from the call_dir contents:
+# Two modes. The launcher names its backend in call_dir/transport.txt ('cmux' or
+# 'headless') and that is read first; a call_dir without it is inferred from its
+# contents exactly as before the signal existed. The cmux SUB-mode (surface vs
+# workspace) is still the host-handle file distinction either way — see the
+# dispatch block below, and wait-for-session.sh for the full contract.
 #
-#   Headless mode (no workspace_ref.txt): poll call_dir/done at 2s intervals.
-#   headless-call-async.sh's own poller writes response.json + done.
+#   Headless mode (transport.txt=headless, or no host handle at all): poll
+#   call_dir/done at 2s intervals. headless-call-async.sh's own poller writes
+#   response.json + done.
 #
 #   CMUX mode (surface_ref.txt / workspace_ref.txt present): cmux-call-async.sh
 #   doesn't run a background poller (under cmux access_mode=cmuxOnly, an orphaned
@@ -143,14 +148,35 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# --- Backend dispatch --------------------------------------------------------
+# Same contract as wait-for-session.sh, which documents it in full: transport.txt
+# is read FIRST and names the backend ('cmux' | 'headless'); it is COARSE, so the
+# cmux sub-mode is still surface_ref.txt vs workspace_ref.txt. An absent
+# transport.txt is a legacy call dir and falls back to the old inference. cmux
+# still resolves through its host handle, because that is what the branch below
+# polls and because a launcher that failed before placing a host hands us a
+# handle-less dir whose error.txt only the file-watch path reports.
+TRANSPORT=""
+if [[ -f "$CALL_DIR/transport.txt" ]]; then
+  TRANSPORT=$(tr -d '[:space:]' < "$CALL_DIR/transport.txt" 2>/dev/null || true)
+fi
+HAS_SURFACE=false
+HAS_WORKSPACE=false
+[[ -f "$CALL_DIR/surface_ref.txt"   ]] && HAS_SURFACE=true
+[[ -f "$CALL_DIR/workspace_ref.txt" ]] && HAS_WORKSPACE=true
+
 CMUX_MODE=false
 SURFACE_MODE=false
-if [[ -f "$CALL_DIR/surface_ref.txt" ]]; then
-  CMUX_MODE=true
-  SURFACE_MODE=true
-elif [[ -f "$CALL_DIR/workspace_ref.txt" ]]; then
-  CMUX_MODE=true
-fi
+case "$TRANSPORT" in
+  headless)
+    # Stated headless: never poll a cmux host, whatever else the dir holds.
+    ;;
+  *)
+    # 'cmux', absent (legacy inference), or a backend this tree has no verbs for.
+    if $HAS_SURFACE || $HAS_WORKSPACE; then CMUX_MODE=true; fi
+    ;;
+esac
+if $CMUX_MODE && $HAS_SURFACE; then SURFACE_MODE=true; fi
 # CMUX mode gets a longer default (30 min) since work orders can run a while.
 if [[ -z "$TIMEOUT" ]]; then
   $CMUX_MODE && TIMEOUT=1800 || TIMEOUT=300
