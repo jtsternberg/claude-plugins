@@ -10,7 +10,8 @@ The stage tells you which section below to read:
 | `args` | (a malformed invocation — `.recovery` says which flag) |
 | `identity` | [Identity Failures](#identity-failures) |
 | `resolve` | [Workspace Resolution Failures](#workspace-resolution-failures), [Identity Cache Issues](#identity-cache-issues) |
-| `fire` | [CMUX Failures](#cmux-failures), [Headless Call Failures](#headless-call-failures) |
+| `transport` | [herdr Failures](#herdr-failures) — the backend the caller asked for cannot host this call. **Never a degradation**; `.recovery` names the fix. |
+| `fire` | [CMUX Failures](#cmux-failures), [Headless Call Failures](#headless-call-failures), [herdr Failures](#herdr-failures) |
 | `boot` | [CMUX Failures](#cmux-failures) — the callee's REPL never came up |
 | `deliver` | [Delivery](#delivery-stage-deliver-and-messages-that-appear-to-vanish) — the REPL came up but the message never landed in it. **A live pane is sitting empty; the prompt is still on disk. Do not re-dial blind.** |
 
@@ -270,6 +271,59 @@ closed instead of accumulating behind a long conversation. Only the polarity of 
 fallback differs — that path DESTROYS the surface, so an unproven box (no capability,
 a refused RPC, a workspace that will not resolve) counts as real text and the surface
 is kept, reported as `surface-cleanup-skipped(parked-input)`.
+
+## herdr Failures
+
+The herdr transport is opt-in (`--transport herdr`), detached-only, and local-only.
+Every refusal below is a **refusal, not a degradation**: the caller asked for a
+callee that survives a disconnect, and quietly giving them a cmux surface instead
+would be a lie they discover hours later. Report `.detail` and `.recovery` as-is.
+
+**`stage: transport` — "herdr is not on PATH" / "no server answered" / "no pane could be resolved"**
+- The three preflight questions, in order. Each needs a different action: install
+  herdr; start it (`herdr` in a terminal, or `herdr session list` to see what is up);
+  or open a pane for it to split (any pane will do) / name one with
+  `HOTLINE_HERDR_PANE=<pane-id>`.
+- Recovery: fix the one it named, or drop `--transport herdr` to use the cmux default.
+
+**`stage: transport` — "supports --placement detached only" / "does not support --mode conference" / "does not support --resume" / "first-contact only" / "--remote is not implemented"**
+- Not a malfunction: these are the Phase 1 boundaries, and each message names the
+  phase that lifts it. Placement and conference need herdr's attach story (Phase 3);
+  a follow-up into a live agent needs the re-target verb (Phase 2); `--remote` needs
+  a remote-transcript reader, because the callee's transcript would live on the
+  remote box while every hotline answer is read from the local `~/.claude/projects`
+  tree (Phase 3).
+- Recovery: re-dial as `--transport herdr --detached` for first contact, or over cmux
+  for anything else.
+
+**`stage: fire` — "herdr pane split failed" / "herdr agent start failed" / "interactive_ready:false"**
+- The pane opened but no claude was detected in it, or herdr said it is not ready for
+  input. `error.txt` in the call dir carries herdr's own diagnostic, and the pane has
+  been closed so nothing leaks — set `HOTLINE_HERDR_KEEP_FAILED_PANE=1` and re-dial to
+  keep it and read its scrollback.
+- `agent_pane_busy` is retried automatically (a freshly split pane needs a moment at
+  its shell prompt); seeing it in a final error means it never settled.
+
+**`stage: deliver` — the nonce never reached the callee's transcript**
+- **There is no screen fallback for herdr, by design.** A claude REPL is a
+  full-screen alternate-screen TUI, and rows that leave the alternate screen never
+  enter herdr's scrollback — so `agent read` cannot confirm what the transcript
+  missed, and hotline reports "unconfirmed" instead of scraping something weaker.
+- The payload is still in `<call_dir>/pending_paste.md` and the agent is still live:
+  `herdr agent attach <name>` (the name is in `<call_dir>/herdr_agent.txt` and in
+  `.surface_ref`). If the delivery result said `sent: true` the callee may well have
+  received it after the confirmation window — read its transcript for the call_id
+  before doing anything, and do NOT re-dial blind.
+
+**The response wait says "agent … is gone"**
+- herdr clears an agent's name when it exits, so the callee died before answering.
+  Its transcript is still on disk; read it. This fails fast rather than sitting out
+  the 30-minute budget, which is the one thing herdr's lifecycle states buy the wait.
+
+**A pane is left over after a finished call**
+- Expected. Persistence is why herdr exists, and Phase 2's follow-up re-targets that
+  same agent, so hotline does not close it the way it closes a detached cmux tab.
+  Teardown: `herdr pane close $(cat <call_dir>/herdr_pane.txt)`.
 
 ## Identity Cache Issues
 

@@ -2,15 +2,21 @@
 # =============================================================================
 # Wait for Session: Poll until the remote session ID is available.
 #
-# Two modes. The launcher names its backend in call_dir/transport.txt ('cmux' or
-# 'headless') and that is read first; an absent transport.txt names nothing, so
-# the backend is inferred from the call dir's host handles. Either way the cmux
+# Three modes. The launcher names its backend in call_dir/transport.txt ('cmux',
+# 'herdr' or 'headless') and that is read first; an absent transport.txt names
+# nothing, so the backend is inferred from the call dir's host handles. Either way the cmux
 # SUB-mode (surface vs workspace) is still the host-handle file distinction. See
 # the dispatch block below for the full contract.
 #
 #   Headless mode (transport.txt=headless, or no host handle at all): poll
 #   call_dir/session_id.txt at 1s intervals; cmux-call.sh and
 #   headless-call-async.sh write it themselves.
+#
+#   herdr mode (transport.txt=herdr): the same file watch, because herdr's launcher
+#   is SYNCHRONOUS — `herdr agent start` blocks until the agent is
+#   interactive-ready, so herdr-call-async.sh has already written session_id.txt
+#   and there is no boot to detect or preset to promote. This wait confirms the id,
+#   surfaces the launcher's error.txt if it failed, and registers the call.
 #
 #   CMUX mode (workspace_ref.txt present): cmux-call-async.sh wrote
 #   session_id_preset.txt but does NOT confirm claude actually booted —
@@ -73,8 +79,8 @@ done
 
 # --- Backend dispatch --------------------------------------------------------
 # transport.txt, written by the launcher when it creates the call dir, names the
-# backend outright: 'cmux' or 'headless'. It is read FIRST and it is a COARSE
-# selector — it says which backend owns this call dir, NOT which cmux sub-mode.
+# backend outright: 'cmux', 'herdr' or 'headless'. It is read FIRST and it is a
+# COARSE selector — it says which backend owns this call dir, NOT which cmux sub-mode.
 # The sub-mode is still the host-handle distinction it always was:
 #   surface mode    — surface_ref.txt present (side-by-side / --window placement).
 #                     Poll the cmux SURFACE.
@@ -109,9 +115,24 @@ HAS_WORKSPACE=false
 
 CMUX_MODE=false
 SURFACE_MODE=false
+HERDR_MODE=false
 case "$TRANSPORT" in
   headless)
     # Stated headless: never poll a cmux host, whatever else the dir holds.
+    ;;
+  herdr)
+    # herdr's launcher is SYNCHRONOUS — `herdr agent start` blocks until the agent
+    # is interactive-ready — so herdr-call-async.sh has already written
+    # session_id.txt itself. There is nothing to poll a host for and no promotion
+    # to perform: this wait confirms the id is on disk (or reports the launcher's
+    # error.txt), then registers the call like every other transport. It takes the
+    # file-watch path below for exactly that reason.
+    #
+    # Liveness is deliberately NOT re-probed here. The response wait gates on
+    # `herdr agent wait`, which reports a dead agent with a diagnostic; adding a
+    # second `agent get` here would only add a way for a transient herdr hiccup to
+    # fail a dial whose callee is perfectly up.
+    HERDR_MODE=true
     ;;
   *)
     # 'cmux', or absent (legacy inference). Both resolve through the host handle —
@@ -125,8 +146,15 @@ if $CMUX_MODE && $HAS_SURFACE; then SURFACE_MODE=true; fi
 # The defaults live in repl-state.sh, not here. dial.sh derives the paste's
 # input-box wait from the same numbers — they are waiting for the same event — and
 # with two definitions the documented 60 was true of this wait and not of that one.
+# herdr shares the cmux budget: both are waiting for a callee REPL to exist, and
+# the caller who raised --boot-timeout for a slow machine meant that event. (herdr
+# normally finds it already satisfied — its launcher blocked on the same thing.)
 if [[ -z "$TIMEOUT" ]]; then
-  $CMUX_MODE && TIMEOUT="$HOTLINE_BOOT_TIMEOUT_CMUX" || TIMEOUT="$HOTLINE_BOOT_TIMEOUT_HEADLESS"
+  if $CMUX_MODE || $HERDR_MODE; then
+    TIMEOUT="$HOTLINE_BOOT_TIMEOUT_CMUX"
+  else
+    TIMEOUT="$HOTLINE_BOOT_TIMEOUT_HEADLESS"
+  fi
 fi
 
 # Common early-fail check: if the launcher already wrote done+error.txt, bail.
@@ -384,12 +412,26 @@ if $CMUX_MODE; then
   exit 0
 fi
 
-# Headless mode — original behavior.
+# A herdr call dir must carry its host handle. The agent NAME is the only way to
+# address the callee for delivery and for the response gate, so a herdr dir without
+# one is a launcher bug — the same class of check as the cmux preset above, and
+# worth failing loudly here rather than letting the delivery step report a missing
+# --agent it could not have supplied.
+if $HERDR_MODE && [[ ! -s "$CALL_DIR/herdr_agent.txt" ]]; then
+  echo "herdr call_dir missing herdr_agent.txt — launcher bug (nothing can address the callee without the agent name)" >&2
+  exit 1
+fi
+
+# File-watch mode — headless (original behavior) and herdr (see the dispatch note).
 ELAPSED=0
 while [[ ! -f "$CALL_DIR/session_id.txt" ]]; do
   check_early_fail
   if [[ $ELAPSED -ge $TIMEOUT ]]; then
-    echo "Timed out waiting for session ID (${TIMEOUT}s)" >&2
+    if $HERDR_MODE; then
+      echo "Timed out waiting for the herdr callee's session id (${TIMEOUT}s). herdr-call-async.sh writes session_id.txt itself once \`herdr agent start\` returns, so an empty call dir here means the launcher neither succeeded nor wrote error.txt — check \`herdr agent list\` and the pane named in $CALL_DIR/herdr_pane.txt." >&2
+    else
+      echo "Timed out waiting for session ID (${TIMEOUT}s)" >&2
+    fi
     exit 1
   fi
   sleep 1

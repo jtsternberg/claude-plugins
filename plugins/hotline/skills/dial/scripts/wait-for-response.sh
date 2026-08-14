@@ -2,11 +2,11 @@
 # =============================================================================
 # Wait for Response: poll until an async hotline call completes.
 #
-# Two modes. The launcher names its backend in call_dir/transport.txt ('cmux' or
-# 'headless') and that is read first; an absent transport.txt names nothing, so
-# the backend is inferred from the call dir's host handles. The cmux SUB-mode
-# (surface vs workspace) is still the host-handle file distinction either way — see
-# the dispatch block below, and wait-for-session.sh for the full contract.
+# Three modes. The launcher names its backend in call_dir/transport.txt ('cmux',
+# 'herdr' or 'headless') and that is read first; an absent transport.txt names
+# nothing, so the backend is inferred from the call dir's host handles. The cmux
+# SUB-mode (surface vs workspace) is still the host-handle file distinction either
+# way — see the dispatch block below, and wait-for-session.sh for the full contract.
 #
 #   Headless mode (transport.txt=headless, or no host handle at all): poll
 #   call_dir/done at 2s intervals. headless-call-async.sh's own poller writes
@@ -28,7 +28,16 @@
 #   Either tier writes response.json + done and closes the workspace unless
 #   keep_workspace.txt said otherwise.
 #
-# Output (stdout, both modes):
+#   herdr mode (transport.txt=herdr): the SAME transcript reader, gated differently.
+#   herdr reports native lifecycle states, so `herdr agent wait` replaces the 2s
+#   screen poll as the when-to-read gate, and transcript-extract.sh then decides
+#   what the transcript MEANS exactly as above — same nonce/STATUS bracketing, same
+#   0/3/4 contract. There is NO screen-scrape tier: a claude REPL runs on the
+#   terminal's alternate screen, whose rows never enter herdr's scrollback, so an
+#   unconfirmable herdr call is reported as unconfirmable rather than scraped.
+#   Nothing is closed afterwards — outliving disconnects is the point of herdr.
+#
+# Output (stdout, every mode):
 #   {"session_id":"...","response":"..."}
 # plus, on exit 4 only, an additive `"awaiting_review":true` — every other status
 # emits byte-identical JSON to before.
@@ -152,7 +161,7 @@ done
 
 # --- Backend dispatch --------------------------------------------------------
 # Same contract as wait-for-session.sh, which documents it in full: transport.txt
-# is read FIRST and names the backend ('cmux' | 'headless'); it is COARSE, so the
+# is read FIRST and names the backend ('cmux' | 'herdr' | 'headless'); it is COARSE, so the
 # cmux sub-mode is still surface_ref.txt vs workspace_ref.txt. An absent
 # transport.txt is a legacy call dir and falls back to the old inference; a value
 # outside the contract's set is refused outright (scripts/transport.sh). cmux
@@ -167,9 +176,15 @@ HAS_WORKSPACE=false
 
 CMUX_MODE=false
 SURFACE_MODE=false
+HERDR_MODE=false
 case "$TRANSPORT" in
   headless)
     # Stated headless: never poll a cmux host, whatever else the dir holds.
+    ;;
+  herdr)
+    # herdr mode: `herdr agent wait` is the WHEN-TO-READ gate and
+    # transcript-extract.sh is still the answer. See the herdr block below.
+    HERDR_MODE=true
     ;;
   *)
     # 'cmux', or absent (legacy inference); 'herdr' until Phase 1 gives it its own
@@ -180,8 +195,10 @@ case "$TRANSPORT" in
 esac
 if $CMUX_MODE && $HAS_SURFACE; then SURFACE_MODE=true; fi
 # CMUX mode gets a longer default (30 min) since work orders can run a while.
+# herdr shares it: the same work orders, and its whole selling point is outliving
+# the events that would have killed a cmux surface.
 if [[ -z "$TIMEOUT" ]]; then
-  $CMUX_MODE && TIMEOUT=1800 || TIMEOUT=300
+  if $CMUX_MODE || $HERDR_MODE; then TIMEOUT=1800; else TIMEOUT=300; fi
 fi
 
 # A waiter that runs out of budget writes done+error.txt so a caller who does NOT
@@ -218,6 +235,204 @@ emit_response_json() {
     exit 1
   fi
 }
+
+if $HERDR_MODE; then
+  # =========================================================================
+  # herdr mode. The gate changes; the answer does not.
+  #
+  # herdr reports native lifecycle states (idle / working / blocked / done /
+  # unknown), so "when should I read the transcript" stops being a 2s screen poll
+  # and becomes one blocking `herdr agent wait`. What the transcript MEANS is
+  # unchanged: transcript-extract.sh runs here byte-identically to the cmux
+  # transcript-PRIMARY path above, with the same nonce/STATUS bracketing and the
+  # same exit-code contract (0 / 4 / 3 / 1).
+  #
+  # WHY THE STATES CANNOT REPLACE THE PROTOCOL. herdr's lifecycle is COARSER than
+  # hotline's semantics: a callee ending on `STATUS: WORK_COMPLETE` and one ending
+  # on `STATUS: AWAITING_REVIEW` both settle to the same state. The STATUS line
+  # carries a distinction the lifecycle cannot express, and the callee is
+  # transport-blind — the ringing skill emits the same protocol whichever
+  # multiplexer hosts it. So the state is the gate and the nonce is the meaning.
+  #
+  # AND THERE IS NO SCREEN FALLBACK. The cmux path degrades to scraping the
+  # rendered screen when it cannot derive a transcript path. herdr cannot: a claude
+  # REPL is a full-screen alternate-screen TUI, and rows that leave the alternate
+  # screen never enter herdr's host scrollback, so `agent read` cannot recover what
+  # the transcript missed. An undecidable herdr call is reported as undecidable.
+  # =========================================================================
+  HERDR_SCRIPTS="$SELF_DIR/../../../scripts"
+  # shellcheck source=../../../scripts/herdr-state.sh
+  source "$HERDR_SCRIPTS/herdr-state.sh"
+
+  AGENT=""
+  [[ -s "$CALL_DIR/herdr_agent.txt" ]] && AGENT=$(tr -d '[:space:]' < "$CALL_DIR/herdr_agent.txt")
+  SESSION_ID=""
+  [[ -f "$CALL_DIR/session_id.txt"        ]] && SESSION_ID=$(cat "$CALL_DIR/session_id.txt")
+  [[ -z "$SESSION_ID" && -f "$CALL_DIR/session_id_preset.txt" ]] && \
+    SESSION_ID=$(cat "$CALL_DIR/session_id_preset.txt")
+  CALL_ID=""
+  [[ -f "$CALL_DIR/call_id.txt" ]] && CALL_ID=$(cat "$CALL_DIR/call_id.txt")
+
+  # If the launcher already wrote done+error.txt, surface that immediately.
+  if [[ -f "$CALL_DIR/done" && -f "$CALL_DIR/error.txt" ]]; then
+    cat "$CALL_DIR/error.txt" >&2
+    exit 1
+  fi
+
+  # Everything the extraction needs, checked UP FRONT and reported as one message.
+  # There is no weaker tier to fall through to, so a missing input is a hard stop
+  # rather than a silent downgrade — and saying which input is missing is the
+  # difference between a fixable report and "it timed out".
+  TRANSCRIPT_PATH=""
+  if [[ -n "$SESSION_ID" && -n "$CALL_ID" && -f "$CALL_DIR/cwd.txt" && -x "$TRANSCRIPT_PATH_SH" ]]; then
+    RECV_CWD=$(cat "$CALL_DIR/cwd.txt")
+    TRANSCRIPT_PATH=$(bash "$TRANSCRIPT_PATH_SH" --cwd "$RECV_CWD" --session "$SESSION_ID" 2>/dev/null || true)
+  fi
+  if [[ -z "$TRANSCRIPT_PATH" ]]; then
+    {
+      echo "Cannot read a herdr callee's response: no transcript path could be derived from $CALL_DIR."
+      echo "Needed: session_id.txt (or session_id_preset.txt)=${SESSION_ID:-MISSING}, call_id.txt=${CALL_ID:-MISSING}, cwd.txt=$( [[ -f "$CALL_DIR/cwd.txt" ]] && cat "$CALL_DIR/cwd.txt" || echo MISSING )."
+      echo "herdr has no screen fallback — a claude REPL runs on the terminal's alternate screen, so its output is not in herdr's scrollback. Read the callee's transcript directly, or re-dial."
+    } >&2
+    exit 1
+  fi
+  if [[ -z "$AGENT" ]]; then
+    echo "Cannot gate a herdr wait: $CALL_DIR has no herdr_agent.txt, so there is no agent to wait on (launcher bug). The transcript at $TRANSCRIPT_PATH may still hold the answer — read it directly." >&2
+    exit 1
+  fi
+
+  # herdr never closes anything after a call: outliving disconnects is the reason
+  # to pick this transport, and Phase 2's follow-up re-targets this same agent by
+  # name. keep_workspace.txt is written 'true' by the launcher and this is where
+  # that promise is kept — the agent and its pane are left live on every exit path.
+  # (`herdr pane close $(cat $CALL_DIR/herdr_pane.txt)` is the manual teardown.)
+
+  # The gate's per-iteration budget. `agent wait` blocks until the agent settles,
+  # so a slice bounds how long we go without re-reading the transcript: a callee
+  # that emits its terminal STATUS mid-turn and keeps working would otherwise not
+  # be noticed until it settled. It also bounds a wait on an agent that has already
+  # settled (which returns instantly) into a poll rather than a spin.
+  GATE_SLICE_MS="${HOTLINE_HERDR_WAIT_SLICE_MS:-30000}"
+
+  H_ELAPSED=0
+  H_SUBMITTED=false
+  SUBMIT_UNCONFIRMED=false
+  LAST_STATUS=""
+  FILE_GRACE=10
+  while [[ $H_ELAPSED -lt $TIMEOUT ]]; do
+    # --- The transcript FIRST, every iteration. -----------------------------
+    # Before the gate, deliberately: the answer may already be on disk (the callee
+    # settled while a previous waiter was between polls, or before this waiter
+    # started at all), and asking herdr to wait for a state change that has already
+    # happened would burn a whole slice to learn nothing.
+    if [[ -f "$TRANSCRIPT_PATH" ]]; then
+      set +e
+      T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$TRANSCRIPT_PATH" "$CALL_ID" 2>/dev/null)
+      T_RC=$?
+      set -e
+      case $T_RC in
+        0)   # turn complete
+          printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
+          touch "$CALL_DIR/done"
+          emit_response_json
+          exit 0
+          ;;
+        13)  # checkpoint reached — reply ready, work order unfinished, agent live
+          printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
+          touch "$CALL_DIR/done"
+          emit_response_json
+          exit 4
+          ;;
+        10) H_SUBMITTED=true ;;   # submitted, model working — be patient
+        12)                       # preempted: a new human prompt landed after ours
+          {
+            echo "Callee reassigned mid-call — a new prompt arrived in its session after ours, so it will never emit STATUS for call_id=$CALL_ID."
+            echo "Preempting prompt: $T_OUT"
+            echo "herdr agent: $AGENT · transcript: $TRANSCRIPT_PATH"
+            echo "Our work order may well have completed anyway — read the transcript, or \`herdr agent attach $AGENT\`, before re-dialing."
+          } > "$CALL_DIR/error.txt"
+          touch "$CALL_DIR/done"
+          cat "$CALL_DIR/error.txt" >&2
+          exit 3
+          ;;
+        11)                       # nothing in the transcript carries the nonce yet
+          # cmux answers "unsubmitted or merely queued?" by reading the callee's
+          # input box. herdr cannot see that box at all (alternate screen), so the
+          # honest substitute is its lifecycle state — which is a genuine signal and
+          # not a guess: an agent sitting `idle`/`done` with no record of our nonce
+          # anywhere is very unlikely to be about to answer it, while a `working`
+          # one plainly has something in flight. Neither is proof, so this REPORTS
+          # and keeps waiting rather than concluding.
+          if ! $H_SUBMITTED && [[ $H_ELAPSED -ge $SUBMIT_DEADLINE ]] && ! $SUBMIT_UNCONFIRMED; then
+            SUBMIT_UNCONFIRMED=true
+            herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"
+            echo "hotline: no submit confirmation within ${SUBMIT_DEADLINE}s — nothing in $TRANSCRIPT_PATH carries call_id=$CALL_ID. herdr reports agent $AGENT as '${LAST_STATUS:-unreadable}'. Still waiting (up to ${TIMEOUT}s); \`herdr agent attach $AGENT\` shows what it is actually doing." >&2
+          fi
+          ;;
+        *)   # extractor usage / read error — no second tier to fall back to
+          echo "transcript-extract.sh failed on $TRANSCRIPT_PATH (rc=$T_RC). herdr has no screen fallback; read the transcript directly." >&2
+          exit 1
+          ;;
+      esac
+    elif [[ $H_ELAPSED -ge $FILE_GRACE ]]; then
+      # The transcript does NOT exist until the first prompt lands, so a brief
+      # absence right after launch is normal. A LASTING absence is not, and there
+      # is nothing else to read: say so instead of waiting out 30 minutes.
+      herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"
+      {
+        echo "No transcript at $TRANSCRIPT_PATH after ${H_ELAPSED}s — a herdr callee's transcript appears as soon as its first prompt lands, so this means the prompt never reached the agent (or the session id is wrong)."
+        echo "herdr reports agent $AGENT as '${LAST_STATUS:-unreadable}'. Check \`herdr agent get $AGENT\`, or attach to it; do NOT blindly re-dial."
+        echo "Nothing was sent by this script and no terminal state was recorded, so re-running it on the same call_dir simply looks again."
+      } >&2
+      exit 1
+    fi
+
+    # --- The gate. ----------------------------------------------------------
+    # An agent whose name no longer resolves has EXITED (herdr clears the name with
+    # it). Checked after the transcript read, so a callee that answered and then
+    # quit is reported as an answer, not as a death.
+    herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"
+    if [[ -z "$LAST_STATUS" ]]; then
+      {
+        echo "herdr agent $AGENT is gone (${HERDR_CLI_ERR:-no live agent answers to that name}) and its transcript carries no terminal STATUS for call_id=$CALL_ID — the callee exited before answering."
+        echo "The transcript is still on disk at $TRANSCRIPT_PATH; read it before re-dialing."
+      } > "$CALL_DIR/error.txt"
+      touch "$CALL_DIR/done"
+      cat "$CALL_DIR/error.txt" >&2
+      exit 1
+    fi
+
+    # Block until the lifecycle settles, bounded by the slice. Its outcome is not
+    # branched on: `agent wait` timing out means "still working", which is exactly
+    # what the next transcript read will confirm or refute. This is a gate, not a
+    # verdict — herdr's states are too coarse to be one (see the block header).
+    GATE_START=$(date +%s)
+    herdr_cli agent wait "$AGENT" "${HERDR_SETTLED_ARGS[@]}" \
+      --timeout "$GATE_SLICE_MS" >/dev/null 2>&1 || true
+    GATE_SECONDS=$(( $(date +%s) - GATE_START ))
+    [[ $GATE_SECONDS -lt 0 ]] && GATE_SECONDS=0
+
+    sleep "$POLL_SLEEP"
+    # The gate's real wall time is charged to the budget alongside the tick, or a
+    # 30s block would cost 2s of a 1800s budget and this loop would run for hours.
+    H_ELAPSED=$((H_ELAPSED + POLL_INTERVAL + GATE_SECONDS))
+  done
+
+  {
+    if $SUBMIT_UNCONFIRMED; then
+      echo "Timed out after ${TIMEOUT}s waiting on herdr agent $AGENT with NO submit confirmation — nothing in the transcript ever carried call_id=$CALL_ID ($TRANSCRIPT_PATH)."
+      echo "Last state herdr reported: '${LAST_STATUS:-unreadable}'. Either the prompt never landed or the callee has been busy the whole time; herdr cannot tell these apart from outside (its states do not name what is being worked on)."
+    else
+      echo "Timed out waiting for the herdr callee to finish (${TIMEOUT}s) — $TRANSCRIPT_PATH, agent $AGENT, last state '${LAST_STATUS:-unreadable}'."
+      echo "The callee may simply be slower than the budget."
+    fi
+    echo "Re-run this script on the same call_dir to resume with a fresh ${TIMEOUT}s budget; it re-reads the transcript and sends nothing. The agent is still live — \`herdr agent attach $AGENT\` to look."
+  } > "$CALL_DIR/error.txt"
+  record_waiter_timeout "mode=herdr"
+  touch "$CALL_DIR/done"
+  cat "$CALL_DIR/error.txt" >&2
+  exit 1
+fi
 
 if $CMUX_MODE; then
   # Resolve the read-screen target: a surface (side-by-side/window placement)

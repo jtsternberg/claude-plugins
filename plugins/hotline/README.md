@@ -234,6 +234,24 @@ Accepts `1` / `true` / `yes` (case-insensitive). When set, `check-cmux.sh` alway
 
 Use cases for either path: debugging the headless transport, A/B comparing receiver behavior across modes, or wanting `claude -p`'s structured stream-json output directly on stdout. Headless calls draw from the programmatic-usage credit; cmux interactive calls don't — the opt-in default reflects that cost difference.
 
+### The herdr transport (opt-in, detached, local)
+
+A third backend, for the one thing neither of the others can do: **outlive the window it was launched from.** `--transport herdr` hosts the callee as a named [herdr](https://herdr.dev) agent in a persistent pane — the herdr server owns the PTY, so a long work order survives a detach, a closed lid, or a dropped SSH session.
+
+```
+/hotline:hotline-dial --herdr dotfiles run the 40-minute migration
+# → dial.sh --transport herdr --placement detached
+```
+
+It requires herdr on `PATH` and a reachable server, and it is **detached and local only**. Anything else is refused up front with the phase that lifts it: side-by-side and `--window` placement and conference mode need herdr's attach story (Phase 3); a follow-up into an already-cached session needs the re-target verb (Phase 2); `--remote` needs a remote transcript reader, because every hotline answer is read from the local `~/.claude/projects` tree (Phase 3).
+
+Two things behave differently from a cmux call, and both are deliberate:
+
+- **A failed herdr preflight is an error, not a fallback.** Asking for herdr is asking for durability; substituting a cmux surface would be a lie the user discovers hours later. `.stage` is `transport` and `.recovery` names the fix.
+- **The pane is left open after the response.** Persistence is the point, so hotline does not close it the way it closes a detached cmux tab. Teardown is `herdr pane close $(cat <call_dir>/herdr_pane.txt)`.
+
+`cmux` remains the default and nothing selects herdr implicitly: running inside a herdr pane (`HERDR_ENV=1`) only makes the option available. Response extraction is shared, not forked — `herdr agent wait` replaces the screen poll as the *when to read* gate, and the same `transcript-extract.sh` nonce/STATUS reader produces the answer, so `AWAITING_REVIEW` and preemption behave exactly as they do over cmux. Tuning knobs: `HOTLINE_HERDR_PANE`, `HOTLINE_HERDR_SPLIT_DIRECTION`, `HOTLINE_HERDR_PANE_SETTLE`, `HOTLINE_HERDR_WAIT_SLICE_MS`, `HOTLINE_HERDR_KEEP_FAILED_PANE`.
+
 ---
 
 ## How It Works
@@ -278,6 +296,7 @@ Use cases for either path: debugging the headless transport, A/B comparing recei
 │                 ┌─────────────────────────────┐                     │
 │                 │ Transport select (per mode) │                     │
 │                 │                             │                     │
+│                 │ --transport herdr?      ─►  │  herdr-call-async.sh│
 │                 │ cmux available?             │                     │
 │                 │  ├─ quick / work order ──►  │  cmux-call-async.sh │
 │                 │  └─ conference call    ──►  │  cmux-call.sh       │

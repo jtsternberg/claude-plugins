@@ -40,12 +40,20 @@ TARGET=$(cat "$CALL_DIR/cwd.txt")
 MODE=$(cat "$CALL_DIR/mode.txt")
 CALLER_SESSION=$(cat "$CALL_DIR/caller_session.txt")
 
-# surface_ref is optional — present only for visible surface placements
-# (side-by-side / --window), absent for headless / detached calls. When present,
-# record it so a follow-up can reuse the surface the session already lives in.
+# The call's HOST HANDLE, recorded so a follow-up can re-address the live callee
+# instead of launching a second one. The cache's `surface_ref` key has always
+# documented itself as an opaque handle, and that is what makes one field serve two
+# transports:
+#   cmux  — surface_ref.txt, present only for visible surface placements
+#           (side-by-side / --window) and absent for headless / detached calls.
+#   herdr — herdr_agent.txt, the agent NAME, which is what `agent prompt` /
+#           `agent wait` / `agent get` address and what survives a disconnect.
+# Only one is ever present: the launchers write one file each, keyed by transport.
 SURFACE_ARGS=()
 if [[ -s "$CALL_DIR/surface_ref.txt" ]]; then
   SURFACE_ARGS=(--surface "$(cat "$CALL_DIR/surface_ref.txt")")
+elif [[ -s "$CALL_DIR/herdr_agent.txt" ]]; then
+  SURFACE_ARGS=(--surface "$(cat "$CALL_DIR/herdr_agent.txt")")
 fi
 
 # The nonce of THIS exchange. Superseded-surface cleanup uses it as proof that a
