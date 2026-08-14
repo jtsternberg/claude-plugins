@@ -105,6 +105,20 @@ die() { jq -nc --arg err "$1" '{error: $err}'; exit 1; }
 [[ -z "$CWD" ]] && die "No --cwd provided; herdr splits its pane with an explicit --cwd"
 [[ -d "$CWD" ]] || die "--cwd does not exist or is not a directory: $CWD"
 
+# CANONICALIZED ONCE, HERE, and used for both the split and cwd.txt. Claude Code
+# derives its project directory from the cwd it actually RESOLVED, so a callee
+# launched under a symlinked path writes its transcript under the REALPATH encoding:
+# a callee in /tmp/x on macOS lands in ~/.claude/projects/-private-tmp-x, not
+# -tmp-x. Every downstream consumer derives the transcript path from cwd.txt, so
+# recording the path as handed to us hands them an encoding the callee never used.
+#
+# Live-caught: a herdr dial into /tmp/herdr-live-smoke delivered fine (delivery
+# tries both spellings) and then the response wait reported "the prompt never
+# reached the agent" while STATUS: WORK_COMPLETE sat in the real transcript.
+# Normalizing here is the half of the fix that makes the two agree by construction;
+# the wait also tries both spellings, so a hand-staged call dir still works.
+CWD=$(cd "$CWD" 2>/dev/null && pwd -P) || die "--cwd could not be resolved to a real path: $CWD"
+
 if [[ -n "$PROMPT_FILE" ]]; then
   [[ -f "$PROMPT_FILE" ]] || die "--prompt-file does not exist: $PROMPT_FILE"
   PROMPT=$(cat "$PROMPT_FILE")

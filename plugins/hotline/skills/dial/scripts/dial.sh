@@ -500,10 +500,20 @@ fi
 # Step 3 — Transport
 # ---------------------------------------------------------------------------
 # Precedence, first match wins:
-#   1. --headless / HOTLINE_FORCE_HEADLESS  → headless          (unchanged)
-#   2. --transport herdr                    → herdr, or ERROR
-#   3. otherwise                            → cmux, with the existing cmux→headless
-#                                             degrade chain, unchanged
+#   1. --headless            → headless                          (unchanged)
+#   2. --transport herdr     → herdr, or ERROR
+#   3. otherwise             → cmux, with the existing cmux→headless degrade chain,
+#                              unchanged — and that chain is where
+#                              HOTLINE_FORCE_HEADLESS acts, via check-cmux.sh.
+#
+# WHERE HOTLINE_FORCE_HEADLESS SITS, precisely: it is read by check-cmux.sh, which
+# only step 3 calls. So it forces headless for every dial that does NOT name a
+# transport, and an explicit `--transport herdr` outranks it — a per-call flag beats
+# an ambient default, and `.transport` reports what actually ran. That is deliberate:
+# the alternative is a second copy of that variable's semantics here, which is how a
+# constant with two definitions ends up disagreeing with itself. `--headless`
+# together with `--transport herdr` is refused outright in the validation block
+# above, because there both asks are explicit and neither is ours to discard.
 #
 # HERDR IS NEVER AUTO-SELECTED. Being inside a herdr pane (HERDR_ENV=1) or having a
 # herdr server up makes herdr *available*, and that is all it does: flipping the
@@ -950,6 +960,14 @@ fi
 # only one herdr Phase 1 accepts, so it is reported as such rather than inventing a
 # fourth placement word for the emitted contract.
 [[ "$TRANSPORT" == "herdr" ]] && PLACEMENT_EFFECTIVE="detached"
+# The launcher records a preset-vs-observed session-id disagreement in the call dir.
+# It belongs in the emitted JSON too: it is the single most diagnostic signal when a
+# herdr dial later goes quiet, and a fact that only exists in a temp dir is a fact
+# nobody reads. The call still succeeded — the launcher adopted herdr's observed id,
+# which is the right one — so this is a fallback note, not an error.
+if [[ -s "$CALL_DIR/session_id_mismatch.txt" ]]; then
+  add_fallback "herdr-session-id-mismatch($(sed -n '1p' "$CALL_DIR/session_id_mismatch.txt"))"
+fi
 [[ -s "$CALL_DIR/call_id.txt" ]] && CALL_ID_OUT=$(cat "$CALL_DIR/call_id.txt")
 
 # ---------------------------------------------------------------------------

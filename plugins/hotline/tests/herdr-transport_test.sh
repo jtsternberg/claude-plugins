@@ -349,9 +349,13 @@ check "herdr_agent.txt holds a herdr-legal name ([a-z][a-z0-9_-]{0,31}, hotline-
 check "herdr_pane.txt names the pane the SPLIT created, not the one it split from" $? \
   "got '$(cat "$cd_path/herdr_pane.txt" 2>/dev/null)'"
 
-[[ "$(cat "$cd_path/cwd.txt" 2>/dev/null)" == "$t/target" ]]
-check "cwd.txt records the callee cwd (the transcript path is derived from it)" $? \
-  "got '$(cat "$cd_path/cwd.txt" 2>/dev/null)'"
+# The CANONICAL cwd, not the string we were handed: the transcript path is derived
+# from this, and Claude Code encodes the path it resolved. (Under $TMPDIR on macOS
+# these differ — /tmp is a symlink to /private/tmp — which is what makes this
+# assertion meaningful rather than tautological.)
+[[ "$(cat "$cd_path/cwd.txt" 2>/dev/null)" == "$(cd "$t/target" && pwd -P)" ]]
+check "cwd.txt records the callee cwd, canonicalized (the transcript path derives from it)" $? \
+  "got '$(cat "$cd_path/cwd.txt" 2>/dev/null)' want '$(cd "$t/target" && pwd -P)'"
 
 preset=$(cat "$cd_path/session_id_preset.txt" 2>/dev/null || true)
 [[ "$preset" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
@@ -395,9 +399,9 @@ check "writes NO cmux handle (so a stale transport.txt could never be read as cm
   "call_dir: $(ls "$cd_path" | tr '\n' ' ')"
 
 # --- what the launcher actually asked herdr to do ---------------------------
-grep -q "pane split --pane w1:p1 --direction right --cwd $t/target --no-focus" \
+grep -q "pane split --pane w1:p1 --direction right --cwd $(cd "$t/target" && pwd -P) --no-focus" \
   <(tr -d '\\' < "$t/herdr.log")
-check "splits the resolved pane with the callee's cwd and --no-focus" $? \
+check "splits the resolved pane with the callee's canonical cwd and --no-focus" $? \
   "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
 
 grep -q -- "agent start $agent --kind claude --pane w1:p4" <(tr -d '\\' < "$t/herdr.log")
@@ -681,6 +685,49 @@ check "…and nothing is closed: the agent outlives the call (that is why herdr 
 # decided anything — but when it IS reached it must ask for the settled SET.
 # `--until idle` alone would hang forever on a hotline callee: herdr reports an
 # unfocused finished agent as `done`, not `idle`.
+# --- the live-caught blocker: cwd.txt in one spelling, transcript in the other ---
+# Delivery has always tried BOTH spellings of the callee's cwd; the wait derived only
+# the literal one. Live consequence on a real callee under /tmp/herdr-live-smoke:
+# `herdr-prompt.sh` confirmed the nonce, then the wait exited 1 with "the prompt never
+# reached the agent" while STATUS: WORK_COMPLETE sat in the realpath-encoded
+# transcript. Every fixture above uses an already-canonical path, which is exactly why
+# none of them could see it.
+t=$(new_env)
+NONCE="cafe1234beef5678"
+LINKED_CWD="$t/symlinked-target"
+ln -s "$t/target" "$LINKED_CWD"
+cd_path="$t/call"
+# cwd.txt holds the SYMLINKED path — what an older call dir, or a hand-staged one,
+# carries. The callee wrote its transcript under the REALPATH encoding, as Claude Code
+# always does.
+stage_herdr_dir "$cd_path" hotline-r-link "herdr-sess" "$NONCE" "$LINKED_CWD"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/herdr-sess.jsonl" \
+  "$NONCE" WORK_COMPLETE "the symlinked answer"
+[[ ! -f "$t/home/.claude/projects/$(encode_cwd "$LINKED_CWD")/herdr-sess.jsonl" ]]
+check "the fixture really has NO transcript under the literal cwd spelling (guards the guard)" $? \
+  "literal-spelling path exists, so this case would pass without the fix"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HOTLINE_POLL_SLEEP=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 10 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 0 && "$(jq -r '.response' <<<"$out" 2>/dev/null)" == *"the symlinked answer"* ]]
+check "a symlinked cwd.txt still finds the REALPATH-encoded transcript (live-caught blocker)" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
+# And the launcher's half of the same fix: cwd.txt is canonicalized at write time, so
+# the two spellings normally coincide by construction rather than by search.
+t=$(new_env)
+ln -s "$t/target" "$t/linked"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_PANE_ID="w1:p1" \
+      bash "$HERDR_ASYNC" --cwd "$t/linked" --prompt "hi" 2>"$t/err.txt")
+cd_path=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ "$(cat "$cd_path/cwd.txt" 2>/dev/null)" == "$(cd "$t/target" && pwd -P)" ]]
+check "the launcher canonicalizes cwd.txt, so every consumer derives the encoding the callee uses" $? \
+  "cwd.txt='$(cat "$cd_path/cwd.txt" 2>/dev/null)' want='$(cd "$t/target" && pwd -P)'"
+grep -q -- "--cwd $(cd "$t/target" && pwd -P) " <(tr -d '\\' < "$t/herdr.log")
+check "…and splits the pane in that same canonical cwd, so the callee resolves there" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
 t=$(new_env)
 NONCE="1122334455667788"
 cd_path="$t/call"
@@ -729,6 +776,39 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
 check "a preempted callee → exit 3, naming the preempting prompt" $? \
   "rc=$rc stderr=$(cat "$t/err.txt")"
 
+# A call dir with no agent name is still a launcher bug — but the ANSWER may already
+# be on disk, and refusing to look because the GATE is missing throws away a finished
+# work order. So the transcript is read first, and the loud refusal happens only at
+# the point of actually needing the gate.
+t=$(new_env)
+NONCE="d0d0d0d0e1e1e1e1"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-r-noagent "herdr-sess" "$NONCE" "$t/target"
+rm -f "$cd_path/herdr_agent.txt"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "$NONCE" WORK_COMPLETE "answered before the handle went missing"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HOTLINE_POLL_SLEEP=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 10 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 0 && "$(jq -r '.response' <<<"$out" 2>/dev/null)" == *"answered before the handle went missing"* ]]
+check "no agent name but an answer on disk → the answer, not a launcher-bug error" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
+# …and with nothing on disk to salvage, it still fails loudly rather than degrading
+# into a bare file poll that would sit out the whole budget.
+t=$(new_env)
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-r-noagent2 "herdr-sess" "n-na2" "$t/target"
+rm -f "$cd_path/herdr_agent.txt"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "n-na2" "" "still working"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HOTLINE_POLL_SLEEP=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 600 2>"$t/err.txt"); rc=$?
+[[ $rc -ne 0 ]] && grep -q 'no herdr_agent.txt' "$t/err.txt" && grep -q 'launcher bug' "$t/err.txt"
+check "…and with no answer on disk it still fails loudly as a launcher bug" $? \
+  "rc=$rc stderr=$(cat "$t/err.txt")"
+
 t=$(new_env)
 cd_path="$t/call"
 stage_herdr_dir "$cd_path" hotline-r-5 "herdr-sess" "n5" "$t/target"
@@ -763,8 +843,12 @@ stage_herdr_dir "$cd_path" hotline-r-7 "herdr-sess" "n7" "$t/target"
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
       HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HOTLINE_POLL_SLEEP=0 \
       bash "$WAIT_RESPONSE" "$cd_path" --timeout 30 2>"$t/err.txt"); rc=$?
-[[ $rc -ne 0 ]] && grep -q 'No transcript at' "$t/err.txt"
-check "a transcript that never appears is reported as 'the prompt never landed'" $? \
+# The message names EVERY derived candidate, not one path: naming a single path is
+# how it once asserted "the prompt never reached the agent" about a callee whose
+# finished answer was in the other spelling.
+[[ $rc -ne 0 ]] && grep -q 'No transcript after' "$t/err.txt" \
+  && grep -q 'at any derived path' "$t/err.txt"
+check "a transcript that never appears is reported as 'the prompt never landed', naming every candidate" $? \
   "rc=$rc stderr=$(cat "$t/err.txt")"
 
 # ===========================================================================
@@ -975,6 +1059,34 @@ call_dir=$(jq -r '.call_dir' <<<"$out" 2>/dev/null)
 [[ ! -f "$call_dir/pending_paste.md" ]]
 check "…and the delivered payload is removed (the transcript is the record now)" $? \
   "call_dir: $(ls "$call_dir" 2>/dev/null | tr '\n' ' ')"
+[[ "$(jq -r '.fallbacks | length' <<<"$out" 2>/dev/null)" == "0" ]]
+check "…with no fallbacks: the session id herdr observed matched the one we preset" $? "out=$out"
+
+# --- a preset/observed session-id disagreement reaches the emitted JSON ------
+# It is the single most diagnostic signal when a herdr dial later goes quiet, and a
+# fact recorded only in a temp dir is a fact nobody reads. The call still SUCCEEDS —
+# the launcher adopts herdr's observed id, which is the correct one — so this is a
+# fallback note rather than an error.
+t=$(new_env)
+OBS_SID="eeeeeeee-2222-4222-8222-333333333333"
+cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/$OBS_SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+chmod +x "$t/bin/herdr"
+mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_OBSERVED_SID=$OBS_SID" \
+        -- --target "$t/target" --mode work_order --prompt "run the suite" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.remote_session_id' <<<"$out" 2>/dev/null)" == "$OBS_SID" ]]
+check "an observed session id different from the preset still connects, on the OBSERVED id" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"herdr-session-id-mismatch(preset="* ]]
+check "…and the disagreement is reported in .fallbacks, not just left in the call dir" $? "out=$out"
 
 # ===========================================================================
 echo ""
