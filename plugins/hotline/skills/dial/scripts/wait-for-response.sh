@@ -64,6 +64,20 @@
 #
 # Usage:
 #   wait-for-response.sh <call_dir> [--timeout <seconds>] [--submit-deadline <seconds>]
+#
+# Re-invoking on the same call_dir is supported and always opens a FRESH --timeout
+# budget. A previous waiter's timeout is a fact about how long that waiter was
+# willing to wait, not about the call, so it is recorded as a resumable marker
+# instead of a terminal verdict — see WAITER_TIMEOUT_MARKER below. A real remote
+# failure (launcher error, preemption) still short-circuits instantly.
+# (claude-plugins-tyaj)
+#
+# Environment:
+#   HOTLINE_POLL_SLEEP — real seconds to sleep per poll tick (default 2, i.e.
+#     $POLL_INTERVAL). The budget is accounted in fixed integer POLL_INTERVAL
+#     ticks either way, so lowering this collapses wall-clock WITHOUT changing
+#     how many iterations run or what they decide. Tests set it to ~0.
+#     (claude-plugins-fhn3)
 # =============================================================================
 set -euo pipefail
 
@@ -73,7 +87,17 @@ TRANSCRIPT_PATH_SH="$SELF_DIR/../../../scripts/transcript-path.sh"
 
 CALL_DIR="${1:-}"
 TIMEOUT=""
+# Two separate numbers on purpose:
+#   POLL_INTERVAL — the tick the timeout budget is accounted in. Must stay an
+#     integer; the ELAPSED counters below are $(( )) arithmetic.
+#   POLL_SLEEP    — the real time one tick costs.
+# They are equal in production. Splitting them is what lets the suite run the
+# poller's full logic — same iteration count, same branch decisions, same
+# messages — for ~0 wall-clock. Note the budget deliberately is NOT anchored to
+# $SECONDS: a wall-clock budget could not be collapsed this way, and the counter
+# already restarts at 0 on every invocation. (claude-plugins-fhn3)
 POLL_INTERVAL=2
+POLL_SLEEP="${HOTLINE_POLL_SLEEP:-$POLL_INTERVAL}"
 # Transcript mode: how long to wait for the transcript to show ANY evidence the
 # nonce reached the callee (user record, queued-command injection, enqueue, or a
 # STATUS naming our call_id — see transcript-extract.sh) before asking the input
@@ -108,6 +132,31 @@ fi
 if [[ -z "$TIMEOUT" ]]; then
   $CMUX_MODE && TIMEOUT=1800 || TIMEOUT=300
 fi
+
+# A waiter that runs out of budget writes done+error.txt so a caller who does NOT
+# want to wait again sees the failure without re-polling. That is deliberate, and
+# it is also what made a long work order unwaitable: once the 1800s budget expired,
+# every later invocation on the same call_dir replayed "Timed out" within seconds
+# instead of opening a fresh window, so a caller could not resume the wait at all.
+#
+# The fix separates the two facts. A timeout drops this marker alongside
+# done+error.txt, and finding it here means "a waiter gave up", not "the call
+# failed" — so we clear the terminal state and poll again with a full budget
+# measured from now. A real remote failure (launcher error, preemption) writes
+# error.txt WITHOUT the marker and still short-circuits immediately, unchanged.
+# response.json is the guard against clearing a call that genuinely finished.
+# (claude-plugins-tyaj)
+WAITER_TIMEOUT_MARKER="$CALL_DIR/waiter_timeout.txt"
+if [[ -f "$WAITER_TIMEOUT_MARKER" && ! -f "$CALL_DIR/response.json" ]]; then
+  echo "hotline: a previous waiter gave up on this call ($(tr -d '\n' < "$WAITER_TIMEOUT_MARKER")) — resuming with a fresh ${TIMEOUT}s budget from now." >&2
+  rm -f "$CALL_DIR/done" "$CALL_DIR/error.txt" "$WAITER_TIMEOUT_MARKER"
+fi
+
+# Record an expired budget as resumable. Called only where the wait itself ran
+# out — never on a remote failure, which must stay terminal.
+record_waiter_timeout() {   # $1 = which loop expired
+  printf 'budget=%ss %s' "$TIMEOUT" "$1" 2>/dev/null > "$WAITER_TIMEOUT_MARKER" || true
+}
 
 emit_response_json() {
   # Re-emit as compact, validated JSON. If response.json is somehow
@@ -237,7 +286,7 @@ if $CMUX_MODE; then
         # No transcript file yet — brief grace, then fall back to scraping
         # rather than hard-fail (guards against a mis-derived path).
         [[ $T_ELAPSED -ge $FILE_GRACE ]] && { FELL_BACK=true; break; }
-        sleep "$POLL_INTERVAL"; T_ELAPSED=$((T_ELAPSED + POLL_INTERVAL)); continue
+        sleep "$POLL_SLEEP"; T_ELAPSED=$((T_ELAPSED + POLL_INTERVAL)); continue
       fi
 
       set +e
@@ -318,7 +367,7 @@ if $CMUX_MODE; then
           ;;
         *)  FELL_BACK=true; break ;;   # extractor usage/read error → fall back
       esac
-      sleep "$POLL_INTERVAL"
+      sleep "$POLL_SLEEP"
       T_ELAPSED=$((T_ELAPSED + POLL_INTERVAL))
     done
     if ! $FELL_BACK; then
@@ -332,11 +381,15 @@ if $CMUX_MODE; then
           echo "Timed out after ${TIMEOUT}s in transcript mode with NO submit confirmation — nothing in the transcript ever carried call_id=$CALL_ID: no user record, no queued-command injection, no enqueue ($TRANSCRIPT_PATH)."
           echo "Could not confirm whether the message submitted: it may still be queued behind a long turn, or it may never have submitted. The script cannot tell these apart from timing alone."
           echo "To check: cmux read-screen --surface $WS_REF — if your text is sitting in the input box it never submitted; if the callee is mid-turn it was queued. Do NOT blindly re-dial; that risks double-queueing the same work."
+          echo "To keep waiting instead, re-run this script on the same call_dir — that resumes with a fresh ${TIMEOUT}s budget and sends nothing."
         } > "$CALL_DIR/error.txt"
       else
-        echo "Timed out waiting for the callee to finish (transcript mode, ${TIMEOUT}s) — $TRANSCRIPT_PATH" \
-          > "$CALL_DIR/error.txt"
+        {
+          echo "Timed out waiting for the callee to finish (transcript mode, ${TIMEOUT}s) — $TRANSCRIPT_PATH"
+          echo "The callee may simply be slower than the budget. Re-run this script on the same call_dir to resume with a fresh ${TIMEOUT}s budget; it re-reads the transcript and sends nothing."
+        } > "$CALL_DIR/error.txt"
       fi
+      record_waiter_timeout "mode=transcript"
       touch "$CALL_DIR/done"
       cleanup_workspace_and_script
       cat "$CALL_DIR/error.txt" >&2
@@ -347,7 +400,7 @@ if $CMUX_MODE; then
 
   # === FALLBACK PATH: scrape the rendered cmux screen ========================
   while [[ $ELAPSED -lt $TIMEOUT ]]; do
-    sleep "$POLL_INTERVAL"
+    sleep "$POLL_SLEEP"
     ELAPSED=$((ELAPSED + POLL_INTERVAL))
 
     SCREEN=$(cmux read-screen "${READ_TARGET[@]}" --scrollback --lines 9999 \
@@ -439,24 +492,31 @@ if $CMUX_MODE; then
     fi
   done
 
-  # Timeout: write error.txt and done so future callers see the failure
-  # without re-polling.
-  echo "Timed out waiting for STATUS in cmux ${WS_REF} (${TIMEOUT}s)" \
-    > "$CALL_DIR/error.txt"
+  # Timeout: write error.txt and done so a caller who does not want to wait again
+  # sees the failure without re-polling — plus the marker that lets one who does
+  # re-run this script for a fresh budget instead (claude-plugins-tyaj).
+  {
+    echo "Timed out waiting for STATUS in cmux ${WS_REF} (${TIMEOUT}s)"
+    echo "Re-run this script on the same call_dir to resume with a fresh ${TIMEOUT}s budget; it re-reads the screen and sends nothing."
+  } > "$CALL_DIR/error.txt"
+  record_waiter_timeout "mode=scrape"
   touch "$CALL_DIR/done"
   cleanup_workspace_and_script
   cat "$CALL_DIR/error.txt" >&2
   exit 1
 fi
 
-# Headless mode — original file-watch behavior.
+# Headless mode — original file-watch behavior. This path needs no
+# WAITER_TIMEOUT_MARKER: it writes neither done nor error.txt when it gives up, so
+# a re-invocation already gets a fresh budget. Only `done` written by
+# headless-call-async.sh's own poller — a real remote outcome — is terminal here.
 ELAPSED=0
 while [[ ! -f "$CALL_DIR/done" ]]; do
   if [[ $ELAPSED -ge $TIMEOUT ]]; then
-    echo "Timed out waiting for response (${TIMEOUT}s)" >&2
+    echo "Timed out waiting for response (${TIMEOUT}s) — re-run on the same call_dir to keep waiting with a fresh budget." >&2
     exit 1
   fi
-  sleep "$POLL_INTERVAL"
+  sleep "$POLL_SLEEP"
   ELAPSED=$((ELAPSED + POLL_INTERVAL))
 done
 

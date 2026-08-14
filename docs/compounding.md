@@ -93,6 +93,12 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   BSD-first `stat -f … || stat -c …` never reaches the fallback and permission
   assertions read empty on the ubuntu runner. Grep tests for any `stat -f` placed
   before its `stat -c` fallback. (289ef4a)
+- **An injectable delay keeps its shipped default under test, and patience is
+  asserted on the exit path rather than the stopwatch.** Collapsing a poller's sleep
+  for speed makes every wall-clock assertion vacuous and hides a `0` default that
+  would spin-loop in production. Give the env var one case that runs with it unset,
+  and prove "waited the whole budget" from the timeout branch's own message, which
+  the early-give-up branch cannot produce. (claude-plugins-fhn3)
 - **A suite is not green until it is green on Linux.** The ubuntu runner is the
   only Linux check, and a macOS-green suite hid a red CI for the entire
   terminal.paste rework — portability bugs (BSD-only `stat`, `getppid` reparenting

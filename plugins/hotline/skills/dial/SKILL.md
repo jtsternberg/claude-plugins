@@ -188,6 +188,13 @@ captured stdout piped into `jq`. Under zsh (the Bash tool's shell) `echo` on
 captured JSON mangles backslash escapes (`\n`, `\f`, `\u001b`, …) into raw
 bytes that `jq` then rejects.
 
+**A timeout is not the end of the call.** The `--timeout` budget bounds how long
+*this invocation* waits, not the call, and re-running the script on the same
+`CALL_DIR` resumes with a fresh budget — it re-reads the transcript (or the
+screen) and sends nothing, so it can never double-queue work. Prefer that over
+re-dialing when a work order is simply slower than the budget. A real remote
+failure still short-circuits immediately instead of waiting again.
+
 Exit codes that are not failures:
 
 - **Exit 3 — the callee was reassigned.** (Not to be confused with `dial.sh`'s

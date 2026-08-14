@@ -7,12 +7,22 @@
 # the hardened caller patterns (file-direct read and here-string) survive
 # under zsh — which is where the original bug (claude-plugins-82u) surfaced.
 #
-# Runs without invoking real `claude -p`. Should finish under 5 seconds.
+# Runs without invoking real `claude -p`. Should finish in a few seconds.
 #
 # Usage: bash plugins/hotline/tests/wait-for-response_test.sh
 # Exit 0 on success; exit 1 with failing case names on any failure.
 # =============================================================================
 set -u
+
+# Collapse the poller's real sleep. wait-for-response.sh accounts its timeout
+# budget in fixed 2s ticks and sleeps HOTLINE_POLL_SLEEP per tick, so this runs
+# every loop the same number of iterations, down the same branches, to the same
+# messages — for none of the wall-clock. Without it this suite spent ~2 minutes
+# sleeping out real backoff intervals and dominated the whole repo's test time.
+# Patience is therefore asserted on WHICH exit path ran (and on poll counts),
+# never on wall-clock; the one case that must see the shipped cadence runs with
+# `env -u HOTLINE_POLL_SLEEP`. (claude-plugins-fhn3)
+export HOTLINE_POLL_SLEEP=0.02
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIAL_SCRIPTS="$SCRIPT_DIR/../skills/dial/scripts"
@@ -488,8 +498,11 @@ setup_discrim_call() {  # $1=transcript body  $2=screen text  $3=with_surface(tr
   echo "$TNONCE"  > "$cd/call_id.txt"
   echo "true"     > "$cd/keep_workspace.txt"
   [[ "$with_surface" == "true" ]] && echo "w1:s1" > "$cd/surface_ref.txt"
+  # The stub logs every invocation to $sd/cmux.log so a test can count poll ticks
+  # directly instead of inferring them from wall-clock (claude-plugins-fhn3).
   {
     echo '#!/usr/bin/env bash'
+    echo "printf '%s\\n' \"\$*\" >> '$sd/cmux.log'"
     echo 'if [[ "$1" == "read-screen" ]]; then'
     printf '  cat <<%s\n' "'SCREENEOF'"
     printf '%s\n' "$screen"
@@ -499,6 +512,7 @@ setup_discrim_call() {  # $1=transcript body  $2=screen text  $3=with_surface(tr
     echo 'exit 0'
   } > "$sd/cmux"
   chmod +x "$sd/cmux"
+  : > "$sd/cmux.log"
   echo "$h|$cd|$sd"
 }
 
@@ -557,12 +571,10 @@ D2=$(setup_discrim_call "$NO_EVENT_BODY" \
 ╰──────────────────────────────────────╯
   ? for shortcuts" true)
 H5=${D2%%|*}; r5=${D2#*|}; CD5=${r5%%|*}; SD5=${r5#*|}
-START5=$SECONDS
 set +e
 ERR5=$(HOME="$H5" PATH="$SD5:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD5" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
 RC5=$?
 set -e
-EL5=$((SECONDS - START5))
 # Match the ASSERTIVE claim, not the words — the correct hedge legitimately
 # contains "may never have submitted", which a naive grep would flag.
 if printf '%s' "$ERR5" | grep -qiE "the message never submitted|never submitted into the REPL"; then
@@ -570,11 +582,26 @@ if printf '%s' "$ERR5" | grep -qiE "the message never submitted|never submitted 
 else
   pass "empty box → does not assert 'never submitted'"
 fi
-if [[ $EL5 -ge 10 ]]; then
-  pass "empty box → stays patient past the submit deadline (${EL5}s of 12s)"
+# Patience is asserted on BUDGET, not wall-clock, because the sleeps are collapsed
+# (claude-plugins-fhn3). Giving up at the 4s submit deadline leaves via the
+# input-box branch with a different message; only consuming the whole 12s budget
+# reaches "Timed out after 12s". Both exits are rc 1, so the message IS the
+# discriminator — a stricter test than a stopwatch, which only saw duration.
+if [[ $RC5 -ne 0 ]] && printf '%s' "$ERR5" | grep -q "Timed out after 12s in transcript mode"; then
+  pass "empty box → spends the whole 12s budget, not just the submit deadline"
 else
-  fail "empty box → stays patient past the submit deadline" \
-    "gave up after ${EL5}s with a 4s submit-deadline and a 12s timeout; rc=$RC5 err=$ERR5"
+  fail "empty box → spends the whole 12s budget, not just the submit deadline" \
+    "rc=$RC5 err=$ERR5"
+fi
+# Independent proof it really iterated: one box check per tick from the 4s deadline
+# to the 12s budget (ticks at 4, 6, 8, 10).
+BOX_CHECKS=0
+[[ -f "$SD5/cmux.log" ]] && BOX_CHECKS=$(grep -c "read-screen" "$SD5/cmux.log" || true)
+if [[ ${BOX_CHECKS:-0} -ge 3 ]]; then
+  pass "empty box → re-checks the input box on every tick past the deadline (${BOX_CHECKS}x)"
+else
+  fail "empty box → re-checks the input box on every tick past the deadline" \
+    "only ${BOX_CHECKS} read-screen calls with a 4s deadline and a 12s budget; rc=$RC5"
 fi
 
 # CASE 3 — the surface ref exists but read-screen FAILS (surface died between
@@ -644,22 +671,22 @@ D4=$(setup_discrim_call "$Q_ENQ" \
 ╰──────────────────────────────────────╯
   ⏵⏵ queued: [CALL_ID: $TNONCE] do the thing" true)
 H8=${D4%%|*}; r8=${D4#*|}; CD8=${r8%%|*}; SD8=${r8#*|}
-START8=$SECONDS
 set +e
 ERR8=$(HOME="$H8" PATH="$SD8:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD8" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
 RC8=$?
 set -e
-EL8=$((SECONDS - START8))
 if printf '%s' "$ERR8" | grep -qi "input box"; then
   fail "queued-and-visible → must not be blamed on the input box" "err=$ERR8"
 else
   pass "queued-and-visible → not blamed on the input box"
 fi
-if [[ $RC8 -ne 0 && $EL8 -ge 10 ]]; then
-  pass "queued-and-visible → waits out the timeout as submitted work (${EL8}s of 12s)"
+# The enqueue record marks it submitted, so this must reach the plain
+# "callee is slower than the budget" timeout — the full 12s, patiently.
+if [[ $RC8 -ne 0 ]] && printf '%s' "$ERR8" | grep -q "transcript mode, 12s"; then
+  pass "queued-and-visible → spends the whole 12s budget as submitted work"
 else
-  fail "queued-and-visible → waits out the timeout as submitted work" \
-    "rc=$RC8 elapsed=${EL8}s err=$ERR8"
+  fail "queued-and-visible → spends the whole 12s budget as submitted work" \
+    "rc=$RC8 err=$ERR8"
 fi
 rm -rf "$H8" "$CD8" "$SD8"
 
@@ -743,18 +770,149 @@ AW2=$(setup_await_call \
 '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] task 1 of 3"}}
 {"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nstill grinding"}]}}')
 HA=${AW2%%|*}; rA=${AW2#*|}; CDA=${rA%%|*}; rAb=${rA#*|}; SDA=${rAb%%|*}; LOGA=${rAb#*|}
-STARTA=$SECONDS
 set +e
 ERRA=$(HOME="$HA" PATH="$SDA:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDA" --timeout 12 --submit-deadline 4 2>&1 >/dev/null)
 RCA=$?
 set -e
-ELA=$((SECONDS - STARTA))
-if [[ $RCA -eq 1 && $ELA -ge 10 ]]; then
-  pass "WORK_IN_PROGRESS still means keep polling (${ELA}s of 12s, then timeout)"
+# Resolving early would exit 0 with a response; the only other way out is the
+# 12s-budget timeout. So rc 1 plus that message is the whole claim.
+if [[ $RCA -eq 1 ]] && printf '%s' "$ERRA" | grep -q "transcript mode, 12s"; then
+  pass "WORK_IN_PROGRESS still means keep polling (whole 12s budget, then timeout)"
 else
-  fail "WORK_IN_PROGRESS still means keep polling" "rc=$RCA elapsed=${ELA}s err=$ERRA"
+  fail "WORK_IN_PROGRESS still means keep polling" "rc=$RCA err=$ERRA"
 fi
 rm -rf "$HA" "$CDA" "$SDA"
+
+# ---- resumable waiter timeout (claude-plugins-tyaj) ------------------------
+# A waiter that runs out of budget writes done+error.txt so a caller who does not
+# want to wait again sees the failure without re-polling. That made a long work
+# order unwaitable: after the 1800s budget expired once, every re-invocation on the
+# same call_dir replayed "Timed out" within seconds, so the caller could not resume
+# the wait at all (hit live 2026-08-12; worked around with a hand-rolled monitor).
+# A timeout now also drops waiter_timeout.txt, and finding it means "resume", not
+# "this call failed".
+echo ""
+echo "Resuming after a waiter timeout:"
+
+transcript_file_for() {  # $1 = sandboxed HOME → path setup_transcript_call wrote
+  local enc; enc=$(printf '%s' "/fake/callee/ws" | sed 's|[^a-zA-Z0-9]|-|g')
+  echo "$1/.claude/projects/$enc/sess-tcm.jsonl"
+}
+
+# A callee still working when the budget runs out.
+RT=$(setup_transcript_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] long work order"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\ngrinding"}]}}')
+HB=${RT%%|*}; rB=${RT#*|}; CDB=${rB%%|*}; SDB=${rB#*|}
+set +e
+ERRB1=$(HOME="$HB" PATH="$SDB:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDB" \
+  --timeout 6 --submit-deadline 99 2>&1 >/dev/null)
+RCB1=$?
+set -e
+if [[ $RCB1 -eq 1 && -f "$CDB/waiter_timeout.txt" ]]; then
+  pass "an expired budget is recorded as resumable (waiter_timeout.txt)"
+else
+  fail "an expired budget is recorded as resumable" \
+    "rc=$RCB1 files=$(ls "$CDB" | tr '\n' ' ') err=$ERRB1"
+fi
+if printf '%s' "$ERRB1" | grep -qi "fresh"; then
+  pass "the timeout message tells the caller re-running resumes the wait"
+else
+  fail "the timeout message tells the caller re-running resumes the wait" "err=$ERRB1"
+fi
+
+# The callee finishes after the first waiter has already given up.
+printf '%s\n' '{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nlate but finished\nSTATUS: WORK_COMPLETE call_id='"$TNONCE"'"}]}}' \
+  >> "$(transcript_file_for "$HB")"
+set +e
+OUTB2=$(HOME="$HB" PATH="$SDB:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDB" \
+  --timeout 6 --submit-deadline 99 2>"$SDB/err2.txt")
+RCB2=$?
+set -e
+if [[ $RCB2 -eq 0 ]] && \
+   [[ "$(printf '%s' "$OUTB2" | jq -r .response 2>/dev/null)" == *"late but finished"* ]]; then
+  pass "re-invoking after a timeout opens a fresh window and returns the answer"
+else
+  fail "re-invoking after a timeout opens a fresh window and returns the answer" \
+    "rc=$RCB2 out=$OUTB2 err=$(cat "$SDB/err2.txt" 2>/dev/null)"
+fi
+if grep -q "previous waiter gave up" "$SDB/err2.txt" 2>/dev/null; then
+  pass "the resume is announced on stderr rather than silently swallowing the marker"
+else
+  fail "the resume is announced on stderr" "err=$(cat "$SDB/err2.txt" 2>/dev/null)"
+fi
+if [[ ! -f "$CDB/waiter_timeout.txt" ]]; then
+  pass "the marker is cleared once the wait is resumed"
+else
+  fail "the marker is cleared once the wait is resumed"
+fi
+rm -rf "$HB" "$CDB" "$SDB"
+
+# A real remote failure — done + error.txt and NO marker — must still short-circuit
+# instantly and stay terminal. That fast path is what the marker exists to keep
+# intact while making a mere timeout resumable.
+TF=$(mktemp -d /tmp/hotline-term-XXXXX)
+echo "w1:s1"            > "$TF/surface_ref.txt"
+echo "true"             > "$TF/keep_workspace.txt"
+echo "launcher blew up" > "$TF/error.txt"
+touch "$TF/done"
+set +e
+ERRT=$(bash "$DIAL_SCRIPTS/wait-for-response.sh" "$TF" --timeout 6 2>&1 >/dev/null)
+RCT=$?
+set -e
+if [[ $RCT -eq 1 ]] && printf '%s' "$ERRT" | grep -q "launcher blew up" \
+   && [[ -f "$TF/done" && -f "$TF/error.txt" ]]; then
+  pass "a remote failure with no marker still short-circuits and stays terminal"
+else
+  fail "a remote failure with no marker still short-circuits and stays terminal" \
+    "rc=$RCT err=$ERRT"
+fi
+rm -rf "$TF"
+
+# A stale marker must never discard a call that actually produced a response.
+TG=$(mktemp -d /tmp/hotline-guard-XXXXX)
+echo '{"session_id":"s-guard","response":"already answered"}' > "$TG/response.json"
+printf 'budget=6s mode=transcript' > "$TG/waiter_timeout.txt"
+touch "$TG/done"
+set +e
+OUTG=$(bash "$DIAL_SCRIPTS/wait-for-response.sh" "$TG" --timeout 6 2>/dev/null)
+RCG=$?
+set -e
+if [[ $RCG -eq 0 ]] && [[ "$(printf '%s' "$OUTG" | jq -r .response 2>/dev/null)" == "already answered" ]]; then
+  pass "a stale marker never discards a call that already produced response.json"
+else
+  fail "a stale marker never discards a call that already produced response.json" \
+    "rc=$RCG out=$OUTG"
+fi
+rm -rf "$TG"
+
+# ---- shipped poll cadence (claude-plugins-fhn3) ----------------------------
+# Every other case in this file runs with HOTLINE_POLL_SLEEP collapsed, so nothing
+# else here would notice if the DEFAULT were broken — and a 0 default would turn the
+# production poller into a spin-loop hammering jq and cmux. This is the one case
+# that runs the shipped cadence: a 4s budget is 2 ticks and must cost ~4s.
+echo ""
+echo "Shipped poll cadence (override unset):"
+
+DC=$(setup_transcript_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] work"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nworking"}]}}')
+HC=${DC%%|*}; rC=${DC#*|}; CDC=${rC%%|*}; SDC=${rC#*|}
+STARTC=$SECONDS
+set +e
+env -u HOTLINE_POLL_SLEEP HOME="$HC" PATH="$SDC:$PATH" \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDC" --timeout 4 --submit-deadline 99 \
+  >/dev/null 2>&1
+RCC=$?
+set -e
+ELC=$((SECONDS - STARTC))
+if [[ $RCC -eq 1 && $ELC -ge 3 ]]; then
+  pass "unset override → poller sleeps the shipped 2s per tick (${ELC}s for a 4s budget)"
+else
+  fail "unset override → poller sleeps the shipped 2s per tick" \
+    "rc=$RCC elapsed=${ELC}s; a 4s budget should cost ~4s of wall-clock"
+fi
+rm -rf "$HC" "$CDC" "$SDC"
 
 # ---- summary ---------------------------------------------------------------
 
