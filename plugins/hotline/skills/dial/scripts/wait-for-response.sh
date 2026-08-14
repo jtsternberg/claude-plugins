@@ -32,7 +32,9 @@
 #   herdr reports native lifecycle states, so `herdr agent wait` replaces the 2s
 #   screen poll as the when-to-read gate, and transcript-extract.sh then decides
 #   what the transcript MEANS exactly as above — same nonce/STATUS bracketing, same
-#   0/3/4 contract. There is NO screen-scrape tier: a claude REPL runs on the
+#   0/3/4 contract, plus one outcome only a lifecycle can report: exit 5 when the
+#   agent settles `blocked` with no STATUS for our nonce (it is waiting on a human,
+#   not on time). There is NO screen-scrape tier: a claude REPL runs on the
 #   terminal's alternate screen, whose rows never enter herdr's scrollback, so an
 #   unconfirmable herdr call is reported as unconfirmable rather than scraped.
 #   Nothing is closed afterwards — outliving disconnects is the point of herdr.
@@ -74,6 +76,20 @@
 #       `"awaiting_review": true`; the surface/session is deliberately left LIVE
 #       (never closed, whatever keep_workspace.txt says) so you can reply into it
 #       via cmux-reuse-surface.sh. Not a failure. (claude-plugins-n4vy)
+#   5 — BLOCKED (herdr only): the callee's lifecycle settled to `blocked` and its
+#       transcript still carries no terminal STATUS for this nonce. It is waiting on
+#       INPUT — a permission gate, or a genuine question — which is neither "still
+#       working" nor "timed out", and no amount of further waiting clears it.
+#       error.txt says what to look at; the agent is left live. RESUMABLE: once a
+#       human has unblocked it, re-running on the same call_dir opens a fresh budget
+#       and reads the answer (see WAITER_TIMEOUT_MARKER).
+#
+# Why 5 exists: herdr reports this state natively, and before this the waiter could
+# only spend its whole 30-minute budget on a callee that was never going to answer
+# without a human — then report a timeout, which sends a reader looking for a slow
+# work order instead of a dialog box. cmux infers the same condition from screen
+# wording (repl_is_interrupted) and can only act on it at delivery time; herdr is
+# told, so the wait can say it.
 #
 # Why 4 exists: "is the work finished" and "is the reply ready" are separate
 # facts, and the protocol used to have one word for both. A callee doing step 1
@@ -337,10 +353,51 @@ if $HERDR_MODE; then
   [[ -z "$AGENT" ]] && HAS_GATE=false
 
   # herdr never closes anything after a call: outliving disconnects is the reason
-  # to pick this transport, and Phase 2's follow-up re-targets this same agent by
+  # to pick this transport, and a follow-up re-targets this same agent by
   # name. keep_workspace.txt is written 'true' by the launcher and this is where
   # that promise is kept — the agent and its pane are left live on every exit path.
   # (`herdr pane close $(cat $CALL_DIR/herdr_pane.txt)` is the manual teardown.)
+
+  # A `blocked` callee is waiting on INPUT, and that is a DIFFERENT fact from every
+  # other reason the transcript has no terminal STATUS yet. `working` means be
+  # patient; a gone agent means it died; a timeout means the budget was too small.
+  # `blocked` means a human has to look — a permission gate, or the callee asking a
+  # question — and waiting longer cannot change it. So it gets its own exit (5) and
+  # its own message instead of being spent as 30 minutes of budget and reported as a
+  # timeout. It is NOT a new terminal STATUS: the protocol is untouched, this is the
+  # LIFECYCLE saying why no STATUS is coming.
+  #
+  # Recorded through record_waiter_timeout on purpose. That marker means "a waiter
+  # stopped, but the call did not fail" — which is exactly this: once the human
+  # clears the gate, re-running on the same call_dir clears done+error.txt and reads
+  # the answer with a fresh budget. Writing done+error.txt WITHOUT the marker (the
+  # remote-failure shape) would make every later invocation replay this instead.
+  #
+  # blocked_confirmed is the gate on all of that: a settle is never acted on
+  # unbacked. `blocked` can be a blink — a gate the callee's own hook answered a
+  # moment later — so one confirming read separates a real dialog box from a
+  # flicker, and it updates LAST_STATUS on the way past. Every caller goes through
+  # this, so the rule has ONE implementation: the first version confirmed at the top
+  # of the loop but not at the end of the budget, and the end-of-budget path then
+  # ended calls on a state the confirming probe would have refuted.
+  blocked_confirmed() {
+    $BLOCKED_SETTLE && $HAS_GATE || return 1
+    herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"
+    [[ "$LAST_STATUS" == "blocked" ]]
+  }
+
+  report_blocked() {  # report_blocked <what-we-had-read>
+    {
+      echo "herdr agent $AGENT is BLOCKED and its transcript carries no terminal STATUS for call_id=$CALL_ID — the callee is waiting on INPUT, not still working, and this is not a timeout."
+      echo "That is a permission gate or a genuine question, and only a human can clear it: \`herdr agent attach $AGENT\` shows what it is asking. (Unattended callees avoid the permission case by dialing with HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 — a real trust decision, see the plugin README.)"
+      echo "Read so far: $1 (transcript $TRANSCRIPT_PATH)."
+      echo "Nothing was sent by this script and no answer was discarded. Once the callee is unblocked, re-run this script on the same call_dir to resume with a fresh ${TIMEOUT}s budget."
+    } > "$CALL_DIR/error.txt"
+    record_waiter_timeout "mode=herdr settle=blocked"
+    touch "$CALL_DIR/done"
+    cat "$CALL_DIR/error.txt" >&2
+    exit 5
+  }
 
   # The gate's per-iteration budget. `agent wait` blocks until the agent settles,
   # so a slice bounds how long we go without re-reading the transcript: a callee
@@ -354,6 +411,11 @@ if $HERDR_MODE; then
   SUBMIT_UNCONFIRMED=false
   LAST_STATUS=""
   FILE_GRACE=10
+  # Set when the gate settled on `blocked`. Acted on at the TOP of the next
+  # iteration, after that iteration's transcript read: a callee can emit its
+  # terminal STATUS and then block (on the next thing it wants to do), and an answer
+  # on disk outranks the lifecycle every time.
+  BLOCKED_SETTLE=false
   while [[ $H_ELAPSED -lt $TIMEOUT ]]; do
     # --- The transcript FIRST, every iteration. -----------------------------
     # Before the gate, deliberately: the answer may already be on disk (the callee
@@ -423,6 +485,12 @@ if $HERDR_MODE; then
       # sitting in the OTHER spelling of that same path.
       LAST_STATUS=""
       $HAS_GATE && { herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"; }
+      # A blocked callee with no transcript at all is still a blocked callee, and
+      # that is the more useful thing to say: "the prompt never reached the agent"
+      # sends a reader hunting a delivery bug when what is actually there is a gate
+      # the callee raised before it could record anything (a trust prompt at
+      # startup, say).
+      [[ "$LAST_STATUS" == "blocked" ]] && report_blocked "no transcript at any derived path ($ALL_CANDIDATES)"
       {
         echo "No transcript after ${H_ELAPSED}s at any derived path ($ALL_CANDIDATES) — a herdr callee's transcript appears as soon as its first prompt lands, so this means the prompt never reached the agent (or the session id is wrong)."
         echo "herdr reports agent ${AGENT:-<none recorded>} as '${LAST_STATUS:-unreadable}'. Check \`herdr agent get $AGENT\`, or attach to it; do NOT blindly re-dial."
@@ -430,6 +498,15 @@ if $HERDR_MODE; then
       } >&2
       exit 1
     fi
+
+    # --- Blocked, and the transcript above had nothing terminal for us. ------
+    # The answer on disk has already had its chance (above), so a confirmed block
+    # here is the real reason no STATUS is coming. An unconfirmed one moved on, so
+    # the flag is dropped and the wait continues.
+    if blocked_confirmed; then
+      report_blocked "no terminal STATUS for call_id=$CALL_ID in $TRANSCRIPT_PATH"
+    fi
+    BLOCKED_SETTLE=false
 
     # --- The gate. ----------------------------------------------------------
     # No agent name recorded: the transcript read above got its chance (which is the
@@ -459,13 +536,28 @@ if $HERDR_MODE; then
       exit 1
     fi
 
-    # Block until the lifecycle settles, bounded by the slice. Its outcome is not
-    # branched on: `agent wait` timing out means "still working", which is exactly
-    # what the next transcript read will confirm or refute. This is a gate, not a
-    # verdict — herdr's states are too coarse to be one (see the block header).
+    # Block until the lifecycle settles, bounded by the slice. Whether it settled or
+    # timed out is still not branched on: a timeout means "still working", which is
+    # exactly what the next transcript read will confirm or refute. This is a gate,
+    # not a verdict — herdr's states are too coarse to be one (see the block header).
+    #
+    # WHICH state it settled on is worth one question, though: `blocked` is the one
+    # answer that no further waiting can improve, and reporting it is the whole point
+    # of gating on a lifecycle instead of a screen. Read from the wait's own reply
+    # when it carries a state, else asked outright — the state matters more than the
+    # shape of the reply that happened to deliver it.
     GATE_START=$(date +%s)
-    herdr_cli agent wait "$AGENT" "${HERDR_SETTLED_ARGS[@]}" \
-      --timeout "$GATE_SLICE_MS" >/dev/null 2>&1 || true
+    GATE_STATE=""
+    if herdr_cli agent wait "$AGENT" "${HERDR_SETTLED_ARGS[@]}" \
+         --timeout "$GATE_SLICE_MS" >/dev/null 2>&1; then
+      GATE_STATE=$(jq -r '.result.agent.agent_status // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null || true)
+      if [[ -z "$GATE_STATE" ]]; then
+        herdr_agent_status "$AGENT"; GATE_STATE="$HERDR_AGENT_STATUS"
+      fi
+    fi
+    [[ -n "$GATE_STATE" ]] && LAST_STATUS="$GATE_STATE"
+    BLOCKED_SETTLE=false
+    [[ "$GATE_STATE" == "blocked" ]] && BLOCKED_SETTLE=true
     GATE_SECONDS=$(( $(date +%s) - GATE_START ))
     [[ $GATE_SECONDS -lt 0 ]] && GATE_SECONDS=0
 
@@ -474,6 +566,15 @@ if $HERDR_MODE; then
     # 30s block would cost 2s of a 1800s budget and this loop would run for hours.
     H_ELAPSED=$((H_ELAPSED + POLL_INTERVAL + GATE_SECONDS))
   done
+
+  # The budget ran out on the same iteration the gate settled `blocked`, so the loop
+  # exited before the check at its top could run. The blocked report is still the
+  # true one — "timed out" would send a reader looking for a slow work order — and
+  # nothing is lost either way, because both paths mark the call resumable and a
+  # re-run re-reads the transcript first.
+  if blocked_confirmed; then
+    report_blocked "no terminal STATUS for call_id=$CALL_ID within the ${TIMEOUT}s budget ($ALL_CANDIDATES)"
+  fi
 
   {
     if $SUBMIT_UNCONFIRMED; then

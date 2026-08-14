@@ -8,14 +8,28 @@
 # Usage:
 #   session-cache.sh get <target-path> --caller-session <id>
 #   session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>]
-#   session-cache.sh update <target-path> --caller-session <id> [--surface <ref> | --clear-surface] [--call-id <id>]
+#   session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>]
 #   session-cache.sh list --caller-session <id>
 #
-# --surface records the opaque cmux surface handle the callee's session lives
-# in, so a follow-up can route its message INTO that surface instead of opening
-# a new one. The JSON key remains surface_ref for backward compatibility, but
-# side-by-side launchers pass a stable UUID when available. Optional — absent
-# for headless/detached calls (no visible surface).
+# --surface records the opaque HOST HANDLE the callee's session lives in, so a
+# follow-up can re-address that live callee instead of starting a second one. The
+# JSON key remains surface_ref for backward compatibility, and the handle is
+# per-transport — one field, because every consumer treats it as opaque:
+#   cmux  — a surface handle (a stable UUID from side-by-side launchers; older
+#           caches may hold a positional surface:N ref).
+#   herdr — the agent NAME, which is what `agent prompt` / `agent wait` /
+#           `agent get` address and what survives a disconnect.
+# Optional — absent for headless calls and for cmux detached placements, neither
+# of which leaves a host a follow-up can route into.
+#
+# --session on `update` RE-KEYS the callee session id. Omitted → untouched, which
+# is right for the common follow-up that continued the cached session. It is
+# needed when a follow-up ends up on a DIFFERENT session than the cached one: a
+# herdr follow-up whose agent has died falls back to a fresh launch, and herdr
+# cannot re-host an existing claude session, so the new callee has a new id.
+# Leaving the old one there would point the next follow-up at a session nothing is
+# listening on, and every answer would be read from a transcript that stopped
+# growing.
 #
 # --clear-surface (update only) REMOVES surface_ref. An empty/omitted --surface
 # means "leave it untouched", which is right when a caller simply has nothing
@@ -35,7 +49,7 @@ set -euo pipefail
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: session-cache.sh get <target-path> --caller-session <id>"
   echo "       session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>]"
-  echo "       session-cache.sh update <target-path> --caller-session <id> [--surface <ref> | --clear-surface] [--call-id <id>]"
+  echo "       session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>]"
   echo "       session-cache.sh list --caller-session <id>"
   echo ""
   echo "Tracks Agent A's outgoing connections in ~/.agents-hotline/sessions/<caller-session>.json"
@@ -139,11 +153,12 @@ case "$CMD" in
     # the next follow-up reuses it). Omitted → surface_ref is left untouched.
     # --clear-surface removes it outright, for the follow-up that ended up with
     # no surface at all.
-    jq --arg t "$TARGET" --arg sf "$SURFACE_REF" --arg ci "$CALL_ID" \
+    jq --arg t "$TARGET" --arg sf "$SURFACE_REF" --arg ci "$CALL_ID" --arg sid "$SESSION_ID" \
        --argjson clear "$($CLEAR_SURFACE && echo true || echo false)" --argjson now "$NOW" \
       '.connections[$t].last_contact = $now
        | .connections[$t].exchange_count += 1
        | (if $ci == "" then . else .connections[$t].last_call_id = $ci end)
+       | (if $sid == "" then . else .connections[$t].session_id = $sid end)
        | (if $clear then del(.connections[$t].surface_ref)
           elif $sf == "" then .
           else .connections[$t].surface_ref = $sf end)' \

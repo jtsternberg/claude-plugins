@@ -286,15 +286,18 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   `HOTLINE_HERDR_PANE=<pane-id>`.
 - Recovery: fix the one it named, or drop `--transport herdr` to use the cmux default.
 
-**`stage: transport` — "supports --placement detached only" / "does not support --mode conference" / "does not support --resume" / "first-contact only" / "--remote is not implemented"**
-- Not a malfunction: these are the Phase 1 boundaries, and each message names the
-  phase that lifts it. Placement and conference need herdr's attach story (Phase 3);
-  a follow-up into a live agent needs the re-target verb (Phase 2); `--remote` needs
-  a remote-transcript reader, because the callee's transcript would live on the
-  remote box while every hotline answer is read from the local `~/.claude/projects`
-  tree (Phase 3).
-- Recovery: re-dial as `--transport herdr --detached` for first contact, or over cmux
-  for anything else.
+**`stage: args`/`transport` — "supports --placement detached only" / "does not support --mode conference" / "cannot adopt an existing session (--resume)" / "--remote is not implemented"**
+- Not a malfunction: these are herdr's current boundaries, and each message names
+  what lifts it. Placement and conference need herdr's attach story (Phase 3);
+  `--remote` needs a remote-transcript reader, because the callee's transcript would
+  live on the remote box while every hotline answer is read from the local
+  `~/.claude/projects` tree (Phase 3). `--resume` is different — it is not a phase
+  boundary but a conflict: herdr hosts a callee it *starts*, with a `--session-id`
+  preset that is the only reason the transcript is readable, and `claude --resume`
+  cannot take that preset.
+- Recovery: re-dial as `--transport herdr --detached`, or over cmux for anything
+  else. To continue a session you already dialed, drop `--resume` entirely — the
+  cached herdr agent is re-targeted by name with no flag at all.
 
 **`stage: fire` — "herdr pane split failed" / "herdr agent start failed" / "interactive_ready:false"**
 - The pane opened but no claude was detected in it, or herdr said it is not ready for
@@ -320,9 +323,35 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   Its transcript is still on disk; read it. This fails fast rather than sitting out
   the 30-minute budget, which is the one thing herdr's lifecycle states buy the wait.
 
+**The response wait exits 5 — "is BLOCKED … waiting on INPUT"**
+- Not a failure and not a timeout. herdr reported the callee's lifecycle as `blocked`
+  with no terminal STATUS for the nonce: it is sitting on a permission gate, or it
+  asked a question. More waiting cannot clear it — a human has to.
+- `herdr agent attach <name>` (the name is in `<call_dir>/herdr_agent.txt` and in
+  `.surface_ref`) shows what it is actually asking. Tell the user what it needs.
+- **Resumable.** The call is marked the same way an expired budget is, so once the
+  callee is unblocked, re-running `wait-for-response.sh` on the same call_dir reads
+  the answer with a fresh budget. It sends nothing, so it can never double-queue.
+- Unattended callees avoid the permission half of this by dialing with
+  `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` — a real trust decision, not a default.
+- The state is always re-probed before the call ends on it, so a `blocked` blink
+  (a gate the callee's own hook answered) leaves the wait running instead.
+
+**`.fallbacks` says `herdr-agent-reuse→fresh(…)` on a follow-up**
+- The cached agent could not be re-targeted: it has exited, or it is `blocked` on
+  input (submitting a work order there would answer the gate instead of starting a
+  turn). hotline started a fresh callee instead of failing the dial.
+- **The cost is in the entry, and it is real: the fresh callee has none of the prior
+  conversation.** herdr cannot re-host an existing claude session — `claude --resume`
+  and the `--session-id` preset the transcript path depends on are mutually
+  exclusive. If the follow-up only makes sense with the earlier context, re-send it
+  self-contained, or continue over cmux (which *can* resume the session).
+- `callee-session-changed(old→new)` alongside it is the cache being re-keyed to the
+  new session, so the NEXT follow-up addresses the callee that is actually live.
+
 **A pane is left over after a finished call**
-- Expected. Persistence is why herdr exists, and Phase 2's follow-up re-targets that
-  same agent, so hotline does not close it the way it closes a detached cmux tab.
+- Expected. Persistence is why herdr exists, and a follow-up re-targets that same
+  agent, so hotline does not close it the way it closes a detached cmux tab.
   Teardown: `herdr pane close $(cat <call_dir>/herdr_pane.txt)`.
 
 ## Identity Cache Issues

@@ -125,11 +125,24 @@ phase that will lift the restriction:
 
 | Combination | Answer |
 |---|---|
-| `--transport herdr --detached`, `--mode quick`/`work_order`, first contact | supported |
+| `--transport herdr --detached`, `--mode quick`/`work_order` | supported — first contact and follow-ups |
 | any other placement (side, `--window`) | refused — herdr has no in-your-window placement (Phase 3 = attach) |
 | `--mode conference` | refused — same reason |
-| a target this caller already has a cached session for | refused — following up into a live herdr agent is Phase 2 |
+| `--resume <someone-else's-session-id>` | refused — herdr hosts a callee it *starts*, with a session id hotline presets so the transcript is readable; `claude --resume` cannot take that preset. Continuing a session **you** dialed needs no flag (see below) |
 | `--remote <target>` | refused — herdr *can* host remotely, but the callee's transcript would live on that box and every hotline answer is read from the local `~/.claude/projects` tree (Phase 3) |
+
+**Follow-ups need no flag and no surface machinery.** Re-dial the same target with
+`--transport herdr --detached` and the cached agent is re-targeted by name
+(`herdr agent prompt`), so the conversation continues in the same session and the
+same transcript. The named agent *is* the session, so there is no host to resolve,
+no input box to clear, and nothing superseded to close.
+
+Two ways that can fall back, both reported in `.fallbacks`, and both with the same
+cost: **the cached agent has exited**, or it is **`blocked`** on input (a follow-up
+submitted into a permission gate would answer the gate instead of starting a turn).
+Either way hotline starts a fresh callee — and that callee has **none of the prior
+conversation**, because herdr cannot re-host an existing claude session. The
+fallback entry says so outright; relay it if the answer depends on prior context.
 
 cmux stays the default and nothing selects herdr on its own. Being inside a herdr
 pane (`HERDR_ENV=1`) only makes the option *available*; the flag is what picks it.
@@ -280,12 +293,21 @@ Exit codes that are not failures:
   session are left live on purpose — relay the report, then send the follow-up by
   dialing the same target again. The wrapper routes it back into that same
   surface.
+- **Exit 5 — the callee is waiting on a human** (herdr calls only). herdr reported
+  its lifecycle as `blocked` with no STATUS for your nonce: it is sitting on a
+  permission gate or asking a question, so more time cannot help. `error.txt` says
+  what to look at; `herdr agent attach <name>` shows the actual prompt. Tell the user
+  what is needed, and once it is cleared re-run the wait on the same `CALL_DIR` — it
+  resumes with a fresh budget and reads the answer. (Unattended callees avoid the
+  permission case by dialing with `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` — a real
+  trust decision.)
 
 Clean up when the exchange is done: `rm -rf "$CALL_DIR"`.
 
 Follow-ups need nothing special: dial the same target again with the next
-message. The wrapper finds the cached session, reuses the surface it lives in,
-and sends the message raw (never re-wrapping the ringing command).
+message. The wrapper finds the cached session, re-addresses the host it lives in —
+a cmux surface, or a herdr agent by name — and sends the message raw (never
+re-wrapping the ringing command).
 
 ## Reporting to the user
 

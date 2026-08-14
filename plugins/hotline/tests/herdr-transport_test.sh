@@ -117,9 +117,15 @@ trap cleanup EXIT
 #                             (default: whatever --session-id we were handed)
 #   HERDR_STUB_AGENT_GONE=1   `agent get` answers agent_not_found (as the real CLI
 #                             does — ON STDOUT, WITH EXIT 0)
+#   HERDR_STUB_GONE_NAMES     space-separated names `agent get` answers
+#                             agent_not_found for, while every OTHER name still
+#                             resolves — the follow-up shape where the CACHED agent
+#                             has exited and a freshly started one has not
 #   HERDR_STUB_AGENT_ANY=1    `agent get` resolves any name (for waiter cases whose
 #                             agent was never "started" through this stub)
 #   HERDR_STUB_STATUS         the agent_status `agent get` reports (default idle)
+#   HERDR_STUB_WAIT_STATUS    the agent_status `agent wait` settles on (default:
+#                             HERDR_STUB_STATUS, else done)
 #   HERDR_STUB_PROMPT_FAIL=1  `agent prompt` returns a server error
 #   HERDR_STUB_TRANSCRIPT     `agent prompt` appends a realistic user record
 #                             carrying the prompt text to this .jsonl (i.e. the
@@ -187,6 +193,9 @@ case "$1 ${2:-}" in
   "agent get")
     NAME="$3"
     [[ "${HERDR_STUB_AGENT_GONE:-}" == "1" ]] && err agent_not_found "agent target $NAME not found"
+    for _gone in ${HERDR_STUB_GONE_NAMES:-}; do
+      [[ "$NAME" == "$_gone" ]] && err agent_not_found "agent target $NAME not found"
+    done
     if [[ "${HERDR_STUB_AGENT_ANY:-}" != "1" ]]; then
       grep -qxF "$NAME" "$ST/started" 2>/dev/null \
         || err agent_not_found "agent target $NAME not found"
@@ -210,7 +219,8 @@ case "$1 ${2:-}" in
     exit 0 ;;
 
   "agent wait")
-    echo '{"id":"cli:agent:wait","result":{"agent":{"agent_status":"done"}}}'
+    jq -nc --arg s "${HERDR_STUB_WAIT_STATUS:-${HERDR_STUB_STATUS:-done}}" \
+      '{id:"cli:agent:wait",result:{agent:{agent_status:$s}}}'
     exit "${HERDR_STUB_WAIT_RC:-0}" ;;
 
   *) echo '{"id":"cli:stub","result":{}}'; exit 0 ;;
@@ -503,9 +513,14 @@ t=$(new_env)
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
       HERDR_STATE="$t/state" HERDR_PANE_ID="w1:p1" \
       bash "$HERDR_ASYNC" --cwd "$t/target" --prompt "hi" --resume "some-session" 2>/dev/null); rc=$?
-[[ $rc -ne 0 && "$(jq -r '.error' <<<"$out" 2>/dev/null)" == *"first-contact only"* ]]
-check "--resume is refused (Phase 2), rather than presetting a session id claude would reject" $? \
+[[ $rc -ne 0 && "$(jq -r '.error' <<<"$out" 2>/dev/null)" == *"cannot re-host an existing claude session"* ]]
+check "--resume is refused, rather than presetting a session id claude would reject" $? \
   "rc=$rc out=$out"
+# The refusal must not send a reader down the follow-up path: re-targeting a live
+# agent is a different verb that launches nothing, and conflating the two is how a
+# caller ends up believing a fresh callee carries the prior conversation.
+[[ "$(jq -r '.error' <<<"$out" 2>/dev/null)" == *"re-targeted by name"* ]]
+check "…and points at the re-target verb instead of implying a resume would work" $? "out=$out"
 
 # --- herdr's observation outranks our preset -------------------------------
 t=$(new_env)
@@ -1019,8 +1034,9 @@ check "--remote alone is refused too (no backend hosts remotely yet)" $? "out=$o
 t=$(new_env)
 out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
         --transport herdr --detached --resume some-session)
-[[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"--resume"* ]]
-check "--transport herdr --resume is refused (Phase 2)" $? "out=$out"
+[[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"--resume"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"re-dial the same target"* ]]
+check "--transport herdr --resume is refused, pointing at the flagless follow-up instead" $? "out=$out"
 
 t=$(new_env)
 out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" --transport nope)
@@ -1067,29 +1083,6 @@ check "HERDR_ENV=1 never SELECTS herdr — the default stays cmux's chain" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 [[ ! -s "$t/herdr.log" ]]
 check "…and no herdr preflight is even run without the explicit flag" $? \
-  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
-
-# A cached session for this target means this is a FOLLOW-UP, which herdr Phase 1
-# cannot host. Refused rather than silently starting a context-free fresh callee.
-t=$(new_env)
-mkdir -p "$t/home/.agents-hotline/sessions"
-jq -nc --arg t "$(cd "$t/target" && pwd -P)" \
-  '{caller_session_id:"caller-dial-1",
-    connections:{($t):{session_id:"prior-session-1",mode:"work_order",
-                       exchange_count:1,last_call_id:"prior-nonce"}}}' \
-  > "$t/home/.agents-hotline/sessions/caller-dial-1.json"
-out=$(dial "$t" "HERDR_PANE_ID=w1:p1" -- --target "$t/target" --mode work_order \
-        --prompt "and now step 2" --transport herdr --detached)
-[[ "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "transport" ]] \
-  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"first-contact only"* ]] \
-  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"prior-session-1"* ]]
-check "a herdr dial into an already-cached session is refused (Phase 2), naming the session" $? \
-  "out=$out stderr=$(cat "$t/err.txt")"
-# The preflight's read-only probes may have run (selection precedes the cache
-# lookup); what must NOT have happened is placing a host for a session that is
-# already live somewhere.
-! grep -qE 'pane split|agent start' "$t/herdr.log" 2>/dev/null
-check "…before placing any host, so no second host is created for a live session" $? \
   "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
 
 # --transport headless is just another way to say --headless.
@@ -1201,7 +1194,347 @@ check "…and the disagreement is reported in .fallbacks, not just left in the c
 
 # ===========================================================================
 echo ""
-echo "6. Doc canaries — a stated default has one source:"
+echo "6. Follow-ups (reuse) — the named agent IS the session:"
+# ===========================================================================
+# A herdr follow-up re-targets the agent the cache already holds. It must NOT
+# launch anything: a second callee would have none of the prior conversation, and
+# a second host for a live session is exactly the surface-stacking the cmux reuse
+# path exists to prevent.
+
+HERDR_REUSE="$SCRIPTS/herdr-reuse-agent.sh"
+
+# The caller-side cache dial.sh reads: one connection for $t/target, keyed by the
+# REALPATH (which is what session-cache.sh canonicalizes to).
+stage_cache() {  # stage_cache <scratch> <session-id> <host-handle|''>
+  local t="$1" sid="$2" handle="$3"
+  mkdir -p "$t/home/.agents-hotline/sessions"
+  jq -nc --arg t "$(cd "$t/target" && pwd -P)" --arg s "$sid" --arg h "$handle" \
+    '{caller_session_id:"caller-dial-1",
+      connections:{($t): ({session_id:$s, mode:"work_order", started:1,
+                           last_contact:1, exchange_count:1,
+                           last_call_id:"prior-nonce"}
+        + (if $h == "" then {} else {surface_ref:$h} end))}}' \
+    > "$t/home/.agents-hotline/sessions/caller-dial-1.json"
+}
+
+# Wrap the stub so `agent prompt` records the payload in the callee's transcript —
+# the tier a delivery is confirmed by. The session id is whatever `agent start`
+# last reported, falling back to the id passed here (a reuse launches nothing, so
+# the stub's state file does not exist).
+wrap_herdr_transcript() {  # wrap_herdr_transcript <scratch> <fallback-session-id>
+  local t="$1" fallback="$2"
+  mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+  cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo "$fallback")
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/\$SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+  chmod +x "$t/bin/herdr"
+}
+
+CACHED_AGENT="hotline-target-a1b2c3"
+CACHED_SID="prior-session-1"
+
+# --- the happy path, end to end through dial.sh -----------------------------
+t=$(new_env)
+stage_cache "$t" "$CACHED_SID" "$CACHED_AGENT"
+wrap_herdr_transcript "$t" "$CACHED_SID"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_AGENT_ANY=1" \
+        -- --target "$t/target" --mode work_order --prompt "and now step 2" \
+           --transport herdr --detached)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.first_contact' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.transport' <<<"$out" 2>/dev/null)" == "herdr" ]]
+check "a herdr dial into an already-cached session CONNECTS as a follow-up" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+log=$(tr -d '\\' < "$t/herdr.log")
+[[ "$log" == *"agent prompt $CACHED_AGENT"* ]]
+check "…delivered by \`agent prompt <cached-name>\`, re-targeting the live agent" $? \
+  "herdr calls: $log"
+! grep -qE 'agent start|pane split' <(printf '%s' "$log")
+check "…and NOT by a fresh \`agent start\` / \`pane split\` (no second callee, no lost context)" $? \
+  "herdr calls: $log"
+! grep -q 'pane close' <(printf '%s' "$log")
+check "…with no superseded-host cleanup: the same agent is reused, so nothing is orphaned" $? \
+  "herdr calls: $log"
+
+[[ "$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)" == "$CACHED_AGENT" \
+   && "$(jq -r '.remote_session_id' <<<"$out" 2>/dev/null)" == "$CACHED_SID" \
+   && -n "$(jq -r '.call_id // empty' <<<"$out" 2>/dev/null)" ]]
+check "…keeping .surface_ref / .remote_session_id / .call_id stable in shape" $? "out=$out"
+[[ "$(jq -r '.fallbacks | length' <<<"$out" 2>/dev/null)" == "0" ]]
+check "…and recording no fallback, because nothing was worked around" $? "out=$out"
+
+# The RAW message, not the ringing invocation: this session already ran first
+# contact, and re-invoking the slash command would re-run its setup mid-call.
+DELIVERED="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/$CACHED_SID.jsonl"
+grep -q 'and now step 2' "$DELIVERED" 2>/dev/null \
+  && ! grep -q 'hotline-ringing' "$DELIVERED" 2>/dev/null
+check "…delivering the RAW follow-up, never re-wrapped with the ringing invocation" $? \
+  "delivered: $(cat "$DELIVERED" 2>/dev/null | head -c 300)"
+
+NEW_NONCE=$(jq -r '.call_id' <<<"$out" 2>/dev/null)
+[[ -n "$NEW_NONCE" && "$NEW_NONCE" != "prior-nonce" ]] \
+  && grep -qF "[CALL_ID: $NEW_NONCE]" "$DELIVERED" 2>/dev/null
+check "…led by a FRESH nonce, so the prior exchange's STATUS lines cannot be read as this turn's" $? \
+  "call_id=$NEW_NONCE prior=prior-nonce delivered=$(head -c 200 "$DELIVERED" 2>/dev/null)"
+
+REG="$t/home/.agents-hotline/sessions/caller-dial-1.json"
+conn() { jq -r --arg t "$(cd "$t/target" && pwd -P)" ".connections[\$t].$1 // \"<absent>\"" "$REG" 2>/dev/null; }
+[[ "$(conn exchange_count)" == "2" && "$(conn session_id)" == "$CACHED_SID" \
+   && "$(conn surface_ref)" == "$CACHED_AGENT" && "$(conn last_call_id)" == "$NEW_NONCE" ]]
+check "…and the cache bumps the exchange while keeping the same session and agent" $? \
+  "registry: $(cat "$REG" 2>/dev/null)"
+
+# --- the cached agent has died → a fresh launch, said out loud ---------------
+t=$(new_env)
+stage_cache "$t" "$CACHED_SID" "$CACHED_AGENT"
+wrap_herdr_transcript "$t" "$CACHED_SID"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_AGENT_ANY=1" \
+        "HERDR_STUB_GONE_NAMES=$CACHED_AGENT" "HERDR_STUB_NEW_PANE=w1:p7" \
+        -- --target "$t/target" --mode work_order --prompt "and now step 2" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" ]]
+check "a cached agent that no longer resolves falls back to a fresh launch" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+fb=$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)
+[[ "$fb" == *"herdr-agent-reuse→fresh"* && "$fb" == *"no live herdr agent answers"* ]]
+check "…recording the fallback with herdr's own reason" $? "fallbacks=$fb"
+[[ "$fb" == *"WITHOUT the prior context"* ]]
+check "…and stating the cost outright: herdr cannot re-host a session, so the callee is amnesiac" $? \
+  "fallbacks=$fb"
+grep -qE 'agent start' <(tr -d '\\' < "$t/herdr.log")
+check "…having actually started a new agent" $? "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+! grep -q 'pane close' <(tr -d '\\' < "$t/herdr.log")
+check "…and closed nothing: a dead agent leaves nothing live to supersede" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+NEW_AGENT=$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)
+NEW_SID=$(jq -r '.remote_session_id' <<<"$out" 2>/dev/null)
+[[ "$NEW_AGENT" == hotline-* && "$NEW_AGENT" != "$CACHED_AGENT" \
+   && -n "$NEW_SID" && "$NEW_SID" != "$CACHED_SID" ]]
+check "…reporting the NEW agent name and the NEW callee session" $? \
+  "surface_ref=$NEW_AGENT session=$NEW_SID"
+[[ "$fb" == *"callee-session-changed(${CACHED_SID}→${NEW_SID}"* ]]
+check "…and the session change itself is reported, not just implied" $? "fallbacks=$fb"
+REG="$t/home/.agents-hotline/sessions/caller-dial-1.json"
+[[ "$(conn session_id)" == "$NEW_SID" && "$(conn surface_ref)" == "$NEW_AGENT" ]]
+check "…with the cache re-keyed, so the NEXT follow-up addresses the live callee" $? \
+  "registry: $(cat "$REG" 2>/dev/null)"
+
+# --- a cached session with no host handle at all -----------------------------
+# A prior headless exchange leaves no host to re-target. Fresh launch, and the
+# fallback says the context is gone rather than letting a caller assume continuity.
+t=$(new_env)
+stage_cache "$t" "$CACHED_SID" ""
+wrap_herdr_transcript "$t" "$CACHED_SID"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_AGENT_ANY=1" \
+        -- --target "$t/target" --mode work_order --prompt "step 2" \
+           --transport herdr --detached --boot-timeout 5)
+fb=$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$fb" == *"herdr-agent-reuse-skipped(no-cached-host-handle"* ]]
+check "a cached session with no host handle → fresh launch, with the skip recorded" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -r '.first_contact' <<<"$out" 2>/dev/null)" == "false" ]] \
+  && [[ "$fb" == *"without the prior context"* ]]
+check "…still first_contact:false (the cache entry is real; only the host is missing), and the loss is named" $? \
+  "out=$out"
+# The reuse script is never invoked here, so nothing probes an agent BEFORE the
+# launch: every `agent get` in this log belongs to the fresh call (the launcher's
+# name-collision check, then delivery's own liveness check).
+! grep -q 'agent get' <(sed -n '1,/pane split/p' <(tr -d '\\' < "$t/herdr.log")) \
+  && grep -q 'agent start' <(tr -d '\\' < "$t/herdr.log")
+check "…and no liveness probe was made before the launch: there was no handle to probe" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# --- herdr-reuse-agent.sh directly ------------------------------------------
+# A BLOCKED agent refuses the reuse. This is the herdr analogue of cmux's
+# post-interrupt refusal: a work order submitted into a permission gate ANSWERS
+# the gate instead of starting a turn.
+t=$(new_env)
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=blocked \
+      bash "$HERDR_REUSE" --agent hotline-b-1 --session s-b --prompt "next thing" \
+        --cwd "$t/target" 2>/dev/null)
+[[ "$(jq -r '.fallback' <<<"$out" 2>/dev/null)" == "fresh" \
+   && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"blocked"* ]]
+check "reuse into a BLOCKED agent refuses with fallback:fresh (it would answer the gate)" $? \
+  "out=$out"
+! grep -q 'agent prompt' "$t/herdr.log" 2>/dev/null
+check "…before submitting anything, so a fresh callee is safe" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+t=$(new_env)
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_GONE=1 \
+      bash "$HERDR_REUSE" --agent hotline-g-1 --session s-g --prompt "next" \
+        --cwd "$t/target" 2>/dev/null)
+[[ "$(jq -r '.fallback' <<<"$out" 2>/dev/null)" == "fresh" ]] \
+  && [[ "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"exited"* ]]
+check "reuse into a GONE agent refuses with fallback:fresh, naming the exit" $? "out=$out"
+! grep -q 'agent prompt' "$t/herdr.log" 2>/dev/null
+check "…and submits nothing" $? "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# The call-dir contract of a reused call: identical to a launched one, minus the
+# launch — so every downstream reader treats it the same.
+t=$(new_env)
+wrap_herdr_transcript "$t" "reuse-sess-1"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 \
+      bash "$HERDR_REUSE" --agent hotline-r-live --session reuse-sess-1 \
+        --prompt "the follow-up" --cwd "$t/target" 2>/dev/null)
+cd_path=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$cd_path" && "$(jq -r '.confirmed' <<<"$out" 2>/dev/null)" == "transcript" \
+   && "$(jq -r '.delivery' <<<"$out" 2>/dev/null)" == "prompt" ]]
+check "a live agent → a call_dir with the delivery confirmed by transcript" $? "out=$out"
+[[ "$(cat "$cd_path/transport.txt" 2>/dev/null)" == "herdr" \
+   && "$(cat "$cd_path/herdr_agent.txt" 2>/dev/null)" == "hotline-r-live" \
+   && "$(cat "$cd_path/keep_workspace.txt" 2>/dev/null)" == "true" \
+   && "$(cat "$cd_path/session_id.txt" 2>/dev/null)" == "reuse-sess-1" ]]
+check "…wired like the launcher's call dir (transport / agent / keep / session)" $? \
+  "call_dir: $(ls "$cd_path" 2>/dev/null | tr '\n' ' ')"
+[[ ! -f "$cd_path/herdr_pane.txt" && ! -f "$cd_path/surface_ref.txt" \
+   && ! -f "$cd_path/workspace_ref.txt" ]]
+check "…and names no pane and no cmux handle (it placed no host)" $? \
+  "call_dir: $(ls "$cd_path" 2>/dev/null | tr '\n' ' ')"
+[[ ! -f "$cd_path/pending_paste.md" ]]
+check "…with the delivered payload removed once confirmed" $? \
+  "call_dir: $(ls "$cd_path" 2>/dev/null | tr '\n' ' ')"
+
+# The same canonicalization the launcher does, and for the same reason: Claude Code
+# encodes the cwd it RESOLVED, and every consumer derives the transcript path from
+# this file.
+t=$(new_env)
+ln -s "$t/target" "$t/linked"
+wrap_herdr_transcript "$t" "reuse-sess-2"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 \
+      bash "$HERDR_REUSE" --agent hotline-r-link --session reuse-sess-2 \
+        --prompt "hi" --cwd "$t/linked" 2>/dev/null)
+cd_path=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ "$(cat "$cd_path/cwd.txt" 2>/dev/null)" == "$(cd "$t/target" && pwd -P)" ]]
+check "reuse canonicalizes cwd.txt too, so a symlinked target still resolves" $? \
+  "cwd.txt='$(cat "$cd_path/cwd.txt" 2>/dev/null)' want='$(cd "$t/target" && pwd -P)'"
+
+# Submitted and unconfirmable is NOT a fallback: the payload may already be queued,
+# so re-delivering it into a fresh callee would run the work order twice.
+t=$(new_env)
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 \
+      bash "$HERDR_REUSE" --agent hotline-r-unconf --session reuse-sess-3 \
+        --prompt "hi" --cwd "$t/target" 2>/dev/null)
+[[ "$(jq -r '.undelivered' <<<"$out" 2>/dev/null)" == "true" \
+   && "$(jq -r '.fallback // empty' <<<"$out" 2>/dev/null)" == "" ]]
+check "submitted but unconfirmed → undelivered:true, never fallback:fresh (no double-run)" $? \
+  "out=$out"
+pf=$(jq -r '.prompt_file // empty' <<<"$out" 2>/dev/null)
+[[ -s "$pf" ]] && grep -q 'hi' "$pf"
+check "…keeping the only copy of the prompt on disk for recovery" $? "prompt_file=$pf"
+
+# …and dial.sh turns that into a stage=deliver ERROR with an explicit do-not-re-dial.
+t=$(new_env)
+stage_cache "$t" "$CACHED_SID" "$CACHED_AGENT"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_AGENT_ANY=1" \
+        -- --target "$t/target" --mode work_order --prompt "step 2" \
+           --transport herdr --detached)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "error" \
+   && "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "deliver" ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"Do NOT re-dial"* ]]
+check "an unconfirmable FOLLOW-UP errors at stage=deliver, telling the caller not to re-dial" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+! grep -qE 'agent start|pane split' <(tr -d '\\' < "$t/herdr.log")
+check "…and never launches a second callee behind it" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# ===========================================================================
+echo ""
+echo "7. Blocked-state reporting — a human is needed, not more time:"
+# ===========================================================================
+# herdr reports `blocked` natively: the callee is waiting on INPUT (a permission
+# gate, or a genuine question). Spending the full 30-minute budget on that and then
+# calling it a timeout sends a reader hunting a slow work order instead of a dialog
+# box. It is NOT a new terminal STATUS — the protocol is untouched; the LIFECYCLE
+# is saying why no STATUS is coming.
+
+t=$(new_env)
+NONCE="b10cked0000aaaa1"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-blk-1 "herdr-sess" "$NONCE" "$t/target"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "$NONCE" "" "reading the repo"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=blocked \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 600 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 5 ]]
+check "a blocked settle with no terminal STATUS → exit 5, its own outcome" $? \
+  "rc=$rc stderr=$(cat "$t/err.txt")"
+grep -q 'waiting on INPUT' "$t/err.txt" && grep -q 'agent attach hotline-blk-1' "$t/err.txt"
+check "…saying it is waiting on input and how to look at it" $? "stderr=$(cat "$t/err.txt")"
+! grep -qi 'timed out' "$t/err.txt"
+check "…and never calling it a timeout" $? "stderr=$(cat "$t/err.txt")"
+[[ -s "$cd_path/waiter_timeout.txt" ]] && grep -q 'settle=blocked' "$cd_path/waiter_timeout.txt"
+check "…marked RESUMABLE, so re-running after a human unblocks it reads the answer" $? \
+  "marker=$(cat "$cd_path/waiter_timeout.txt" 2>/dev/null)"
+! grep -q 'pane close' "$t/herdr.log" 2>/dev/null
+check "…leaving the agent live (it is mid-question; closing it would end the call)" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# The answer outranks the lifecycle. A callee that emits its terminal STATUS and
+# then blocks on the NEXT thing it wants to do has answered us.
+t=$(new_env)
+NONCE="b10cked0000aaaa2"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-blk-2 "herdr-sess" "$NONCE" "$t/target"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "$NONCE" WORK_COMPLETE "done, and now asking about something else"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=blocked \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 30 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 0 && "$(jq -r '.response' <<<"$out" 2>/dev/null)" == *"done, and now asking"* ]]
+check "a blocked agent that ALREADY answered still exits 0 with the answer" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
+# A blocked callee with no transcript at all is still blocked, and that is the more
+# useful thing to say than "the prompt never reached the agent" — a gate raised
+# before the callee could record anything looks identical to a lost delivery.
+t=$(new_env)
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-blk-3 "herdr-sess" "n-blk3" "$t/target"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=blocked \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 600 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 5 ]] && grep -q 'waiting on INPUT' "$t/err.txt"
+check "blocked with no transcript reports the block, not a phantom delivery failure" $? \
+  "rc=$rc stderr=$(cat "$t/err.txt")"
+
+# A blocked BLINK is not a verdict: the state is re-probed before the call ends, so
+# a gate that cleared itself leaves the wait running.
+t=$(new_env)
+NONCE="b10cked0000aaaa4"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-blk-4 "herdr-sess" "$NONCE" "$t/target"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "$NONCE" "" "still working"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=working \
+      HERDR_STUB_WAIT_STATUS=blocked \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 6 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 1 ]] && grep -q 'Timed out' "$cd_path/error.txt"
+check "a blocked settle the confirming probe does not reproduce keeps waiting" $? \
+  "rc=$rc error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
+# ===========================================================================
+echo ""
+echo "8. Doc canaries — a stated default has one source:"
 # ===========================================================================
 # SKILL.md states these numbers, and the scripts define them. Two copies of a
 # constant is how a documented "default 60" sat next to a hardcoded 20 at both call
