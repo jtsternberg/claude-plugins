@@ -86,6 +86,19 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   inputs exist before the risky step, write the record first.
   (claude-plugins-xick, round 2 #4)
 
+## Testing
+
+- **Read a file's mode with GNU `stat -c` before BSD `stat -f`.** On Linux
+  `stat -f` is `--file-system` and prints verbose output instead of failing, so a
+  BSD-first `stat -f … || stat -c …` never reaches the fallback and permission
+  assertions read empty on the ubuntu runner. Grep tests for any `stat -f` placed
+  before its `stat -c` fallback. (289ef4a)
+- **A suite is not green until it is green on Linux.** The ubuntu runner is the
+  only Linux check, and a macOS-green suite hid a red CI for the entire
+  terminal.paste rework — portability bugs (BSD-only `stat`, `getppid` reparenting
+  under command substitution) surface only there. Read the CI conclusion for a
+  change, not just local output. (289ef4a, ad10bbf)
+
 ## Process
 
 - **A suite that can skip must be satisfiable, and skip counts get read.** Owned by
