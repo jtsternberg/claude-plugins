@@ -2,10 +2,15 @@
 # =============================================================================
 # Wait for Session: Poll until the remote session ID is available.
 #
-# Two modes, auto-detected from the call_dir contents:
+# Two modes. The launcher names its backend in call_dir/transport.txt ('cmux' or
+# 'headless') and that is read first; a call_dir without it is inferred from its
+# contents exactly as before the signal existed. Either way the cmux SUB-mode
+# (surface vs workspace) is still the host-handle file distinction. See the
+# dispatch block below for the full contract.
 #
-#   Headless mode (no workspace_ref.txt): poll call_dir/session_id.txt at
-#   1s intervals; cmux-call.sh and headless-call-async.sh write it themselves.
+#   Headless mode (transport.txt=headless, or no host handle at all): poll
+#   call_dir/session_id.txt at 1s intervals; cmux-call.sh and
+#   headless-call-async.sh write it themselves.
 #
 #   CMUX mode (workspace_ref.txt present): cmux-call-async.sh wrote
 #   session_id_preset.txt but does NOT confirm claude actually booted —
@@ -64,23 +69,54 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Mode detection. cmux mode gets a longer default timeout (60s) because we're
-# waiting for the receiver claude REPL to actually boot, not just a file to
-# appear. Headless mode keeps its existing 30s default.
-#
-# Two cmux sub-modes, auto-detected like the launcher signals them:
+# --- Backend dispatch --------------------------------------------------------
+# transport.txt, written by the launcher when it creates the call dir, names the
+# backend outright: 'cmux' or 'headless'. It is read FIRST and it is a COARSE
+# selector — it says which backend owns this call dir, NOT which cmux sub-mode.
+# The sub-mode is still the host-handle distinction it always was:
 #   surface mode    — surface_ref.txt present (side-by-side / --window placement).
 #                     Poll the cmux SURFACE.
 #   workspace mode  — workspace_ref.txt present (--detached placement).
 #                     Poll the cmux WORKSPACE.
+#
+# An ABSENT transport.txt is a legacy call dir — one created before this signal
+# existed, or staged by hand. Infer the backend from the handle files exactly as
+# before: a handle means cmux, no handle means headless.
+#
+# WHY cmux STILL REQUIRES ITS HANDLE. The cmux branch below polls a surface or a
+# workspace by ref, so a cmux call dir with no handle has nothing to poll — and
+# that state is real, not hypothetical: transport.txt is written with the dir,
+# well before a host is placed, and a launcher whose placement fails writes
+# done+error.txt and hands that handle-less dir straight to this script. It takes
+# the file-watch path below, whose check_early_fail reports the launcher's own
+# error.txt. Forcing it down the cmux branch would replace that diagnosis with a
+# bare `cat: no such file` from the ref read.
+#
+# cmux mode gets a longer default timeout (60s) because we're waiting for the
+# receiver claude REPL to actually boot, not just a file to appear. Headless mode
+# keeps its existing 30s default.
+TRANSPORT=""
+if [[ -f "$CALL_DIR/transport.txt" ]]; then
+  TRANSPORT=$(tr -d '[:space:]' < "$CALL_DIR/transport.txt" 2>/dev/null || true)
+fi
+HAS_SURFACE=false
+HAS_WORKSPACE=false
+[[ -f "$CALL_DIR/surface_ref.txt"   ]] && HAS_SURFACE=true
+[[ -f "$CALL_DIR/workspace_ref.txt" ]] && HAS_WORKSPACE=true
+
 CMUX_MODE=false
 SURFACE_MODE=false
-if [[ -f "$CALL_DIR/surface_ref.txt" ]]; then
-  CMUX_MODE=true
-  SURFACE_MODE=true
-elif [[ -f "$CALL_DIR/workspace_ref.txt" ]]; then
-  CMUX_MODE=true
-fi
+case "$TRANSPORT" in
+  headless)
+    # Stated headless: never poll a cmux host, whatever else the dir holds.
+    ;;
+  *)
+    # 'cmux', absent (legacy inference), or a backend this tree has no verbs for.
+    # All three resolve through the host handle — see the note above.
+    if $HAS_SURFACE || $HAS_WORKSPACE; then CMUX_MODE=true; fi
+    ;;
+esac
+if $CMUX_MODE && $HAS_SURFACE; then SURFACE_MODE=true; fi
 # The defaults live in repl-state.sh, not here. dial.sh derives the paste's
 # input-box wait from the same numbers — they are waiting for the same event — and
 # with two definitions the documented 60 was true of this wait and not of that one.

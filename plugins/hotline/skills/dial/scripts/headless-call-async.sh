@@ -85,6 +85,10 @@ fi
 # instead of leaving hundreds of /tmp/hotline-call-* dirs behind (claude-plugins-cjgn).
 # Production is unchanged: unset → /tmp.
 CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
+# Which backend owns this call dir. Headless places no host, so it writes no host
+# handle — this file is the only positive evidence of its backend a reader gets.
+# See wait-for-session.sh's dispatch block for the whole contract.
+echo headless > "$CALL_DIR/transport.txt"
 # Persist receiver cwd + [MODE:]/[CALLER:]/[SESSION:] tags from the ringing
 # prompt so wait-for-session.sh can register the call in the sessions registry.
 # The prompt goes on STDIN, so it needs a file inside the call dir either way:

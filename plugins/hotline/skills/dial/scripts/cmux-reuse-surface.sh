@@ -270,6 +270,10 @@ fi
 # HOTLINE_CALL_HOME overrides the base dir (default /tmp) so test suites can own
 # and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
 CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
+# Which backend owns this call dir — a follow-up reuses a live cmux surface, so
+# it is a cmux call dir like any other. Coarse selector; surface_ref.txt below
+# still names the sub-mode. See wait-for-session.sh's dispatch block.
+echo cmux > "$CALL_DIR/transport.txt"
 echo "$SURFACE_REF" > "$CALL_DIR/surface_ref.txt"
 echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 [[ -n "$SESSION_ID" ]] && {
