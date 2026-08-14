@@ -227,14 +227,19 @@ fi
 
 # --- the cache override is honored: no write escapes to the default dir -----
 # Regression for claude-plugins-d4ux: with CLAUDE_HANDOFF_CACHE_DIR set, a hook
-# run must write ONLY under it. If a future edit hardcodes /tmp/claude-handoff
-# again, this test's own claude/codex ancestor PID lands a fixture file there
-# and the snapshot diff catches it.
+# run must write its cache ONLY under it, never the shared default.
+#
+# Both hooks only write when they find a claude/codex ANCESTOR pid, so run them
+# under a fake `claude` (a copied bash, the same trick the session-info cases use
+# above) — otherwise on CI, which has no real claude/codex ancestor, nothing is
+# written and the test proves nothing. JSON and paths pass as positional args to
+# dodge nested-quote hell.
 DEFAULT_DIR="/tmp/claude-handoff"
-printf '{"session_id":"leak-probe","transcript_path":"/tmp/probe.jsonl","cwd":"%s"}' "$EMPTY" \
-  | PATH="$BIN:$PATH" bash "$HOOK" >/dev/null 2>&1
-printf '{"session_id":"leak-probe","transcript_path":"/tmp/probe.jsonl","cwd":"/tmp","hook_event_name":"PostCompact","trigger":"manual"}' \
-  | CLAUDE_CODE_SESSION_ID=leak-probe bash "$POST_COMPACT" >/dev/null 2>&1
+FAKE_CLAUDE="$TMP/claude"; cp "$(command -v bash)" "$FAKE_CLAUDE"
+LEAK_JSON_START="{\"session_id\":\"leak-probe\",\"transcript_path\":\"/tmp/probe.jsonl\",\"cwd\":\"$EMPTY\"}"
+LEAK_JSON_COMPACT='{"session_id":"leak-probe","transcript_path":"/tmp/probe.jsonl","cwd":"/tmp","hook_event_name":"PostCompact","trigger":"manual"}'
+"$FAKE_CLAUDE" -c 'printf "%s" "$2" | PATH="$3:$PATH" bash "$1" >/dev/null 2>&1' _ "$HOOK" "$LEAK_JSON_START" "$BIN"
+"$FAKE_CLAUDE" -c 'printf "%s" "$2" | CLAUDE_CODE_SESSION_ID=leak-probe bash "$1" >/dev/null 2>&1' _ "$POST_COMPACT" "$LEAK_JSON_COMPACT"
 if grep -rlq 'leak-probe' "$DEFAULT_DIR" 2>/dev/null; then
   fail "a hook wrote to $DEFAULT_DIR despite CLAUDE_HANDOFF_CACHE_DIR being set"
 else
