@@ -1,5 +1,5 @@
 ---
-name: sessions-recap-self
+name: self-recap
 description: "Recap where THIS session is right now — the arc, the decisions, and what's still open — summarized from the conversation already in context. For a long session whose thread has slipped."
 when_to_use: |
   Use when the user wants to get re-oriented on the CURRENT session — the one

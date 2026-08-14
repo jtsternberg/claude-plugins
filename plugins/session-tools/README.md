@@ -178,12 +178,12 @@ Node 18+. (`sessions-weekly-recap` uses Python; this skill uses Node so its pars
 
 ---
 
-### 🧭 sessions-recap-self
+### 🧭 self-recap
 
 `sessions-catch-up` for the session you're **already in**. No id, no transcript, no script — the conversation is already in context, so it just summarizes what's there.
 
 ```
-/session-tools:sessions-recap-self            # where are we, how did we get here, what's open
+/session-tools:self-recap            # where are we, how did we get here, what's open
 ```
 
 Built for the moment a long session's thread has slipped out of your head — an overnight run, or one you walked away from — and you want your bearings back without scrolling. Unlike catch-up (which reads a *different* session off disk), this reads nothing: it distills the in-context conversation into the arc, the loose ends, and the one next step. Orientation, not a replay.
@@ -265,12 +265,12 @@ plugins/session-tools/
 ├── scripts/            ← shared: lib/, export-session.mjs, nudge.mjs, install-wrapper.sh
 ├── references/         ← shared prose: reading-a-digest.md
 ├── tests/              ← transcript.test.mjs
-└── skills/             ← sessions-catch-up, sessions-recap-self, sessions-fork, sessions-weekly-recap, note-to-self
+└── skills/             ← sessions-catch-up, self-recap, sessions-fork, sessions-weekly-recap, note-to-self
 ```
 
-`note-to-self` and `sessions-recap-self` are the exceptions: they read no transcripts and
+`note-to-self` and `self-recap` are the exceptions: they read no transcripts and
 ship no scripts, just prose — `note-to-self` writes a breadcrumb for your return, and
-`sessions-recap-self` summarizes the current conversation already in context.
+`self-recap` summarizes the current conversation already in context.
 
 Skills reach it with `${CLAUDE_PLUGIN_ROOT}` — the documented variable for a plugin's
 install directory, which keeps working after a marketplace install:

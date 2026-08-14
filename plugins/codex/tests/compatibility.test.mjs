@@ -329,7 +329,7 @@ test('invocation-policy guard rejects Claude/Codex disagreement', () => {
 
 test('explicit-only inventory has mirrored Codex policy and risk classification', () => {
 	const report = collectExplicitInvocationPolicy(REPO);
-	assert.equal(report.explicitOnly.length, 33);
-	assert.equal(report.codexExplicitOnly.length, 33);
+	assert.equal(report.explicitOnly.length, 34);
+	assert.equal(report.codexExplicitOnly.length, 34);
 	assert.deepEqual(policyErrors(report), []);
 });
