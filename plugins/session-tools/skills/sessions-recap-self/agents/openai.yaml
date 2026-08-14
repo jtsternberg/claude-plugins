@@ -1,0 +1,5 @@
+interface:
+  display_name: Sessions Recap (self)
+  short_description: Recap the current session's arc and loose ends from context in view.
+policy:
+  allow_implicit_invocation: false
