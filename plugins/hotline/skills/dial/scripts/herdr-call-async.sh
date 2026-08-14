@@ -43,8 +43,8 @@
 # WHY NOTHING IS CLOSED AFTER THE CALL. A cmux detached workspace is closed once
 # the response is captured, because a cmux surface is cheap and dies with its
 # window anyway. A herdr agent is the opposite: surviving disconnects is the reason
-# to choose this transport at all, and Phase 2's follow-up path re-targets this
-# very agent by name. So keep_workspace.txt is 'true' and the agent is left live.
+# to choose this transport at all, and the follow-up path (herdr-reuse-agent.sh)
+# re-targets this very agent by name. So keep_workspace.txt is 'true' and the agent is left live.
 # The cost is honest and worth stating: a herdr call leaves a pane behind, and the
 # caller (or the user) closes it — `herdr pane close <herdr_pane.txt>`.
 #
@@ -125,13 +125,17 @@ if [[ -n "$PROMPT_FILE" ]]; then
 fi
 [[ -z "$PROMPT" ]] && die "No --prompt or --prompt-file provided"
 
-# Phase 1 is FIRST CONTACT ONLY. A resume/fork would need the callee's existing
-# session to be re-hosted in a new herdr agent, which is the Phase 2 follow-up
-# verb — and a plain resume must NOT pass --session-id (claude rejects the
-# combination), so the preset below would be wrong for it. Refuse rather than
+# THIS LAUNCHER ONLY EVER STARTS A NEW SESSION. A resume/fork would re-host an
+# existing claude session, and a plain resume must NOT pass --session-id (claude
+# rejects the combination) — so the preset below, which is the only reason the
+# transcript path is derivable at all, would be wrong for it. Refuse rather than
 # launch something whose transcript path we would then derive incorrectly.
+#
+# This is NOT the follow-up path and never was: a follow-up re-targets the herdr
+# agent that already hosts the session (herdr-reuse-agent.sh), so it launches
+# nothing and needs no resume.
 if [[ -n "$RESUME_ID" ]] || $FORK_SESSION; then
-  die "herdr Phase 1 is first-contact only: --resume/--fork-session are the Phase 2 follow-up path. Dial with --transport cmux to continue an existing session."
+  die "herdr cannot re-host an existing claude session: --resume/--fork-session are incompatible with the --session-id preset the transcript path is derived from. To continue a session hotline already dialed, re-dial the target and the live herdr agent is re-targeted by name; to adopt an unrelated session id, dial with --transport cmux."
 fi
 
 if [[ -n "$BOOT_TIMEOUT" && ! "$BOOT_TIMEOUT" =~ ^[0-9]+$ ]]; then

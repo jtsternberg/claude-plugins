@@ -256,10 +256,16 @@ case "$TRANSPORT_REQ" in
         "--transport herdr does not support --mode conference" \
         "A conference call hands the user a VISIBLE session next to their own; herdr's equivalent is attach-in-place (\`herdr session attach\`), which is Phase 3. Use --mode work_order or quick with herdr, or drop --transport for a cmux conference."
     fi
+    # --resume names SOMEBODY ELSE's session — the fork path, not a follow-up — and
+    # herdr cannot re-host one at all: `claude --resume` and `--session-id` are
+    # mutually exclusive, and without the preset there is no transcript path to read
+    # the answer from. Following up into a callee THIS caller already dialed is a
+    # different thing and needs no flag (the cache holds the agent name); this
+    # refusal is about adopting a session hotline did not start.
     if [[ -n "$RESUME_ARG" ]]; then
       emit_error args \
-        "--transport herdr does not support --resume yet" \
-        "herdr Phase 1 is first contact only; re-hosting an existing session in a herdr agent is the Phase 2 follow-up path. Drop --transport to resume over cmux."
+        "--transport herdr cannot adopt an existing session (--resume)" \
+        "herdr hosts a callee it STARTS, with a session id hotline presets so the transcript is readable; \`claude --resume\` cannot take that preset. To continue a session you dialed before, just re-dial the same target with --transport herdr --detached and no --resume — the cached herdr agent is re-targeted by name. To adopt an unrelated session id, drop --transport and resume over cmux."
     fi
     ;;
   *)
@@ -613,34 +619,29 @@ SURFACE_REF=""
 # superseded-surface cleanup needs to know what it replaced.
 PREV_SURFACE_REF=""
 PREV_CALL_ID=""
+# The callee session this target was cached with. Kept because a follow-up can end
+# up on a DIFFERENT session than the cached one — a herdr follow-up whose agent has
+# died falls back to a fresh launch, and herdr cannot re-host an existing session,
+# so the new callee has a new id. Step 6 compares the two and heals the cache when
+# they differ; a cmux follow-up resumes the same id, so nothing there changes.
+PREV_SESSION_ID=""
 if [[ -z "$RESUME_ARG" ]]; then
   if CACHED=$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" \
                 --caller-session "$MY_SESSION_ID" 2>/dev/null) && [[ -n "$CACHED" ]]; then
+    # The PREV_* group is what this dial SUPERSEDES, so it is read whether or not
+    # --fresh goes on to decline the entry: step 7 closes the old surface either
+    # way, and step 6's cache healing compares against the id that was cached.
     PREV_SURFACE_REF=$(jq -r '.surface_ref // empty' <<<"$CACHED")
     PREV_CALL_ID=$(jq -r '.last_call_id // empty' <<<"$CACHED")
+    PREV_SESSION_ID=$(jq -r '.session_id // empty' <<<"$CACHED")
     if $FRESH; then
-      add_fallback "session-cache→fresh($(jq -r '.session_id // "unknown"' <<<"$CACHED"))"
+      add_fallback "session-cache→fresh(${PREV_SESSION_ID:-unknown})"
     else
       FIRST_CONTACT=false
-      REMOTE_SESSION_ID=$(jq -r '.session_id // empty' <<<"$CACHED")
+      REMOTE_SESSION_ID="$PREV_SESSION_ID"
       SURFACE_REF="$PREV_SURFACE_REF"
     fi
   fi
-fi
-
-# herdr Phase 1 is FIRST CONTACT ONLY, and this is where that becomes knowable: the
-# caller asked for herdr, and our own cache says this session already exists
-# somewhere. Both honest options were considered and rejected —
-#   silently ignoring the cache would start a FRESH callee with none of the prior
-#     context, which is the opposite of what a follow-up means;
-#   launching a herdr agent that `claude --resume`s it would re-host a live session
-#     in a second place, and is the Phase 2 verb precisely because it needs the
-#     liveness probe and handle bookkeeping Phase 2 adds.
-# So refuse, and name both ways forward.
-if [[ "$TRANSPORT" == "herdr" ]] && ! $FIRST_CONTACT; then
-  emit_error transport \
-    "herdr Phase 1 is first-contact only, and $TARGET_PATH already has a cached session for this caller (${REMOTE_SESSION_ID:-unknown})" \
-    "Continue that conversation over cmux (drop --transport herdr) — but if that session is hosted by a herdr agent, CLOSE IT FIRST (\`herdr pane close \$(cat <call_dir>/herdr_pane.txt)\`, or \`herdr agent list\` to find it): a cmux follow-up plain-resumes the session, so a live herdr REPL on it leaves two claude processes appending to one transcript (claude-plugins-7wze.11). To start a FRESH herdr callee instead, drop this target's entry from ~/.agents-hotline/sessions/${MY_SESSION_ID}.json (its .connections[\"$TARGET_PATH\"]) and re-dial — that loses the prior context, which is why it is not done for you. Following up INTO a live herdr agent is Phase 2."
 fi
 
 # Resume/fork semantics for the launchers:
@@ -803,6 +804,68 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Step 5a (herdr) — the same step, into a named agent instead of a surface.
+#
+# The named agent IS the session: `herdr agent prompt <name>` re-targets it, and a
+# follow-up continues the same conversation in the same transcript. So this is the
+# cmux step above with the surface machinery removed — no host to resolve, no input
+# box to read, no interrupt to risk, and (step 7) nothing superseded to close,
+# because the same agent is reused rather than replaced.
+#
+# The two things that DO carry over are the two that matter: a fresh nonce per turn
+# (the transcript keeps every prior exchange's STATUS lines, so a reused nonce would
+# read the previous turn's completion as this one's), and the rule that EVERY bail
+# records a fallback — a follow-up that quietly started a second callee must never
+# look identical to a clean first-contact dial (claude-plugins-6nbr).
+#
+# A REFUSED REUSE FALLS BACK TO A FRESH LAUNCH, and that costs the prior context:
+# herdr cannot re-host an existing claude session (`claude --resume` and
+# `--session-id` are mutually exclusive, and the launcher refuses the combination
+# rather than derive a transcript path it would then read wrongly). The cmux
+# fallback re-opens the SAME session in a new surface; this one cannot, so the
+# fallback entry says so outright instead of leaving a caller to discover that its
+# callee has amnesia.
+# ---------------------------------------------------------------------------
+if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
+  if [[ -z "$SURFACE_REF" ]]; then
+    # A prior exchange over headless (no host at all), or a cmux follow-up that
+    # cleared a stale surface ref, leaves nothing to re-target.
+    add_fallback "herdr-agent-reuse-skipped(no-cached-host-handle; the fresh callee starts without the prior context)"
+  else
+    # The file, never --prompt: same reason as the cmux path (claude-plugins-86ka).
+    REUSE=$(bash "$DIAL_SCRIPTS/herdr-reuse-agent.sh" \
+      --agent "$SURFACE_REF" --session "$REMOTE_SESSION_ID" \
+      --prompt-file "$SEND_PROMPT_FILE" --cwd "$TARGET_PATH" 2>/dev/null)
+
+    # UNDELIVERED FIRST, before the call_dir success test — the undelivered outcome
+    # carries a call_dir too (it holds the only copy of the prompt), so testing for
+    # call_dir first would read a failed delivery as a successful one.
+    if [[ "$(jq -r '.undelivered // false' <<<"$REUSE" 2>/dev/null)" == "true" ]]; then
+      CALL_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
+      emit_error deliver "the follow-up was submitted to herdr agent $SURFACE_REF but could not be confirmed: $(reason_of "$REUSE")" \
+        "The agent is live and may ALREADY have the message; $(jq -r '.prompt_file // "the prompt file"' <<<"$REUSE" 2>/dev/null) still holds it. Read the callee's transcript for the call_id, or \`herdr agent attach $SURFACE_REF\`, before doing anything. See references/error-recovery.md § herdr Failures. Do NOT re-dial — that would deliver it twice."
+    fi
+
+    REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
+    if [[ -n "$REUSE_DIR" ]]; then
+      CALL_DIR="$REUSE_DIR"
+      [[ -s "$CALL_DIR/call_id.txt" ]] && CALL_ID_OUT=$(cat "$CALL_DIR/call_id.txt")
+      # The agent is unchanged (that is the point), but bump last_contact /
+      # exchange_count and record this turn's nonce.
+      bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
+        --caller-session "$MY_SESSION_ID" --surface "$SURFACE_REF" \
+        ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} >/dev/null 2>&1
+      emit_connected true
+    fi
+    # {"fallback":"fresh"} — refused BEFORE anything was submitted (the agent is
+    # gone, or blocked on input), so a fresh callee is safe. It just will not
+    # remember anything.
+    add_fallback "herdr-agent-reuse→fresh($(reason_of "$REUSE"); the fresh callee starts WITHOUT the prior context — herdr cannot re-host an existing claude session)"
+    SURFACE_REF=""
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Step 5b — Conference mode: a visible interactive session, handed to the user.
 # cmux-call.sh is synchronous and self-registers, so we early-return after it —
 # no boot wait, no response wait. (Headless conference falls through to the
@@ -912,8 +975,15 @@ fire_cmux() {
 # herdr's launcher BLOCKS until the callee's REPL is interactive-ready (that is what
 # `herdr agent start` does), so --boot-timeout has to reach it here — for cmux the
 # same budget is spent later, inside wait-for-session.sh. No placement args: herdr
-# Phase 1 is detached-only and the validation above has already refused everything
-# else, so there is nothing left to say about placement.
+# is detached-only and the validation above has already refused everything else, so
+# there is nothing left to say about placement.
+#
+# $EFFECTIVE_RESUME IS DELIBERATELY NOT PASSED. Reaching this function on a
+# follow-up means the reuse step above refused (dead or blocked agent), and herdr
+# cannot re-host an existing session at all: `claude --resume` and `--session-id`
+# are mutually exclusive, and without the preset there is no transcript path to read
+# the answer from. So the fresh callee is genuinely fresh, and the reuse→fresh
+# fallback entry says so rather than letting a caller infer continuity.
 fire_herdr() {
   local ARGS=(--cwd "$TARGET_PATH")
   $FIRST_CONTACT && ARGS+=(--name "$SESSION_NAME")
@@ -984,7 +1054,7 @@ fi
 # The call's HOST REF, one field for both transports — the emitted `.surface_ref` has
 # always been documented as an opaque handle, and register-call.sh records it the
 # same way. For herdr it is the agent NAME, which is what `agent prompt` /
-# `agent wait` / `agent get` address and what a Phase 2 follow-up will re-target.
+# `agent wait` / `agent get` address, and what step 5a's follow-up re-targets.
 [[ -s "$CALL_DIR/herdr_agent.txt" ]] && SURFACE_REF=$(cat "$CALL_DIR/herdr_agent.txt")
 
 # Follow-ups that had to open a NEW surface: refresh the cached surface_ref so
@@ -1005,6 +1075,16 @@ if ! $FIRST_CONTACT; then
     CACHE_ARGS+=(--clear-surface)
   fi
   [[ -n "$CALL_ID_OUT" ]] && CACHE_ARGS+=(--call-id "$CALL_ID_OUT")
+  # A follow-up that landed on a DIFFERENT callee session must re-key the cache, or
+  # the next follow-up resumes a session id nothing is listening on and every answer
+  # is read from a transcript that stops growing. Only a herdr reuse→fresh fallback
+  # gets here with a changed id (herdr cannot re-host a session, so its fresh callee
+  # is a new one); a cmux follow-up resumes the cached id, so the values match and
+  # this is a no-op — which is why the condition is the CHANGE, not the transport.
+  if [[ -n "$REMOTE_SESSION_ID" && "$REMOTE_SESSION_ID" != "$PREV_SESSION_ID" ]]; then
+    CACHE_ARGS+=(--session "$REMOTE_SESSION_ID")
+    add_fallback "callee-session-changed(${PREV_SESSION_ID:-none}→$REMOTE_SESSION_ID; the cache now points at the new session)"
+  fi
   bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
     "${CACHE_ARGS[@]}" >/dev/null 2>&1
 fi

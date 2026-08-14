@@ -87,6 +87,30 @@ HOME="$T/home" bash "$CACHE" update "$TARGET" --caller-session caller-1 >/dev/nu
 check "a cleared surface_ref stays cleared, and the nonce survives" $? \
   "$(cat "$CACHE_FILE" 2>/dev/null)"
 
+# --- update --session re-keys the callee session ----------------------------
+# A follow-up normally continues the cached session, so an omitted --session must
+# leave it alone. It is needed when the follow-up ends up on a DIFFERENT session:
+# a herdr follow-up whose agent has died falls back to a fresh launch, and herdr
+# cannot re-host an existing claude session, so the new callee has a new id.
+# Leaving the old one there points the next follow-up at a session nothing is
+# listening on, and every answer is read from a transcript that stopped growing.
+HOME="$T/home" bash "$CACHE" update "$TARGET" --caller-session caller-1 \
+  --surface AGENT-HOTLINE-1 >/dev/null
+[[ "$(conn session_id)" == "sess-aaa" ]]
+check "update without --session leaves session_id untouched" $? \
+  "$(cat "$CACHE_FILE" 2>/dev/null)"
+
+HOME="$T/home" bash "$CACHE" update "$TARGET" --caller-session caller-1 \
+  --session sess-ccc --surface AGENT-HOTLINE-2 --call-id nonce-4 >/dev/null
+[[ "$(conn session_id)" == "sess-ccc" && "$(conn surface_ref)" == "AGENT-HOTLINE-2" \
+   && "$(conn last_call_id)" == "nonce-4" ]]
+check "update --session re-keys session_id alongside the host handle and the nonce" $? \
+  "$(cat "$CACHE_FILE" 2>/dev/null)"
+
+# Restore what the cases below expect: no surface, and the original session id.
+HOME="$T/home" bash "$CACHE" update "$TARGET" --caller-session caller-1 \
+  --session sess-aaa --clear-surface --call-id nonce-2 >/dev/null
+
 # --- get reflects the clear -------------------------------------------------
 got=$(HOME="$T/home" bash "$CACHE" get "$TARGET" --caller-session caller-1 2>/dev/null)
 [[ -n "$got" && -z "$(jq -r '.surface_ref // empty' <<<"$got")" \
