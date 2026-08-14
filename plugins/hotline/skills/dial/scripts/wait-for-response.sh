@@ -263,6 +263,13 @@ if $HERDR_MODE; then
   HERDR_SCRIPTS="$SELF_DIR/../../../scripts"
   # shellcheck source=../../../scripts/herdr-state.sh
   source "$HERDR_SCRIPTS/herdr-state.sh"
+  # The dual-cwd-spelling rule lives in ONE place and this is a second caller of it,
+  # not a second copy. Delivery already reads the callee's transcript through this
+  # helper; the wait deriving its own single-spelling path is precisely how the two
+  # disagreed live — delivery confirmed the nonce while the wait reported "the prompt
+  # never reached the agent" about a transcript that held the finished answer.
+  # shellcheck source=../../../scripts/transcript-confirm.sh
+  source "$HERDR_SCRIPTS/transcript-confirm.sh"
 
   AGENT=""
   [[ -s "$CALL_DIR/herdr_agent.txt" ]] && AGENT=$(tr -d '[:space:]' < "$CALL_DIR/herdr_agent.txt")
@@ -283,12 +290,20 @@ if $HERDR_MODE; then
   # There is no weaker tier to fall through to, so a missing input is a hard stop
   # rather than a silent downgrade — and saying which input is missing is the
   # difference between a fixable report and "it timed out".
-  TRANSCRIPT_PATH=""
+  #
+  # CANDIDATES, PLURAL. The transcript may be under either spelling of the callee's
+  # cwd, because Claude Code encodes the path it RESOLVED: a callee under a symlink
+  # (/tmp on macOS) writes to the realpath encoding. The launcher now canonicalizes
+  # cwd.txt so the two normally coincide, but a hand-staged or older call dir does
+  # not, and asking the shared helper costs nothing.
+  TRANSCRIPT_CANDIDATES=()
   if [[ -n "$SESSION_ID" && -n "$CALL_ID" && -f "$CALL_DIR/cwd.txt" && -x "$TRANSCRIPT_PATH_SH" ]]; then
     RECV_CWD=$(cat "$CALL_DIR/cwd.txt")
-    TRANSCRIPT_PATH=$(bash "$TRANSCRIPT_PATH_SH" --cwd "$RECV_CWD" --session "$SESSION_ID" 2>/dev/null || true)
+    while IFS= read -r _cand; do
+      [[ -n "$_cand" ]] && TRANSCRIPT_CANDIDATES+=("$_cand")
+    done < <(hotline_transcript_candidates "$RECV_CWD" "$SESSION_ID")
   fi
-  if [[ -z "$TRANSCRIPT_PATH" ]]; then
+  if [[ ${#TRANSCRIPT_CANDIDATES[@]} -eq 0 ]]; then
     {
       echo "Cannot read a herdr callee's response: no transcript path could be derived from $CALL_DIR."
       echo "Needed: session_id.txt (or session_id_preset.txt)=${SESSION_ID:-MISSING}, call_id.txt=${CALL_ID:-MISSING}, cwd.txt=$( [[ -f "$CALL_DIR/cwd.txt" ]] && cat "$CALL_DIR/cwd.txt" || echo MISSING )."
@@ -296,10 +311,28 @@ if $HERDR_MODE; then
     } >&2
     exit 1
   fi
-  if [[ -z "$AGENT" ]]; then
-    echo "Cannot gate a herdr wait: $CALL_DIR has no herdr_agent.txt, so there is no agent to wait on (launcher bug). The transcript at $TRANSCRIPT_PATH may still hold the answer — read it directly." >&2
-    exit 1
-  fi
+  # The one that exists, re-resolved every poll: the file does not exist until the
+  # first prompt lands, so which candidate is live is not knowable up front.
+  # TRANSCRIPT_PATH is the reported path — the live one when there is one, otherwise
+  # the first candidate, so a diagnostic always names something concrete.
+  TRANSCRIPT_PATH="${TRANSCRIPT_CANDIDATES[0]}"
+  ALL_CANDIDATES="${TRANSCRIPT_CANDIDATES[*]}"
+  herdr_live_transcript() {
+    local c
+    for c in "${TRANSCRIPT_CANDIDATES[@]}"; do
+      if [[ -f "$c" ]]; then printf '%s' "$c"; return 0; fi
+    done
+    return 1
+  }
+
+  # A herdr call dir with no agent name is a launcher bug, and it stays one — but the
+  # ANSWER may already be on disk, and refusing to look for it because the gate is
+  # missing would throw away a completed work order. So the loop below runs its
+  # transcript read first and only refuses when it reaches the point of needing the
+  # gate. (HAS_GATE is also what keeps the lifecycle probes from querying an empty
+  # agent name.)
+  HAS_GATE=true
+  [[ -z "$AGENT" ]] && HAS_GATE=false
 
   # herdr never closes anything after a call: outliving disconnects is the reason
   # to pick this transport, and Phase 2's follow-up re-targets this same agent by
@@ -325,9 +358,11 @@ if $HERDR_MODE; then
     # settled while a previous waiter was between polls, or before this waiter
     # started at all), and asking herdr to wait for a state change that has already
     # happened would burn a whole slice to learn nothing.
-    if [[ -f "$TRANSCRIPT_PATH" ]]; then
+    LIVE_TRANSCRIPT=$(herdr_live_transcript) || LIVE_TRANSCRIPT=""
+    [[ -n "$LIVE_TRANSCRIPT" ]] && TRANSCRIPT_PATH="$LIVE_TRANSCRIPT"
+    if [[ -n "$LIVE_TRANSCRIPT" ]]; then
       set +e
-      T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$TRANSCRIPT_PATH" "$CALL_ID" 2>/dev/null)
+      T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$LIVE_TRANSCRIPT" "$CALL_ID" 2>/dev/null)
       T_RC=$?
       set -e
       case $T_RC in
@@ -365,8 +400,9 @@ if $HERDR_MODE; then
           # and keeps waiting rather than concluding.
           if ! $H_SUBMITTED && [[ $H_ELAPSED -ge $SUBMIT_DEADLINE ]] && ! $SUBMIT_UNCONFIRMED; then
             SUBMIT_UNCONFIRMED=true
-            herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"
-            echo "hotline: no submit confirmation within ${SUBMIT_DEADLINE}s — nothing in $TRANSCRIPT_PATH carries call_id=$CALL_ID. herdr reports agent $AGENT as '${LAST_STATUS:-unreadable}'. Still waiting (up to ${TIMEOUT}s); \`herdr agent attach $AGENT\` shows what it is actually doing." >&2
+            LAST_STATUS=""
+            $HAS_GATE && { herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"; }
+            echo "hotline: no submit confirmation within ${SUBMIT_DEADLINE}s — nothing in $TRANSCRIPT_PATH carries call_id=$CALL_ID. herdr reports agent ${AGENT:-<none recorded>} as '${LAST_STATUS:-unreadable}'. Still waiting (up to ${TIMEOUT}s); \`herdr agent attach $AGENT\` shows what it is actually doing." >&2
           fi
           ;;
         *)   # extractor usage / read error — no second tier to fall back to
@@ -378,16 +414,35 @@ if $HERDR_MODE; then
       # The transcript does NOT exist until the first prompt lands, so a brief
       # absence right after launch is normal. A LASTING absence is not, and there
       # is nothing else to read: say so instead of waiting out 30 minutes.
-      herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"
+      #
+      # EVERY candidate is named, not just the one we would have reported. This
+      # message used to name a single derived path and assert the prompt never
+      # arrived — and it said that, live, about a callee whose finished answer was
+      # sitting in the OTHER spelling of that same path.
+      LAST_STATUS=""
+      $HAS_GATE && { herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"; }
       {
-        echo "No transcript at $TRANSCRIPT_PATH after ${H_ELAPSED}s — a herdr callee's transcript appears as soon as its first prompt lands, so this means the prompt never reached the agent (or the session id is wrong)."
-        echo "herdr reports agent $AGENT as '${LAST_STATUS:-unreadable}'. Check \`herdr agent get $AGENT\`, or attach to it; do NOT blindly re-dial."
+        echo "No transcript after ${H_ELAPSED}s at any derived path ($ALL_CANDIDATES) — a herdr callee's transcript appears as soon as its first prompt lands, so this means the prompt never reached the agent (or the session id is wrong)."
+        echo "herdr reports agent ${AGENT:-<none recorded>} as '${LAST_STATUS:-unreadable}'. Check \`herdr agent get $AGENT\`, or attach to it; do NOT blindly re-dial."
         echo "Nothing was sent by this script and no terminal state was recorded, so re-running it on the same call_dir simply looks again."
       } >&2
       exit 1
     fi
 
     # --- The gate. ----------------------------------------------------------
+    # No agent name recorded: the transcript read above got its chance (which is the
+    # whole reason this check is here and not up front — a completed work order on
+    # disk is worth more than a tidy early exit), and now there is nothing to wait
+    # ON. That is a launcher bug, so it fails loudly rather than degrading into a
+    # bare file poll that would sit here for the full budget.
+    if ! $HAS_GATE; then
+      {
+        echo "Cannot gate a herdr wait: $CALL_DIR has no herdr_agent.txt, so there is no agent to wait on (launcher bug)."
+        echo "The transcript was read first and carries no terminal STATUS for call_id=$CALL_ID yet ($ALL_CANDIDATES) — read it directly, or \`herdr agent list\` to find the callee and record its name."
+      } >&2
+      exit 1
+    fi
+
     # An agent whose name no longer resolves has EXITED (herdr clears the name with
     # it). Checked after the transcript read, so a callee that answered and then
     # quit is reported as an answer, not as a death.
@@ -420,7 +475,7 @@ if $HERDR_MODE; then
 
   {
     if $SUBMIT_UNCONFIRMED; then
-      echo "Timed out after ${TIMEOUT}s waiting on herdr agent $AGENT with NO submit confirmation — nothing in the transcript ever carried call_id=$CALL_ID ($TRANSCRIPT_PATH)."
+      echo "Timed out after ${TIMEOUT}s waiting on herdr agent $AGENT with NO submit confirmation — nothing in the transcript ever carried call_id=$CALL_ID ($ALL_CANDIDATES)."
       echo "Last state herdr reported: '${LAST_STATUS:-unreadable}'. Either the prompt never landed or the callee has been busy the whole time; herdr cannot tell these apart from outside (its states do not name what is being worked on)."
     else
       echo "Timed out waiting for the herdr callee to finish (${TIMEOUT}s) — $TRANSCRIPT_PATH, agent $AGENT, last state '${LAST_STATUS:-unreadable}'."
