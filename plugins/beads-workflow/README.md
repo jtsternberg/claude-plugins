@@ -39,4 +39,10 @@ Invoke the skill with an epic ID or name. Add `--here` to work on the current br
 
 Fix a list of findings one at a time, with one Beads task and one commit per finding. Add `--push` to push each completed fix.
 
-The names above are the canonical skill names. Explicit invocation uses `/beads-workflow:tackle-epic` or `/beads-workflow:fix-findings-beads-tasks` for the Claude plugin. Standalone Codex installs use `$tackle-epic` or `$fix-findings-beads-tasks` without a plugin namespace. The slash and dollar-sign forms are harness syntax, not part of the skill names.
+### `triage-beads`
+
+Sweep every open bead and triage it against reality the way a careful engineer would by hand: close the ones already satisfied (with cited evidence — a version output, a passing test count, a commit SHA, a since-closed blocker), park the ones stuck on an external resource behind a ready-to-run playbook comment, and surface genuine human-only decisions into an end-of-run report instead of guessing. Add `--dry-run` to preview the plan without writing anything; `--status <list>` or `--label <label>` to scope the sweep. It only ever changes Beads state and adds comments, so it is safe to run repeatedly and unattended (e.g. from a scheduled agent).
+
+Unlike the two workflows above, `triage-beads` is model-invocable on purpose — it fires on phrases like "triage beads" or "clean up stale issues" and can run on a schedule.
+
+The names above are the canonical skill names. Explicit invocation uses `/beads-workflow:tackle-epic`, `/beads-workflow:fix-findings-beads-tasks`, or `/beads-workflow:triage-beads` for the Claude plugin. Standalone Codex installs use `$tackle-epic`, `$fix-findings-beads-tasks`, or `$triage-beads` without a plugin namespace. The slash and dollar-sign forms are harness syntax, not part of the skill names.

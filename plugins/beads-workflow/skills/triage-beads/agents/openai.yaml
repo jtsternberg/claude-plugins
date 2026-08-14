@@ -1,0 +1,8 @@
+interface:
+  display_name: Triage Beads
+  short_description: Autonomously sweep open beads — close the done, park the blocked, surface the decisions
+policy:
+  # Deliberately implicit-invocable, unlike the other beads-workflow skills:
+  # this one is meant to fire on "triage beads" / "clean up stale issues" and
+  # to run unattended from a scheduled agent. See SKILL.md.
+  allow_implicit_invocation: true
