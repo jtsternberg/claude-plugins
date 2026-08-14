@@ -311,8 +311,8 @@ STUB
     CASE_CALL_DIR="$cd_path"
     if [[ -f "$cd_path/pending_paste.md" ]]; then
       CASE_HAD_PAYLOAD_FILE=true
-      CASE_PAYLOAD_MODE=$(stat -f '%Lp' "$cd_path/pending_paste.md" 2>/dev/null \
-        || stat -c '%a' "$cd_path/pending_paste.md" 2>/dev/null)
+      CASE_PAYLOAD_MODE=$(stat -c '%a' "$cd_path/pending_paste.md" 2>/dev/null \
+        || stat -f '%Lp' "$cd_path/pending_paste.md" 2>/dev/null)
     fi
     [[ -f "$cd_path/message.md" ]] && CASE_HAS_MESSAGE=true
     [[ -d "$cd_path" ]] && rm -rf "$cd_path"

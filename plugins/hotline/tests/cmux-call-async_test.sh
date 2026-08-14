@@ -437,8 +437,8 @@ if [[ -s "$call_dir/pending_paste.md" ]]; then
 else
   fail "the prompt waits in pending_paste.md for delivery" "call_dir=$call_dir"
 fi
-PENDING_MODE=$(stat -f '%Lp' "$call_dir/pending_paste.md" 2>/dev/null \
-  || stat -c '%a' "$call_dir/pending_paste.md" 2>/dev/null)
+PENDING_MODE=$(stat -c '%a' "$call_dir/pending_paste.md" 2>/dev/null \
+  || stat -f '%Lp' "$call_dir/pending_paste.md" 2>/dev/null)
 if [[ "$PENDING_MODE" == "600" ]]; then
   pass "pending_paste.md is owner-only (0600)"
 else

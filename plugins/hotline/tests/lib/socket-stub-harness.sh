@@ -83,13 +83,17 @@ socket_stub_cleanup() {
 write_python3_shim() {
   local bindir="$1" log="$2"
   mkdir -p "$bindir"
+  # The mode read below tries GNU stat (-c) BEFORE BSD stat (-f). Order matters:
+  # on Linux `stat -f '%Lp'` is --file-system and prints verbose garbage instead
+  # of failing, so a BSD-first idiom never reaches the -c fallback and the 0600
+  # assertions read empty on CI. All four copies of this idiom must stay GNU-first.
   cat > "$bindir/python3" <<SHIM
 #!/usr/bin/env bash
 printf '%q ' "\$@" >> "$log"; printf '\n' >> "$log"
 for _a in "\$@"; do
   if [[ -n "\${_want_file:-}" ]]; then
     printf 'PAYLOAD_MODE %s %s\n' \
-      "\$(stat -f '%Lp' "\$_a" 2>/dev/null || stat -c '%a' "\$_a" 2>/dev/null)" "\$_a" >> "$log"
+      "\$(stat -c '%a' "\$_a" 2>/dev/null || stat -f '%Lp' "\$_a" 2>/dev/null)" "\$_a" >> "$log"
     _want_file=""
   fi
   [[ "\$_a" == "--payload-file" ]] && _want_file=1

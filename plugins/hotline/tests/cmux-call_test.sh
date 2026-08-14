@@ -351,7 +351,7 @@ if [[ -s "$UNDEL_DIR/pending_paste.md" ]] \
 else
   fail "…named pending_paste.md, holding the prompt" "$(ls -A "$UNDEL_DIR" 2>/dev/null | tr '\n' ' ')"
 fi
-UNDEL_MODE=$(stat -f '%Lp' "$UNDEL_DIR/pending_paste.md" 2>/dev/null || stat -c '%a' "$UNDEL_DIR/pending_paste.md" 2>/dev/null)
+UNDEL_MODE=$(stat -c '%a' "$UNDEL_DIR/pending_paste.md" 2>/dev/null || stat -f '%Lp' "$UNDEL_DIR/pending_paste.md" 2>/dev/null)
 if [[ "$UNDEL_MODE" == "600" ]]; then
   pass "…owner-only (0600)"
 else
