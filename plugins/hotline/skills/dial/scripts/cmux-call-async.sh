@@ -11,8 +11,8 @@
 #
 # Same call_dir interface as headless-call-async.sh:
 #   transport.txt        — 'cmux'. The explicit backend signal the wait-for-*
-#                          scripts read first; coarse (cmux vs headless), so the
-#                          ref files below still pick the cmux sub-mode.
+#                          scripts read first; coarse (it names the backend, not the
+#                          sub-mode), so the ref files below still pick the cmux one.
 #   workspace_ref.txt    — the cmux workspace ref (signals "cmux mode" to
 #                          the wait-for-* scripts)
 #   session_id_preset.txt — the UUID we passed to `claude --session-id`,

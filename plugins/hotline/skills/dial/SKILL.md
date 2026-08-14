@@ -1,7 +1,7 @@
 ---
 name: hotline-dial
 description: "Call another Claude Code workspace — quick calls, work orders, conference calls. 'Call/dial/message/delegate to <workspace or project>'."
-argument-hint: "[--headless] [--detached] [--window <name|ref>] [workspace] [task/question...]"
+argument-hint: "[--headless] [--herdr] [--detached] [--window <name|ref>] [workspace] [task/question...]"
 allowed-tools: Bash, ListAgents, SendMessage
 ---
 
@@ -21,6 +21,7 @@ status it returns.
 - **`--headless`**: force the headless transport (`claude -p`) for this dial even when cmux is up. Debugging the headless path, A/B-ing transports, or wanting `claude -p`'s structured output. Costs programmatic-usage credit; the cmux default doesn't. → `--headless`
 - **`--detached`** / **`--new-workspace`**: spawn the callee in a disconnected new workspace tab instead of a side-by-side surface. The tab auto-closes once the response is captured, so nothing is left to watch or clean up. → `--placement detached`
 - **`--window <name|ref>`**: land the callee as a surface in a specific cmux window (find-or-create), for grouping workers by project. A `window:<n>` ref targets that window; a bare name reuses the window holding a workspace titled `<name>`. Wins over `--detached` if both are given. → `--window <name|ref>`
+- **`--herdr`**: host the callee as a **herdr agent** instead of a cmux surface — a persistent pane owned by the herdr server, so the callee **survives a detach, a closed lid, or a dropped SSH session**. That is the reason to ask for it: a long work order you do not want tied to the life of a window. Requires herdr running, and is **detached-only** — pass it with `--detached`. → `--transport herdr --detached`
 
 ```
 /hotline:hotline-dial dotfiles what branch are you on?
@@ -29,6 +30,7 @@ status it returns.
 /hotline:hotline-dial --headless dotfiles what branch are you on?
 /hotline:hotline-dial --detached dotfiles run the full test suite
 /hotline:hotline-dial --window lindris backend tests, please
+/hotline:hotline-dial --herdr dotfiles run the 40-minute migration
 ```
 
 Strip those flags out of the args before reading `$0` and `$1+`, and pass the
@@ -71,8 +73,9 @@ escaping, or `jq` hazards, however long or gnarly it is.
 
 Flags: `--mode quick|work_order|conference` (required),
 `--prompt-file <path>` (or `--prompt <text>` for a one-liner),
-`--headless`, `--placement detached`, `--window <name|ref>`,
-`--resume <session-id>` `[--no-fork]`, `--refresh-identity`,
+`--headless`, `--transport cmux|herdr|headless`, `--placement detached`,
+`--window <name|ref>`, `--resume <session-id>` `[--no-fork]`,
+`--refresh-identity`,
 `--fresh` (ignore the cached session for this target and start a new one —
 contradicts `--resume`), `--tools <list>`, `--boot-timeout <seconds>`,
 `--caller-session <id>`.
@@ -88,7 +91,7 @@ Exactly one JSON object on stdout, always. Read `.status`:
 | `connected` | 0 | The callee is up. `.remote_session_id`, `.workspace`, `.transport`, `.call_dir`, `.surface_ref`, `.first_contact`, `.fallbacks` describe the call. On a follow-up into a live surface, `.confirmed` and `.retried_enter` describe how the delivery landed. | Report the connection to the user, then wait for the response (below) — unless `.awaiting_response` is `false`. |
 | `replay` | 2 | Identity needed a second pass. `.fingerprint` is now in the transcript. | Run **the identical command again**. Nothing else. Don't explain it to the user. |
 | `needs_disambiguation` | 3 | The reference matched several workspaces; `.candidates` has them. | Ask the user which one, then re-run with `--target <their chosen path>`. |
-| `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`fire`/`boot`/`deliver`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user, and leave the retry to them. |
+| `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`transport`/`fire`/`boot`/`deliver`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user, and leave the retry to them. |
 
 `deliver` is the one stage that leaves something live behind: the callee's REPL is
 up and this message was never proven to land in it, so there is an open pane — empty
@@ -101,6 +104,49 @@ of the callee's JSONL and is definitive; `screen` inferred it from the rendered
 viewport. `.retried_enter: true` means the paste's own submit key was dropped and one
 corrective Enter submitted it — the delivery is good, but a run of them is worth
 reporting.
+
+`transport` means the backend the caller asked for is not usable here — herdr is not
+installed, no herdr server answered, or the placement/mode they combined with it is
+not one herdr can host. **It is never a degradation**: an explicit `--transport
+herdr` is an ask for a callee that survives a disconnect, and quietly handing back a
+cmux surface instead would be a lie the user only discovers hours later. Pass
+`.detail` and `.recovery` through as-is; both name the fix.
+
+## The herdr transport (opt-in, detached, local)
+
+`--transport herdr` hosts the callee as a **named herdr agent** in a persistent
+pane. What you get for it is durability: the herdr server owns the PTY, so the
+callee outlives a detach, a closed lid and a dropped SSH session. What you give up
+is visibility-in-place — herdr's "watch it" story is `herdr agent attach <name>`,
+not a pane beside yours.
+
+Today it accepts exactly one shape, and refuses everything else up front with the
+phase that will lift the restriction:
+
+| Combination | Answer |
+|---|---|
+| `--transport herdr --detached`, `--mode quick`/`work_order`, first contact | supported |
+| any other placement (side, `--window`) | refused — herdr has no in-your-window placement (Phase 3 = attach) |
+| `--mode conference` | refused — same reason |
+| a target this caller already has a cached session for | refused — following up into a live herdr agent is Phase 2 |
+| `--remote <target>` | refused — herdr *can* host remotely, but the callee's transcript would live on that box and every hotline answer is read from the local `~/.claude/projects` tree (Phase 3) |
+
+cmux stays the default and nothing selects herdr on its own. Being inside a herdr
+pane (`HERDR_ENV=1`) only makes the option *available*; the flag is what picks it.
+
+`--headless` and `--transport herdr` together are refused — two explicit,
+incompatible asks, and dropping either one silently would discard a flag the user
+typed on purpose. An ambient `HOTLINE_FORCE_HEADLESS=1` is different: a per-call
+`--transport` outranks an environment default, and `.transport` reports what ran.
+
+Two consequences worth telling the user about:
+
+- **`.surface_ref` holds the herdr AGENT NAME** for a herdr call, not a cmux
+  surface handle. It is the durable handle: `herdr agent get <name>` for its state,
+  `herdr agent attach <name>` to watch it.
+- **The pane is left open after the response.** Outliving the call is the point, so
+  hotline does not close it the way it closes a detached cmux tab. When the user is
+  done: `herdr pane close $(cat <call_dir>/herdr_pane.txt)`.
 
 `.fallbacks` lists what the wrapper worked around on its way. All of them are
 already handled; mention them only if the user is debugging or the degradation
@@ -302,6 +348,23 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
 - **`HOTLINE_PENDING_TTL=<seconds>`** — how long a `replay` fingerprint stays
   valid in `~/.agents-hotline/pending/` (default 600). A round-trip takes
   seconds; anything older is treated as a leftover and discarded.
+
+herdr-only, and none of them select the transport — `--transport herdr` still does
+that:
+
+- **`HOTLINE_HERDR_PANE=<pane-id>`** — the pane hotline splits to host the callee.
+  Defaults to the caller's own `$HERDR_PANE_ID`, then to the first pane herdr
+  reports. Name one when the automatic choice lands somewhere awkward.
+- **`HOTLINE_HERDR_SPLIT_DIRECTION=right|down`** — which way that split goes
+  (default `right`).
+- **`HOTLINE_HERDR_PANE_SETTLE=<seconds>`** — pause before starting the agent in a
+  freshly split pane (default 1). `agent start` requires the pane to be at its shell
+  prompt, and starting too early fails `agent_pane_busy` (which is then retried).
+- **`HOTLINE_HERDR_WAIT_SLICE_MS=<ms>`** — how long one `herdr agent wait` blocks
+  before the response wait re-reads the transcript (default 30000).
+- **`HOTLINE_HERDR_KEEP_FAILED_PANE=1`** — keep the pane after a failed launch. Off
+  by default (a failed dial should leak nothing); on, the pane's scrollback is the
+  only evidence of a launch that died before the agent was detected.
 
 If the `/cmux-cli:using-cmux-cli` skill is available and a cmux-routed call
 misbehaves, invoke it — it documents the workspace/surface/tty semantics this

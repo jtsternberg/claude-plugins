@@ -558,6 +558,34 @@ hotline_mint_call_id() {
     || date +%s%N | sha256sum 2>/dev/null | cut -c1-16
 }
 
+# --- The callee's session id -------------------------------------------------
+# A fresh claude session UUID, for a launcher that must PRESET the callee's
+# session id rather than read it back. Presetting is not a convenience: the whole
+# filesystem response channel is ~/.claude/projects/<encoded-cwd>/<session>.jsonl,
+# so the id has to be known BEFORE the callee boots.
+#
+# uuidgen (macOS/Linux), /proc/sys/kernel/random/uuid and /dev/urandom are tried in
+# order so this degrades gracefully on minimal systems. Prints nothing when all
+# three are unavailable; callers must handle an empty result.
+#
+# cmux-call-async.sh carries this same derivation inline and is deliberately NOT
+# refactored onto this helper here: the phase that added herdr had "the cmux path
+# stays bit-identical" as its hard constraint, and a pure extraction is still a
+# diff in the file that constraint is about. Adopt this there the next time that
+# launcher is touched for its own reasons, and delete the inline copy.
+hotline_mint_session_uuid() {
+  local b
+  uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' \
+    || cat /proc/sys/kernel/random/uuid 2>/dev/null \
+    || {
+         b=$(od -A n -N 16 -t x1 /dev/urandom | tr -d ' \n')
+         printf '%s-%s-4%s-%x%s-%s\n' \
+           "${b:0:8}" "${b:8:4}" "${b:13:3}" \
+           "$(( (16#${b:16:1} & 0x3) | 0x8 ))" "${b:17:3}" "${b:20:12}"
+       } \
+    || true
+}
+
 # hotline_inject_call_id <nonce> <prompt> → the prompt with the nonce in it.
 #
 # Two placements, and which one applies is not a style choice:
