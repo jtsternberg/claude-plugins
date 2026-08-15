@@ -251,6 +251,17 @@ still gets through, on a fresh surface. A paste that went out and could not be
 confirmed is the exception and is not in that list: it is a `deliver` error, for the
 double-execution reason above.
 
+**Text in the box is not always unsent text.** Claude Code draws its ghost suggested
+prompt, its queued-messages hint and `Message @agent…` from a placeholder prop while
+the input's value is empty, and `cmux read-screen` renders a placeholder and typed
+input identically. Such a box is reused as-is: no Ctrl-C, no verify, the follow-up
+pastes straight in. The judgement comes from the styled render grid
+(`terminal.replay`, capability `terminal.render_grid.v1`), where a placeholder is
+dim — so a cmux without that capability, or an RPC that fails, reads the box as real
+text and takes the clear-then-verify path instead. That direction costs at most one
+fresh surface; the other would paste a work order on top of a human's half-typed
+words.
+
 ## Identity Cache Issues
 
 **Stale identity — resolution picks wrong workspace**

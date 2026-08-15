@@ -25,6 +25,11 @@
 # optional "_default". Each response is echoed with the request's own id merged
 # in, which is what the real socket does.
 #
+# A method's value may instead be a LIST of responses, consumed one per call with
+# the last one repeating. Some states are only reachable in sequence — a box that
+# holds real text when a gate reads it and a placeholder when the post-clear re-read
+# does — and a single canned answer per method cannot express those at all.
+#
 # Runs until killed. Serves connections one at a time, which matches the wire
 # protocol: one request line per connection, one response line back.
 # =============================================================================
@@ -61,6 +66,10 @@ RESPONSES = {}
 if args.responses:
     with open(args.responses) as fh:
         RESPONSES = json.load(fh)
+
+# How many times each method has been answered, for the list-of-responses form.
+SEQ_INDEX = {}
+SEQ_LOCK = threading.Lock()
 
 try:
     os.unlink(args.socket)
@@ -133,6 +142,13 @@ def handle(conn):
         else:
             resp = RESPONSES.get(method) or RESPONSES.get("_default") \
                 or {"ok": True, "result": {}}
+            if isinstance(resp, list):
+                # One per call, last repeating. The counter is per method, and the
+                # lock keeps two concurrent clients from consuming the same entry.
+                with SEQ_LOCK:
+                    i = SEQ_INDEX.get(method, 0)
+                    SEQ_INDEX[method] = i + 1
+                resp = resp[min(i, len(resp) - 1)] if resp else {"ok": True, "result": {}}
         resp = dict(resp)
         resp["id"] = req_id
         conn.sendall((json.dumps(resp, separators=(",", ":")) + "\n").encode())

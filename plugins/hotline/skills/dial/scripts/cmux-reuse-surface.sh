@@ -54,6 +54,15 @@
 # a raw Ctrl-C byte, which is a real interrupt. It is sent only when the box
 # demonstrably holds unsent text AND the REPL shows no sign of an active turn.
 #
+# "Demonstrably" excludes a PLACEHOLDER. Claude Code draws its ghost suggested
+# prompt, its queued-messages hint and `Message @agent…` from a placeholder prop
+# while the input's value is empty, and a plain-text screen read cannot tell any of
+# them from typed text. Such a box is treated as empty — no Ctrl-C, no verify, paste
+# straight in — because that is what it is (claude-plugins-ff6g). The judgement comes
+# from repl-state.sh's input_box_is_placeholder, which reads the styled render grid
+# and fails closed: anything it cannot prove is a placeholder is handled as real
+# unsent text.
+#
 # New call caches pass a stable surface UUID. Positional surface:N refs can
 # silently retarget after a tab move or sibling close; they remain accepted only
 # for backward compatibility with caches written by older plugin versions.
@@ -153,7 +162,45 @@ if repl_is_interrupted "$SCREEN"; then
   fallback_fresh "surface $SURFACE_REF is in the post-interrupt 'what should Claude do instead?' state; a follow-up typed here would answer that prompt instead of starting a turn"
 fi
 
+# --- Is that "parked text" actually Claude Code's PLACEHOLDER? ----------------
+# input_box_content reads a plain-text screen, where a placeholder and unsent input
+# are byte-identical, so ANY non-empty box line arrives here as parked text. The
+# suggested-prompt ghost (`push it`), the queued-messages hint and `Message @agent…`
+# are all placeholders: the input's VALUE is empty, and the box is drawn from a
+# placeholder prop. A Ctrl-C therefore clears nothing, the verify below re-reads the
+# same ghost, and every follow-up to an idle callee showing a suggestion bounces to a
+# fresh surface — surfaces stack, and each bounce fires a real Ctrl-C at an idle REPL
+# (two of those in a row exits the REPL entirely). That is claude-plugins-ff6g.
+#
+# input_box_is_placeholder (repl-state.sh) answers it from the styled render grid
+# rather than the text, and FAILS CLOSED — anything it cannot prove reads as real
+# text, i.e. exactly the behavior below without it.
+#
+# The address is resolved once and only when the box is non-empty, because on the
+# common path (empty box) the RPC is not needed at all.
+GHOST_ADDR_TRIED=false
+GHOST_WS=""
+GHOST_SURF=""
+box_is_ghost_placeholder() {
+  local addr
+  if ! $GHOST_ADDR_TRIED; then
+    GHOST_ADDR_TRIED=true
+    if addr=$(cmux_surface_address "$SURFACE_REF"); then
+      GHOST_WS="${addr%% *}"
+      GHOST_SURF="${addr##* }"
+    fi
+  fi
+  [[ -n "$GHOST_WS" && -n "$GHOST_SURF" ]] || return 1
+  input_box_is_placeholder "$GHOST_WS" "$GHOST_SURF"
+}
+
 PARKED=$(input_box_content "$SCREEN")
+# A placeholder is an EMPTY box wearing text. Treated as empty here, which skips the
+# Ctrl-C, the idle-stability wait and the post-clear verify — the same path an empty
+# box takes, because it is the same state.
+if [[ -n "$PARKED" ]] && box_is_ghost_placeholder; then
+  PARKED=""
+fi
 NEEDS_CLEAR=false
 if [[ -n "$PARKED" ]]; then
   # Something is parked in the box. Clearing it costs a real interrupt, so only
@@ -209,11 +256,15 @@ chmod 600 "$PAYLOAD_FILE" 2>/dev/null || true
 # leftover and the whole line would run as garbage. `send-key ctrl+c` does NOT
 # reach an in-pane claude REPL (verified against Claude Code v2.1.216); the raw
 # Ctrl-C byte via the TEXT path does, regardless of cursor position.
+#
+# The re-read asks the same question the gate did, so it gets the same placeholder
+# check: a Ctrl-C that empties the box lets Claude Code draw a placeholder into it,
+# and reading that as "still dirty" would refuse a clear that in fact worked.
 if $NEEDS_CLEAR; then
   cmux send --surface "$SURFACE_REF" $'\003' >/dev/null 2>&1 || true
   sleep 0.4
   if ! SCREEN3=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) \
-     || [[ -n "$(input_box_content "$SCREEN3")" ]]; then
+     || { [[ -n "$(input_box_content "$SCREEN3")" ]] && ! box_is_ghost_placeholder; }; then
     rm -rf "$CALL_DIR"
     fallback_fresh "could not clear unsent text out of surface $SURFACE_REF's input box; refusing to type on top of it"
   fi

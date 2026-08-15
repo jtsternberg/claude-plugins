@@ -13,6 +13,7 @@
 #   parked          → retry → still parked        → stage-deliver error (honest)
 #   already submitted (nonce in transcript)      → NO retry
 #   busy / queued (phase-2 shapes)               → NO retry
+#   queued hint AS the box's content             → NO retry, and still CONFIRMED
 #   ghost suggested-prompt in the box (ff6g)     → NO retry (not our payload)
 #
 # And the OTHER direction, which is how the same bug came back live as
@@ -65,8 +66,15 @@ export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
 
 empty_box() { printf '%s\n%s%s\n%s\n' "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
 box_holding() { printf '%s\n%s%s%s\n%s\n' "$RULE" "$GLYPH" "$NBSP" "$1" "$RULE"; }
-queued_screen() { printf '%s%s prior\n\n%s Working… (5s · ↓ 12 tokens)\n%s\n%s%s\n%s\nPress up to edit queued messages\n' \
+# The queued hint is drawn INSIDE the box, as a placeholder — which is why the box
+# exclusion exempts it: a placeholder proves the input VALUE is empty, so the payload
+# is not parked behind it, and the hint proves the queue is non-empty.
+queued_screen() { printf '%s%s prior\n\n%s Working… (5s · ↓ 12 tokens)\n%s\n%s%sPress up to edit queued messages\n%s\n' \
   "$GLYPH" " " "✶" "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
+# The same hint with NO spinner above it, so repl_looks_busy cannot answer and the
+# hint on the box line is the ONLY evidence of the queued landing shape.
+queued_box_only() { printf '%s%s prior\n%s\n%s%sPress up to edit queued messages\n%s\n' \
+  "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
 # A reused surface whose scrollback ALREADY shows a prior collapsed paste (so
 # "[Pasted text" is not fresh vs baseline), with an EMPTY box — the pre-paste state
 # of the observed fkgv instance (the '#2' index implies a submitted '#1' above).
@@ -294,6 +302,19 @@ check "nonce ON the box line → NOT confirmed by screen" $? "out=$OUT12"
 check "nonce parked in the box → parked path runs, retry delivers" $? "out=$OUT12"
 [[ "$(grep -ciE 'enter|return' "$c12/sendkey")" -eq 1 ]]
 check "nonce parked in the box → exactly ONE Enter" $? "sendkey=$(cat "$c12/sendkey")"
+
+# 13. THE QUEUED HINT AS THE BOX'S OWN CONTENT, with nothing else to go on: no
+#     transcript entry, no spinner, and the y4rl box exclusion would otherwise drop the
+#     one line carrying the marker. It must still confirm — a queued payload IS
+#     delivered, claude flushes it at the next tool boundary — and it must NOT fire a
+#     retry Enter, which would submit a second turn on top of the queue.
+c13="$STUBROOT/queued-in-box"; N13="park0000000000b4"
+OUT13=$(run_case "$c13" "$N13" "$(queued_box_only)" "" no "$(clean_baseline)" notx)
+[[ "$(jq -r '.delivered' <<<"$OUT13" 2>/dev/null)" == "true" \
+   && "$(jq -r '.confirmed' <<<"$OUT13" 2>/dev/null)" == "screen" ]]
+check "queued hint AS the box content → confirmed as delivered" $? "out=$OUT13"
+[[ ! -s "$c13/sendkey" ]]
+check "queued hint AS the box content → NO retry Enter fired" $? "sendkey=$(cat "$c13/sendkey")"
 
 [[ ! -s "$POISON_LOG" ]]
 check "no test reached the real cmux or control socket" $? "$(cat "$POISON_LOG" 2>/dev/null)"

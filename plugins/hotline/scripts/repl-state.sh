@@ -18,7 +18,9 @@
 #
 # The screen-reading functions take a captured screen as $1 and read nothing
 # themselves, so the caller decides whether it wants the visible viewport or
-# scrollback. cmux_surface_address is the one function here that talks to cmux.
+# scrollback. cmux_surface_address and input_box_is_placeholder are the functions
+# here that talk to cmux — the latter because the question it answers (placeholder
+# or unsent input?) is not present in a plain-text screen at all.
 # =============================================================================
 
 # --- Reading the REPL's state off its rendered screen -------------------------
@@ -57,6 +59,149 @@ input_box_content() {
     'Try "'*) return 0 ;;
   esac
   printf '%s' "$line" | sed 's/[[:space:]]*$//'
+}
+
+# --- Placeholder or unsent input? --------------------------------------------
+# input_box_is_placeholder <workspace-uuid> <surface-uuid>
+#
+# True when the text visible in the box is Claude Code's PLACEHOLDER rather than
+# something a human (or a previous paste) left unsent (claude-plugins-ff6g).
+#
+# input_box_content cannot answer this and never will: `cmux read-screen` is plain
+# text, and placeholder and input are byte-identical there. Claude Code renders the
+# placeholder DIM (SGR 2) and real input at normal intensity, so the discriminator
+# is the attribute the text read throws away. The cmux RPC `terminal.replay`
+# (capability `terminal.render_grid.v1`) keeps it: row_spans carry a style_id into a
+# styles table with `faint`, `inverse` and `bold`, plus the cursor's row/column.
+#
+# A VISIBLE PLACEHOLDER PROVES THE INPUT VALUE IS EMPTY — the TUI draws it only
+# when `value.length === 0` — which is why this is worth an RPC. There are at least
+# three placeholder strings (`Try "<example>"` on a virgin session, `Press up to
+# edit queued messages`, `Message @<agent>…`) and a suggested-prompt ghost is
+# arbitrary text, so no shape match can cover them; the dim attribute covers all of
+# them at once.
+#
+# THE FENCE IS ASYMMETRIC, so this predicate FAILS CLOSED. A false negative costs
+# one fresh surface. A false positive pastes a work order on top of a human's
+# half-typed words. So: an RPC error, a cmux without `terminal.render_grid.v1`,
+# unparseable JSON, no box row on the grid, or one scrap of non-dim content all
+# return false — "treat it as real text", which is the behavior a caller has
+# without this predicate at all. Ambiguity is always real text.
+#
+# The one tolerated exception to "every span is faint" is a SINGLE non-faint
+# `inverse` cell at the cursor column: a focused terminal renders the placeholder's
+# first character as the block cursor instead of dim. Real input never renders dim,
+# so the tolerance cannot turn typed text into a placeholder.
+input_box_is_placeholder() {
+  local ws="$1" surf="$2" here rpc grid
+  [[ -z "$ws" || -z "$surf" ]] && return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+  rpc="$here/cmux-rpc.py"
+  [[ -f "$rpc" ]] || return 1
+  # A cmux that cannot render a styled grid cannot answer the question. Checked
+  # against the capability list rather than inferred from an empty reply, so an
+  # older cmux degrades to today's behavior instead of to a guess.
+  cmux capabilities 2>/dev/null | grep -qF 'terminal.render_grid.v1' || return 1
+  grid=$(python3 "$rpc" --method terminal.replay --workspace "$ws" --surface "$surf" 2>/dev/null) || return 1
+  [[ -z "$grid" ]] && return 1
+  # Exit 0 only for "every non-blank span after the box glyph is dim".
+  printf '%s' "$grid" | python3 -c '
+import json, sys
+
+# Escapes, not literals: the NO-BREAK SPACE below is one keystroke away from an
+# ordinary space and nothing downstream would notice the swap.
+GLYPH = "\u276f"   # the box glyph
+NBSP = "\u00a0"    # the padding the box draws after it
+PREFIX = GLYPH + NBSP
+
+def nope():
+    sys.exit(1)
+
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    nope()
+if not isinstance(doc, dict) or doc.get("ok") is not True:
+    nope()
+grid = (doc.get("result") or {}).get("render_grid")
+if not isinstance(grid, dict):
+    nope()
+spans = grid.get("row_spans")
+styles = grid.get("styles")
+if not isinstance(spans, list):
+    nope()
+# A list of {"id": N, ...} live; a mapping is accepted so a shape change degrades
+# to a lookup miss (which fails closed) rather than to a crash.
+table = {}
+if isinstance(styles, list):
+    for st in styles:
+        if isinstance(st, dict) and "id" in st:
+            table[st["id"]] = st
+elif isinstance(styles, dict):
+    for key, st in styles.items():
+        if isinstance(st, dict):
+            table[st.get("id", key)] = st
+else:
+    nope()
+
+# The LIVE box row, by the same two tells input_box_content uses: the glyph padded
+# with U+00A0 (a transcript echo of a past turn pads with an ordinary space), and
+# failing a tie, the LAST such row — the box is drawn at the bottom. No box row on
+# the grid is an answer this predicate must not give, so it fails closed.
+box = None
+for span in spans:
+    if not isinstance(span, dict):
+        continue
+    row, text = span.get("row"), span.get("text")
+    if span.get("column") == 0 and isinstance(text, str) and text.startswith(PREFIX):
+        if isinstance(row, int) and (box is None or row > box):
+            box = row
+if box is None:
+    nope()
+
+cursor = grid.get("cursor")
+cursor_col = None
+if isinstance(cursor, dict) and cursor.get("row") == box:
+    cursor_col = cursor.get("column")
+
+# Every non-blank piece of the box row after the glyph, with the style it carries.
+# The glyph span is not always the glyph alone: cmux merges same-style runs, so a
+# box holding typed text renders the glyph, its U+00A0 padding and the first word as
+# ONE span, while a dim placeholder must split off from the non-dim glyph. Stripping the prefix and
+# judging the remainder by ITS OWN style therefore handles both without a special
+# case for either.
+pieces = []
+for span in spans:
+    if not isinstance(span, dict) or span.get("row") != box:
+        continue
+    text = span.get("text")
+    col = span.get("column")
+    style = table.get(span.get("style_id"))
+    if not isinstance(text, str) or style is None:
+        nope()
+    if col == 0 and text.startswith(PREFIX):
+        text = text[len(PREFIX):].lstrip()
+        col = len(PREFIX)
+    if not text.strip():
+        continue
+    pieces.append((col, text, style))
+
+# An empty box has nothing to reclassify; the caller already treats it as empty.
+if not pieces:
+    nope()
+
+tolerated = 0
+for col, text, style in pieces:
+    if style.get("faint") is True:
+        continue
+    if (style.get("inverse") is True and len(text) == 1 and tolerated == 0
+            and cursor_col is not None and col == cursor_col):
+        tolerated = 1
+        continue
+    nope()
+sys.exit(0)
+' || return 1
 }
 
 # True when the screen shows a turn in flight. Two independent markers, because

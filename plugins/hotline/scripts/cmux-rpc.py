@@ -23,6 +23,7 @@
 #   cmux-rpc.py --method terminal.paste --workspace <uuid> --surface <uuid>
 #               --payload-file <path> [--submit-key return|ctrl+enter|none]
 #   cmux-rpc.py --method system.capabilities
+#   cmux-rpc.py --method terminal.replay --workspace <uuid> --surface <uuid>
 #   cmux-rpc.py --method <any> --params-file <path-to-json>
 #
 # The response line is echoed on stdout exactly as received, so callers can
@@ -143,7 +144,15 @@ def main(argv):
             "submit_key": args.submit_key,
         }
     else:
+        # Any other method addresses a surface the same way terminal.paste does, so
+        # --workspace/--surface build its params without a --params-file detour.
+        # UUIDs in an argv are not the leak --payload-file exists to close; they are
+        # already there for the paste.
         params = {}
+        if args.workspace:
+            params["workspace_id"] = args.workspace
+        if args.surface:
+            params["surface_id"] = args.surface
 
     sock_path = resolve_socket_path()
     line = build_line(args.method, params)

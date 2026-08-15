@@ -311,7 +311,9 @@ confirmed_by_transcript() {
 #                        only OUTSIDE the input box (see below): in the box, the
 #                        placeholder means the payload arrived and never submitted.
 #   • "Press up to edit queued" — the REPL was busy and queued it. That IS
-#                        delivery; claude flushes it at the next tool boundary.
+#                        delivery; claude flushes it at the next tool boundary. The
+#                        one marker that also counts ON the box line, because claude
+#                        draws it there as a placeholder (see QUEUED_HINT below).
 #   • "Jump to bottom" — the user has scrolled the surface up, so read-screen is
 #                        returning a stale viewport and absence proves nothing.
 #                        cmux exposes no primitive to snap a scrolled terminal
@@ -334,10 +336,20 @@ confirmed_by_transcript() {
 # text #2 +6 lines]` sitting in the box IS the unsubmitted state — the same state
 # payload_is_parked classifies below — so counting it here confirms a delivery that
 # is still waiting for its Enter, and the parked-retry path never runs
-# (claude-plugins-y4rl). Only a marker rendered elsewhere — a scrollback echo of a
-# submitted turn, the queued-messages hint, the scrolled-viewport banner — carries
-# information about submission.
-SCREEN_MARKERS=('[Pasted text' 'Press up to edit queued' 'Jump to bottom')
+# (claude-plugins-y4rl). A marker rendered elsewhere — a scrollback echo of a
+# submitted turn, the scrolled-viewport banner — carries information about
+# submission; box CONTENT does not.
+#
+# ONE MARKER IS EXEMPT FROM THE BOX EXCLUSION, and only this one: the
+# queued-messages hint, which Claude Code renders INSIDE the box as a placeholder.
+# Excluding the box line therefore deletes a queued delivery's strongest proof. It is
+# safe to accept there because a placeholder proves the input's VALUE is empty — the
+# TUI draws one only when `value.length === 0` — so our payload cannot be parked in a
+# box that is showing it, and the hint's presence proves the queue is non-empty. The
+# nonce and `[Pasted text` get no such exemption: both render as real box CONTENT,
+# where they mean "arrived, not submitted" (claude-plugins-y4rl).
+QUEUED_HINT='Press up to edit queued'
+SCREEN_MARKERS=('[Pasted text' "$QUEUED_HINT" 'Jump to bottom')
 FRESH_MARKERS=()
 for _m in "${SCREEN_MARKERS[@]}"; do
   printf '%s' "$BASELINE" | grep -qF "$_m" || FRESH_MARKERS+=("$_m")
@@ -376,6 +388,13 @@ confirmed_by_screen() {
       printf '%s' "$outside" | grep -qF "$CALL_ID" && return 0
       for m in ${FRESH_MARKERS[@]+"${FRESH_MARKERS[@]}"}; do
         printf '%s' "$outside" | grep -qF "$m" && return 0
+        # The queued hint also counts as the box's own content — see QUEUED_HINT
+        # above. Still freshness-gated: a hint left over from a previous exchange
+        # never reaches this loop, because FRESH_MARKERS excluded it.
+        if [[ "$m" == "$QUEUED_HINT" ]] \
+           && printf '%s' "$(input_box_content "$scr")" | grep -qF "$m"; then
+          return 0
+        fi
       done
     fi
     sleep "$CONFIRM_SLEEP"
@@ -443,7 +462,7 @@ retry_landed() {
     done
     scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || scr=""
     if [[ -n "$scr" ]] && ! printf '%s' "$scr" | grep -qF 'Jump to bottom'; then
-      if repl_looks_busy "$scr" || printf '%s' "$scr" | grep -qF 'Press up to edit queued'; then
+      if repl_looks_busy "$scr" || printf '%s' "$scr" | grep -qF "$QUEUED_HINT"; then
         echo "screen"; return 0
       fi
       box=$(input_box_content "$scr")

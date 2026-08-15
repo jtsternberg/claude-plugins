@@ -117,6 +117,13 @@ POISON_SOCK="$(start_socket_stub "$STUBROOT/poison-socket")"
 socket_stub_write_responses "$STUBROOT/responses"
 OK_RESPONSES="$STUBROOT/responses/ok.json"
 REJECT_RESPONSES="$STUBROOT/responses/reject.json"
+# terminal.replay render grids: what the box's text looks like in ATTRIBUTES, which is
+# the only place placeholder and unsent input differ (claude-plugins-ff6g).
+GHOST_RESPONSES="$STUBROOT/responses/replay-ghost.json"
+GHOST_FOCUSED_RESPONSES="$STUBROOT/responses/replay-ghost-focused.json"
+REAL_INPUT_RESPONSES="$STUBROOT/responses/replay-real.json"
+REAL_THEN_GHOST_RESPONSES="$STUBROOT/responses/replay-real-then-ghost.json"
+REPLAY_ERROR_RESPONSES="$STUBROOT/responses/replay-error.json"
 
 # --- Fixture screens -------------------------------------------------------
 # Empty box, idle: prior user turn above (plain space), live box below (NBSP).
@@ -188,10 +195,12 @@ screen_pasted_parked() {
   printf '%s\n%s%s[Pasted text +75 lines]\n%s\n' \
     "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
-# Queued against a busy REPL. The box renders it like unsent text, so this
-# marker is the only screen-side proof.
+# Queued against a busy REPL. The hint is drawn INSIDE the box, as a placeholder —
+# so screen confirmation cannot find it by looking outside the box, and the box-line
+# exemption in cmux-paste.sh is what makes a queued delivery provable at all. It is
+# also the only screen-side proof of this landing shape: no user turn is written.
 screen_queued() {
-  printf '%s%s Run the earlier thing\n\n%s Working… (5s · ↓ 12 tokens)\n%s\n%s%s\n%s\nPress up to edit queued messages\n' \
+  printf '%s%s Run the earlier thing\n\n%s Working… (5s · ↓ 12 tokens)\n%s\n%s%sPress up to edit queued messages\n%s\n' \
     "$GLYPH" " " "✶" "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
 # The user has scrolled up, so read-screen returns a stale viewport and the
@@ -211,6 +220,8 @@ screen_scrolled() {
 #   CASE_ORPHAN_TREE the surface is absent from the tree
 #   CASE_SURFACE     surface handle to pass (default: the UUID)
 #   CASE_TARGET      "" to omit --cwd/--session, forcing the screen fallback
+#   CASE_RENDER_GRID non-empty → `cmux capabilities` advertises
+#                    terminal.render_grid.v1, so the placeholder judgement may run
 CASEDIR=""
 OUT=""
 CALLLOG=""
@@ -278,6 +289,12 @@ case "$1" in
     [[ "$n" -gt 0 ]] && cat "$STUB_SCREENS/$c.txt"
     exit 0
     ;;
+  capabilities)
+    # Absent by default: a cmux that cannot render a styled grid must leave the
+    # placeholder judgement unable to answer, which is the fail-closed direction.
+    [[ -n "${STUB_RENDER_GRID:-}" ]] \
+      && printf '{"capabilities": ["terminal.bytes.v1", "terminal.render_grid.v1"]}\n'
+    exit 0 ;;
   tree)
     [[ -n "${STUB_NO_TREE:-}" ]] && exit 1
     if [[ -n "${STUB_ORPHAN_TREE:-}" ]]; then
@@ -304,6 +321,7 @@ STUB
   OUT="$(STUB_CALLLOG="$CALLLOG" STUB_SCREENS="$CASEDIR/screens" \
     STUB_SURF="$SURF_UUID" STUB_WS="$WS_UUID" \
     STUB_NO_TREE="${CASE_NO_TREE:-}" STUB_ORPHAN_TREE="${CASE_ORPHAN_TREE:-}" \
+    STUB_RENDER_GRID="${CASE_RENDER_GRID:-}" \
     CMUX_SOCKET_PATH="$sock" HOME="$CASEDIR/home" \
     HOTLINE_PASTE_CONFIRM_TRIES=3 HOTLINE_PASTE_CONFIRM_SLEEP=0.05 \
     PATH="$CASEDIR/bin:$PATH" bash "$SCRIPT_UNDER_TEST" \
@@ -340,6 +358,9 @@ requests() {
   tail -n "+$((base + 1))" "$REQLOG"
 }
 request_count() { requests | grep -c . || true; }
+# Requests for ONE method. A case that consults terminal.replay makes more than one
+# request, so "did the paste go out" and "was the grid read" need separate counts.
+method_count() { requests | grep -cF "\"method\":\"$1\"" || true; }
 # The `text` param of the single terminal.paste request, decoded.
 pasted_text() {
   requests | head -1 | "$REAL_PYTHON3" -c '
@@ -634,10 +655,15 @@ confirm_case 3b notarget screen_pasted_parked
   && pass "the same placeholder in the LIVE box does NOT confirm on screen" \
   || fail "the same placeholder in the LIVE box does NOT confirm on screen" "out: $CONFIRM_OUT"
 
+# The queued hint is the BOX's content, which is where claude actually draws it. It
+# still confirms: a placeholder proves the input VALUE is empty, so our payload is not
+# parked behind it, and the hint proves the queue is non-empty. This is the one marker
+# the box exclusion exempts — without the exemption a queued delivery has no proof at
+# all, because there is no user turn either.
 confirm_case 4 notarget screen_queued
 [[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \
-  && pass "'Press up to edit queued messages' counts as landed" \
-  || fail "'Press up to edit queued messages' counts as landed" "out: $CONFIRM_OUT"
+  && pass "'Press up to edit queued messages' AS the box content counts as landed" \
+  || fail "'Press up to edit queued messages' AS the box content counts as landed" "out: $CONFIRM_OUT"
 
 # A scrolled viewport is NOT a failed send: cmux has no primitive to snap a
 # terminal back to its live tail, so absence of the nonce proves nothing, and
@@ -874,6 +900,109 @@ run_case interrupted screen_interrupted -- --prompt "follow up"
 [[ "$(clear_count)" -eq 0 && "$(request_count)" -eq 0 ]] \
   && pass "an interrupted REPL gets neither a Ctrl-C nor a paste" \
   || fail "an interrupted REPL gets neither a Ctrl-C nor a paste" "log:"$'\n'"$(log_view)"
+
+echo ""
+echo "  -- a ghost placeholder is an EMPTY box, not parked text (ff6g) --"
+
+# The bug: `cmux read-screen` is plain text, so claude's ghost suggested prompt (and
+# its queued-messages hint, and `Message @agent…`) is byte-identical to unsent typed
+# input. The gate read every one of them as parked text, fired a real Ctrl-C at an
+# idle callee, watched the placeholder survive it (there is nothing to clear — the
+# input's VALUE is empty), and bounced to a fresh surface. Surfaces stacked, and two
+# consecutive Ctrl-Cs exit a claude REPL outright.
+#
+# The discriminator is the attribute the text read discards: claude renders a
+# placeholder DIM. `terminal.replay` carries it as faint:true per span.
+
+# --- Ghost in the box: NO Ctrl-C, and the follow-up is delivered. ------------
+CASE_RESPONSES="$GHOST_RESPONSES" CASE_RENDER_GRID=1 \
+  run_case ghost_box screen_idle_parked screen_pasted_placeholder -- --prompt "follow up"
+CASE_RESPONSES=""; CASE_RENDER_GRID=""
+# Both halves, because "no Ctrl-C" alone also describes a refusal that never got as
+# far as clearing — the assertion has to say the surface was USED.
+[[ "$(clear_count)" -eq 0 && "$OUT" != *'"fallback"'* ]] \
+  && pass "a box whose text renders DIM gets NO Ctrl-C and no fresh-surface bounce" \
+  || fail "a box whose text renders DIM gets NO Ctrl-C and no fresh-surface bounce" \
+          "out: $OUT log:"$'\n'"$(log_view)"
+[[ "$(method_count terminal.paste)" -eq 1 && "$OUT" == *'"call_dir"'* ]] \
+  && pass "…and the follow-up is pasted into that surface instead of a fresh one" \
+  || fail "…and the follow-up is pasted into that surface instead of a fresh one" "out: $OUT"
+[[ "$(method_count terminal.replay)" -ge 1 ]] \
+  && pass "…having asked terminal.replay, not guessed from the text" \
+  || fail "…having asked terminal.replay, not guessed from the text" "$(requests)"
+
+# --- The FOCUSED render of the same ghost. -----------------------------------
+# A focused terminal draws the placeholder's first character as the block cursor:
+# that one cell comes back inverse and NOT faint while the rest stays dim. Rejecting
+# the whole row on it would make the fix work only on unfocused surfaces.
+CASE_RESPONSES="$GHOST_FOCUSED_RESPONSES" CASE_RENDER_GRID=1 \
+  run_case ghost_focused screen_idle_parked screen_pasted_placeholder -- --prompt "follow up"
+CASE_RESPONSES=""; CASE_RENDER_GRID=""
+[[ "$(clear_count)" -eq 0 && "$OUT" == *'"call_dir"'* ]] \
+  && pass "one inverse cursor cell over a dim placeholder is still a placeholder" \
+  || fail "one inverse cursor cell over a dim placeholder is still a placeholder" "out: $OUT log:"$'\n'"$(log_view)"
+
+# --- REAL unsent text: today's clear-then-verify path, unchanged. ------------
+# The direction that must not regress. A false positive here pastes a work order on
+# top of a human's half-typed words, which is why the predicate fails closed.
+CASE_RESPONSES="$REAL_INPUT_RESPONSES" CASE_RENDER_GRID=1 \
+  run_case real_input screen_idle_parked screen_idle_parked screen_idle_empty screen_pasted_placeholder \
+  -- --prompt "follow up"
+CASE_RESPONSES=""; CASE_RENDER_GRID=""
+[[ "$(clear_count)" -ge 1 && "$(clear_index)" -ge 0 ]] \
+  && pass "a box whose text renders at NORMAL intensity is still cleared first" \
+  || fail "a box whose text renders at NORMAL intensity is still cleared first" "log:"$'\n'"$(log_view)"
+[[ "$OUT" == *'"call_dir"'* ]] \
+  && pass "…and then delivered, exactly as before" \
+  || fail "…and then delivered, exactly as before" "out: $OUT"
+
+# --- The post-clear re-read gets the same question. --------------------------
+# The Ctrl-C empties the box and claude immediately draws a placeholder into it.
+# Reading that as "still dirty" refuses a clear that demonstrably worked — the same
+# bug one step later. (The grid answers real-input first, placeholder second.)
+CASE_RESPONSES="$REAL_THEN_GHOST_RESPONSES" CASE_RENDER_GRID=1 \
+  run_case cleared_into_ghost screen_idle_parked screen_idle_parked screen_idle_parked screen_pasted_placeholder \
+  -- --prompt "follow up"
+CASE_RESPONSES=""; CASE_RENDER_GRID=""
+[[ "$(clear_count)" -ge 1 ]] \
+  && pass "real text is cleared, as before" \
+  || fail "real text is cleared, as before" "log:"$'\n'"$(log_view)"
+[[ "$OUT" == *'"call_dir"'* && "$OUT" != *'"fallback"'* ]] \
+  && pass "…and a placeholder drawn into the emptied box does NOT read as a failed clear" \
+  || fail "…and a placeholder drawn into the emptied box does NOT read as a failed clear" "out: $OUT"
+
+# --- FAIL CLOSED, both ways. -------------------------------------------------
+# An RPC the socket refuses proves nothing, so the box stays "real text" and the
+# clear/verify path runs untouched.
+CASE_RESPONSES="$REPLAY_ERROR_RESPONSES" CASE_RENDER_GRID=1 \
+  run_case replay_refused screen_idle_parked screen_idle_parked screen_idle_empty screen_pasted_placeholder \
+  -- --prompt "follow up"
+CASE_RESPONSES=""; CASE_RENDER_GRID=""
+[[ "$(clear_count)" -ge 1 && "$OUT" == *'"call_dir"'* ]] \
+  && pass "a refused terminal.replay falls back to today's clear-then-verify" \
+  || fail "a refused terminal.replay falls back to today's clear-then-verify" "out: $OUT log:"$'\n'"$(log_view)"
+
+# A cmux without terminal.render_grid.v1 must not even ASK — the grid staged here
+# says "ghost", and the capability gate is the only thing keeping it unread.
+CASE_RESPONSES="$GHOST_RESPONSES" \
+  run_case no_render_grid screen_idle_parked screen_idle_parked screen_idle_empty screen_pasted_placeholder \
+  -- --prompt "follow up"
+CASE_RESPONSES=""
+[[ "$(method_count terminal.replay)" -eq 0 ]] \
+  && pass "a cmux without terminal.render_grid.v1 is never asked for a grid" \
+  || fail "a cmux without terminal.render_grid.v1 is never asked for a grid" "$(requests)"
+[[ "$(clear_count)" -ge 1 && "$OUT" == *'"call_dir"'* ]] \
+  && pass "…and the box is treated as real text (today's behavior)" \
+  || fail "…and the box is treated as real text (today's behavior)" "out: $OUT log:"$'\n'"$(log_view)"
+
+# An unresolvable surface cannot be addressed for the RPC either. It falls back for
+# its own reason before any of this matters, and asks for no grid on the way out.
+CASE_ORPHAN_TREE=1 CASE_RENDER_GRID=1 \
+  run_case ghost_orphan screen_idle_parked screen_idle_parked screen_idle_parked -- --prompt "follow up"
+CASE_ORPHAN_TREE=""; CASE_RENDER_GRID=""
+[[ "$OUT" == *'"fallback"'* && "$(method_count terminal.replay)" -eq 0 ]] \
+  && pass "a surface absent from the tree yields no grid lookup and still falls back" \
+  || fail "a surface absent from the tree yields no grid lookup and still falls back" "out: $OUT"
 
 echo ""
 echo "  -- a surface with no REPL left in it is refused, not pasted into --"

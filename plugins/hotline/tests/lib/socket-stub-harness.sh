@@ -19,6 +19,11 @@
 #                         the payload travels as a path and never as an argument,
 #                         and that the path is owner-only at the moment it is read.
 #
+#   socket_stub_write_responses — the canned answers a working cmux gives, including
+#                         the `terminal.replay` render grids the placeholder-vs-input
+#                         judgement reads. One definition of what a real cmux
+#                         answers, so no suite tests against a fictional one.
+#
 # Contract for the sourcing suite:
 #   • define $POISON_LOG before sourcing (violations are appended to it)
 #   • call socket_stub_cleanup from your EXIT trap
@@ -129,5 +134,73 @@ JSON
 {"system.capabilities": {"ok": true, "result": {
    "methods": ["system.capabilities", "terminal.paste"]}},
  "terminal.paste": {"ok": false, "error": {"message": "surface is not a terminal"}}}
+JSON
+
+  # --- terminal.replay: the STYLED render grid ------------------------------
+  # The one thing a plain-text screen read cannot carry, and the whole reason
+  # input_box_is_placeholder exists: claude draws a placeholder DIM (faint:true) and
+  # real input at normal intensity, and `cmux read-screen` renders both identically.
+  #
+  # Every grid below is the same box: row 10, the glyph padded with U+00A0 in a
+  # non-faint span at column 0, and a plain-space `❯` ECHO on row 12 BELOW it. The
+  # echo is deliberate — it is drawn lower than the live box, so a reader that took
+  # simply "the last ❯ row" would pick the wrong line, exactly as input_box_content's
+  # NBSP tell exists to prevent. \u escapes rather than literals: a NO-BREAK SPACE
+  # typed into a fixture is indistinguishable from a space on sight.
+  #
+  # style 0 = normal, 1 = faint (placeholder), 2 = inverse-not-faint (the cursor cell
+  # a focused terminal draws over the placeholder's first character).
+  _replay_grid() {  # _replay_grid <spans-json>
+    cat <<JSON
+{"ok": true, "result": {"render_grid": {
+  "cursor": {"row": 10, "column": 2, "visible": true},
+  "styles": [{"id": 0, "faint": false, "inverse": false, "bold": false},
+             {"id": 1, "faint": true,  "inverse": false, "bold": false},
+             {"id": 2, "faint": false, "inverse": true,  "bold": false}],
+  "row_spans": [
+    {"row": 10, "column": 0, "text": "\u276f\u00a0", "style_id": 0},
+    $1
+    {"row": 12, "column": 0, "text": "\u276f prior turn echo", "style_id": 0}
+  ]}}}
+JSON
+  }
+  _replay_responses() {  # _replay_responses <out-file> <spans-json>
+    local out="$1"
+    { printf '{"terminal.paste": {"ok": true, "result": {"submitted": true}},\n'
+      printf ' "_default": {"ok": true, "result": {}},\n'
+      printf ' "terminal.replay": '
+      _replay_grid "$2"
+      printf '}\n'
+    } > "$out"
+  }
+
+  # The box holds a placeholder: every span after the glyph is faint.
+  _replay_responses "$dir/replay-ghost.json" \
+    '{"row": 10, "column": 2, "text": "push it", "style_id": 1},'
+  # Same, focused: the placeholder's first character renders as the inverse cursor
+  # cell at the cursor column, and only that one cell is not faint.
+  _replay_responses "$dir/replay-ghost-focused.json" \
+    '{"row": 10, "column": 2, "text": "p", "style_id": 2},
+     {"row": 10, "column": 3, "text": "ush it", "style_id": 1},'
+  # The box holds REAL unsent input: not faint, so not a placeholder.
+  _replay_responses "$dir/replay-real.json" \
+    '{"row": 10, "column": 2, "text": "leftover half-typed thing", "style_id": 0},'
+  # Real input FIRST, a placeholder SECOND — the only way to express the state the
+  # post-clear re-read has to handle: the gate saw genuine unsent text and cleared it,
+  # and claude drew a placeholder into the now-empty box. Reading that as "still
+  # dirty" would refuse a clear that worked.
+  { printf '{"terminal.paste": {"ok": true, "result": {"submitted": true}},\n'
+    printf ' "_default": {"ok": true, "result": {}},\n'
+    printf ' "terminal.replay": [\n'
+    _replay_grid '{"row": 10, "column": 2, "text": "leftover half-typed thing", "style_id": 0},'
+    printf ',\n'
+    _replay_grid '{"row": 10, "column": 2, "text": "push it", "style_id": 1},'
+    printf ']}\n'
+  } > "$dir/replay-real-then-ghost.json"
+  # A cmux that has the capability but refuses the call.
+  cat > "$dir/replay-error.json" <<'JSON'
+{"terminal.paste": {"ok": true, "result": {"submitted": true}},
+ "terminal.replay": {"ok": false, "error": {"message": "surface has no renderer"}},
+ "_default": {"ok": true, "result": {}}}
 JSON
 }

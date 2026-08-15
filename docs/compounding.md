@@ -61,8 +61,10 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   submission.** The nonce or a `[Pasted text` placeholder on the live input-box line
   is a payload still WAITING for its Enter, and confirming delivery on it left work
   orders parked while the caller waited out a 30-minute budget. Scope screen-side
-  acceptances to the text outside the input box, and derive the box from the one
-  helper that owns it (`input_box_content`). (claude-plugins-fkgv, -y4rl)
+  acceptances to the text outside the input box, deriving the box from the one helper
+  that owns it (`input_box_content`) — the sole exception being a marker the TUI draws
+  as a PLACEHOLDER, which proves the input value is empty and so cannot be a parked
+  payload. (claude-plugins-fkgv, -y4rl, -ff6g)
 - **Order confirmation tiers so the negative reading is tested first.** When two
   tiers can read the same signal and reach opposite verdicts, whichever runs first
   wins — so a tier concluding "delivered" placed ahead of one concluding "arrived but
@@ -74,6 +76,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   collapse while every real work order crossed it, shipping a silent
   protocol-drop. Size smoke inputs like production inputs — or above.
   (claude-plugins-pmgb)
+- **When two states are byte-identical in text, find a styled source before inventing
+  a heuristic.** A plain-text terminal read erases the attribute distinguishing a
+  placeholder from typed input, and shape-matching the placeholder covered one of its
+  three strings; cmux's `terminal.replay` grid carries `faint`/`inverse` per span and
+  answers it outright. Ask what the renderer knows that the text dropped — and gate
+  the reader on the capability, failing closed to the text behavior.
+  (claude-plugins-ff6g)
 - **Accept/reject guards get one fixture per direction.** A recency check tested
   only against stale markers silently asserts the false-negative bug, and a
   parked-payload retry fixtured only where screen confirmation already failed let the
