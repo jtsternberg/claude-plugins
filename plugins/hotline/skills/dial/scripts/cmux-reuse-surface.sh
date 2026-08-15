@@ -271,6 +271,13 @@ fi
 # transcript now holds the payload. The baseline snapshot goes with it.
 rm -f "$PAYLOAD_FILE" "$BASELINE_FILE"
 
+# `retried_enter` travels with `confirmed` because the two together are the delivery's
+# confidence, and a caller reading only "delivered" cannot see that this one needed a
+# corrective Enter to submit at all. A run of them says the submit_key race is back
+# (claude-plugins-fkgv / -y4rl), which is invisible if the field stops here.
+DELIVERY_RETRIED=$(jq -r 'if .retried_enter == true then "true" else "false" end' \
+  <<<"$DELIVERY_RESULT" 2>/dev/null) || DELIVERY_RETRIED=false
 jq -n --arg dir "$CALL_DIR" \
   --arg confirmed "$(jq -r '.confirmed // empty' <<<"$DELIVERY_RESULT" 2>/dev/null)" \
-  '{call_dir: $dir, delivery: "paste", confirmed: $confirmed}'
+  --argjson retried "${DELIVERY_RETRIED:-false}" \
+  '{call_dir: $dir, delivery: "paste", confirmed: $confirmed, retried_enter: $retried}'

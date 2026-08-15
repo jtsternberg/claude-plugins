@@ -41,8 +41,9 @@
 #   0 — response received, call finished (valid JSON on stdout)
 #   1 — error (timeout, remote failure, unparseable response.json, or — in
 #       transcript mode — no submit evidence for the nonce within
-#       --submit-deadline while the text sits visibly in the callee's input box;
-#       message on stderr)
+#       --submit-deadline while the payload sits in the callee's input box, either
+#       as visible text or as a collapsed `[Pasted text` placeholder; message on
+#       stderr)
 #   3 — PREEMPTED: the callee was handed a different task mid-call, so its STATUS
 #       for this nonce is never coming. error.txt names the preempting prompt and
 #       the surface to look at. The work may have completed anyway.
@@ -83,7 +84,13 @@ set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRANSCRIPT_EXTRACT="$SELF_DIR/transcript-extract.sh"
-TRANSCRIPT_PATH_SH="$SELF_DIR/../../../scripts/transcript-path.sh"
+HOTLINE_SCRIPTS="$(cd "$SELF_DIR/../../.." && pwd)/scripts"
+TRANSCRIPT_PATH_SH="$HOTLINE_SCRIPTS/transcript-path.sh"
+# input_box_content: what is sitting in the callee's live input box, as opposed to
+# anywhere on its screen. The same one definition cmux-paste.sh confirms against —
+# two readers of the REPL's box would drift (repl-state.sh's header says why).
+# shellcheck source=../../../scripts/repl-state.sh
+source "$HOTLINE_SCRIPTS/repl-state.sh"
 
 CALL_DIR="${1:-}"
 TIMEOUT=""
@@ -262,14 +269,43 @@ if $CMUX_MODE; then
   # in the prompt box. Note a QUEUED message is also drawn on screen while it
   # waits — that used to read here as "unsubmitted", and the enqueue record now
   # rules it out before we ever look. (claude-plugins-1jpz)
+  # A COLLAPSED PASTE HIDES THE NONCE. CC renders any paste over ~800 chars or 3
+  # lines as `[Pasted text #N +M lines]`, so a parked work order — which is most of
+  # them — puts nothing on screen that carries the call_id. Looking for the nonce
+  # alone therefore answers "not visible" for the exact payload shape most likely to
+  # be parked, and the waiter then sits out its full 1800s budget on a message that
+  # was never going to submit. So the live input box HOLDING a placeholder counts as
+  # the same evidence: the box is where an unsubmitted payload sits, and after the
+  # submit deadline with nothing in the transcript, that placeholder is ours.
+  #
+  # Box-scoped, via input_box_content, not screen-scoped: `[Pasted text` in the
+  # SCROLLBACK is a submitted turn's echo and would incriminate a healthy delivery.
+  # The nonce keeps its whole-screen match — it is minted for this call and cannot be
+  # a leftover, so narrowing it could only lose detections.
+  #
+  # This function looks and reports. It never presses Enter: an extra Enter on a
+  # payload that did submit is a double submit, and the waiter cannot tell the two
+  # apart (references/error-recovery.md § Delivery). Recovery is the caller's call.
+  #
+  # BOX_EVIDENCE names which shape fired, so the diagnostic can say what was actually
+  # seen rather than asserting a nonce is on screen when a placeholder is.
   # Returns 0 = visibly unsubmitted, 1 = not visible, 2 = could not look.
+  BOX_EVIDENCE=""
   nonce_visible_in_input_box() {
     [[ -z "$CALL_ID" ]] && return 2
     [[ ${#READ_TARGET[@]} -eq 0 ]] && return 2
-    local scr
+    local scr box
     scr=$(cmux read-screen "${READ_TARGET[@]}" 2>/dev/null) || return 2
     [[ -z "$scr" ]] && return 2
-    printf '%s' "$scr" | grep -qF "$CALL_ID" && return 0
+    if printf '%s' "$scr" | grep -qF "$CALL_ID"; then
+      BOX_EVIDENCE="call_id=$CALL_ID is visible on the callee's screen"
+      return 0
+    fi
+    box=$(input_box_content "$scr")
+    if [[ -n "$box" ]] && printf '%s' "$box" | grep -qF '[Pasted text'; then
+      BOX_EVIDENCE="the callee's input box is holding a collapsed paste placeholder ($box), which hides the nonce"
+      return 0
+    fi
     return 1
   }
 
@@ -338,12 +374,13 @@ if $CMUX_MODE; then
             BOX_RC=$?
             set -e
             if [[ $BOX_RC -eq 0 ]]; then
-              # EVIDENCE: our text is on the callee's screen and the transcript
-              # holds no record of it arriving — not a user record, not a
-              # queued-command injection, not even an enqueue — so it is sitting
-              # in the prompt box unsubmitted.
+              # EVIDENCE: our payload is on the callee's screen — either the nonce
+              # itself, or the collapsed placeholder holding it in the live input box
+              # — and the transcript holds no record of it arriving: not a user
+              # record, not a queued-command injection, not even an enqueue. So it is
+              # sitting in the prompt box unsubmitted.
               {
-                echo "Message is still sitting UNSUBMITTED in the callee's input box after ${SUBMIT_DEADLINE}s — call_id=$CALL_ID is visible on screen but nothing in the transcript carries it: no user record, no queued-command injection, no enqueue ($TRANSCRIPT_PATH)."
+                echo "Message is still sitting UNSUBMITTED in the callee's input box after ${SUBMIT_DEADLINE}s — ${BOX_EVIDENCE}, but nothing in the transcript carries call_id=$CALL_ID: no user record, no queued-command injection, no enqueue ($TRANSCRIPT_PATH)."
                 echo "This is a transport failure, not a problem with your message content — escaping/quoting is almost never the cause."
                 echo "Send Enter to the surface (cmux send-key --surface $WS_REF Enter) rather than re-sending the text, which would append to what is already in the box. Or re-dial via a fresh surface."
               } >&2

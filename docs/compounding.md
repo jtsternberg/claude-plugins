@@ -54,17 +54,32 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   (claude-plugins-xick)
 - **Verifiers enumerate every terminal shape, or match a nonce instead.** Counting
   only user turns reads a landed-but-queued paste as lost; a shape whitelist missed
-  the third shape a live run produced. A per-delivery nonce matched anywhere beats
-  a whitelist. (claude-plugins-gxar, -xick)
+  the third shape a live run produced. A per-delivery nonce matched anywhere in the
+  *transcript* beats a whitelist — on a *screen* it is weaker, see the next entry.
+  (claude-plugins-gxar, -xick)
+- **On a rendered screen, a marker proves arrival; only its position proves
+  submission.** The nonce or a `[Pasted text` placeholder on the live input-box line
+  is a payload still WAITING for its Enter, and confirming delivery on it left work
+  orders parked while the caller waited out a 30-minute budget. Scope screen-side
+  acceptances to the text outside the input box, and derive the box from the one
+  helper that owns it (`input_box_content`). (claude-plugins-fkgv, -y4rl)
+- **Order confirmation tiers so the negative reading is tested first.** When two
+  tiers can read the same signal and reach opposite verdicts, whichever runs first
+  wins — so a tier concluding "delivered" placed ahead of one concluding "arrived but
+  never submitted" makes the second unreachable and its recovery dead code. Put the
+  refusing/negative classifier first and let confirmation run only where it declines.
+  (claude-plugins-fkgv, -y4rl)
 - **Live smokes use real-sized payloads.** A smoke with a toy payload proves the
   toy: 300-byte test payloads sailed under Claude Code's 800-char/3-line paste
   collapse while every real work order crossed it, shipping a silent
   protocol-drop. Size smoke inputs like production inputs — or above.
   (claude-plugins-pmgb)
 - **Accept/reject guards get one fixture per direction.** A recency check tested
-  only against stale markers silently asserts the false-negative bug — the old
-  single-screen fixtures asserted the bug they existed to prevent.
-  (claude-plugins-xick, round 2 #1)
+  only against stale markers silently asserts the false-negative bug, and a
+  parked-payload retry fixtured only where screen confirmation already failed let the
+  screen confirm the parked payload for another two days. Every fixture in a suite
+  sharing one precondition (a baseline that already carries the marker, say) is the
+  tell that a direction is missing. (claude-plugins-xick round 2 #1, -y4rl)
 
 ## Code shape
 

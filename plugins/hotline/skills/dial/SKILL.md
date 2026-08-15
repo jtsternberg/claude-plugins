@@ -83,15 +83,22 @@ Exactly one JSON object on stdout, always. Read `.status`:
 
 | `.status` | exit | What it means | What you do |
 |---|---|---|---|
-| `connected` | 0 | The callee is up. `.remote_session_id`, `.workspace`, `.transport`, `.call_dir`, `.surface_ref`, `.first_contact`, `.fallbacks` describe the call. | Report the connection to the user, then wait for the response (below) — unless `.awaiting_response` is `false`. |
+| `connected` | 0 | The callee is up. `.remote_session_id`, `.workspace`, `.transport`, `.call_dir`, `.surface_ref`, `.first_contact`, `.fallbacks` describe the call. On a follow-up into a live surface, `.confirmed` and `.retried_enter` describe how the delivery landed. | Report the connection to the user, then wait for the response (below) — unless `.awaiting_response` is `false`. |
 | `replay` | 2 | Identity needed a second pass. `.fingerprint` is now in the transcript. | Run **the identical command again**. Nothing else. Don't explain it to the user. |
 | `needs_disambiguation` | 3 | The reference matched several workspaces; `.candidates` has them. | Ask the user which one, then re-run with `--target <their chosen path>`. |
 | `error` | 1 | `.stage` (`args`/`identity`/`resolve`/`fire`/`boot`/`deliver`), `.detail` (real stderr), `.recovery` (one-line hint). | Surface `.detail` and `.recovery` to the user, and leave the retry to them. |
 
-`deliver` is the one stage that leaves something live behind: the callee's REPL
-booted but the message never landed in it, so there is an open pane sitting empty.
-Say so — re-dialling blind can double-deliver, because the paste may have arrived
-just after the confirmation window closed.
+`deliver` is the one stage that leaves something live behind: the callee's REPL is
+up and this message was never proven to land in it, so there is an open pane — empty
+on first contact, mid-conversation on a follow-up. Say so — re-dialling blind can
+double-deliver, because the paste may have arrived just after the confirmation
+window closed.
+
+`.confirmed` names the tier that proved a delivery: `transcript` read the nonce out
+of the callee's JSONL and is definitive; `screen` inferred it from the rendered
+viewport. `.retried_enter: true` means the paste's own submit key was dropped and one
+corrective Enter submitted it — the delivery is good, but a run of them is worth
+reporting.
 
 `.fallbacks` lists what the wrapper worked around on its way. All of them are
 already handled; mention them only if the user is debugging or the degradation
@@ -107,7 +114,7 @@ expected, say).
 | `cmux-socket-unreachable→headless(<diag>)` | The control socket could not be reached — no socket file, connection refused, timeout, or a reply that wasn't JSON. The diagnostic is the real OS error. Usually cmux is not actually running, or `$CMUX_SOCKET_PATH` points somewhere stale; `~/.local/state/cmux/last-socket-path` names the live one. **Do not upgrade cmux for this.** |
 | `cmux-rpc-error→headless(rc=N <diag>)` | The socket answered but refused the preflight (`rc=1` = `ok:false`, `rc=2` = a bad call from us). The diagnostic carries its error. This one is worth reporting — it usually means the helper and cmux disagree about the protocol. |
 | `surface-context→detached` | Side-by-side needs the caller's own surface context and it wouldn't resolve, so the callee landed in its own workspace tab. |
-| `surface-reuse→fresh(<reason>)` | A follow-up tried to speak to the live surface and that surface refused (gone, mid-turn, post-interrupt, dirty input box), or the paste went out and could not be confirmed. It opened a fresh one instead; `<reason>` says which. |
+| `surface-reuse→fresh(<reason>)` | A follow-up tried to speak to the live surface and that surface refused BEFORE anything was sent (gone, mid-turn, post-interrupt, dirty input box, an RPC the socket rejected). It opened a fresh one instead; `<reason>` says which. A paste that went out and could not be confirmed is never this — it is a hard `stage: "deliver"` error, because re-delivering into a fresh `--resume` of the same session would run the work order twice. |
 | `surface-reuse-skipped(no-cached-surface)` | A follow-up had no surface to reuse — first contact was headless or detached, or a previous degraded follow-up cleared a stale ref. |
 | `surface-cleanup→closed(<handle>)` | A follow-up opened a new surface, so the old one held a REPL nobody would speak to again. It was proven idle and proven to be the superseded exchange, then closed. |
 | `surface-cleanup-skipped(<reason>)` | The old surface was left alone. Common reasons: it is mid-turn; `parked-input` (unsent text in its box, which closing would discard); its identity couldn't be proven from the prior nonce; `positional-ref-unsafe` (the cached handle is a `surface:N` ref, which can name a different surface than it did — closing requires a UUID); it was already gone; or cmux refused (it will not close the last surface in a workspace). `HOTLINE_CLOSE_SUPERSEDED=0` reports `disabled`. |

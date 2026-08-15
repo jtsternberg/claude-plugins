@@ -171,9 +171,20 @@ screen_placeholder() {
   printf '%s\n%s%sTry "how does <filepath> work?"\n%s\n' \
     "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
-# A large paste collapses to a placeholder — the nonce is genuinely NOT on screen
-# even though delivery succeeded.
+# A large paste that SUBMITTED. CC collapsed it to a placeholder, so the nonce is
+# genuinely not on screen; what proves it landed is the placeholder echoed as a turn
+# ABOVE the box (plain space after the glyph, like every transcript echo) while the
+# live box (glyph + U+00A0) is empty again.
+#
+# The echo is the load-bearing part. A placeholder sitting IN the live box is the
+# opposite outcome — arrived, never submitted — and confirming on it is the y4rl
+# false positive (see screen_pasted_parked below).
 screen_pasted_placeholder() {
+  printf '%s%s [Pasted text +75 lines]\n%s\n%s%s\n%s\n' \
+    "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"
+}
+# The same paste PARKED: the placeholder is in the live input box and nowhere else.
+screen_pasted_parked() {
   printf '%s\n%s%s[Pasted text +75 lines]\n%s\n' \
     "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
@@ -612,6 +623,16 @@ confirm_case 3 notarget screen_pasted_placeholder
 [[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \
   && pass "a collapsed [Pasted text placeholder confirms delivery on screen" \
   || fail "a collapsed [Pasted text placeholder confirms delivery on screen" "out: $CONFIRM_OUT"
+
+# …but only where it is an ECHO. The same placeholder sitting in the LIVE INPUT BOX
+# is the opposite fact — the payload arrived and its submit was dropped — and the
+# screen tier confirming on it is what suppressed the parked retry live
+# (claude-plugins-y4rl). Nothing else on screen has changed, so the marker is fresh
+# and the only thing withholding confirmation is where it is rendered.
+confirm_case 3b notarget screen_pasted_parked
+[[ "$CONFIRM_OUT" != *'"confirmed":"screen"'* ]] \
+  && pass "the same placeholder in the LIVE box does NOT confirm on screen" \
+  || fail "the same placeholder in the LIVE box does NOT confirm on screen" "out: $CONFIRM_OUT"
 
 confirm_case 4 notarget screen_queued
 [[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \

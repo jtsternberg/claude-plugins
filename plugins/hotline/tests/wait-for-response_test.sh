@@ -562,6 +562,55 @@ else
 fi
 rm -rf "$H4" "$CD4" "$SD4"
 
+# CASE 1b — the SAME non-submit, but the payload collapsed. CC renders any paste
+# over ~800 chars or 3 lines as `[Pasted text #N +M lines]`, so a parked work order
+# — which is most of them — puts nothing carrying the nonce on screen. Looking only
+# for the nonce answers "not visible" here and the waiter then sits out its entire
+# budget on a message that is never going to submit (claude-plugins-y4rl). The
+# placeholder in the LIVE INPUT BOX is the same evidence and must fast-fail the same
+# way. Real `❯` + U+00A0 box, because that is what input_box_content reads.
+GLYPH=$'\xe2\x9d\xaf'; NBSP=$'\xc2\xa0'
+D1B=$(setup_discrim_call "$NO_EVENT_BODY" \
+"$GLYPH do the thing
+────────────────────────────────────────
+${GLYPH}${NBSP}[Pasted text #2 +18 lines]
+────────────────────────────────────────
+  ? for shortcuts" true)
+H4B=${D1B%%|*}; r4b=${D1B#*|}; CD4B=${r4b%%|*}; SD4B=${r4b#*|}
+START4B=$SECONDS
+set +e
+ERR4B=$(HOME="$H4B" PATH="$SD4B:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CD4B" --timeout 60 --submit-deadline 4 2>&1 >/dev/null)
+RC4B=$?
+set -e
+EL4B=$((SECONDS - START4B))
+# Asserted on the MESSAGE, not on wall-clock or a bare "input box" grep: the sleeps
+# are collapsed (claude-plugins-fhn3) and the patient 60s-timeout message ALSO names
+# the input box, as the recovery step to try. Only the fast-fail branch says the
+# payload is sitting there — so that string is the one thing that separates
+# "detected and reported" from "waited out the whole budget", which is the bug.
+if [[ $RC4B -ne 0 ]] && printf '%s' "$ERR4B" | grep -q "still sitting UNSUBMITTED in the callee's input box"; then
+  pass "collapsed placeholder parked in the box → fast-fail naming the real cause (${EL4B}s)"
+else
+  fail "collapsed placeholder parked in the box → fast-fail naming the real cause" \
+    "rc=$RC4B elapsed=${EL4B}s err=$ERR4B"
+fi
+# And it says what it actually saw. Claiming the nonce is visible when a placeholder
+# is hiding it sends the reader looking for text that is not there.
+if printf '%s' "$ERR4B" | grep -qi "placeholder"; then
+  pass "collapsed placeholder → the diagnostic reports the placeholder, not a visible nonce"
+else
+  fail "collapsed placeholder → the diagnostic reports the placeholder, not a visible nonce" \
+    "err=$ERR4B"
+fi
+# The waiter must never submit for the callee: an extra Enter on a payload that DID
+# submit is a double submit, and it cannot tell the two apart.
+if grep -qi 'send-key\|send ' "$SD4B/cmux.log" 2>/dev/null; then
+  fail "collapsed placeholder → the waiter must not press Enter" "log=$(cat "$SD4B/cmux.log")"
+else
+  pass "collapsed placeholder → the waiter reports and sends nothing"
+fi
+rm -rf "$H4B" "$CD4B" "$SD4B"
+
 # CASE 2 — nonce NOT on screen, no user event: indistinguishable from a queued
 # submit behind a long turn. The script must NOT claim it never submitted, and
 # must NOT give up at the submit deadline — it stays patient until --timeout.

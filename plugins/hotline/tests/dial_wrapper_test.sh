@@ -592,6 +592,15 @@ check "reuse bumps the cache's exchange_count" $? \
 [[ "$(jq -r '.fallbacks | length' <<<"$out")" -eq 0 ]]
 check "a successful reuse records no fallbacks" $? "out=$out"
 
+# HOW it landed travels with the connection. `confirmed` names the tier that proved
+# delivery (transcript is definitive, screen is inference) and `retried_enter` says
+# whether the paste's own submit key had to be rescued by a corrective Enter — a run
+# of those is the submit_key race resurfacing (claude-plugins-fkgv, -y4rl), which is
+# invisible to the caller if the wrapper drops the fields cmux-paste.sh reports.
+jq -e '(.confirmed | type == "string") and (.confirmed | length > 0)
+       and (.retried_enter | type == "boolean")' <<<"$out" >/dev/null 2>&1
+check "a successful reuse reports .confirmed and .retried_enter" $? "out=$out"
+
 # ===========================================================================
 # 6. Follow-up whose surface refuses the message → resume into a fresh surface.
 # ===========================================================================

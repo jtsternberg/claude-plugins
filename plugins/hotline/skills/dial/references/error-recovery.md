@@ -176,10 +176,29 @@ received nothing.
   `[Pasted text +N lines]` placeholder instead, so the nonce is genuinely not on
   screen even though delivery succeeded.
 
+**But neither is text in the input box proof it DID arrive and submit.** Confirmation
+scopes every screen-side marker — `[Pasted text`, the nonce, the queued-messages hint
+— to the screen OUTSIDE the live input box. A marker in the box proves the payload
+ARRIVED; only one rendered elsewhere (an echoed turn above the box, the queued hint)
+says anything about whether it SUBMITTED. The two readings are the same pixels, so
+`cmux-paste.sh` tests the negative one first: the parked classifier runs before the
+screen tier, and only when it refuses does a marker get to confirm. Read the same way
+when you are doing this by hand — `❯ [Pasted text #2 +18 lines]` on the box line is a
+message waiting for an Enter, not a message that went.
+
 **Never press Enter on a surface to "help" a stuck message.** `submit_key` already
 submitted it; an extra Enter on a queued or already-submitted payload is a double
 submit. If a payload really is sitting unsubmitted in the box, the right move is to
 let the dial fail and recover the prompt from `pending_paste.md`.
+
+`cmux-paste.sh` does fire exactly one corrective Enter, and that is not a licence to
+do it by hand. It has what you do not: the nonce it just minted, a pre-paste snapshot
+of the box, and refusals for every ambiguous state (busy, queued, post-interrupt,
+scrolled viewport, box contents unchanged since before the paste). It reports the
+Enter as `retried_enter: true` and re-proves submission afterwards by positive
+evidence only. `wait-for-response.sh` never sends one — when it finds a payload parked
+it says so and stops, because it cannot tell a parked payload from one that submitted
+a moment after it looked.
 
 #### Recover by re-delivering, never by hand-typing with `cmux send`
 
@@ -226,9 +245,11 @@ occupies, and only opens a fresh surface when that is refused — which it recor
 `surface-reuse→fresh(<reason>)` in `.fallbacks`. `cmux-reuse-surface.sh`'s header
 documents every refusal condition: a surface that is gone, one showing no input
 box, the post-interrupt "what should Claude do instead?" state, unsent text in the
-box while a turn is in flight, a box that would not clear, and a paste that could
-not be confirmed. All of them are reasons, never errors — the follow-up still gets
-through, on a fresh surface.
+box while a turn is in flight, and a box that would not clear. All of them happen
+BEFORE anything is sent, so all of them are reasons, never errors — the follow-up
+still gets through, on a fresh surface. A paste that went out and could not be
+confirmed is the exception and is not in that list: it is a `deliver` error, for the
+double-execution reason above.
 
 ## Identity Cache Issues
 

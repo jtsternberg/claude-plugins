@@ -534,6 +534,8 @@ emit_connected() {  # emit_connected <awaiting_response:true|false>
     --arg call_dir "$CALL_DIR" \
     --arg surface "$SURFACE_REF" \
     --arg call_id "$CALL_ID_OUT" \
+    --arg confirmed "$DELIVERY_CONFIRMED" \
+    --arg retried "$DELIVERY_RETRIED" \
     --argjson first_contact "$FIRST_CONTACT" \
     --argjson identity_stale "$IDENTITY_STALE" \
     --argjson awaiting "$1" \
@@ -545,10 +547,21 @@ emit_connected() {  # emit_connected <awaiting_response:true|false>
       fallbacks:$fallbacks}
      + (if $call_dir == "" then {} else {call_dir:$call_dir} end)
      + (if $surface  == "" then {} else {surface_ref:$surface} end)
-     + (if $call_id  == "" then {} else {call_id:$call_id} end)'
+     + (if $call_id  == "" then {} else {call_id:$call_id} end)
+     + (if $confirmed == "" then {} else {confirmed:$confirmed} end)
+     + (if $retried   == "" then {} else {retried_enter:($retried == "true")} end)'
   exit 0
 }
 CALL_ID_OUT=""
+# How much the delivery had to work to land. Present only where cmux-paste.sh actually
+# reported them — the surface-reuse path — and OMITTED elsewhere, like every other
+# optional field above: a headless call has no screen to confirm against, so a `false`
+# there would be an assertion rather than a reading. `confirmed` names the tier that
+# proved it (transcript is definitive, screen is inference); `retried_enter` says the
+# submit needed a corrective Enter, which is the fkgv/y4rl race showing itself and is
+# worth seeing before it becomes a bug report.
+DELIVERY_CONFIRMED=""
+DELIVERY_RETRIED=""
 
 # ---------------------------------------------------------------------------
 # Step 5a — Follow-up into the surface the session already lives in.
@@ -599,6 +612,9 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
     REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
     if [[ -n "$REUSE_DIR" ]]; then
       CALL_DIR="$REUSE_DIR"
+      # cmux-paste.sh's confidence, forwarded rather than dropped.
+      DELIVERY_CONFIRMED=$(jq -r '.confirmed // empty' <<<"$REUSE" 2>/dev/null)
+      DELIVERY_RETRIED=$(jq -r 'if has("retried_enter") then (.retried_enter|tostring) else "" end' <<<"$REUSE" 2>/dev/null)
       [[ -s "$CALL_DIR/call_id.txt" ]] && CALL_ID_OUT=$(cat "$CALL_DIR/call_id.txt")
       # The reused surface is unchanged, but bump last_contact / exchange_count.
       bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \

@@ -240,7 +240,11 @@ if $SPLIT_PASTE; then
   PASTE_SENT=true
   paste_one "$BODY_FILE" none
   rm -f "$HEAD_FILE" "$BODY_FILE"; trap - EXIT
-  # Submit with a real key event, outside any bracketed paste.
+  # Submit with a real key event, outside any bracketed paste — after a settle.
+  # The key event travels a different path than the paste, so sent in the same breath
+  # it can reach the REPL before the bytes it is meant to submit have been ingested,
+  # and the Enter is swallowed (claude-plugins-5zhp). 0.2s is the measured margin.
+  sleep 0.2
   if ! cmux send-key --surface "$SURFACE_REF" Enter >/dev/null 2>&1; then
     undelivered "pasted both halves into surface $SURF_ID but the submit Enter keystroke failed" true
   fi
@@ -300,7 +304,9 @@ confirmed_by_transcript() {
 # transcript that has not flushed yet. Four acceptances, and all four must stay:
 #   • the nonce itself — a short payload renders in the box verbatim.
 #   • "[Pasted text"   — a large paste collapses to a placeholder, so the nonce
-#                        is genuinely not on screen even though it landed.
+#                        is genuinely not on screen even though it landed. Counts
+#                        only OUTSIDE the input box (see below): in the box, the
+#                        placeholder means the payload arrived and never submitted.
 #   • "Press up to edit queued" — the REPL was busy and queued it. That IS
 #                        delivery; claude flushes it at the next tool boundary.
 #   • "Jump to bottom" — the user has scrolled the surface up, so read-screen is
@@ -318,20 +324,55 @@ confirmed_by_transcript() {
 #
 # So a marker only counts if it is ABSENT from the pre-paste baseline. The nonce
 # needs no such treatment — it is minted for this delivery and cannot be stale.
+#
+# AND EVERY ACCEPTANCE IS SCOPED TO THE SCREEN OUTSIDE THE LIVE INPUT BOX. A
+# marker on the box line proves the payload ARRIVED; it says nothing about whether
+# it SUBMITTED, and the two are exactly what this tier has to tell apart. `❯ [Pasted
+# text #2 +6 lines]` sitting in the box IS the unsubmitted state — the same state
+# payload_is_parked classifies below — so counting it here confirms a delivery that
+# is still waiting for its Enter, and the parked-retry path never runs
+# (claude-plugins-y4rl). Only a marker rendered elsewhere — a scrollback echo of a
+# submitted turn, the queued-messages hint, the scrolled-viewport banner — carries
+# information about submission.
 SCREEN_MARKERS=('[Pasted text' 'Press up to edit queued' 'Jump to bottom')
 FRESH_MARKERS=()
 for _m in "${SCREEN_MARKERS[@]}"; do
   printf '%s' "$BASELINE" | grep -qF "$_m" || FRESH_MARKERS+=("$_m")
 done
+# What the input box held BEFORE this paste. The parked classifier compares against
+# it: box content that was already there cannot be the payload we just sent, and an
+# Enter fired on it would submit someone else's text.
+BASELINE_BOX=$(input_box_content "$BASELINE")
+
+# screen_outside_box <screen> — the screen with the live input box's own line taken
+# out, so nothing sitting IN the box can confirm submission.
+#
+# input_box_content (repl-state.sh) already owns the judgement of which line the box
+# is; this drops every `❯`-prefixed line carrying that content rather than trying to
+# re-derive the one line number, because a scrollback echo of the same bytes cannot
+# distinguish itself from the live box anyway. Dropping one line too many can only
+# withhold a confirmation, never fabricate one — the safe direction.
+screen_outside_box() {
+  local scr="$1" box
+  box=$(input_box_content "$scr")
+  if [[ -z "$box" ]]; then
+    printf '%s' "$scr"
+    return 0
+  fi
+  printf '%s\n' "$scr" | awk -v g="$REPL_BOX_GLYPH" -v b="$box" '
+    index($0, g) == 1 && index($0, b) > 0 { next }
+    { print }'
+}
 
 confirmed_by_screen() {
-  local i scr m
+  local i scr outside m
   for ((i = 0; i < CONFIRM_TRIES; i++)); do
     scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || scr=""
     if [[ -n "$scr" ]]; then
-      printf '%s' "$scr" | grep -qF "$CALL_ID" && return 0
+      outside=$(screen_outside_box "$scr")
+      printf '%s' "$outside" | grep -qF "$CALL_ID" && return 0
       for m in ${FRESH_MARKERS[@]+"${FRESH_MARKERS[@]}"}; do
-        printf '%s' "$scr" | grep -qF "$m" && return 0
+        printf '%s' "$outside" | grep -qF "$m" && return 0
       done
     fi
     sleep "$CONFIRM_SLEEP"
@@ -359,6 +400,12 @@ confirmed_by_screen() {
 #                    — where a ghost suggested-prompt would become a phantom turn
 #                    (ff6g). Absence of the live box proves nothing; refuse. Same
 #                    rationale as the screen tier's Jump-to-bottom handling.
+#   box unchanged from the baseline — whatever is in there was in there BEFORE this
+#                    paste, so it is not ours and an Enter would submit someone
+#                    else's text. Reuse clears a dirty box and proves the clear took
+#                    before pasting, and first contact waits for a freshly-drawn box,
+#                    so in practice this only fires when the paste has not rendered
+#                    yet — which is indistinguishable from "not ours" from here.
 payload_is_parked() {
   local scr box
   scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || return 1
@@ -368,6 +415,7 @@ payload_is_parked() {
   repl_is_interrupted "$scr" && return 1
   box=$(input_box_content "$scr")
   [[ -z "$box" ]] && return 1
+  [[ "$box" == "$BASELINE_BOX" ]] && return 1
   printf '%s' "$box" | grep -qF "$CALL_ID" && return 0
   printf '%s' "$box" | grep -qF '[Pasted text' && return 0
   return 1
@@ -405,28 +453,45 @@ retry_landed() {
   return 1
 }
 
-# The confirmation tiers are unchanged (transcript, then screen). The fkgv retry
-# sits AFTER them, just before the delivery is called lost: only a delivery the
-# existing tiers could NOT confirm is a candidate for "the return was dropped and
-# the payload is parked". Ordering it after the screen tier keeps every already-
-# confirming path (reuse follow-ups included) byte-for-byte as it was.
+# TIER ORDER: transcript, then PARKED, then screen.
+#
+# The transcript is definitive and goes first — it reads submitted bytes, not pixels.
+#
+# The parked check goes ahead of the screen tier because the two can read the SAME
+# pixels and reach opposite verdicts, and only one of them is right. `[Pasted text`
+# in the box is the parked state; `[Pasted text` in the scrollback is a submitted
+# turn. When a tier that concludes "delivered" runs before the tier that concludes
+# "arrived but never submitted", the false positive wins and the retry never fires —
+# observed live on a reused surface at ~5% (claude-plugins-y4rl, recurrence of
+# claude-plugins-fkgv). So the NEGATIVE interpretation is tested first: parked is a
+# strictly stronger, box-scoped read of the same screen.
+#
+# Ordering it first is safe against submitting a payload twice because the box was
+# proven EMPTY before this paste went out — cmux-reuse-surface.sh refuses to paste
+# onto parked text and re-reads the box to prove its clear worked, and a first-contact
+# REPL has never been typed into. So `[Pasted text` or our nonce in the box after the
+# paste is OUR payload, not a leftover an Enter would submit instead.
 CONFIRMED=""
 RETRIED_ENTER=false
 if confirmed_by_transcript; then
   CONFIRMED="transcript"
-elif confirmed_by_screen; then
-  CONFIRMED="screen"
 elif payload_is_parked; then
-  # Neither tier confirmed AND the payload is still sitting unsubmitted in the box:
-  # submit_key:return intermittently races the paste render and its return is
+  # The transcript holds nothing AND the payload is still sitting unsubmitted in the
+  # box: submit_key:return intermittently races the paste render and its return is
   # dropped (claude-plugins-fkgv; reproduced ~5% on collapsing multi-line payloads
   # into a reused surface, always recovered by one manual Enter). Fire that one
   # Enter, then re-verify.
+  #
+  # The settle is the same fence the split paste needs (claude-plugins-5zhp): the key
+  # event travels a different path than the paste, so an Enter sent in the same breath
+  # can reach the REPL before it has finished ingesting the bytes — which is the very
+  # race that parked the payload in the first place.
   #
   # The Enter's own exit code is checked (like the other send-key call sites): if the
   # keystroke never left this machine, there is nothing to re-verify and claiming
   # success would be inventing it. The payload is still parked in the box, so this is
   # sent:true — the caller must not blindly re-deliver.
+  sleep 0.2
   if ! cmux send-key --surface "$SURFACE_REF" Enter >/dev/null 2>&1; then
     undelivered "pasted into surface $SURFACE_REF; the payload parked and the one Enter retry keystroke itself failed to send, so submission is unproven"
   fi
@@ -436,6 +501,8 @@ elif payload_is_parked; then
   landed=$(retry_landed) \
     && CONFIRMED="$landed" \
     || undelivered "pasted into surface $SURFACE_REF; the payload parked unsubmitted and one Enter retry produced no evidence of submission within the confirmation budget — the nonce $CALL_ID never reached the transcript${TRANSCRIPTS[0]:+ (${TRANSCRIPTS[*]})} and the box was never observed to clear"
+elif confirmed_by_screen; then
+  CONFIRMED="screen"
 else
   undelivered "pasted into surface $SURFACE_REF but nonce $CALL_ID never appeared in the callee's transcript${TRANSCRIPTS[0]:+ (${TRANSCRIPTS[*]})} or on its screen; treating delivery as lost"
 fi

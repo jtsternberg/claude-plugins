@@ -15,6 +15,15 @@
 #   busy / queued (phase-2 shapes)               → NO retry
 #   ghost suggested-prompt in the box (ff6g)     → NO retry (not our payload)
 #
+# And the OTHER direction, which is how the same bug came back live as
+# claude-plugins-y4rl: a parked payload the SCREEN tier must not confirm on. Screen
+# confirmation and the parked classifier can read the same pixels — `[Pasted text` or
+# the nonce on the live box line — and reach opposite verdicts, so cases 10-12 pin
+# that a marker on the box line is arrival, never submission, and that the parked
+# path gets to run. Cases 1-9 all carry `[Pasted text` in their BASELINE, where the
+# marker is stale and the screen tier could not have confirmed on it anyway; 10-12
+# start from a clean baseline, where it is fresh.
+#
 # `cmux` is a PATH stub whose read-screen SEQUENCES: the first read (box-wait /
 # baseline) returns a clean empty box, later reads return the case screen — so a
 # screen marker only counts if it appeared AFTER the paste, exactly as the real
@@ -76,6 +85,29 @@ collapsed_parked() { printf '%s%s [Pasted text #1 +5 lines]\n%s\n%s%s[Pasted tex
 scrolled_baseline() { printf '%s%s [Pasted text #1 +5 lines]\nJump to bottom (click) ↓\n%s\n%s%s\n%s\n' \
   "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
 scrolled_target() { printf '%s%s [Pasted text #1 +5 lines]\nJump to bottom (click) ↓\n' "$GLYPH" " "; }
+# --- The y4rl shapes: a parked placeholder the screen tier must NOT confirm on ---
+# The three screens below differ only in what ELSE is on screen, and they exist because
+# every case above happens to carry `[Pasted text` in its BASELINE — so the marker was
+# never fresh, and the screen tier could not have confirmed on a parked placeholder even
+# while it was still looking at the whole screen. These start from a CLEAN baseline,
+# where the marker IS fresh: the only thing that keeps the screen tier from confirming
+# is that the placeholder sits on the live box line, where it means "arrived", never
+# "submitted".
+#
+# A finished turn above the box (`✻ Baked for 12s` — no elapsed-time parenthetical, so
+# not busy) and no `[Pasted text` anywhere.
+clean_baseline() { printf '%s%s do the thing\n\n%s Baked for 12s\n%s\n%s%s\n%s\n' \
+  "$GLYPH" " " "✻" "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
+# The same surface after a paste that parked: the placeholder is in the box, nowhere else.
+clean_parked() { printf '%s%s do the thing\n\n%s Baked for 12s\n%s\n%s%s[Pasted text #1 +6 lines]\n%s\n' \
+  "$GLYPH" " " "✻" "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
+# A surface with no scrollback echo at all: nothing but the box, holding the placeholder.
+bare_parked() { printf '%s\n%s%s[Pasted text #1 +6 lines]\n%s\n' "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
+# A payload short enough that the NONCE renders verbatim in the box. Paired with
+# collapsed_baseline, so the stale `[Pasted text #1` echo above it is not a fresh marker
+# and the nonce on the box line is the only thing the screen tier could match.
+nonce_parked() { printf '%s%s [Pasted text #1 +5 lines]\n%s\n%s%s[CALL_ID: %s]\n%s\n' \
+  "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$1" "$RULE"; }
 
 # make_cmux <bindir> <baseline-file> <target-file> <counter> <sendkey-log> <transcript> <submit-mode>
 # submit-mode governs what an Enter keystroke does (models the retry's outcome):
@@ -225,6 +257,43 @@ OUT9=$(run_case "$c9" "$N9" "$(collapsed_parked)" "" keyfail "$(collapsed_baseli
 [[ "$(jq -r '.delivered' <<<"$OUT9" 2>/dev/null)" == "false" \
    && "$(jq -r '.sent' <<<"$OUT9" 2>/dev/null)" == "true" ]]
 check "retry keystroke fails → undelivered sent:true (not fabricated success)" $? "out=$OUT9"
+
+# 10. THE y4rl SHAPE: parked collapsed placeholder, CLEAN baseline. `[Pasted text` is
+#     a FRESH marker here — and it is on the box line, so it is arrival, not
+#     submission. Confirming on it reports delivered:"screen" with retried_enter:false
+#     and the payload sits in the box forever, which is what happened live.
+c10="$STUBROOT/y4rl-clean"; N10="park0000000000b1"
+OUT10=$(run_case "$c10" "$N10" "$(clean_parked)" "" yes "$(clean_baseline)")
+[[ "$(jq -r '.confirmed' <<<"$OUT10" 2>/dev/null)" != "screen" ]]
+check "fresh [Pasted text ON the box line → NOT confirmed by screen" $? "out=$OUT10"
+[[ "$(jq -r '.delivered' <<<"$OUT10" 2>/dev/null)" == "true" \
+   && "$(jq -r '.retried_enter' <<<"$OUT10" 2>/dev/null)" == "true" ]]
+check "y4rl shape → parked path runs, retry delivers" $? "out=$OUT10"
+[[ "$(grep -ciE 'enter|return' "$c10/sendkey")" -eq 1 ]]
+check "y4rl shape → exactly ONE Enter" $? "sendkey=$(cat "$c10/sendkey")"
+
+# 11. Same, with NO scrollback echo at all and a retry that does not submit → honest
+#     delivered:false rather than a screen confirmation off the box line.
+c11="$STUBROOT/y4rl-bare"; N11="park0000000000b2"
+OUT11=$(run_case "$c11" "$N11" "$(bare_parked)" "" no)
+[[ "$(jq -r '.delivered' <<<"$OUT11" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$OUT11" 2>/dev/null)" == "true" ]]
+check "parked placeholder, no scrollback echo → delivered:false sent:true" $? "out=$OUT11"
+[[ "$(grep -ciE 'enter|return' "$c11/sendkey")" -eq 1 ]]
+check "parked placeholder, no scrollback echo → the guarded retry still fired once" $? "sendkey=$(cat "$c11/sendkey")"
+
+# 12. NONCE parked in the box, baseline already carrying a stale `[Pasted text`. The
+#     nonce is the screen tier's one baseline-exempt acceptance, so it must be box-scoped
+#     too: on the box line it proves the payload arrived and never submitted.
+c12="$STUBROOT/y4rl-nonce"; N12="park0000000000b3"
+OUT12=$(run_case "$c12" "$N12" "$(nonce_parked "$N12")" "" yes "$(collapsed_baseline)")
+[[ "$(jq -r '.confirmed' <<<"$OUT12" 2>/dev/null)" != "screen" ]]
+check "nonce ON the box line → NOT confirmed by screen" $? "out=$OUT12"
+[[ "$(jq -r '.delivered' <<<"$OUT12" 2>/dev/null)" == "true" \
+   && "$(jq -r '.retried_enter' <<<"$OUT12" 2>/dev/null)" == "true" ]]
+check "nonce parked in the box → parked path runs, retry delivers" $? "out=$OUT12"
+[[ "$(grep -ciE 'enter|return' "$c12/sendkey")" -eq 1 ]]
+check "nonce parked in the box → exactly ONE Enter" $? "sendkey=$(cat "$c12/sendkey")"
 
 [[ ! -s "$POISON_LOG" ]]
 check "no test reached the real cmux or control socket" $? "$(cat "$POISON_LOG" 2>/dev/null)"
