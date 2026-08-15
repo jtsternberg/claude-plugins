@@ -262,6 +262,13 @@ text and takes the clear-then-verify path instead. That direction costs at most 
 fresh surface; the other would paste a work order on top of a human's half-typed
 words.
 
+`close-superseded-surface.sh` asks the same question for the opposite purpose: a
+proven placeholder is no reason to keep a superseded surface, so the dead pane gets
+closed instead of accumulating behind a long conversation. Only the polarity of the
+fallback differs — that path DESTROYS the surface, so an unproven box (no capability,
+a refused RPC, a workspace that will not resolve) counts as real text and the surface
+is kept, reported as `surface-cleanup-skipped(parked-input)`.
+
 ## Identity Cache Issues
 
 **Stale identity — resolution picks wrong workspace**

@@ -25,7 +25,10 @@
 #   6. It is not sitting in the post-interrupt "what should Claude do instead?"
 #      state, where a human is mid-decision.
 #   7. Its input box holds no unsent text. Reuse refuses to type over parked
-#      text; closing would delete it, which is worse.
+#      text; closing would delete it, which is worse. A box holding Claude Code's
+#      PLACEHOLDER — the ghost suggested prompt, the queued-messages hint,
+#      `Message @agent…` — is an empty box wearing text and does not count; that
+#      judgement comes from the styled render grid and fails closed.
 #
 # Every refusal is a reason string, never an error: cleanup failing to run must
 # not fail the dial that triggered it.
@@ -133,11 +136,68 @@ repl_is_interrupted "$SCREEN" && \
 repl_looks_busy "$SCREEN" && \
   refuse "surface $SURFACE_REF has a turn in flight; closing it would destroy that work"
 
+# --- Resolving this surface's address, once ----------------------------------
+# Two things want it: the placeholder check just below (its RPC addresses a surface
+# by workspace + surface UUID) and the close call at the bottom (cmux needs
+# --workspace even when handed a surface UUID — see the header). Only SURFACE_REF is
+# in scope; the workspace has to come off the tree. One walk, memoised, so the two
+# callers cannot become two reads — and so this stays the single tree reader the
+# paste path shares via repl-state.sh.
+#
+# The memo carries the STATUS as well as the address, because the refusal wording
+# below distinguishes "the tree could not be read" from "the surface is not in it".
+#
+# It publishes into $ADDR rather than echoing: a resolver called as $(...) runs in a
+# subshell, so its memo — and its status — would die with that subshell and every
+# caller would walk the tree again.
+ADDR_TRIED=false
+ADDR=""
+ADDR_STATUS=0
+resolve_surface_address() {
+  if ! $ADDR_TRIED; then
+    ADDR_TRIED=true
+    ADDR=$(cmux_surface_address "$SURFACE_REF")
+    ADDR_STATUS=$?
+  fi
+  return $ADDR_STATUS
+}
+
+# --- Is that "parked text" actually Claude Code's PLACEHOLDER? ---------------
+# input_box_content reads plain text, where a placeholder and unsent input are
+# byte-identical, so ANY non-empty box line arrives below as parked text. Claude Code
+# draws its ghost suggested prompt, its queued-messages hint and `Message @agent…`
+# from a placeholder prop while the input's VALUE is empty — nothing is at risk, and
+# a superseded surface showing one was skipped every time, so its dead pane
+# accumulated behind a long conversation (claude-plugins-8vuf).
+#
+# input_box_is_placeholder (repl-state.sh) answers from the styled render grid, where
+# a placeholder is dim, and FAILS CLOSED: an RPC error, a cmux without
+# terminal.render_grid.v1, an unresolvable address, no box row, one scrap of non-dim
+# content — all read as real text.
+#
+# THAT DIRECTION IS LOAD-BEARING HERE IN A WAY IT IS NOT AT THE REUSE GATE, because
+# this path is DESTRUCTIVE. Reuse pays for an unproven placeholder with one extra
+# surface; here the cost of getting it wrong the other way is a human's half-typed
+# thought deleted with the pane it was sitting in. Ambiguity means real text means
+# KEEP THE SURFACE — the exact behavior this check had before it existed. Nothing
+# below may be relaxed to make a close more likely.
+box_is_ghost_placeholder() {
+  local ws surf
+  resolve_surface_address || return 1
+  ws="${ADDR%% *}"; surf="${ADDR##* }"
+  [[ -n "$ws" && -n "$surf" ]] || return 1
+  input_box_is_placeholder "$ws" "$surf"
+}
+
 # Unsent text in the input box is almost always a human's half-typed thought.
 # Reuse refuses to type on top of it; closing the surface would delete it
 # outright, which is strictly worse — an idle REPL is not the same as an
 # abandoned one.
 PARKED=$(input_box_content "$SCREEN")
+# A proven placeholder is an empty box, so it is no reason to keep the surface.
+if [[ -n "$PARKED" ]] && box_is_ghost_placeholder; then
+  PARKED=""
+fi
 [[ -n "$PARKED" ]] && \
   refuse "parked-input: surface $SURFACE_REF holds unsent text in its input box, which closing would discard"
 
@@ -156,12 +216,14 @@ repl_looks_busy "$SCREEN2" && \
 # Resolve the owning workspace. cmux needs it (see the header) and we never
 # stored it. Shared with the paste path via repl-state.sh so one tree lookup
 # serves both and neither can drift from the other's idea of a surface handle.
-ADDR=$(cmux_surface_address "$SURFACE_REF")
-case $? in
-  0) ;;
-  3) refuse "could not read the cmux tree to resolve surface $SURFACE_REF's workspace" ;;
-  *) refuse "surface $SURFACE_REF is not in the cmux tree, so its workspace is unknown" ;;
-esac
+# Memoised above, so a case that already resolved it for the placeholder check
+# re-reads nothing — and the refusals below still tell the two failures apart.
+if ! resolve_surface_address; then
+  case $ADDR_STATUS in
+    3) refuse "could not read the cmux tree to resolve surface $SURFACE_REF's workspace" ;;
+    *) refuse "surface $SURFACE_REF is not in the cmux tree, so its workspace is unknown" ;;
+  esac
+fi
 WS="${ADDR%% *}"
 
 # cmux itself refuses to close the last surface in a workspace

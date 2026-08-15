@@ -16,17 +16,30 @@
 #   4. cmux's own "Cannot close the last surface" refusal is recorded as a skip,
 #      not raised as an error.
 #   5. HOTLINE_CLOSE_SUPERSEDED=0 disables it.
+#   6. A box holding Claude Code's PLACEHOLDER is not parked text, so it does not
+#      spare the surface — but every ambiguity about that still does. This is the
+#      DESTRUCTIVE side of the ff6g judgement, so the fail-closed cases below are
+#      the load-bearing ones (claude-plugins-8vuf).
 #
-# `cmux` is stubbed on PATH throughout: nothing here touches a real cmux, opens a
-# surface, or closes one. Poison stubs at the front of PATH make a missing stub
-# fail loudly instead of escaping into the user's session.
+# TWO STUB LAYERS, because the placeholder judgement reads a styled render grid over
+# a socket, which no PATH stub can intercept:
+#   • `cmux` is stubbed on PATH (read-screen serves the fixture screens, tree answers
+#     the workspace lookup, capabilities advertises terminal.render_grid.v1 only when
+#     a case asks for it).
+#   • $CMUX_SOCKET_PATH points at tests/lib/socket-stub.py answering `terminal.replay`
+#     from the shared grid fixtures. The default server is POISONED, so a case that
+#     makes an RPC it did not stage fails loudly.
+# Nothing here touches a real cmux, opens a surface, or closes one. Poison stubs at
+# the front of PATH make a missing stub fail loudly instead of escaping into the
+# user's session.
 # =============================================================================
 set -u
 
 PASS=0
 FAIL=0
 FAILED_CASES=()
-SCRIPT_UNDER_TEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/dial/scripts/close-superseded-surface.sh"
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_UNDER_TEST="$(cd "$TESTS_DIR/.." && pwd)/skills/dial/scripts/close-superseded-surface.sh"
 
 POISON_BIN="$(mktemp -d)"
 POISON_LOG="$POISON_BIN/violations"
@@ -42,7 +55,28 @@ done
 PATH="$POISON_BIN:$PATH"
 
 STUBROOT="$(mktemp -d)"
-trap 'rm -rf "$POISON_BIN" "$STUBROOT"' EXIT
+
+# --- Socket stub plumbing ---------------------------------------------------
+# Shared with cmux-reuse-surface_test.sh and dial_wrapper_test.sh via
+# tests/lib/socket-stub-harness.sh: the grid fixtures the placeholder judgement reads
+# are defined once there, so no suite can test against a cmux that answers
+# differently from the one another suite imagines.
+# shellcheck source=lib/socket-stub-harness.sh
+source "$TESTS_DIR/lib/socket-stub-harness.sh"
+trap 'socket_stub_cleanup; rm -rf "$POISON_BIN" "$STUBROOT"' EXIT
+
+# The socket every case inherits is the poisoned one: an RPC nobody staged is a
+# violation, not a quiet pass.
+POISON_SOCK="$(socket_stub_start "$STUBROOT/poison-socket")"
+: > "$STUBROOT/poison-socket/requests.log"
+
+socket_stub_write_responses "$STUBROOT/responses"
+# What the box's text looks like in ATTRIBUTES — the only place a placeholder and
+# real unsent input differ (claude-plugins-ff6g).
+GHOST_RESPONSES="$STUBROOT/responses/replay-ghost.json"
+GHOST_FOCUSED_RESPONSES="$STUBROOT/responses/replay-ghost-focused.json"
+REAL_INPUT_RESPONSES="$STUBROOT/responses/replay-real.json"
+REPLAY_ERROR_RESPONSES="$STUBROOT/responses/replay-error.json"
 
 pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() {
@@ -93,7 +127,13 @@ screen_shell_prompt_themed() {
 # run_case <name> [--no-nonce] [--moving] [--busy] [--interrupted]
 #          [--no-tree] [--orphan-tree] [--close-fails <msg>] [--unreadable]
 #          -- [args to the script]
-CASEDIR=""; OUT=""; CALLLOG=""
+#
+# Two knobs come from the environment of the call, matching the vocabulary
+# cmux-reuse-surface_test.sh already uses for the same two things:
+#   CASE_RESPONSES    canned socket responses (default: the poisoned server)
+#   CASE_RENDER_GRID  non-empty → `cmux capabilities` advertises
+#                     terminal.render_grid.v1, so the placeholder judgement may run
+CASEDIR=""; OUT=""; CALLLOG=""; REQLOG=""
 run_case() {
   local name="$1"; shift
   local no_nonce="" moving="" screen="screen_idle" no_tree="" orphan="" close_fail="" unreadable=""
@@ -131,6 +171,19 @@ run_case() {
   printf '%s' "${unreadable:-}"  > "$CASEDIR/unreadable"
   printf '%s' "$SURF" > "$CASEDIR/surf"; printf '%s' "$WS" > "$CASEDIR/ws"
 
+  # A per-case socket server when responses are staged, else the poisoned one. The
+  # poisoned log is shared across cases, so record where this case's lines start.
+  local sock="$POISON_SOCK"
+  if [[ -n "${CASE_RESPONSES:-}" ]]; then
+    sock="$(socket_stub_start "$CASEDIR/socket" "$CASE_RESPONSES")"
+    REQLOG="$CASEDIR/socket/requests.log"
+  else
+    REQLOG="$STUBROOT/poison-socket/requests.log"
+  fi
+  local reqbase=0
+  [[ -f "$REQLOG" ]] && reqbase=$(wc -l < "$REQLOG" | tr -d ' ')
+  echo "$reqbase" > "$CASEDIR/reqbase"
+
   cat > "$CASEDIR/cmux" <<'STUB'
 #!/usr/bin/env bash
 D="${STUB_DIR:?}"
@@ -147,6 +200,13 @@ case "$1" in
       n=$(cat "$D/reads" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$D/reads"
       echo "  reading file $n of 9"
     fi
+    exit 0 ;;
+  capabilities)
+    # Absent by default: a cmux that cannot render a styled grid leaves the
+    # placeholder judgement unable to answer, which is the fail-closed direction —
+    # and on THIS path fail-closed means the surface is spared.
+    [[ -n "${STUB_RENDER_GRID:-}" ]] \
+      && printf '{"capabilities": ["terminal.bytes.v1", "terminal.render_grid.v1"]}\n'
     exit 0 ;;
   tree)
     # --id-format both: each surface reports its stable `id` alongside its
@@ -172,6 +232,7 @@ STUB
   chmod +x "$CASEDIR/cmux"
 
   OUT="$(STUB_DIR="$CASEDIR" PATH="$CASEDIR:$PATH" \
+    STUB_RENDER_GRID="${CASE_RENDER_GRID:-}" CMUX_SOCKET_PATH="$sock" \
     bash "$SCRIPT_UNDER_TEST" --settle 0 "$@" 2>&1)"
   return 0
 }
@@ -179,6 +240,14 @@ STUB
 closed() { [[ "$(jq -r '.closed' <<<"$OUT" 2>/dev/null)" == "true" ]]; }
 reason() { jq -r '.reason // ""' <<<"$OUT" 2>/dev/null; }
 close_calls() { grep -c '^close-surface' "$CALLLOG" || true; }
+tree_calls() { grep -c '^tree' "$CALLLOG" || true; }
+# Request lines this case produced (the poisoned log is shared, so slice it).
+requests() {
+  local base; base=$(cat "$CASEDIR/reqbase" 2>/dev/null || echo 0)
+  [[ -f "$REQLOG" ]] || return 0
+  tail -n "+$((base + 1))" "$REQLOG"
+}
+method_count() { requests | grep -cF "\"method\":\"$1\"" || true; }
 
 echo "close-superseded-surface:"
 
@@ -270,6 +339,91 @@ run_case parked --parked -- --surface "$SURF" --expect-call-id "$NONCE"
 ! closed && [[ "$(reason)" == *"parked-input"* ]] && [[ "$(close_calls)" -eq 0 ]] \
   && pass "an idle REPL with unsent text in its box is NOT closed" \
   || fail "an idle REPL with unsent text in its box is NOT closed" "out=$OUT"
+
+echo ""
+echo "  -- but a PLACEHOLDER is not unsent text (8vuf) --"
+
+# `cmux read-screen` is plain text, where claude's ghost suggested prompt, its
+# queued-messages hint and `Message @agent…` are byte-identical to typed input — so
+# every one of them read as parked text and the superseded surface was never closed,
+# accumulating a dead pane per turn. The discriminator is the attribute the text read
+# discards: claude renders a placeholder DIM, and `terminal.replay` carries it as
+# faint:true per span. The screen fixture is the SAME `--parked` one throughout this
+# block; only the grid differs, which is the whole point.
+#
+# The asymmetry matters more here than at the reuse gate: this path DESTROYS the
+# surface, so every unproven case below must still spare it.
+if [[ -z "$REAL_PYTHON3" ]]; then
+  echo "  ⚠ SKIP — python3 not available, so the render-grid RPC cannot be exercised"
+else
+
+# --- A ghost in the box: the surface IS closed. ------------------------------
+CASE_RESPONSES="$GHOST_RESPONSES" CASE_RENDER_GRID=1 \
+  run_case ghost_box --parked -- --surface "$SURF" --expect-call-id "$NONCE"
+CASE_RESPONSES=""; CASE_RENDER_GRID=""
+closed && [[ "$(close_calls)" -eq 1 ]] \
+  && pass "a box whose text renders DIM does not spare the surface — it IS closed" \
+  || fail "a box whose text renders DIM does not spare the surface — it IS closed" \
+          "out=$OUT closes=$(close_calls)"
+[[ "$(method_count terminal.replay)" -ge 1 ]] \
+  && pass "…having asked terminal.replay, not guessed from the text" \
+  || fail "…having asked terminal.replay, not guessed from the text" "$(requests)"
+# The RPC addresses a surface by workspace + surface UUID, and so does the close —
+# one tree walk serves both. Two would mean the resolution grew a second copy.
+[[ "$(tree_calls)" -eq 1 ]] \
+  && pass "…and the workspace is resolved from the tree ONCE for both the RPC and the close" \
+  || fail "…and the workspace is resolved from the tree ONCE for both the RPC and the close" \
+          "$(cat "$CALLLOG")"
+
+# The focused render of the same ghost: the placeholder's first character comes back
+# as the inverse cursor cell and NOT faint. Rejecting the row on it would leave the
+# fix working only on unfocused surfaces.
+CASE_RESPONSES="$GHOST_FOCUSED_RESPONSES" CASE_RENDER_GRID=1 \
+  run_case ghost_focused --parked -- --surface "$SURF" --expect-call-id "$NONCE"
+CASE_RESPONSES=""; CASE_RENDER_GRID=""
+closed \
+  && pass "one inverse cursor cell over a dim placeholder is still a placeholder" \
+  || fail "one inverse cursor cell over a dim placeholder is still a placeholder" "out=$OUT"
+
+# --- REAL unsent text: the skip is unchanged. -------------------------------
+# The direction that must never regress. A false positive here deletes a human's
+# half-typed thought along with the pane it was sitting in.
+CASE_RESPONSES="$REAL_INPUT_RESPONSES" CASE_RENDER_GRID=1 \
+  run_case real_input --parked -- --surface "$SURF" --expect-call-id "$NONCE"
+CASE_RESPONSES=""; CASE_RENDER_GRID=""
+! closed && [[ "$(reason)" == *"parked-input"* ]] && [[ "$(close_calls)" -eq 0 ]] \
+  && pass "a box whose text renders at NORMAL intensity is still a parked-input skip" \
+  || fail "a box whose text renders at NORMAL intensity is still a parked-input skip" \
+          "out=$OUT closes=$(close_calls)"
+
+# --- FAIL CLOSED, both ways. ------------------------------------------------
+# An RPC the socket refuses proves nothing, so the box stays real text and the
+# surface is spared — exactly the behavior this check had before the grid existed.
+CASE_RESPONSES="$REPLAY_ERROR_RESPONSES" CASE_RENDER_GRID=1 \
+  run_case replay_refused --parked -- --surface "$SURF" --expect-call-id "$NONCE"
+CASE_RESPONSES=""; CASE_RENDER_GRID=""
+! closed && [[ "$(reason)" == *"parked-input"* ]] && [[ "$(close_calls)" -eq 0 ]] \
+  && pass "a refused terminal.replay leaves the parked-input skip in place" \
+  || fail "a refused terminal.replay leaves the parked-input skip in place" \
+          "out=$OUT closes=$(close_calls)"
+[[ "$(method_count terminal.replay)" -ge 1 ]] \
+  && pass "…and it really was the REFUSAL, not an unasked question" \
+  || fail "…and it really was the REFUSAL, not an unasked question" "$(requests)"
+
+# A cmux without terminal.render_grid.v1 must not even ASK. The grid staged here says
+# "ghost", so the capability gate is the only thing standing between it and a close.
+CASE_RESPONSES="$GHOST_RESPONSES" \
+  run_case no_render_grid --parked -- --surface "$SURF" --expect-call-id "$NONCE"
+CASE_RESPONSES=""
+! closed && [[ "$(reason)" == *"parked-input"* ]] && [[ "$(close_calls)" -eq 0 ]] \
+  && pass "a cmux without terminal.render_grid.v1 keeps today's parked-input skip" \
+  || fail "a cmux without terminal.render_grid.v1 keeps today's parked-input skip" \
+          "out=$OUT closes=$(close_calls)"
+[[ "$(method_count terminal.replay)" -eq 0 ]] \
+  && pass "…and is never asked for a grid it cannot render" \
+  || fail "…and is never asked for a grid it cannot render" "$(requests)"
+
+fi
 
 # --- Positional refs can name the replacement, not the superseded surface ----
 # The replacement resumed the SAME session, so its scrollback replays the SAME
