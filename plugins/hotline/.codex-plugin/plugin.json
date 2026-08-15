@@ -1,6 +1,6 @@
 {
   "name": "hotline",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "Cross-workspace Claude Code communication. Dial another workspace to ask questions, delegate work, or collaborate in real-time.",
   "author": {
     "name": "JT Sternberg",
