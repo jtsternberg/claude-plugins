@@ -83,6 +83,11 @@ BASELINE_FILE=""
 # seconds rather than discovered a minute later by wait-for-response.sh.
 CONFIRM_TRIES="${HOTLINE_PASTE_CONFIRM_TRIES:-10}"
 CONFIRM_SLEEP="${HOTLINE_PASTE_CONFIRM_SLEEP:-0.3}"
+# Settle between a paste and the Enter key event that submits it. The key event
+# travels a different path than the paste, so sent in the same breath it can reach
+# the REPL before the bytes it is meant to submit have been ingested, and the Enter
+# is swallowed (claude-plugins-5zhp). 0.2s is the measured margin.
+SUBMIT_SETTLE="${HOTLINE_SUBMIT_SETTLE:-0.2}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -240,11 +245,9 @@ if $SPLIT_PASTE; then
   PASTE_SENT=true
   paste_one "$BODY_FILE" none
   rm -f "$HEAD_FILE" "$BODY_FILE"; trap - EXIT
-  # Submit with a real key event, outside any bracketed paste — after a settle.
-  # The key event travels a different path than the paste, so sent in the same breath
-  # it can reach the REPL before the bytes it is meant to submit have been ingested,
-  # and the Enter is swallowed (claude-plugins-5zhp). 0.2s is the measured margin.
-  sleep 0.2
+  # Submit with a real key event, outside any bracketed paste — after the settle
+  # (see SUBMIT_SETTLE).
+  sleep "$SUBMIT_SETTLE"
   if ! cmux send-key --surface "$SURFACE_REF" Enter >/dev/null 2>&1; then
     undelivered "pasted both halves into surface $SURF_ID but the submit Enter keystroke failed" true
   fi
@@ -482,16 +485,15 @@ elif payload_is_parked; then
   # into a reused surface, always recovered by one manual Enter). Fire that one
   # Enter, then re-verify.
   #
-  # The settle is the same fence the split paste needs (claude-plugins-5zhp): the key
-  # event travels a different path than the paste, so an Enter sent in the same breath
-  # can reach the REPL before it has finished ingesting the bytes — which is the very
-  # race that parked the payload in the first place.
+  # The settle (SUBMIT_SETTLE) is the same fence the split paste needs — an Enter
+  # racing unfinished paste ingestion is the very race that parked the payload in
+  # the first place.
   #
   # The Enter's own exit code is checked (like the other send-key call sites): if the
   # keystroke never left this machine, there is nothing to re-verify and claiming
   # success would be inventing it. The payload is still parked in the box, so this is
   # sent:true — the caller must not blindly re-deliver.
-  sleep 0.2
+  sleep "$SUBMIT_SETTLE"
   if ! cmux send-key --surface "$SURFACE_REF" Enter >/dev/null 2>&1; then
     undelivered "pasted into surface $SURFACE_REF; the payload parked and the one Enter retry keystroke itself failed to send, so submission is unproven"
   fi
