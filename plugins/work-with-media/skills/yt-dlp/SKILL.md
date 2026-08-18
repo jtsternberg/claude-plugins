@@ -73,6 +73,8 @@ yt-dlp -x --audio-format m4a -o "/tmp/yt-%(id)s.%(ext)s" "<url>"
 
 yt-dlp pulls the best audio stream and uses ffmpeg internally (via `-x`) to produce `/tmp/yt-<id>.m4a`. From there, `mw transcribe /tmp/yt-<id>.m4a > /tmp/mw-yt-<id>.txt` — follow the [output conventions](../../shared/output-conventions.md).
 
+If this (or any download) dies with `HTTP Error 403: Forbidden` on the actual data stream — often after a client *finds* a format then fails on the bytes — see the YouTube 403 / PO-token / DRM entry under [Troubleshooting](#troubleshooting).
+
 ## Transposed audio output (pitch shift)
 
 For "give me this YouTube link transposed down a semitone / in a lower key" requests: download the audio as MP3, then pitch-shift with ffmpeg. Tempo and duration are preserved — only pitch changes.
@@ -174,3 +176,25 @@ Explicit cleanup is optional (macOS cleans `/tmp` periodically), but worth runni
 - **Captions are empty or missing** — Either the video has no auto-subs (creator disabled them) or they exist in a language other than English. Run `yt-dlp --list-subs "<url>"` to see what's available; if nothing shows up, fall back to audio transcription.
 - **`yt-dlp -x` errors about ffmpeg** — ffmpeg isn't on PATH. Install it (see [references/setup.md](references/setup.md)) before retrying.
 - **Very long download on a short video** — yt-dlp may be choosing a high-bitrate format. For audio-only transcription, `-x --audio-format m4a` keeps it small. For subs-only runs, `--skip-download` avoids audio entirely.
+- **YouTube `HTTP Error 403: Forbidden` on the data stream (PO-token / DRM / SABR wall)** — The extractor negotiates a format fine, then 403s on the actual bytes. Recognize it by any of these tells:
+  - `HTTP Error 403: Forbidden` on the *download* (not the metadata fetch);
+  - a client finds a format (e.g. format 251) and then 403s on the stream;
+  - warnings naming a `GVS PO Token` (`... require a GVS PO Token ...`), `DRM protected` formats, or a `SABR-only streaming experiment`.
+
+  YouTube gates playback behind rotating proof-of-origin tokens; individual player clients each fail a different way (`android_vr` 403s on the bytes, `ios`/`mweb`/`tv_simply` demand a PO token, `tv` reports DRM). Fix it with this ladder — in order, and stop at the step that works:
+
+  1. **Update yt-dlp first.** These breakages are patched constantly, so a stale binary (older than ~90 days) is the single most common root cause. Update by however it was installed — check the shebang of `$(which yt-dlp)` if unsure:
+
+     ```bash
+     brew upgrade yt-dlp          # Homebrew
+     pipx upgrade yt-dlp          # pipx
+     pip install -U yt-dlp        # pip
+     ```
+
+  2. **Retry with every player client at once:**
+
+     ```bash
+     yt-dlp --extractor-args "youtube:player_client=all" <your-other-args> "<url>"
+     ```
+
+     This one retry is the whole move: `player_client=all` tries every client (`android_vr`, `ios`, `tv`, `mweb`, web) in a single pass, so it already covers the ground you'd otherwise walk client by client — and a web client mints the required GVS PO token via yt-dlp's bundled JS (deno) solver. Because the 403 here is a *missing PO token* rather than an expired login, cookies are the wrong lever: `--cookies-from-browser` leaves it at 403 even with fresh cookies. Reach for that flag only when the video is genuinely age- or login-gated.
