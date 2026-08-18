@@ -33,9 +33,11 @@
 #        → caller keeps waiting patiently (model is working)
 #   11 — no submit evidence for the nonce anywhere in the transcript
 #        → caller consults the callee's input box before concluding anything
-#   12 — PREEMPTED: no terminal STATUS, and a genuine human prompt arrived after
-#        our turn, so it is never coming. The preempting prompt (200 chars) goes
-#        to stdout. → caller stops waiting instead of sitting out its timeout.
+#   12 — PREEMPTED: no terminal STATUS, a genuine human prompt arrived after our
+#        turn, and nothing after that prompt names our call_id — so the receiver
+#        has been handed something else. The preempting prompt (200 chars) goes to
+#        stdout. → caller starts its grace window instead of sitting out the
+#        timeout (wait-for-response.sh decides how long to keep polling).
 #   13 — AWAITING_REVIEW: this step's reply is complete but the work order is not
 #        finished. Same JSON as exit 0 plus `"awaiting_review": true`.
 #        → caller stops waiting and keeps the session live for a follow-up.
@@ -68,6 +70,22 @@
 # records can arrive as type:"user" without isMeta; those begin with
 # <local-command-stderr>, <local-command-stdout>, <local-command-caveat>, or
 # <task-notification> and are synthetic harness output, not human reassignment.
+#
+# A MID-CALL REDIRECT IS NOT A REASSIGNMENT (claude-plugins-mrpi)
+# The same human who can hand that session another task can also interrupt it to
+# STEER the order we sent — and steering produces the identical records: a
+# `[Request interrupted by user]` user record plus a correction prompt. The tell
+# is what the receiver does next. So: PREEMPTED iff no non-sidechain assistant
+# record after the LATEST genuine human prompt carries `STATUS: <anything>
+# call_id=<our nonce>` — WORK_IN_PROGRESS included. A re-ack after that prompt
+# means the receiver is still on OUR order (exit 10, keep waiting); a newer prompt
+# after a re-ack re-opens the question, which is why the anchor is the latest prompt
+# and not the first: anchoring on the first would let one re-ack absolve every
+# prompt that followed it, permanently masking a real reassignment. It also makes
+# the prompt we report the most recent one, which is the one worth showing.
+# Observed live 2026-08-18 (call_id a7d57642a858b188): the correction landed, the
+# caller exited 3, and the receiver went on to report WORK_COMPLETE for that same
+# nonce with nobody listening.
 #
 # SUBMIT EVIDENCE — WHY A `user` RECORD IS NOT THE ONLY PROOF (claude-plugins-1jpz)
 # A message typed into a REPL that is already mid-turn does NOT produce a user
@@ -160,6 +178,42 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
      | index(true)) as $ei
   | ([$ui, $qi] | map(select(. != null)) | min) as $di
   | ($di // $ai // $ei) as $ui
+  | (if $ui == null then [] else .[$ui:] end) as $rest
+  # The LATEST genuine human prompt after our turn, carried with its position in
+  # $rest so the STATUS scan below knows where "after" starts. Latest, not first:
+  # anchoring on the first prompt lets one re-ack absolve every prompt that comes
+  # later, so a redirect we answered would permanently mask a real reassignment
+  # after it. tool_result records contribute no text blocks, so they drop out here
+  # without a special case; our own anchor record is excluded by the nonce test.
+  | ([ $rest
+       | to_entries[]
+       | select(.value.type == "user")
+       | select((.value.isMeta // false) != true)
+       | select((.value.isSidechain // false) != true)
+       | select((.value.isCompactSummary // false) != true)
+       | select((.value.isVisibleInTranscriptOnly // false) != true)
+       | select((.value.message.content | tostring | test("CALL_ID: " + $nonce)) | not)
+       | {i: .key,
+          t: (if (.value.message.content | type) == "string"
+              then .value.message.content
+              else ([.value.message.content[]? | select(.type == "text") | .text] | join(" "))
+              end)}
+       | select(.t != null)
+       | .t |= gsub("^\\s+|\\s+$"; "")
+       | select((.t | length) > 0)
+       | select((.t | test("^<(local-command-(stderr|stdout|caveat)|task-notification)>")) | not)
+     ] | last) as $pe
+  # Does ANY assistant record AFTER that prompt still name OUR call_id in a STATUS
+  # line — any status, WORK_IN_PROGRESS included? Then the interjection was a
+  # mid-course correction of OUR order, not a reassignment, and the callee is
+  # demonstrably still working it. See the PREEMPTION note. (claude-plugins-mrpi)
+  | (if $pe == null then false
+     else ([ $rest[($pe.i + 1):][]
+             | select(.type == "assistant" and ((.isSidechain // false) != true))
+             | ([.message.content[]? | select(.type == "text") | .text] | join("\n"))
+             | select(test("STATUS: [A-Z_]+ " + $stag))
+           ] | length) > 0
+     end) as $still_ours
   | if $ui == null then
       {submitted: false, session_id: "", text: "", preempt: ""}
     else
@@ -175,26 +229,11 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
                 | select(.type == "text")
                 | .text ]
               | join("\n")),
-       # First genuine human prompt after our turn, if any — see the preemption
-       # note in the header. tool_result records contribute no text blocks, so
-       # they drop out here without a special case. Our own anchor record is
-       # excluded by the nonce test below.
-       preempt: ([ .[$ui:][]
-                   | select(.type == "user")
-                   | select((.isMeta // false) != true)
-                   | select((.isSidechain // false) != true)
-                   | select((.isCompactSummary // false) != true)
-                   | select((.isVisibleInTranscriptOnly // false) != true)
-                   | select((.message.content | tostring | test("CALL_ID: " + $nonce)) | not)
-                   | (if (.message.content | type) == "string"
-                      then .message.content
-                      else ([.message.content[]? | select(.type == "text") | .text] | join(" "))
-                      end)
-                   | select(. != null)
-                   | gsub("^\\s+|\\s+$"; "")
-                   | select(length > 0)
-                   | select(test("^<(local-command-(stderr|stdout|caveat)|task-notification)>") | not)
-                 ] | first // "")}
+       # The preempting prompt — reported ONLY when nothing after it still names
+       # our call_id. A post-preempt STATUS for our nonce means the receiver is
+       # still on OUR order, so this reports "" and the caller reads that as
+       # "submitted, still working". (claude-plugins-mrpi)
+       preempt: (if $still_ours then "" else ($pe.t // "") end)}
     end
 ' "$TRANSCRIPT") || { echo "jq failed parsing $TRANSCRIPT" >&2; exit 1; }
 

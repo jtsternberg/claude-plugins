@@ -44,10 +44,16 @@
 #       --submit-deadline while the payload sits in the callee's input box, either
 #       as visible text or as a collapsed `[Pasted text` placeholder; message on
 #       stderr)
-#   3 — PREEMPTED: the callee was handed a different task mid-call, so its STATUS
-#       for this nonce is never coming. error.txt names the preempting prompt and
-#       the surface to look at. The work may have completed anyway.
-#       (claude-plugins-dvjo)
+#   3 — PREEMPTED: the callee was handed a different task mid-call AND no STATUS
+#       for this nonce arrived within the grace window that followed, so it is
+#       never coming. error.txt names the preempting prompt and the surface to look
+#       at. The work may have completed anyway. A mid-call redirect of the SAME
+#       order resolves normally instead of landing here — see the grace window
+#       below. The surface/session is left LIVE (whatever keep_workspace.txt says),
+#       exactly as on exit 4: this verdict is a judgement about a human's intent
+#       read off a transcript, and closing the surface would destroy the only place
+#       to check it — the very thing the message tells the caller to do.
+#       (claude-plugins-dvjo, claude-plugins-mrpi)
 #   4 — AWAITING_REVIEW: response received, but the work order is NOT finished —
 #       the callee reported a checkpoint and is idle waiting for your review or
 #       follow-up. Same valid JSON on stdout as exit 0, plus
@@ -79,6 +85,12 @@
 #     ticks either way, so lowering this collapses wall-clock WITHOUT changing
 #     how many iterations run or what they decide. Tests set it to ~0.
 #     (claude-plugins-fhn3)
+#   HOTLINE_PREEMPT_GRACE — how long (default 180, in the same integer POLL_INTERVAL
+#     tick accounting as --timeout) to keep polling after the callee's session shows
+#     a preempting prompt, before giving up with exit 3. A human who interrupts to
+#     REDIRECT the same work order looks identical to one who reassigns the session;
+#     only the callee's next STATUS tells them apart, so the waiter waits for it.
+#     Tests set it small. (claude-plugins-mrpi)
 # =============================================================================
 set -euo pipefail
 
@@ -105,6 +117,10 @@ TIMEOUT=""
 # already restarts at 0 on every invocation. (claude-plugins-fhn3)
 POLL_INTERVAL=2
 POLL_SLEEP="${HOTLINE_POLL_SLEEP:-$POLL_INTERVAL}"
+# How long a preempting prompt buys the callee before we call the call lost. Same
+# integer tick accounting as TIMEOUT, so the suite can collapse it too.
+# (claude-plugins-mrpi)
+PREEMPT_GRACE="${HOTLINE_PREEMPT_GRACE:-180}"
 # Transcript mode: how long to wait for the transcript to show ANY evidence the
 # nonce reached the callee (user record, queued-command injection, enqueue, or a
 # STATUS naming our call_id — see transcript-extract.sh) before asking the input
@@ -234,6 +250,30 @@ if $CMUX_MODE; then
     fi
   }
 
+  # The one exit-3 site. Reached either at the end of the grace window or when the
+  # overall budget runs out with the window still open — a budget expiring mid-grace
+  # is still a preemption, and the generic timeout message would bury the one fact
+  # the caller needs. PREEMPT_TEXT holds the latest preempting prompt the extractor
+  # reported. (claude-plugins-mrpi)
+  preempt_exit() {
+    local surf
+    surf=$(cat "$CALL_DIR/surface_ref.txt" 2>/dev/null || echo '?')
+    {
+      echo "Callee reassigned mid-call — a new prompt arrived in its session after ours, and no STATUS for call_id=$CALL_ID arrived within the ${PREEMPT_GRACE}s grace window after the preempting prompt."
+      echo "Preempting prompt: $PREEMPT_TEXT"
+      echo "Surface: $surf · transcript: $TRANSCRIPT_PATH"
+      echo "Our work order may well have completed anyway — the surface and session are left OPEN so you can check: read the transcript or look at the surface before re-dialing."
+    } > "$CALL_DIR/error.txt"
+    touch "$CALL_DIR/done"
+    # Keeps the surface, like exit 4 does and for the same reason: this verdict is
+    # inferred from a human's typing, the message tells the caller to go look at the
+    # surface, and closing it would delete the evidence — plus a wrong exit 3 stays
+    # cheap to recover from. (claude-plugins-mrpi)
+    cleanup_script_only
+    cat "$CALL_DIR/error.txt" >&2
+    exit 3
+  }
+
   ELAPSED=0
   # If the launcher already wrote done+error.txt, surface that immediately.
   if [[ -f "$CALL_DIR/done" && -f "$CALL_DIR/error.txt" ]]; then
@@ -317,6 +357,11 @@ if $CMUX_MODE; then
     # timeout message can say submit was never confirmed without asserting why.
     SUBMIT_UNCONFIRMED=false
     FILE_GRACE=10   # transcript appears ~instantly for a live session; else fall back
+    # Grace-window state. -1 = no preempting prompt seen yet; otherwise the tick at
+    # which one first appeared, so the window is measured from it in the same
+    # accounting as TIMEOUT. (claude-plugins-mrpi)
+    PREEMPT_SEEN_AT=-1
+    PREEMPT_TEXT=""
     while [[ $T_ELAPSED -lt $TIMEOUT ]]; do
       if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
         # No transcript file yet — brief grace, then fall back to scraping
@@ -347,23 +392,31 @@ if $CMUX_MODE; then
           emit_response_json
           exit 4
           ;;
-        10) T_SUBMITTED=true ;;   # submitted, model working — be patient
+        10)                       # submitted, model working — be patient
+          T_SUBMITTED=true
+          # The extractor sees post-preempt evidence we are still the live order
+          # (its STATUS names our nonce after the interjection), so any grace window
+          # we had opened is void, not merely paused. (claude-plugins-mrpi)
+          PREEMPT_SEEN_AT=-1
+          PREEMPT_TEXT=""
+          ;;
         12)                       # …but only while the receiver is still OURS.
-          # The extractor found a new human prompt after our turn, so our STATUS is
-          # never coming and waiting out the remaining timeout tells the caller
-          # nothing. Bail now and say why. T_OUT holds the preempting prompt.
-          # (claude-plugins-dvjo)
-          SURF=$(cat "$CALL_DIR/surface_ref.txt" 2>/dev/null || echo '?')
-          {
-            echo "Callee reassigned mid-call — a new prompt arrived in its session after ours, so it will never emit STATUS for call_id=$CALL_ID."
-            echo "Preempting prompt: $T_OUT"
-            echo "Surface: $SURF · transcript: $TRANSCRIPT_PATH"
-            echo "Our work order may well have completed anyway — check the surface, or read the transcript, before re-dialing."
-          } > "$CALL_DIR/error.txt"
-          touch "$CALL_DIR/done"
-          cleanup_workspace_and_script
-          cat "$CALL_DIR/error.txt" >&2
-          exit 3
+          # A new human prompt arrived after our turn with nothing since naming our
+          # call_id. That is EITHER a reassignment (our STATUS is never coming) or a
+          # mid-course correction of our own order the callee has not answered yet —
+          # and at this instant the two are indistinguishable, which is exactly what
+          # made instant-bail wrong: the redirected callee reported WORK_COMPLETE to
+          # nobody. So start a bounded window and keep polling; the callee resolves
+          # it by naming our nonce again (→ RC 0/10/13), or the window closes and we
+          # exit 3 with the prompt we saw. (claude-plugins-mrpi, claude-plugins-dvjo)
+          PREEMPT_TEXT="$T_OUT"
+          if [[ $PREEMPT_SEEN_AT -lt 0 ]]; then
+            PREEMPT_SEEN_AT=$T_ELAPSED
+            echo "hotline: a new prompt arrived in the callee's session after ours — it may be a redirect of this same work order, so waiting ${PREEMPT_GRACE}s for a STATUS naming call_id=$CALL_ID before giving up." >&2
+          fi
+          if [[ $((T_ELAPSED - PREEMPT_SEEN_AT)) -ge $PREEMPT_GRACE ]]; then
+            preempt_exit
+          fi
           ;;
         11)                       # nothing in the transcript carries the nonce yet
           if ! $T_SUBMITTED && [[ $T_ELAPSED -ge $SUBMIT_DEADLINE ]]; then
@@ -408,6 +461,12 @@ if $CMUX_MODE; then
       T_ELAPSED=$((T_ELAPSED + POLL_INTERVAL))
     done
     if ! $FELL_BACK; then
+      # Budget gone with the grace window still open: the last thing we knew was a
+      # preemption, so report THAT rather than a timeout the caller cannot act on.
+      # (claude-plugins-mrpi)
+      if [[ $PREEMPT_SEEN_AT -ge 0 ]]; then
+        preempt_exit
+      fi
       # Ran the full TIMEOUT in transcript mode while merely working → a genuine
       # timeout, not a reason to re-scrape. Report it and stop.
       if $SUBMIT_UNCONFIRMED; then

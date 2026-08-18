@@ -450,7 +450,11 @@ else
 fi
 rm -rf "$(dirname "$T_DONE_THEN")"
 
-# End to end: wait-for-response.sh must bail fast with exit 3, not sit out the timeout.
+# End to end: wait-for-response.sh must report the reassignment as exit 3 with its
+# informative error, never as a bare timeout. The default grace (180s) outlasts this
+# 90s budget on purpose — that is the "budget expired while the grace window was
+# still open" branch, and it has to leave through the preempt path too
+# (claude-plugins-mrpi).
 CT3=$(setup_transcript_call \
 '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
 {"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"content":[{"type":"text","text":"on it"}]}}
@@ -463,11 +467,128 @@ RC3=$?
 set -e
 EL3=$((SECONDS - START3))
 if [[ $RC3 -eq 3 && $EL3 -lt 30 ]] && printf '%s' "$ERR3" | grep -qi "reassigned\|preempt"; then
-  pass "wait-for-response exits 3 on preemption instead of waiting out the timeout (${EL3}s)"
+  pass "wait-for-response exits 3 on preemption, not a bare timeout (${EL3}s)"
 else
   fail "wait-for-response exits 3 on preemption" "rc=$RC3 elapsed=${EL3}s err=$ERR3"
 fi
+if printf '%s' "$ERR3" | grep -q "Timed out waiting for the callee"; then
+  fail "a budget that expires mid-grace reports the preemption, not the generic timeout" "err=$ERR3"
+else
+  pass "a budget that expires mid-grace reports the preemption, not the generic timeout"
+fi
 rm -rf "$H3" "$CD3" "$SD3"
+
+# ---- mid-call redirect: preemption is a grace window, not a verdict ----------
+# (claude-plugins-mrpi) The human who types into a visible surface is often
+# STEERING the same work order, not reassigning it. That correction produces the
+# identical signal — an interrupt record plus a new prompt — and the callee then
+# folds it in and emits STATUS for OUR nonce. Exiting 3 the instant a preempting
+# prompt appears therefore abandoned calls that were still very much live
+# (observed 2026-08-18, call_id a7d57642a858b188: the waiter bailed, the callee
+# went on to report WORK_COMPLETE). RC 12 now opens a bounded grace window
+# instead: keep polling, and only give up if no STATUS for our nonce shows up
+# within it.
+echo ""
+echo "Mid-call redirect grace window:"
+
+transcript_path_in() {  # $1 = sandboxed HOME → the path setup_transcript_call wrote
+  local enc; enc=$(printf '%s' "/fake/callee/ws" | sed 's|[^a-zA-Z0-9]|-|g')
+  echo "$1/.claude/projects/$enc/sess-tcm.jsonl"
+}
+
+# The interrupt + correction shape, verbatim from the live incident.
+REDIR_BODY='{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nfirst pass"}]}}
+{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"phrase those affirmatively instead"}}'
+REDIR_DONE='{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nredirected answer delivered\nSTATUS: WORK_COMPLETE call_id='"$TNONCE"'"}]}}'
+
+# CASE 6 — the callee resolves OUR nonce inside the grace window. The transcript
+# is replaced atomically (write + mv) so the poller can never read a half-written
+# line. Grace is set enormous in tick terms so the swap always lands inside it;
+# the case still costs only the appender's sleep, because the very next poll after
+# the swap resolves and exits.
+CT5=$(setup_transcript_call "$REDIR_BODY")
+HD=${CT5%%|*}; rD=${CT5#*|}; CDD=${rD%%|*}; SDD=${rD#*|}
+TFD=$(transcript_path_in "$HD")
+(
+  sleep 0.4
+  printf '%s\n%s\n' "$REDIR_BODY" "$REDIR_DONE" > "$TFD.next"
+  mv "$TFD.next" "$TFD"
+) &
+APPENDER=$!
+set +e
+OUTD=$(HOME="$HD" PATH="$SDD:$PATH" HOTLINE_PREEMPT_GRACE=400 \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDD" --timeout 600 --submit-deadline 99 2>/dev/null)
+RCD5=$?
+set -e
+wait $APPENDER 2>/dev/null || true
+if [[ $RCD5 -eq 0 ]] && [[ "$(printf '%s' "$OUTD" | jq -r .response 2>/dev/null)" == *"redirected answer delivered"* ]]; then
+  pass "a redirect answered inside the grace window resolves normally (exit 0)"
+else
+  fail "a redirect answered inside the grace window resolves normally" "rc=$RCD5 out=$OUTD"
+fi
+if [[ -f "$CDD/response.json" ]] && jq -e . "$CDD/response.json" >/dev/null 2>&1; then
+  pass "the redirect's response.json is written and parseable"
+else
+  fail "the redirect's response.json is written and parseable" \
+    "response.json: $(cat "$CDD/response.json" 2>/dev/null || echo '<missing>')"
+fi
+rm -rf "$HD" "$CDD" "$SDD"
+
+# CASE 7 — nothing ever names our nonce again: a real reassignment. The waiter
+# gives up at the grace boundary (NOT at the first sighting) and says so. Rigged
+# with keep_workspace=false and a logging cmux stub, because exit 3 must ALSO leave
+# the surface live: the verdict is inferred from a human's typing and the message
+# sends the caller to that surface to check it.
+CT6=$(setup_transcript_call "$REDIR_BODY")
+HE=${CT6%%|*}; rE=${CT6#*|}; CDE=${rE%%|*}; SDE=${rE#*|}
+echo "false" > "$CDE/keep_workspace.txt"
+LOGE="$SDE/cmux.log"
+{
+  echo '#!/usr/bin/env bash'
+  echo "printf '%s\\n' \"\$*\" >> '$LOGE'"
+  echo 'exit 0'
+} > "$SDE/cmux"
+chmod +x "$SDE/cmux"
+: > "$LOGE"
+set +e
+ERRE=$(HOME="$HE" PATH="$SDE:$PATH" HOTLINE_PREEMPT_GRACE=6 \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDE" --timeout 60 --submit-deadline 99 2>&1 >/dev/null)
+RCE=$?
+set -e
+if [[ $RCE -eq 3 ]]; then
+  pass "preemption that outlasts the grace window still exits 3"
+else
+  fail "preemption that outlasts the grace window still exits 3" "rc=$RCE err=$ERRE"
+fi
+# The message has to say the waiter WAITED, or the reader re-learns the old
+# (wrong) model of exit 3: "bailed the instant someone typed".
+if printf '%s' "$ERRE" | grep -q "6s grace window"; then
+  pass "the exit-3 message names the grace window it waited out"
+else
+  fail "the exit-3 message names the grace window it waited out" "err=$ERRE"
+fi
+if [[ -f "$CDE/error.txt" ]] && grep -q "grace window" "$CDE/error.txt"; then
+  pass "error.txt records the grace window for a file-reading caller"
+else
+  fail "error.txt records the grace window" \
+    "error.txt: $(cat "$CDE/error.txt" 2>/dev/null || echo '<missing>')"
+fi
+# Exit 3 is a judgement about what a human meant, and the message it writes tells
+# the caller to go read the surface. Closing that surface would delete the evidence
+# and make a wrong verdict unrecoverable, so keep_workspace=false must not close it.
+if grep -qE "close-surface|close-workspace" "$LOGE" 2>/dev/null; then
+  fail "exit 3 must leave the callee surface live for inspection" "cmux calls: $(cat "$LOGE")"
+else
+  pass "exit 3 leaves the surface live even with keep_workspace=false"
+fi
+if printf '%s' "$ERRE" | grep -qi "left OPEN"; then
+  pass "the exit-3 message says the surface was left open"
+else
+  fail "the exit-3 message says the surface was left open" "err=$ERRE"
+fi
+rm -rf "$HE" "$CDE" "$SDE"
 
 # ---- submit discrimination (claude-plugins-mo8m) ---------------------------
 # The submit deadline expiring is NOT evidence the message never submitted. A

@@ -301,6 +301,103 @@ bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
   || fail "a sibling call's AWAITING_REVIEW does not resolve ours" "got exit $RC"
 rm -f "$F"
 
+# ---- mid-call redirect vs. genuine reassignment (claude-plugins-mrpi) --------
+# A human who interrupts the callee to STEER the same work order produces exactly
+# the preemption signal — an `[Request interrupted by user]` user record plus a
+# correction prompt — while the callee folds the correction into OUR order and
+# goes on to emit STATUS for OUR nonce. Reporting preemption there is wrong: the
+# answer is coming. So a STATUS for our call_id from ANY assistant record AFTER
+# the preempting prompt (WORK_IN_PROGRESS included) neutralizes preemption.
+# Record shapes copied from the live 2026-08-18 incident (call_id a7d57642a858b188).
+INTERRUPT='{"type":"user","isSidechain":false,"sessionId":"sess-1","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}'
+REDIRECT='{"type":"user","isSidechain":false,"sessionId":"sess-1","message":{"content":"phrase those affirmatively instead"}}'
+POST_WIP='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nrewriting per the correction"}]}}'
+POST_DONE='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nthe redirected answer\nSTATUS: WORK_COMPLETE call_id='"$NONCE"'"}]}}'
+
+# Case 23: interrupt + redirect, then a non-terminal STATUS for OUR nonce → the
+# callee is demonstrably still working our order. Exit 10 (keep waiting), not 12.
+F=$(mkf "$USER_NONCE
+$WIP
+$INTERRUPT
+$REDIRECT
+$POST_WIP")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "post-preempt WORK_IN_PROGRESS for our nonce → exit 10, not 12" \
+  || fail "post-preempt WORK_IN_PROGRESS for our nonce → exit 10" "got exit $RC"
+rm -f "$F"
+
+# Case 24: same shape, but the callee finishes after the redirect → exit 0, and
+# the WORK_IN_PROGRESS reset still keeps only the final attempt's prose.
+FIRST_PASS='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nfirst-pass prose that should be discarded"}]}}'
+F=$(mkf "$USER_NONCE
+$FIRST_PASS
+$INTERRUPT
+$REDIRECT
+$POST_DONE")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>/dev/null); RC=$?
+RESP=$(printf '%s' "$OUT" | jq -r '.response' 2>/dev/null)
+[[ $RC -eq 0 ]] && pass "terminal STATUS after a mid-call redirect → exit 0" \
+  || fail "terminal STATUS after a mid-call redirect → exit 0" "rc=$RC out=$OUT"
+[[ "$RESP" == *"the redirected answer"* && "$RESP" != *"first-pass prose"* ]] \
+  && pass "redirected body extracted from the final attempt (WIP reset unchanged)" \
+  || fail "redirected body extracted from the final attempt" "resp=$RESP"
+rm -f "$F"
+
+# Case 25: a GENUINE reassignment — a human prompt after our turn with NO later
+# STATUS for our nonce — must still exit 12 with the prompt on stdout.
+F=$(mkf "$USER_NONCE
+$WIP
+$INTERRUPT
+{\"type\":\"user\",\"isSidechain\":false,\"sessionId\":\"sess-1\",\"message\":{\"content\":\"forget that, do the PSR4 migration\"}}
+{\"type\":\"assistant\",\"isSidechain\":false,\"sessionId\":\"sess-1\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"starting the PSR4 migration\"}]}}")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>/dev/null); RC=$?
+[[ $RC -eq 12 ]] && pass "genuine reassignment (no later our-nonce STATUS) still exits 12" \
+  || fail "genuine reassignment still exits 12" "rc=$RC out=$OUT"
+[[ "$OUT" == *"interrupted by user"* || "$OUT" == *"PSR4"* ]] \
+  && pass "the preempting prompt is still reported on stdout" \
+  || fail "the preempting prompt is still reported on stdout" "out=$OUT"
+rm -f "$F"
+
+# Case 26: a SIBLING call's STATUS after the preempting prompt is not evidence we
+# are still live — that is exactly the reassignment case.
+F=$(mkf "$USER_NONCE
+$WIP
+$REDIRECT
+{\"type\":\"assistant\",\"isSidechain\":false,\"sessionId\":\"sess-1\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"STATUS: WORK_IN_PROGRESS call_id=ffff0000ffff0000\"}]}}")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 12 ]] && pass "a sibling call's post-preempt STATUS does not clear preemption" \
+  || fail "a sibling call's post-preempt STATUS does not clear preemption" "got exit $RC"
+rm -f "$F"
+
+# Case 27: a STATUS for our nonce BEFORE the preempting prompt proves nothing
+# about after it — order matters, so this stays preemption.
+F=$(mkf "$USER_NONCE
+$WIP
+$REDIRECT")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 12 ]] && pass "our-nonce STATUS only counts when it comes AFTER the preempt" \
+  || fail "our-nonce STATUS only counts when it comes AFTER the preempt" "got exit $RC"
+rm -f "$F"
+
+# Case 28: re-ack then a REAL reassignment. The preemption question is asked about
+# the LATEST human prompt, not the first: if the first prompt anchored the scan, the
+# re-ack that answered the redirect would sit "after" it forever and absolve every
+# prompt that followed — the extractor would report 10 for good and the waiter would
+# die of a generic timeout instead of naming the task that actually stole the session.
+F=$(mkf "$USER_NONCE
+$WIP
+$INTERRUPT
+$REDIRECT
+$POST_WIP
+{\"type\":\"user\",\"isSidechain\":false,\"sessionId\":\"sess-1\",\"message\":{\"content\":\"stop, go do the PSR4 migration instead\"}}")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>/dev/null); RC=$?
+[[ $RC -eq 12 ]] && pass "a reassignment AFTER a re-ack still exits 12" \
+  || fail "a reassignment AFTER a re-ack still exits 12" "rc=$RC out=$OUT"
+[[ "$OUT" == *"PSR4 migration"* ]] \
+  && pass "the reported prompt is the LATEST one, not the redirect it superseded" \
+  || fail "the reported prompt is the LATEST one" "out=$OUT"
+rm -f "$F"
+
 echo ""
 echo "transcript-extract: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then printf '  - %s\n' "${FAILED[@]}"; exit 1; fi

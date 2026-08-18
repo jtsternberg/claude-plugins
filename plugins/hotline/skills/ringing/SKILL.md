@@ -142,6 +142,8 @@ So pick by what is true of *this turn*, not of the whole job:
 
 You can still re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` mid-response as a step marker: the caller resets its body buffer on every WORK_IN_PROGRESS, so only the content after the LAST one counts as the response.
 
+**Interrupted or redirected mid-call? Re-ack before you resume.** If the user interrupts you or types a correction and you are continuing the *same* work order, re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` before doing anything else. From the caller's side an interjection is indistinguishable from being handed a different job; that re-ack is the only signal that the order is still yours, and without it the caller stops waiting and never receives your answer.
+
 ## Logging — Already Handled
 
 **The caller logs this call, you don't.** It records the workspace, the mode, and both

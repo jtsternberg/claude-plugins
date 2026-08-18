@@ -206,12 +206,15 @@ Exit codes that are not failures:
 
 - **Exit 3 — the callee was reassigned.** (Not to be confused with `dial.sh`'s
   own exit 3, `needs_disambiguation` — different script, different meaning.) A
-  cmux call sits in a visible surface,
-  so the user can type into it; the moment they give it another task, your
-  nonce's STATUS is never coming. The script bails immediately and writes
-  `error.txt` naming the preempting prompt. Report that plainly, and note the
-  work you asked for may well have finished anyway — read the callee's
-  transcript or look at the surface. **Do not silently re-dial.**
+  cmux call sits in a visible surface, so the user can type into it. When they
+  do, the script keeps polling for a grace window (180s, `HOTLINE_PREEMPT_GRACE`)
+  and only exits 3 if no STATUS for your nonce arrives in it — a mid-call
+  *redirect* of the same work order is tolerated and resolves normally. Exit 3
+  therefore means they handed the session a different task, and `error.txt` names
+  the preempting prompt. The surface and session are left live on purpose — the
+  verdict is read off a transcript, so go check it. Report it plainly, and note the
+  work you asked for may well have finished anyway: read the callee's transcript or
+  look at the surface. **Do not silently re-dial.**
 - **Exit 4 — reply ready, work order not finished.** The callee emitted
   `STATUS: AWAITING_REVIEW`: it reported a checkpoint and is idle waiting on you.
   Read `.response` exactly as on exit 0 (the JSON also carries
