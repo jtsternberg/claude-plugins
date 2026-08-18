@@ -83,6 +83,14 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   answers it outright. Ask what the renderer knows that the text dropped — and gate
   the reader on the capability, failing closed to the text behavior.
   (claude-plugins-ff6g)
+- **When one observation supports two opposite verdicts, open a window or write a
+  resumable marker — never convert it to a terminal verdict on sight.** An
+  intervening human prompt in a callee's session is either a reassignment or a
+  redirect of the same order, and a waiter's expired budget is a fact about the
+  waiter, not the call; verdict-on-sight reports failure on calls that then
+  complete unheard. Wait (bounded) for the evidence only the other side can
+  produce — e.g. the callee's next nonce-stamped STATUS — and let that decide.
+  (claude-plugins-mrpi, -tyaj)
 - **Accept/reject guards get one fixture per direction.** A recency check tested
   only against stale markers silently asserts the false-negative bug, and a
   parked-payload retry fixtured only where screen confirmation already failed let the
