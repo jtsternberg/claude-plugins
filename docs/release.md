@@ -113,6 +113,21 @@ and install or update the plugin with the current Claude Code plugin commands.
 Then start a new session and run a representative `/<plugin>:<skill>` probe.
 Codex-native-only plugins have no Claude release step.
 
+Two Claude-side behaviors differ from Codex and are correct, not failures:
+
+- Claude Code's versioned cache **accumulates** — every previously installed
+  version stays under `~/.claude/plugins/cache/<marketplace>/<plugin>/`, and only
+  the version `claude plugin list` reports is live. Codex removes the prior
+  version on upgrade; Claude does not, and `claude plugin prune` cleans
+  auto-installed dependencies, not stale versions. Leftover old-version
+  directories are expected.
+- A marketplace whose `Source` is a local **Directory** (as on the maintainer
+  machine) reads the working tree, never the published GitHub revision — the
+  Claude check then proves local content only, and it cannot catch a
+  committed-but-unpushed release. Prove publication separately: `HEAD ==
+  origin/main` on the release ref, or the GitHub-backed Codex profile check
+  in §3.
+
 ## Empirical cache result
 
 On 2026-08-07, Codex CLI 0.147.0 was tested with a clean `CODEX_HOME` against a
