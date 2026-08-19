@@ -50,6 +50,7 @@ test('user-facing Codex examples distinguish native plugins from standalone skil
 	assert.doesNotMatch(userFacingDocs, /Codex[^\n]*`?\$<(?:frontmatter-name|skill-name|skill)>/);
 	for (const invocation of [
 		'$skill-tools:validate-dual-harness-skill',
+		'$adapt-skill',
 		'$pr-workflow:address-pr-comments',
 		'$hotline:<skill-name>',
 		'$tackle-epic',

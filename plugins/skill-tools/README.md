@@ -1,6 +1,6 @@
 # Skill Tools Plugin
 
-Skills for creating and reviewing Claude Code skills, slash commands, and subagents, plus validating shared skills under Claude Code and Codex.
+Skills for creating, adapting, and reviewing agent skills, slash commands, and subagents, plus validating shared skills under Claude Code and Codex.
 
 ## Installation
 
@@ -14,9 +14,9 @@ claude plugin install skill-tools@jtsternberg
 
 ## Description
 
-Provides scaffolding and review tools for developing Claude Code extensions. Helps maintain consistency and quality across skills and commands.
+Provides scaffolding, adaptation, and review tools for developing agent extensions. Helps preserve durable reasoning methods while maintaining consistency and quality across skills and commands.
 
-All skills in this plugin are name-only (`disable-model-invocation: true`) — invoke them explicitly by their namespaced path.
+The authoring, review, and validation skills are name-only (`disable-model-invocation: true`) and must be invoked explicitly. `adapt-skill` remains model-invocable because requests to adapt a supplied skill should route to it automatically.
 
 ## Skills
 
@@ -31,6 +31,25 @@ End-to-end skill builder. Chains the official `skill-creator` → `review-skill`
 One up-front confirmation covers classification (project / personal / public) and save path; everything after runs straight through. Public skills get parameterized automatically using the same env-var pattern as `plugins/session-tools` (`$SESSIONS_RECAP_EXAMPLE`-style overrides with safe defaults).
 
 Set `$CLAUDE_PUBLIC_SKILLS_DIR` to have the wrapper propose a default location for new public skills.
+
+### `/skill-tools:adapt-skill`
+
+Adapt a source skill's durable reasoning method to another job or workflow without baking one recipient domain into the general workflow.
+
+```text
+Claude Code plugin: /skill-tools:adapt-skill <source skill> for <recipient workflow>
+Codex standalone: $adapt-skill <source skill> for <recipient workflow>
+```
+
+Supply a public GitHub URL, an exact local path, or an installed skill reference. The workflow separates invariants from domain details, presents a concise adaptation map, and writes a complete, reviewable draft skill directory in the same run. It honors an explicit destination; otherwise it uses `adapted-skills/<generated-name>/` under the current working directory. The directory includes the adapted `SKILL.md` plus required references, scripts, assets, templates, and agents metadata from the source; the final report identifies included and omitted resources.
+
+Source and recipient context may be sensitive. The local output is explicitly a draft that can be edited or discarded; publication, commit, or push requires a separate explicit request. The skill keeps credentials and restricted data outside the adaptation, assumes no personal memory system, and has no dependency on a profile or interview plugin or special integration with one. A profile created elsewhere is merely an optional approved context attachment.
+
+For standalone Codex installation:
+
+```bash
+bash scripts/install-standalone-skill.sh skill-tools:adapt-skill
+```
 
 ### `/skill-tools:create-slash-command`
 
@@ -125,6 +144,7 @@ Evaluates command files for:
 ## Additional Documentation
 
 - [skills/create-skill/SKILL.md](skills/create-skill/SKILL.md)
+- [skills/adapt-skill/SKILL.md](skills/adapt-skill/SKILL.md)
 - [skills/create-slash-command/SKILL.md](skills/create-slash-command/SKILL.md)
 - [skills/create-subagent/SKILL.md](skills/create-subagent/SKILL.md)
 - [skills/review-skill/SKILL.md](skills/review-skill/SKILL.md)

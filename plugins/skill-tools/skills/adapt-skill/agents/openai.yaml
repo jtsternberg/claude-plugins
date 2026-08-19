@@ -1,0 +1,4 @@
+interface:
+  display_name: "Adapt Skill"
+  short_description: "Adapt a skill method to a recipient workflow"
+  default_prompt: "Use $adapt-skill to adapt this source skill for my recipient workflow."

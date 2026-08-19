@@ -144,7 +144,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | [publish-insights](../plugins/publish-insights) | Redirect | Not offered | Install from the separately maintained `jtsternberg/claude-usage-data` marketplace; it also requires Git, authenticated `gh`, and a Claude Code insights report. |
 | [research-tools](../plugins/research-tools) | Available | Not offered | Requires network access for source retrieval. A self-contained skill can instead be installed through the standalone guide. |
 | [session-tools](../plugins/session-tools) | Available | Not offered | Operates on Claude Code session transcripts. |
-| [skill-tools](../plugins/skill-tools) | Available | Not offered | Some workflows require their documented local toolchain. |
+| [skill-tools](../plugins/skill-tools) | Available | Not offered | `adapt-skill` supports [standalone skill installation](codex/standalone-skills.md); public URL sources are limited to unauthenticated GitHub access in v1. Other workflows may require their documented local toolchain. |
 | [slack](../plugins/slack) | Available | Not offered | Requires Slack Web API credentials/configuration. |
 | [slides-presentation](../plugins/slides-presentation) | Available | Not offered | Requires its documented browser/image-generation tooling as needed. |
 | [thinking-tools](../plugins/thinking-tools) | Available | Not offered | No extra platform requirement documented. |

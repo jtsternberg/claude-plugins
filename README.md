@@ -171,9 +171,9 @@ Available in both the Claude Code and Codex-native catalogs.
 **Install:** `claude plugin install pr-workflow@jtsternberg` or `codex plugin add pr-workflow@jtsternberg`
 
 #### 🛠️ [skill-tools](plugins/skill-tools)
-Skills for creating and reviewing Claude Code skills, slash commands, and subagents.
+Skills for creating, adapting, reviewing, and validating agent skills, slash commands, and subagents. `adapt-skill` preserves a source skill's durable reasoning method while mapping it to another job or workflow and producing a reviewable local draft skill directory.
 
-**Skills:** `create-slash-command`, `create-subagent`, `review-skill`, `review-slash-command`
+**Skills:** `adapt-skill`, `create-skill`, `create-slash-command`, `create-subagent`, `review-skill`, `review-slash-command`, `validate-dual-harness-skill`
 
 **Install:** `claude plugin install skill-tools@jtsternberg`
 

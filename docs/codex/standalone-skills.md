@@ -72,6 +72,7 @@ but their self-contained workflows are verified for standalone installation:
 | `beads-workflow:fix-findings-beads-tasks` | `$fix-findings-beads-tasks` | Configured `bd` CLI |
 | `git-commits:commit-staged` | `$commit-staged` | Git working tree |
 | `git-commits:commit-unstaged` | `$commit-unstaged` | Git working tree |
+| `skill-tools:adapt-skill` | `$adapt-skill` | Public GitHub access is unauthenticated-only in v1; local and installed sources use read-only access. |
 
 Install each source with the same command form shown above. These unqualified
 invocations are different from plugin-qualified names: a standalone install is
