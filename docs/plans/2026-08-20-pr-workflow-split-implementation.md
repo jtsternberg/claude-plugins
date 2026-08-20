@@ -475,7 +475,7 @@ grep -rn 'pr-workflow:' */skills/*/agents/openai.yaml   # expect: no matches
 }
 ```
 
-- [ ] **Step 2: Bundle README** at `plugins/pr-workflow/bundle/README.md`: title `# PR Workflow (bundle)`, explain it is a dependency-only bundle (installing it installs the five children; each child can be disabled/uninstalled independently), the same Installation snippet as the old README but noting v2.0.0 is a breaking change (`/pr-workflow:X` invocations became `/<child>:X` — list all six old→new mappings), and links to each child dir. Move the old README's `## Example Usage` block (lines 149–172) here with namespaces rewritten. Then `git rm plugins/pr-workflow/README.md`.
+- [ ] **Step 2: Bundle README** at `plugins/pr-workflow/bundle/README.md`: title `# PR Workflow (bundle)`, explain it is a dependency-only bundle (installing it installs the five children), the same Installation snippet as the old README but noting v2.0.0 is a breaking change (`/pr-workflow:X` invocations became `/<child>:X` — list all six old→new mappings), and links to each child dir. Include the verified customization workflow (probe evidence 2026-08-20, Claude Code 2.1.237): **a child cannot be disabled while the bundle is enabled** (`claude plugin disable <child>` fails with "still required by pr-workflow"); to drop unwanted children, first `claude plugin disable pr-workflow` (children stay installed and enabled), then disable/uninstall individual children. Uninstalling a child under an enabled bundle "works" but leaves the bundle dependency-unsatisfied — do not document that path. Move the old README's `## Example Usage` block (lines 149–172) here with namespaces rewritten. Then `git rm plugins/pr-workflow/README.md`.
 
 - [ ] **Step 3: Marketplace (legacy).** In `.claude-plugin/marketplace.json`, replace `{ "name": "pr-workflow", "source": "./plugins/pr-workflow" }` with six entries (keep array position, children first, bundle last):
 
@@ -488,7 +488,7 @@ grep -rn 'pr-workflow:' */skills/*/agents/openai.yaml   # expect: no matches
 { "name": "pr-workflow", "source": "./plugins/pr-workflow/bundle" }
 ```
 
-- [ ] **Step 4: Codex catalog policy + regenerate.** Codex has no verified plugin-dependency support, so the bundle must not be offered natively until verified: add `"pr-workflow"` to the `notAvailable` array in `scripts/codex-catalog.config.json` (children stay available — Codex reads their `.codex-plugin` manifests). Then:
+- [ ] **Step 4: Codex catalog policy + regenerate.** Codex does not resolve the `dependencies` field (verified live 2026-08-20, codex-cli 0.148.0: bundle installs as an empty plugin, children stay uninstalled — evidence `/tmp/work-order-bx41.*/evidence/codex-0{3,4}-*.json`; OpenAI's plugin manifest docs list no dependencies field). Add `"pr-workflow"` to the `notAvailable` array in `scripts/codex-catalog.config.json` — Codex users install children directly (children stay available via their `.codex-plugin` manifests). Then:
 
 ```bash
 node scripts/gen-codex-catalog.mjs
@@ -557,15 +557,15 @@ claude --dangerously-skip-permissions -p "Run /plugin marketplace add /Users/JT/
 
 Save raw output to the file first, then read it. Expected: bundle install pulls all 5 dependencies; skills listed under child namespaces (`walk-through-work-history:walk-through-work-history` etc.). If dependencies do NOT auto-install, stop and investigate against https://code.claude.com/docs/en/plugin-dependencies before proceeding.
 
-- [ ] **Step 2: Codex.** Verify a child installs and, separately, whether Codex resolves the bundle's `dependencies` field at all:
+- [ ] **Step 2: Codex.** Verify a real child installs (the dependency question is already settled — Codex 0.148.0 ignores `dependencies`; see Task 6 Step 4):
 
 ```bash
 codex plugin add walk-through-work-history --marketplace jtsternberg   # or the local-path equivalent used in past releases (see docs/release.md)
 ```
 
-Expected: child installs; `$walk-through-work-history:walk-through-work-history` invocable. If Codex turns out to support dependency bundles, remove `"pr-workflow"` from `notAvailable` in `scripts/codex-catalog.config.json`, regenerate the catalog, and amend the Task 6 commit rationale in a follow-up commit.
+Expected: child installs; `$walk-through-work-history:walk-through-work-history` invocable.
 
-- [ ] **Step 3: Uninstall/disable granularity check (the whole point).** In the scratch Claude session: disable one child (`/plugin` → disable `update-pr-description`), confirm its skills leave the context listing while the other children's skills remain.
+- [ ] **Step 3: Disable-granularity check (the whole point).** Pre-verified with fixture plugins (2026-08-20, Claude Code 2.1.237): disabling a child under an enabled bundle is refused. Confirm the same on the real plugins using the supported sequence: `claude plugin disable pr-workflow@<marketplace>` (children stay enabled), then disable `update-pr-description` — its skill must leave the context listing while the other children's skills remain.
 
 - [ ] **Step 4: Record results.** Append a `## Verification` section to `docs/plans/2026-08-20-plugin-split-justification.md` with the probe outcomes (dependency auto-install: yes/no; per-child disable: works/not; Codex bundle: supported/notAvailable). Commit — `git add docs/plans && git commit -m "docs(plans): record pr-workflow split verification results"`
 

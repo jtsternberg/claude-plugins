@@ -2,7 +2,7 @@
 
 Decision doc: which multi-skill plugins get split into single-skill plugins, and in what order. **Reviewed and decided 2026-08-20**: Option A (pr-workflow pilot only), with one amendment — `address-pr-comments` and `address-pr-comments-human` stay together in a single `address-pr-comments` child plugin (same job, human-vs-agent variants), so pr-workflow splits into **5 children + bundle**, not 6. Prior decisions:
 
-- **Install UX**: split + dependency-only bundle plugin (official term per Claude docs). The bundle keeps the old plugin name (`pr-workflow`), so `claude plugin install pr-workflow@...` still installs everything; users can then disable/uninstall individual children.
+- **Install UX**: split + dependency-only bundle plugin (official term per Claude docs). The bundle keeps the old plugin name (`pr-workflow`), so `claude plugin install pr-workflow@...` still installs everything. Per-child customization is a two-step (verified 2026-08-20 on Claude Code 2.1.237 with fixture plugins): a child cannot be disabled while the bundle is enabled — disable the bundle first (children stay installed/enabled), then disable unwanted children. Codex (0.148.0) ignores `dependencies` entirely; Codex users install children directly and the bundle is marked notAvailable in the Codex catalog.
 - **Repo layout**: nested group dir — `plugins/pr-workflow/{bundle/, address-pr-comments/, ...}`. Requires updating ~6 in-repo tooling sites (test-runner globs, compatibility test, 2 scripts).
 - **Naming**: child plugin name = skill name → invocation `/address-pr-comments:address-pr-comments` (precedent: `aiqrank:aiqrank`).
 
