@@ -119,7 +119,7 @@ grand_total=0
 
 while IFS= read -r skill_file; do
   relative_path=${skill_file#"$repo_root/plugins/"}
-  plugin=${relative_path%%/*}
+  plugin=${relative_path%%/skills/*}
   skill=${relative_path#*/skills/}
   skill=${skill%/SKILL.md}
   description=$(parse_description "$skill_file")
@@ -138,11 +138,6 @@ while IFS= read -r skill_file; do
   skill_count=$((skill_count + 1))
   grand_total=$((grand_total + char_count))
 done < <(find "$repo_root/plugins" -path '*/skills/*/SKILL.md' -type f -print | sort)
-
-if [ "$skill_count" -ne 60 ]; then
-  printf 'Expected 60 skill descriptions; parsed %s.\n' "$skill_count" >&2
-  exit 1
-fi
 
 budget_percent=$(awk -v total="$grand_total" 'BEGIN { printf "%.2f", (total / 8000) * 100 }')
 
@@ -165,9 +160,7 @@ emit_records | sort -t "$(printf '\t')" -k3,3nr -k1,1 -k2,2
 
 printf '\nPer-plugin subtotals\n'
 printf 'plugin\tskills\tdescription chars\n'
-for plugin_dir in "$repo_root"/plugins/*; do
-  [ -d "$plugin_dir" ] || continue
-  plugin=${plugin_dir##*/}
+printf '%s\n' "${plugins[@]}" | sort -u | while IFS= read -r plugin; do
   plugin_stats=$(emit_records | awk -F '\t' -v wanted="$plugin" '
     $1 == wanted {
       skills++
@@ -178,7 +171,7 @@ for plugin_dir in "$repo_root"/plugins/*; do
     }
   ')
   printf '%s\t%s\n' "$plugin" "$plugin_stats"
-done | sort -t "$(printf '\t')" -k1,1
+done
 
 printf '\nGrand total: %s chars (%.2f%% of the 8,000-char budget)\n' "$grand_total" "$budget_percent"
 

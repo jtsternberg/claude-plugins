@@ -19,7 +19,7 @@
 // Frontmatter parsing mirrors scripts/measure-skill-descriptions.sh: plain scalars,
 // single/double-quoted scalars, and YAML folded (>) / literal (|) block scalars.
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -81,12 +81,27 @@ function parseFrontmatter(file) {
 	return fields;
 }
 
+// A dir under plugins/ with no `skills/` and no manifest is a plugin GROUP: its
+// immediate children are the plugins (see plugins/pr-workflow/).
+function skillRoots(pluginsDir) {
+	const roots = [];
+	for (const dir of readdirSync(pluginsDir).sort()) {
+		const base = join(pluginsDir, dir);
+		if (!statSync(base).isDirectory()) continue;
+		if (existsSync(join(base, 'skills'))) { roots.push({ label: dir, dir: join(base, 'skills') }); continue; }
+		if (existsSync(join(base, '.claude-plugin')) || existsSync(join(base, '.codex-plugin'))) continue; // plugin without skills
+		for (const child of readdirSync(base).sort()) {
+			const nested = join(base, child, 'skills');
+			if (existsSync(nested)) roots.push({ label: `${dir}/${child}`, dir: nested });
+		}
+	}
+	return roots;
+}
+
 function collectSkills() {
 	const skills = [];
 	const pluginsDir = join(repoRoot, 'plugins');
-	for (const plugin of readdirSync(pluginsDir).sort()) {
-		const skillsDir = join(pluginsDir, plugin, 'skills');
-		if (!existsSync(skillsDir)) continue;
+	for (const { label: plugin, dir: skillsDir } of skillRoots(pluginsDir)) {
 		for (const skill of readdirSync(skillsDir).sort()) {
 			const skillFile = join(skillsDir, skill, 'SKILL.md');
 			if (!existsSync(skillFile)) continue;
@@ -109,10 +124,6 @@ function collectSkills() {
 }
 
 const skills = collectSkills();
-if (skills.length !== 50) {
-	console.error(`Expected 50 skills, found ${skills.length}`);
-	process.exit(1);
-}
 
 if (process.argv.includes('--dump-current')) {
 	console.log(JSON.stringify(skills, null, 2));

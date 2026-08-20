@@ -79,6 +79,12 @@ done
 plugin="${skill_ref%%:*}"
 skill="${skill_ref#*:}"
 source_dir="$repo_root/plugins/$plugin/skills/$skill"
+# Plugins in a group dir live one level deeper (plugins/<group>/<plugin>/skills/<skill>).
+if [ ! -d "$source_dir" ]; then
+	for candidate in "$repo_root"/plugins/*/"$plugin"/skills/"$skill"; do
+		[ -d "$candidate" ] && source_dir="$candidate" && break
+	done
+fi
 dest="$skills_dir/$skill"
 marker="$dest/.claude-plugins-standalone"
 
