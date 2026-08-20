@@ -57,7 +57,8 @@ if have node; then
 	# Discovered, not listed: a hardcoded list silently omits new suites. The handoff
 	# bash suite shipped with 14 passing tests that CI never ran, because the globs
 	# below used to name one plugin each.
-	for t in plugins/*/skills/*/tests/*.test.mjs plugins/*/tests/*.test.mjs; do
+	for t in plugins/*/skills/*/tests/*.test.mjs plugins/*/tests/*.test.mjs \
+	         plugins/*/*/skills/*/tests/*.test.mjs plugins/*/*/tests/*.test.mjs; do
 		[[ -f "$t" ]] || continue
 		run "node: ${t#plugins/}" node --test "$t"
 	done
@@ -71,9 +72,9 @@ fi
 
 if have bash; then
 	CMUX_OK=0; have cmux && CMUX_OK=1
-	for t in plugins/*/tests/*_test.sh; do
+	for t in plugins/*/tests/*_test.sh plugins/*/*/tests/*_test.sh; do
 		[[ -f "$t" ]] || continue
-		plugin="${t#plugins/}"; plugin="${plugin%%/*}"
+		plugin="${t#plugins/}"; plugin="${plugin%/tests/*}"
 		name="$plugin: $(basename "$t" _test.sh)"
 		if [[ $CMUX_OK -eq 0 ]] && grep -q "command -v cmux" "$t" 2>/dev/null; then
 			skip "$name" "needs cmux"
@@ -95,14 +96,15 @@ PY="$HOME/.venvs/genai/bin/python3"
 # hardcoded-list failure the node section warns about, one language over.
 # Glob by path, never by plugin name.
 if [[ -n "$PY" ]]; then
-	for d in plugins/*/skills/*/tests plugins/*/tests; do
+	for d in plugins/*/skills/*/tests plugins/*/tests \
+	         plugins/*/*/skills/*/tests plugins/*/*/tests; do
 		[[ -d "$d" ]] || continue
 		compgen -G "$d/test_*.py" >/dev/null || continue
 
-		plugin="${d#plugins/}"; plugin="${plugin%%/*}"
+		plugin="${d#plugins/}"; plugin="${plugin%%/skills/*}"; plugin="${plugin%/tests}"
 		sub="$(basename "$(dirname "$d")")"
 		label="python: $plugin"
-		[[ "$sub" != "$plugin" ]] && label="python: $plugin/$sub"
+		[[ "$sub" != "$(basename "$plugin")" ]] && label="python: $plugin/$sub"
 
 		# `unittest discover` collects only unittest.TestCase subclasses. A
 		# pytest-style module of bare `def test_x()` functions would be silently
