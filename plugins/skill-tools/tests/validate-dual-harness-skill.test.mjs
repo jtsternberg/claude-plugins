@@ -13,7 +13,7 @@ const userFacingDocs = [
 	agents,
 	fs.readFileSync(path.join(REPO, 'plugins/beads-workflow/README.md'), 'utf8'),
 	fs.readFileSync(path.join(REPO, 'plugins/git-commits/README.md'), 'utf8'),
-	fs.readFileSync(path.join(REPO, 'plugins/pr-workflow/README.md'), 'utf8'),
+	fs.readFileSync(path.join(REPO, 'plugins/pr-workflow/bundle/README.md'), 'utf8'),
 	fs.readFileSync(path.join(REPO, 'plugins/hotline/README.md'), 'utf8'),
 	fs.readFileSync(path.join(REPO, 'plugins/skill-tools/README.md'), 'utf8'),
 ].join('\n');
@@ -50,7 +50,7 @@ test('user-facing Codex examples distinguish native plugins from standalone skil
 	assert.doesNotMatch(userFacingDocs, /Codex[^\n]*`?\$<(?:frontmatter-name|skill-name|skill)>/);
 	for (const invocation of [
 		'$skill-tools:validate-dual-harness-skill',
-		'$pr-workflow:address-pr-comments',
+		'$address-pr-comments:address-pr-comments',
 		'$hotline:<skill-name>',
 		'$tackle-epic',
 		'$commit-staged',

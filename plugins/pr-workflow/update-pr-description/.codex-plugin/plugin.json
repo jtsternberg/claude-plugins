@@ -1,0 +1,32 @@
+{
+  "name": "update-pr-description",
+  "version": "1.0.0",
+  "description": "Regenerate a pull request's description from its current diff and commits.",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  },
+  "repository": "https://github.com/jtsternberg/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "code-review"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Update PR Description",
+    "shortDescription": "Regenerate a pull request's description from its current diff and commits.",
+    "developerName": "JT Sternberg",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/jtsternberg/claude-plugins",
+    "defaultPrompt": [
+      "Use $update-pr-description:update-pr-description to revise a pull request description from recent changes."
+    ]
+  }
+}

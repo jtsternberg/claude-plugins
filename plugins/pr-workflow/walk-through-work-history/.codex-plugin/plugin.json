@@ -1,0 +1,32 @@
+{
+  "name": "walk-through-work-history",
+  "version": "1.0.0",
+  "description": "Explain how work progressed — PR, branch, or project — one page at a time.",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  },
+  "repository": "https://github.com/jtsternberg/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "code-review"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Walk Through Work History",
+    "shortDescription": "Explain how work progressed — PR, branch, or project — one page at a time.",
+    "developerName": "JT Sternberg",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/jtsternberg/claude-plugins",
+    "defaultPrompt": [
+      "Use $walk-through-work-history:walk-through-work-history to explain how work progressed one page at a time."
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "watch-pr-then-action",
+  "version": "1.0.0",
+  "description": "Watch a PR for events (CI, reviews, ready-for-review) and run a follow-up action.",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  },
+  "repository": "https://github.com/jtsternberg/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "code-review"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Watch PR Then Action",
+    "shortDescription": "Watch a PR for events (CI, reviews, ready-for-review) and run a follow-up action.",
+    "developerName": "JT Sternberg",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/jtsternberg/claude-plugins",
+    "defaultPrompt": [
+      "Use $watch-pr-then-action:watch-pr-then-action to poll a GitHub PR and then run a follow-up action."
+    ]
+  }
+}

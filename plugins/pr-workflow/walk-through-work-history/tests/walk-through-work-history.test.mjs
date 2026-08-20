@@ -11,10 +11,9 @@ const openai = fs.readFileSync(path.join(skillRoot, 'agents', 'openai.yaml'), 'u
 const readme = fs.readFileSync(path.join(pluginRoot, 'README.md'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf8'));
 
-test('packages the walkthrough as a versioned pr-workflow skill', () => {
-	assert.equal(manifest.name, 'pr-workflow');
-	assert.equal(manifest.version, '1.8.2');
-	assert.match(manifest.description, /history walkthroughs/);
+test('packages the walkthrough as a versioned walk-through-work-history plugin', () => {
+	assert.equal(manifest.name, 'walk-through-work-history');
+	assert.equal(manifest.version, '1.0.0');
 	assert.match(skill, /^---\nname: walk-through-work-history\ndescription: .+\n---\n/);
 	assert.match(skill, /Ready to \*\*turn the page\*\*\?/);
 });
@@ -27,8 +26,8 @@ test('resolves the GitHub reference in both Claude and Codex', () => {
 });
 
 test('ships Codex metadata with plugin-qualified invocation', () => {
-	assert.match(openai, /default_prompt: "Use \$pr-workflow:walk-through-work-history /);
+	assert.match(openai, /default_prompt: "Use \$walk-through-work-history:walk-through-work-history /);
 	assert.match(openai, /allow_implicit_invocation: true/);
-	assert.match(readme, /\/pr-workflow:walk-through-work-history/);
-	assert.match(readme, /\$pr-workflow:walk-through-work-history/);
+	assert.match(readme, /\/walk-through-work-history:walk-through-work-history/);
+	assert.match(readme, /\$walk-through-work-history:walk-through-work-history/);
 });

@@ -1,0 +1,33 @@
+{
+  "name": "address-pr-comments",
+  "version": "1.0.0",
+  "description": "Address PR review comments — automated resolution or human-in-the-loop drafts.",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  },
+  "repository": "https://github.com/jtsternberg/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "code-review"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Address PR Comments",
+    "shortDescription": "Address PR review comments — automated resolution or human-in-the-loop drafts.",
+    "developerName": "JT Sternberg",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/jtsternberg/claude-plugins",
+    "defaultPrompt": [
+      "Use $address-pr-comments:address-pr-comments to resolve review feedback.",
+      "Use $address-pr-comments:address-pr-comments-human to draft feedback fixes for approval before pushing."
+    ]
+  }
+}

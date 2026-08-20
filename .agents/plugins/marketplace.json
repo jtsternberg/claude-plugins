@@ -56,12 +56,55 @@
       "category": "Coding"
     },
     {
+      "name": "address-pr-comments",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pr-workflow/address-pr-comments"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "qa-walkthrough-pr",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pr-workflow/qa-walkthrough-pr"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "update-pr-description",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pr-workflow/update-pr-description"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "walk-through-work-history",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pr-workflow/walk-through-work-history"
+      },
+      "category": "Coding"
+    },
+    {
+      "name": "watch-pr-then-action",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pr-workflow/watch-pr-then-action"
+      },
+      "category": "Coding"
+    },
+    {
       "name": "pr-workflow",
       "source": {
         "source": "local",
-        "path": "./plugins/pr-workflow"
+        "path": "./plugins/pr-workflow/bundle"
       },
-      "category": "Coding"
+      "category": "Coding",
+      "policy": {
+        "installation": "NOT_AVAILABLE"
+      }
     },
     {
       "name": "skill-tools",

@@ -13,6 +13,7 @@
   ],
   "notAvailable": [
     "publish-insights",
-    "workspace-status"
+    "workspace-status",
+    "pr-workflow"
   ]
 }

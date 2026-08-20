@@ -1,0 +1,33 @@
+{
+  "name": "qa-walkthrough-pr",
+  "version": "1.0.0",
+  "description": "Guide manual QA of a pull request with a generated walkthrough and checklist.",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  },
+  "repository": "https://github.com/jtsternberg/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "code-review",
+    "qa"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "QA Walkthrough PR",
+    "shortDescription": "Guide manual QA of a pull request with a generated walkthrough and checklist.",
+    "developerName": "JT Sternberg",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/jtsternberg/claude-plugins",
+    "defaultPrompt": [
+      "Use $qa-walkthrough-pr:qa-walkthrough-pr to guide manual PR testing."
+    ]
+  }
+}
