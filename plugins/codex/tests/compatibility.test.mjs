@@ -48,11 +48,36 @@ function componentPaths(value) {
 	return [];
 }
 
+// Plugin roots, one level of group nesting deep: a dir under plugins/ with no
+// manifest of its own is a plugin GROUP whose immediate children are plugins.
+function pluginRoots(pluginsRoot) {
+	const hasManifest = dir => fs.existsSync(path.join(dir, '.claude-plugin/plugin.json')) ||
+		fs.existsSync(path.join(dir, '.codex-plugin/plugin.json'));
+	const roots = [];
+	for (const dir of directories(pluginsRoot)) {
+		const base = path.join(pluginsRoot, dir);
+		if (hasManifest(base)) { roots.push(base); continue; }
+		for (const child of directories(base)) {
+			const nested = path.join(base, child);
+			if (hasManifest(nested)) roots.push(nested);
+		}
+	}
+	return roots;
+}
+
+// A plugin dir named `bundle` inside a plugin group carries the GROUP's name: the
+// bundle is the group's headline plugin, the dependency-only entry point that keeps
+// the pre-split install command working (see plugins/pr-workflow/bundle).
+function expectedManifestName(pluginRoot) {
+	const base = path.basename(pluginRoot);
+	return base === 'bundle' ? path.basename(path.dirname(pluginRoot)) : base;
+}
+
 function validateManifest(file) {
 	const manifest = readJson(file);
 	const pluginRoot = path.dirname(path.dirname(file));
 	assert.match(manifest.name, /^[a-z0-9]+(?:-[a-z0-9]+)*$/, `${file}: name must be kebab-case`);
-	assert.equal(manifest.name, path.basename(pluginRoot), `${file}: name must match its directory`);
+	assert.equal(manifest.name, expectedManifestName(pluginRoot), `${file}: name must match its directory`);
 	assert.match(manifest.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, `${file}: version must be semver`);
 	assert.equal(typeof manifest.description, 'string', `${file}: description is required`);
 	assert.ok(manifest.description.trim(), `${file}: description cannot be empty`);
@@ -69,51 +94,80 @@ function validateManifest(file) {
 }
 
 function manifestPlugins(pluginsRoot, manifestDir) {
-	return directories(pluginsRoot).filter(name =>
-		fs.existsSync(path.join(pluginsRoot, name, manifestDir, 'plugin.json'))
-	);
+	const names = [];
+	for (const dir of directories(pluginsRoot)) {
+		const flat = path.join(pluginsRoot, dir, manifestDir, 'plugin.json');
+		if (fs.existsSync(flat)) {
+			names.push(readJson(flat).name);
+			continue;
+		}
+		// No manifest at this level: treat as a group dir and scan one level deeper.
+		for (const child of directories(path.join(pluginsRoot, dir))) {
+			const nested = path.join(pluginsRoot, dir, child, manifestDir, 'plugin.json');
+			if (fs.existsSync(nested)) names.push(readJson(nested).name);
+		}
+	}
+	return names.sort();
 }
 
-function catalogEntries(file) {
+function catalogEntries(file, root) {
 	const catalog = readJson(file);
 	assert.ok(Array.isArray(catalog.plugins), `${file}: plugins must be an array`);
 	return catalog.plugins.map(entry => {
 		const source = typeof entry.source === 'string' ? entry.source : entry.source?.path;
-		assert.equal(source, `./plugins/${entry.name}`, `${file}: ${entry.name} has a mismatched source path`);
-		return entry.name;
+		assert.ok(source && source.startsWith('./plugins/'), `${file}: ${entry.name} source must live under ./plugins/`);
+		const sourceDir = path.join(root, source);
+		const manifestPath = ['.claude-plugin', '.codex-plugin']
+			.map(d => path.join(sourceDir, d, 'plugin.json'))
+			.find(p => fs.existsSync(p));
+		assert.ok(manifestPath, `${file}: ${entry.name} source ${source} has no plugin manifest`);
+		assert.equal(readJson(manifestPath).name, entry.name, `${file}: ${entry.name} has a mismatched manifest name at ${source}`);
+		return { name: entry.name, source };
 	});
 }
 
 function validateCatalogs(root) {
 	const pluginsRoot = path.join(root, 'plugins');
-	const legacy = catalogEntries(path.join(root, '.claude-plugin/marketplace.json'));
-	const native = catalogEntries(path.join(root, '.agents/plugins/marketplace.json'));
-	const legacySet = new Set(legacy);
-	const nativeSet = new Set(native);
-	assert.deepEqual([...legacySet].sort(), legacy.slice().sort(), 'legacy catalog contains duplicate names');
-	assert.deepEqual([...nativeSet].sort(), native.slice().sort(), 'native catalog contains duplicate names');
+	const legacy = catalogEntries(path.join(root, '.claude-plugin/marketplace.json'), root);
+	const native = catalogEntries(path.join(root, '.agents/plugins/marketplace.json'), root);
+	const legacyNames = legacy.map(entry => entry.name);
+	const nativeNames = native.map(entry => entry.name);
+	const legacySet = new Set(legacyNames);
+	const nativeSet = new Set(nativeNames);
+	assert.deepEqual([...legacySet].sort(), legacyNames.slice().sort(), 'legacy catalog contains duplicate names');
+	assert.deepEqual([...nativeSet].sort(), nativeNames.slice().sort(), 'native catalog contains duplicate names');
 	// The legacy catalog is exactly the Claude-manifest-bearing plugins.
-	assert.deepEqual(legacy.slice().sort(), manifestPlugins(pluginsRoot, '.claude-plugin'),
+	assert.deepEqual(legacyNames.slice().sort(), manifestPlugins(pluginsRoot, '.claude-plugin'),
 		'legacy catalog must list exactly the .claude-plugin manifest-bearing plugins');
 	// The Codex-native catalog is a GENERATED full-inventory catalog (ADR-002):
 	// it must offer every legacy plugin — Codex reads their .claude-plugin
 	// manifest by fallback — plus any native-only extras.
-	for (const name of legacy) {
+	for (const name of legacyNames) {
 		assert.ok(nativeSet.has(name), `native catalog is missing legacy plugin ${name}`);
 	}
 	// A native-only extra (in the native catalog, absent from legacy) has no
 	// Claude manifest to fall back to, so it must ship its own .codex-plugin one.
 	const codexManifest = new Set(manifestPlugins(pluginsRoot, '.codex-plugin'));
-	for (const name of native) {
+	for (const name of nativeNames) {
 		if (legacySet.has(name)) continue;
 		assert.ok(codexManifest.has(name),
 			`native-only catalog entry ${name} must ship a .codex-plugin/plugin.json`);
 	}
 	// Every native entry must resolve to an existing plugin directory.
-	for (const name of native) {
-		assert.ok(fs.existsSync(path.join(pluginsRoot, name)),
-			`native catalog entry ${name} has no plugin directory`);
+	for (const entry of native) {
+		assert.ok(fs.existsSync(path.join(root, entry.source)),
+			`native catalog entry ${entry.name} has no plugin directory at ${entry.source}`);
 	}
+}
+
+function pluginRootFor(pluginsRoot, file) {
+	let dir = path.dirname(file);
+	while (dir.length > pluginsRoot.length) {
+		if (fs.existsSync(path.join(dir, '.claude-plugin', 'plugin.json')) ||
+		    fs.existsSync(path.join(dir, '.codex-plugin', 'plugin.json'))) return dir;
+		dir = path.dirname(dir);
+	}
+	return path.join(pluginsRoot, path.relative(pluginsRoot, file).split(path.sep)[0]);
 }
 
 function runtimeReferenceErrors(pluginsRoot) {
@@ -121,7 +175,7 @@ function runtimeReferenceErrors(pluginsRoot) {
 	for (const file of filesBelow(pluginsRoot)) {
 		const relative = path.relative(pluginsRoot, file);
 		if (!(file.endsWith('/SKILL.md') || file.endsWith('/hooks.json') || /(^|\/)commands\/[^/]+\.md$/.test(relative))) continue;
-		const pluginRoot = path.join(pluginsRoot, relative.split(path.sep)[0]);
+		const pluginRoot = pluginRootFor(pluginsRoot, file);
 		const skillRoot = file.endsWith('/SKILL.md') ? path.dirname(file) : pluginRoot;
 		const text = fs.readFileSync(file, 'utf8');
 		const refs = text.matchAll(/(\$\{CLAUDE_PLUGIN_ROOT\}|\$PLUGIN_ROOT|\$GIT_TREE_ROOT|\$SKILL_DIR)\/([A-Za-z0-9._/-]+)/g);
@@ -190,7 +244,9 @@ test('catalog guard requires full Codex inventory and native manifests for extra
 		for (const [name, manifestDir] of [['legacy-only', '.claude-plugin'], ['codex-only', '.codex-plugin']]) {
 			const dir = path.join(root, 'plugins', name, manifestDir);
 			fs.mkdirSync(dir, { recursive: true });
-			fs.writeFileSync(path.join(dir, 'plugin.json'), '{}');
+			// Catalog entries are now matched to their manifest's `name`, not to the
+			// directory name, so the fixture manifests have to carry one.
+			fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify({ name }));
 		}
 		fs.writeFileSync(path.join(root, '.claude-plugin/marketplace.json'), JSON.stringify({
 			plugins: [{ name: 'legacy-only', source: './plugins/legacy-only' }],
@@ -233,19 +289,23 @@ test('plugins that ship both manifests keep versions aligned', () => {
 	// now appears in the native catalog too (served by .claude-plugin fallback), so
 	// the version-alignment obligation applies only to plugins that actually ship
 	// BOTH a .claude-plugin and a .codex-plugin manifest. See docs/release.md §1.
-	const dualPublished = directories(PLUGINS).filter(name =>
-		fs.existsSync(path.join(PLUGINS, name, '.claude-plugin/plugin.json')) &&
-		fs.existsSync(path.join(PLUGINS, name, '.codex-plugin/plugin.json')),
-	);
+	// Enumerated via pluginRoots so nested group-dir plugins are covered too — a flat
+	// `plugins/*` scan would silently skip every child plugin instead of checking it.
+	const dualPublished = new Map(pluginRoots(PLUGINS)
+		.filter(root =>
+			fs.existsSync(path.join(root, '.claude-plugin/plugin.json')) &&
+			fs.existsSync(path.join(root, '.codex-plugin/plugin.json')),
+		)
+		.map(root => [readJson(path.join(root, '.claude-plugin/plugin.json')).name, root]));
 
 	for (const [name, rationale] of DUAL_PUBLISHED_VERSION_EXCEPTIONS) {
-		assert.ok(dualPublished.includes(name), `version exception is not dual-published: ${name}`);
+		assert.ok(dualPublished.has(name), `version exception is not dual-published: ${name}`);
 		assert.ok(rationale.trim().length >= 20, `version exception needs a concrete rationale: ${name}`);
 	}
 
-	for (const name of dualPublished) {
-		const claudeVersion = readJson(path.join(PLUGINS, name, '.claude-plugin/plugin.json')).version;
-		const codexVersion = readJson(path.join(PLUGINS, name, '.codex-plugin/plugin.json')).version;
+	for (const [name, root] of dualPublished) {
+		const claudeVersion = readJson(path.join(root, '.claude-plugin/plugin.json')).version;
+		const codexVersion = readJson(path.join(root, '.codex-plugin/plugin.json')).version;
 		if (DUAL_PUBLISHED_VERSION_EXCEPTIONS.has(name)) {
 			assert.notEqual(claudeVersion, codexVersion, `remove stale version exception for ${name}`);
 			continue;
