@@ -24,11 +24,11 @@ export const RISK_BY_SKILL = new Map([
 	['hotline:hotline-whoami', ['read-only-or-advisory', 'Reports local caller identity without changing state.']],
 	['mac-caffeinate:caffeinate-computer', ['local-side-effect', 'Starts a local macOS caffeinate process.']],
 	['paperclip:paperclip', ['local-side-effect', 'Controls a locally running Paperclip service.']],
-	['pr-workflow:address-pr-comments-human', ['local-side-effect', 'Drafts PR feedback fixes locally for human approval.']],
-	['pr-workflow:address-pr-comments', ['external-side-effect', 'May push commits and reply to GitHub PR comments.']],
-	['pr-workflow:qa-walkthrough-pr', ['local-side-effect', 'Creates and updates local Beads QA issues.']],
-	['pr-workflow:update-pr-description', ['external-side-effect', 'Edits GitHub pull request metadata.']],
-	['pr-workflow:watch-pr-then-action', ['external-side-effect', 'Polls GitHub and then performs an arbitrary follow-up action.']],
+	['address-pr-comments:address-pr-comments-human', ['local-side-effect', 'Drafts PR feedback fixes locally for human approval.']],
+	['address-pr-comments:address-pr-comments', ['external-side-effect', 'May push commits and reply to GitHub PR comments.']],
+	['qa-walkthrough-pr:qa-walkthrough-pr', ['local-side-effect', 'Creates and updates local Beads QA issues.']],
+	['update-pr-description:update-pr-description', ['external-side-effect', 'Edits GitHub pull request metadata.']],
+	['watch-pr-then-action:watch-pr-then-action', ['external-side-effect', 'Polls GitHub and then performs an arbitrary follow-up action.']],
 	['session-tools:note-to-self', ['local-side-effect', 'Records a durable conversation breadcrumb.']],
 	['session-tools:self-recap', ['read-only-or-advisory', 'Summarizes the current session from context in view; reads and reports only.']],
 	['session-tools:sessions-catch-up', ['read-only-or-advisory', 'Reads another transcript and reports a briefing.']],
@@ -78,6 +78,20 @@ function openaiPolicyBoolean(text) {
 	return match[1] === 'true';
 }
 
+function pluginNameFor(pluginsRoot, skillFile) {
+	let dir = path.dirname(skillFile);
+	while (dir.length > pluginsRoot.length) {
+		for (const manifestDir of ['.claude-plugin', '.codex-plugin']) {
+			const manifest = path.join(dir, manifestDir, 'plugin.json');
+			if (!fs.existsSync(manifest)) continue;
+			const name = JSON.parse(fs.readFileSync(manifest, 'utf8')).name;
+			if (name) return name;
+		}
+		dir = path.dirname(dir);
+	}
+	return path.relative(pluginsRoot, skillFile).split(path.sep)[0];
+}
+
 export function collectExplicitInvocationPolicy(repo = DEFAULT_REPO) {
 	const pluginsRoot = path.join(repo, 'plugins');
 	const skills = filesBelow(pluginsRoot)
@@ -86,7 +100,7 @@ export function collectExplicitInvocationPolicy(repo = DEFAULT_REPO) {
 		.map((skillFile) => {
 			const text = fs.readFileSync(skillFile, 'utf8');
 			const frontmatter = parseFrontmatter(text);
-			const plugin = path.relative(pluginsRoot, skillFile).split(path.sep)[0];
+			const plugin = pluginNameFor(pluginsRoot, skillFile);
 			const metadataFile = path.join(path.dirname(skillFile), 'agents/openai.yaml');
 			const metadata = fs.existsSync(metadataFile) ? fs.readFileSync(metadataFile, 'utf8') : '';
 			const key = `${plugin}:${frontmatter.name}`;

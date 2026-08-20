@@ -25,6 +25,13 @@ plugins/
     └── hooks/                   # Hook scripts (optional)
 ```
 
+A directory under `plugins/` without its own `.claude-plugin/plugin.json` is a
+**plugin group**: each of its immediate subdirectories is a plugin of the normal
+shape above (see `plugins/pr-workflow/`). A group typically also holds a
+`bundle/` plugin — a manifest with only `name` + `dependencies` — so one install
+brings in every child. Tooling resolves a plugin root as the nearest directory
+containing a plugin manifest; never assume `plugins/<name>` is a plugin root.
+
 Each skill's `SKILL.md` belongs at `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`. That path is what makes the skill discoverable in autocomplete. Claude Code invokes an installed plugin skill as `/<plugin-name>:<frontmatter-name>`; Codex invokes it as `$<plugin-name>:<frontmatter-name>`. Use the bare frontmatter name only when referring to the skill in prose. Keep `.claude-plugin/plugin.json` at the plugin root; everything a skill needs (its `SKILL.md` and any `scripts/`) sits together under its own `skills/<skill-name>/` directory.
 
 ## Dual-Harness Skill Contract
@@ -70,10 +77,13 @@ restatement — two sources for one rule is itself entry-one's failure mode.
 5. Register the plugin in `.claude-plugin/marketplace.json` by adding an entry to the `plugins` array
 6. Update `README.md` with documentation for the new plugin
 
+For a set of related but independent skills, prefer a plugin group of single-skill plugins plus a bundle (see `plugins/pr-workflow/`) over one multi-skill plugin.
+
 To confirm a new skill sits where discovery expects it, check that it matches the others:
 
 ```bash
 find plugins -name SKILL.md    # every result should be plugins/<plugin>/skills/<skill>/SKILL.md
+                               # or plugins/<group>/<plugin>/skills/<skill>/SKILL.md
 ```
 
 ## Sharing Code or Docs Between Sibling Skills
@@ -234,6 +244,10 @@ ran. Match one of these paths and it is covered automatically:
 | node | `plugins/<plugin>/tests/<name>.test.mjs` | `node --test` |
 | python | `plugins/<plugin>/skills/<skill>/tests/test_*.py` | `unittest discover` |
 | python | `plugins/<plugin>/tests/test_*.py` | `unittest discover` |
+
+Plugins inside a plugin group match the same five paths one level deeper —
+`plugins/<group>/<plugin>/tests/<name>_test.sh` and so on. The runner globs both
+depths; a suite label for a nested plugin reads `group/child`.
 
 Python suites must be **stdlib `unittest`** — `unittest discover` collects only
 `unittest.TestCase` subclasses, so a pytest-style module of bare `def test_x()`

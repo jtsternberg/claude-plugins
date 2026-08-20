@@ -330,6 +330,17 @@ test('manifest guard rejects unsafe component paths and validates every manifest
 			name: 'bad-plugin', version: '1.0.0', description: 'fixture', skills: './skills/',
 		}));
 		assert.doesNotThrow(() => validateManifest(file));
+
+		// A group's `bundle/` dir takes the GROUP's name, not "bundle" — one fixture per
+		// direction, because the real tree only ever exercises the accepting one.
+		const bundleDir = path.join(root, 'my-group', 'bundle', '.claude-plugin');
+		fs.mkdirSync(bundleDir, { recursive: true });
+		const bundleFile = path.join(bundleDir, 'plugin.json');
+		const bundle = { version: '1.0.0', description: 'fixture' };
+		fs.writeFileSync(bundleFile, JSON.stringify({ ...bundle, name: 'my-group' }));
+		assert.doesNotThrow(() => validateManifest(bundleFile));
+		fs.writeFileSync(bundleFile, JSON.stringify({ ...bundle, name: 'bundle' }));
+		assert.throws(() => validateManifest(bundleFile), /name must match its directory/);
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}

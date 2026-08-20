@@ -131,6 +131,12 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   would spin-loop in production. Give the env var one case that runs with it unset,
   and prove "waited the whole budget" from the timeout branch's own message, which
   the early-give-up branch cannot produce. (claude-plugins-fhn3)
+- **A count guard is derived from the tree, or it is a mask.** A hardcoded
+  expected-count check the tree has outgrown fails before every check behind it: the
+  50-skill guard in `compare-skill-descriptions.mjs` hid a 21-skill-stale proposals
+  file, and the 60-skill guard in `measure-skill-descriptions.sh` suppressed the
+  report it was protecting. Derive the count, or drop the guard and let the report
+  state the number. (claude-plugins-nwtk, -lvj0)
 - **A suite is not green until it is green on Linux.** The ubuntu runner is the
   only Linux check, and a macOS-green suite hid a red CI for the entire
   terminal.paste rework — portability bugs (BSD-only `stat`, `getppid` reparenting

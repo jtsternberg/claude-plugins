@@ -8,10 +8,10 @@ catalogs, so install from the column that matches the client you are using.
 
 **Catalog probes:** Claude Code 2.1.226 and Codex CLI 0.147.0
 
-The clean probes found 27 entries in the Claude Code marketplace and exactly
-three entries in the Codex-native marketplace: `codex`, `pr-workflow`, and
-`hotline`. Together those catalogs name 28 plugins. Recheck this guide after a
-client upgrade or a catalog change.
+The clean probes confirmed that Claude Code and Codex resolve separate catalogs
+and that Codex offers only a subset. The matrix below is the current inventory —
+33 entries in the Claude Code catalog, 34 names across both. Recheck this guide
+after a client upgrade or a catalog change.
 
 ## Install and invoke
 
@@ -22,11 +22,11 @@ its skill's frontmatter `name`:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
-claude plugin install pr-workflow@jtsternberg
+claude plugin install qa-walkthrough-pr@jtsternberg
 ```
 
 ```text
-/pr-workflow:qa-walkthrough-pr
+/qa-walkthrough-pr:qa-walkthrough-pr
 ```
 
 The invocation form is `/<plugin>:<frontmatter-name>`; a skill directory name
@@ -39,7 +39,7 @@ plugins in the matrix:
 
 ```bash
 codex plugin marketplace add jtsternberg/claude-plugins
-codex plugin add pr-workflow@jtsternberg
+codex plugin add qa-walkthrough-pr@jtsternberg
 ```
 
 Open `/plugins` in Codex to browse configured marketplaces. Start a new Codex
@@ -47,7 +47,7 @@ session after installing or updating a plugin, then invoke a skill with
 `$<plugin>:<frontmatter-name>`:
 
 ```text
-$pr-workflow:qa-walkthrough-pr
+$qa-walkthrough-pr:qa-walkthrough-pr
 ```
 
 For example, the `hotline-ringing` frontmatter name is invoked as
@@ -140,7 +140,12 @@ state, or user configuration. Those constraints are noted in the last column.
 | [mac-caffeinate](../plugins/mac-caffeinate) | Available | Not offered | macOS only; uses the system `caffeinate` utility. |
 | [obsidian-cli](../plugins/obsidian-cli) | Available | Not offered | Requires Obsidian CLI v1.12+ and a local vault. |
 | [paperclip](../plugins/paperclip) | Available | Not offered | Requires a locally running Paperclip instance and CLI. |
-| [pr-workflow](../plugins/pr-workflow) | Available | Available | Individual workflows may require an open PR, Git, GitHub CLI authentication, or Beads. |
+| [address-pr-comments](../plugins/pr-workflow/address-pr-comments) | Available | Available | Requires an open PR and GitHub CLI authentication. |
+| [pr-workflow](../plugins/pr-workflow/bundle) | Available | Not offered | Dependency-only bundle for the five PR plugins; Codex does not resolve `dependencies`, so install the children there instead. |
+| [qa-walkthrough-pr](../plugins/pr-workflow/qa-walkthrough-pr) | Available | Available | Requires GitHub CLI authentication and the `bd` CLI for Beads work. |
+| [update-pr-description](../plugins/pr-workflow/update-pr-description) | Available | Available | Requires an open PR and GitHub CLI authentication. |
+| [walk-through-work-history](../plugins/pr-workflow/walk-through-work-history) | Available | Available | Requires GitHub CLI authentication for PR history. |
+| [watch-pr-then-action](../plugins/pr-workflow/watch-pr-then-action) | Available | Available | Requires GitHub CLI authentication; schedules a polling cron job. |
 | [publish-insights](../plugins/publish-insights) | Redirect | Not offered | Install from the separately maintained `jtsternberg/claude-usage-data` marketplace; it also requires Git, authenticated `gh`, and a Claude Code insights report. |
 | [research-tools](../plugins/research-tools) | Available | Not offered | Requires network access for source retrieval. A self-contained skill can instead be installed through the standalone guide. |
 | [session-tools](../plugins/session-tools) | Available | Not offered | Operates on Claude Code session transcripts. |

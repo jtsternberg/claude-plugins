@@ -38,15 +38,17 @@ node scripts/audit-explicit-invocation-policy.mjs
 
 Current summary:
 
-- Explicit-only skills: 33
-- Codex explicit-only policies: 33
+- Explicit-only skills: 34
+- Codex explicit-only policies: 34
 - coordination-side-effect: 1
 - external-side-effect: 4
 - local-side-effect: 19
-- read-only-or-advisory: 9
+- read-only-or-advisory: 10
 
 | Skill | Side-effect risk | Policy |
 | --- | --- | --- |
+| `address-pr-comments:address-pr-comments` | external-side-effect | explicit-only in both harnesses |
+| `address-pr-comments:address-pr-comments-human` | local-side-effect | explicit-only in both harnesses |
 | `beads-workflow:fix-findings-beads-tasks` | local-side-effect | explicit-only in both harnesses |
 | `beads-workflow:tackle-epic` | local-side-effect | explicit-only in both harnesses |
 | `bible:bible-nlt-lookup` | read-only-or-advisory | explicit-only in both harnesses |
@@ -64,12 +66,9 @@ Current summary:
 | `hotline:hotline-whoami` | read-only-or-advisory | explicit-only in both harnesses |
 | `mac-caffeinate:caffeinate-computer` | local-side-effect | explicit-only in both harnesses |
 | `paperclip:paperclip` | local-side-effect | explicit-only in both harnesses |
-| `pr-workflow:address-pr-comments-human` | local-side-effect | explicit-only in both harnesses |
-| `pr-workflow:address-pr-comments` | external-side-effect | explicit-only in both harnesses |
-| `pr-workflow:qa-walkthrough-pr` | local-side-effect | explicit-only in both harnesses |
-| `pr-workflow:update-pr-description` | external-side-effect | explicit-only in both harnesses |
-| `pr-workflow:watch-pr-then-action` | external-side-effect | explicit-only in both harnesses |
+| `qa-walkthrough-pr:qa-walkthrough-pr` | local-side-effect | explicit-only in both harnesses |
 | `session-tools:note-to-self` | local-side-effect | explicit-only in both harnesses |
+| `session-tools:self-recap` | read-only-or-advisory | explicit-only in both harnesses |
 | `session-tools:sessions-catch-up` | read-only-or-advisory | explicit-only in both harnesses |
 | `session-tools:sessions-fork` | read-only-or-advisory | explicit-only in both harnesses |
 | `session-tools:sessions-weekly-recap` | local-side-effect | explicit-only in both harnesses |
@@ -80,6 +79,8 @@ Current summary:
 | `skill-tools:review-slash-command` | read-only-or-advisory | explicit-only in both harnesses |
 | `skill-tools:validate-dual-harness-skill` | read-only-or-advisory | explicit-only in both harnesses |
 | `slides-presentation:create-slides-presentation` | local-side-effect | explicit-only in both harnesses |
+| `update-pr-description:update-pr-description` | external-side-effect | explicit-only in both harnesses |
+| `watch-pr-then-action:watch-pr-then-action` | external-side-effect | explicit-only in both harnesses |
 
 ## Live Codex probe
 

@@ -16,7 +16,7 @@ installing.
 
 ### Claude Code
 
-Add the marketplace and install any of its 28 listed plugins:
+Add the marketplace and install any of its 33 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
@@ -30,11 +30,13 @@ claude plugin list
 ```
 
 Invoke an installed skill as `/<plugin>:<skill-name>`, using the skill's
-frontmatter `name`. For example: `/pr-workflow:qa-walkthrough-pr`.
+frontmatter `name`. For example: `/qa-walkthrough-pr:qa-walkthrough-pr`.
 
 ### Codex
 
-Codex's native catalog currently offers `codex`, `pr-workflow`, and `hotline`:
+Codex's native catalog currently offers `codex`, `hotline`, and the five PR plugins
+(`address-pr-comments`, `qa-walkthrough-pr`, `update-pr-description`,
+`walk-through-work-history`, `watch-pr-then-action`):
 
 ```bash
 codex plugin marketplace add jtsternberg/claude-plugins
@@ -48,7 +50,7 @@ installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
 
 To install one self-contained repository skill instead of a whole plugin, see
 [standalone Codex skills](docs/codex/standalone-skills.md). For commands,
-updates, catalog scope, and all 29 plugin names, see the
+updates, catalog scope, and all 34 plugin names, see the
 [compatibility guide](docs/compatibility.md).
 
 ---
@@ -57,7 +59,7 @@ updates, catalog scope, and all 29 plugin names, see the
 
 These are selected plugins and workflows. The
 [support matrix](docs/compatibility.md#plugin-support-matrix) is the complete
-29-name inventory and the authority for harness availability.
+34-name inventory and the authority for harness availability.
 
 ### Skills
 
@@ -159,16 +161,26 @@ Skills for creating git commits from staged or unstaged files with AI-generated 
 
 **Install:** `claude plugin install git-commits@jtsternberg`
 
-#### 🔀 [pr-workflow](plugins/pr-workflow)
-Skills for managing pull requests: addressing comments, updating descriptions, watching PRs, and guiding QA.
+#### 🔀 [pr-workflow](plugins/pr-workflow) — plugin group
+Five single-purpose PR plugins, installable together or one at a time. `pr-workflow`
+itself is a [dependency-only bundle](plugins/pr-workflow/bundle): installing it installs
+all five, and you can then disable the bundle to drop the ones you don't want.
 
-**Skills:** `address-pr-comments`, `address-pr-comments-human`, `update-pr-description`, `watch-pr-then-action`, `qa-walkthrough-pr`
+| Plugin | Skills | Invocation |
+|---|---|---|
+| [address-pr-comments](plugins/pr-workflow/address-pr-comments) | `address-pr-comments`, `address-pr-comments-human` | `/address-pr-comments:address-pr-comments` |
+| [qa-walkthrough-pr](plugins/pr-workflow/qa-walkthrough-pr) | `qa-walkthrough-pr` | `/qa-walkthrough-pr:qa-walkthrough-pr` |
+| [update-pr-description](plugins/pr-workflow/update-pr-description) | `update-pr-description` | `/update-pr-description:update-pr-description` |
+| [walk-through-work-history](plugins/pr-workflow/walk-through-work-history) | `walk-through-work-history` | `/walk-through-work-history:walk-through-work-history` |
+| [watch-pr-then-action](plugins/pr-workflow/watch-pr-then-action) | `watch-pr-then-action` | `/watch-pr-then-action:watch-pr-then-action` |
 
-Available in both the Claude Code and Codex-native catalogs.
+Available in both the Claude Code and Codex-native catalogs. Codex does not resolve
+plugin dependencies, so the bundle is Claude-only there — install the children directly.
 
 **Supports:** [`CODE_CONVENTIONS`](#code_conventions-env-var) — loads project conventions before implementing fixes or writing PR descriptions.
 
-**Install:** `claude plugin install pr-workflow@jtsternberg` or `codex plugin add pr-workflow@jtsternberg`
+**Install:** `claude plugin install pr-workflow@jtsternberg` (all five), or one child at a
+time — e.g. `claude plugin install qa-walkthrough-pr@jtsternberg` / `codex plugin add qa-walkthrough-pr@jtsternberg`
 
 #### 🛠️ [skill-tools](plugins/skill-tools)
 Skills for creating and reviewing Claude Code skills, slash commands, and subagents.

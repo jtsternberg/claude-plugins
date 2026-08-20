@@ -74,11 +74,11 @@
   "mac-caffeinate/caffeinate-computer": "Keep the Mac awake during long-running agents, builds, or commands via macOS caffeinate.",
   "obsidian-cli/obsidian-cli": "Work with Obsidian vaults from the terminal via the official Obsidian CLI — notes, daily notes, tasks, properties, tags, bases, search, vault health, automation.",
   "paperclip/paperclip": "Operate a locally-running Paperclip instance via the paperclipai CLI.",
-  "pr-workflow/qa-walkthrough-pr": {
+  "pr-workflow/qa-walkthrough-pr/qa-walkthrough-pr": {
     "description": "Guided manual QA walkthrough of a PR or branch — test plan as a beads epic, stepped interactively.",
     "when_to_use": "Use when the user says \"QA this PR\", \"qa walkthrough\", \"manual testing\", \"walk me through testing\", \"QA my changes\", \"test my changes\", or wants to manually verify work before merging or pushing."
   },
-  "pr-workflow/watch-pr-then-action": "Poll a GitHub PR until a condition (Copilot done, marked ready, review submitted), then run a follow-up action.",
+  "pr-workflow/watch-pr-then-action/watch-pr-then-action": "Poll a GitHub PR until a condition (Copilot done, marked ready, review submitted), then run a follow-up action.",
   "research-tools/fetch-docs": {
     "description": "Pull a URL's raw content into a local file (optional HTML→markdown) so the authoritative source gets read instead of WebFetch's summary — docs pages, API references, READMEs, changelogs.",
     "when_to_use": "Use when the user says any of:\n\"fetch the docs\", \"fetch this URL raw\", \"fetch this page\",\n\"grab the raw page\", \"pull this URL without summarizing\",\n\"read this URL directly\", \"I want the full page, not a summary\",\n\"fetch-docs <url>\", \"read the actual docs at <url>\".\nAlso use proactively whenever you're about to call WebFetch on a docs\npage, API reference, README, or changelog — fetch-docs is strictly more\ngrounded because the full source lands in a file you can Read."

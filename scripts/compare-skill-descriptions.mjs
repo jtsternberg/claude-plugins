@@ -12,7 +12,9 @@
 //   node scripts/compare-skill-descriptions.mjs                # tables + totals for both budgets
 //   node scripts/compare-skill-descriptions.mjs --dump-current # emit current state as JSON
 //
-// Reads:  plugins/*/skills/*/SKILL.md (description, when_to_use, disable-model-invocation)
+// Reads:  plugins/*/skills/*/SKILL.md and plugins/*/*/skills/*/SKILL.md — the second
+//         depth covers plugin groups, whose children are the plugins (see plugins/pr-workflow/).
+//         (description, when_to_use, disable-model-invocation)
 //         docs/codex/proposed-descriptions.json — keyed by "plugin/skill"; each value is either
 //         a string (description only) or { "description": ..., "when_to_use": ... }.
 //
