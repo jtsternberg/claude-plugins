@@ -117,6 +117,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   live REPL no cache knew about, so the next dial opened a second one. If a record's
   inputs exist before the risky step, write the record first.
   (claude-plugins-xick, round 2 #4)
+- **Every Drive v3 file call carries `supportsAllDrives=true`; `files.export` and
+  the Docs API do not.** The gws rung of the gws skills omitted it on
+  `files.create/get/update`, so shared-drive folders and docs 404'd as "File not
+  found" while the ADC rung — which already had the flag — worked; the same gap, one
+  rung apart. When adding a Drive v3 file call to these skills put the flag in its
+  `--params`, but leave it off `files.export` and `documents.get/batchUpdate`, which
+  resolve shared-drive docs without it (verified live). (claude-plugins-wxh2, ddbb035)
 
 ## Testing
 
