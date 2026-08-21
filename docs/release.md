@@ -141,3 +141,7 @@ marketplace root as upgraded and, before any reinstall, replaced the 0.1.2
 cache with 0.1.3. The cached README contained the newly published content. A
 subsequent `codex plugin add codex@jtsternberg` returned the same 0.1.3 path,
 and a second marketplace upgrade reported no upgraded roots.
+
+The same transition was observed on Codex CLI 0.148.0 with
+`walk-through-work-history` 1.0.0 → 1.1.0, so the reconciliation behavior is not
+specific to 0.147.0.
