@@ -1,7 +1,7 @@
 {
   "name": "pr-workflow",
   "description": "PR workflow bundle: installs all five PR skills plugins (address-pr-comments, qa-walkthrough-pr, update-pr-description, walk-through-work-history, watch-pr-then-action).",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": { "name": "JT Sternberg", "url": "https://github.com/jtsternberg" },
   "dependencies": [
     "address-pr-comments",

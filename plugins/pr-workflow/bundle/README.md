@@ -58,6 +58,17 @@ bundle with an unsatisfied dependency — disable the bundle first there too.
 New children added to the bundle later arrive via `claude plugin update pr-workflow`
 followed by `/reload-plugins`; auto-update is off by default for non-Anthropic marketplaces.
 
+**Upgrading from pr-workflow 1.x:** `claude plugin update pr-workflow` alone leaves the
+bundle in a "failed to load — dependency not installed" state, because update does not
+install newly added dependencies. Either run `/reload-plugins` in a session to finish it,
+or install the children explicitly (`claude plugin install <child>@jtsternberg` for each),
+or take the clean path:
+
+```bash
+claude plugin uninstall pr-workflow@jtsternberg
+claude plugin install pr-workflow@jtsternberg   # installs the bundle + all 5 children
+```
+
 ## Example Usage
 
 Claude Code:
