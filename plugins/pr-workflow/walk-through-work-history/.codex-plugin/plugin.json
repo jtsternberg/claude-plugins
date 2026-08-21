@@ -1,6 +1,6 @@
 {
   "name": "walk-through-work-history",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Explain how work progressed — PR, branch, or project — one page at a time.",
   "author": {
     "name": "JT Sternberg",
@@ -11,7 +11,8 @@
   "keywords": [
     "github",
     "pull-requests",
-    "code-review"
+    "code-review",
+    "google-docs"
   ],
   "skills": "./skills/",
   "interface": {

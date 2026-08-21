@@ -1,6 +1,6 @@
 ---
 name: walk-through-work-history
-description: Research and explain how work progressed as an interactive, one-page-at-a-time walkthrough. Use when the user asks for the history, evolution, review progression, revisions, decisions, false starts, or outcome of a GitHub pull request (the primary use case), issue, branch, project, incident, document, ticket, or other chronological work record—especially when they ask for a paginated, ADHD-friendly, story-like, or "turn the page" explanation.
+description: Research and explain how work progressed as an interactive, one-page-at-a-time walkthrough. Use when the user asks for the history, evolution, review progression, revisions, decisions, false starts, or outcome of a GitHub pull request (the primary use case), issue, branch, project, incident, document, ticket, or other chronological work record—including a Google Doc's revision history and comment threads—especially when they ask for a paginated, ADHD-friendly, story-like, or "turn the page" explanation.
 ---
 
 # Walk Through Work History
@@ -14,6 +14,11 @@ Turn a dense work history into a causal narrative delivered one short page per u
    - For a GitHub pull request, read the harness-appropriate reference before continuing:
      - Claude: `${CLAUDE_SKILL_DIR}/references/github-pr.md`
      - Codex: resolve `references/github-pr.md` relative to the directory containing this `SKILL.md`.
+   - For a Google Doc, read the harness-appropriate reference before continuing:
+     - Claude: `${CLAUDE_SKILL_DIR}/references/google-doc.md`
+     - Codex: resolve `references/google-doc.md` relative to the directory containing this `SKILL.md`.
+   - Confirm which sources you can actually reach before page 1, and assume no local tool or
+     credential exists until you have checked for it.
    - Use current external data when the source can change or the user supplies a live URL.
 
 2. Reconstruct the full progression privately.
@@ -75,3 +80,8 @@ Apply the same method to tickets, incident logs, documents, chat threads, or pro
 2. Find decision points and causal transitions.
 3. Build the full chapter map.
 4. Deliver one page per turn using the same pacing and evidence rules.
+
+When a source's history is only partly retrievable, name the limit early instead of
+narrating around the gap. The Google Doc reference named in step 1 is the worked example: an
+access ladder to try in order, and a plain statement of which parts of the record simply do
+not exist.

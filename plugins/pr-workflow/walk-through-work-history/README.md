@@ -41,10 +41,12 @@ $walk-through-work-history:walk-through-work-history Explain https://github.com/
 5. Preserves stale approvals, reversals, wrong diagnoses, and later corrections
 6. Ends each non-final page by asking whether to turn the page
 
-Although optimized for GitHub PRs, the same method can explain issues, branches, incidents, documents, tickets, and other chronological work records.
+Although optimized for GitHub PRs, the same method can explain issues, branches, incidents, documents, tickets, and other chronological work records. Google Docs have their own bundled reference: it walks down an access ladder (connected Drive tools, a Workspace CLI, raw Drive REST with any OAuth token, then the browser UI) and is explicit about which parts of a Doc's history the APIs cannot return — comment threads are rich, revision lists are incomplete for busy docs, and accepted suggestions leave no record.
 
 ## Additional Documentation
 
 - [skills/walk-through-work-history/SKILL.md](skills/walk-through-work-history/SKILL.md) - Paginated work-history walkthrough
+- [skills/walk-through-work-history/references/github-pr.md](skills/walk-through-work-history/references/github-pr.md) - Collecting a pull request's full record
+- [skills/walk-through-work-history/references/google-doc.md](skills/walk-through-work-history/references/google-doc.md) - Collecting a Google Doc's revisions, comments, and activity
 
 Part of the pr-workflow bundle — install pr-workflow to get all PR skills at once.
