@@ -29,9 +29,12 @@ Neither catalog pins plugin versions. Codex reads a plugin's manifest by
 fallback: `.codex-plugin/plugin.json` if the plugin ships one, otherwise
 `.claude-plugin/plugin.json`. This is verified live on Codex CLI 0.147.0 — a
 plugin with only a Claude manifest installs from the native catalog and reports
-its Claude manifest version. Only `codex`, `hotline`, and `pr-workflow` ship a
-`.codex-plugin/plugin.json`; every other plugin is served to Codex from its
-Claude manifest.
+its Claude manifest version. `codex`, `hotline`, and each of the five
+`pr-workflow` child plugins ship a `.codex-plugin/plugin.json` — the
+`pr-workflow` bundle does not — and every other plugin is served to Codex from
+its Claude manifest. Confirm with `find plugins -name plugin.json -path
+'*.codex-plugin*'` rather than trusting this list after a plugin is added or
+split.
 
 When a shared skill or bundled resource changes, bump every published manifest
 whose harness receives that change and keep their release versions aligned. For
