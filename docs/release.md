@@ -105,6 +105,13 @@ isolated profile, add the marketplace, and install the plugin to confirm that
 the merged release is available, but do not report that result as an
 old-version-to-new-version cache transition.
 
+A profile whose `jtsternberg` marketplace is a local **Directory** — as on the
+maintainer machine — has no Git root to upgrade: `codex plugin marketplace
+upgrade` fails with *not configured as a Git marketplace*. Refresh that profile
+with `codex plugin add <plugin-name>@jtsternberg`, which re-materializes the
+cache at the new version. The isolated profile in this section is Git-backed, so
+it takes the `marketplace upgrade` path above.
+
 Start a new Codex session before exercising changed skills, hooks, MCP servers,
 or app configuration. Existing sessions may retain their previously loaded
 plugin surface.
