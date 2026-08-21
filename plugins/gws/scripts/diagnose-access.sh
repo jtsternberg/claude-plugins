@@ -42,7 +42,7 @@ fi
 # Attempt to fetch the resource and capture the JSON response on stdout.
 # Do NOT merge stderr (gws emits "Using keyring backend: keyring" and other
 # noise there, which would break JSON parsing below).
-RESPONSE=$(gws drive files get --params "{\"fileId\": \"$RESOURCE_ID\", \"fields\": \"name\"}" 2>/dev/null || true)
+RESPONSE=$(gws drive files get --params "{\"fileId\": \"$RESOURCE_ID\", \"supportsAllDrives\": true, \"fields\": \"name\"}" 2>/dev/null || true)
 
 # Try to extract an HTTP error code from the response
 ERROR_CODE=$(printf '%s' "$RESPONSE" \

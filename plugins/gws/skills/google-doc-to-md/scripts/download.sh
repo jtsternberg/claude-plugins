@@ -5,6 +5,8 @@
 # Output: Path to the created markdown file on stdout. Errors on stderr.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Resolve active account config directory
 if [[ -z "${GOOGLE_WORKSPACE_CLI_CONFIG_DIR:-}" ]]; then
   _COMMON="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../scripts/account-common.sh"
@@ -80,7 +82,7 @@ if [[ -n "$TAB_ARG" ]]; then
 fi
 
 # Fetch doc title from Drive metadata
-DOC_TITLE=$(gws drive files get --params "{\"fileId\": \"$DOC_ID\", \"fields\": \"name\"}" 2>/dev/null \
+DOC_TITLE=$(gws drive files get --params "{\"fileId\": \"$DOC_ID\", \"supportsAllDrives\": true, \"fields\": \"name\"}" 2>/dev/null \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])" 2>/dev/null || true)
 
 if [[ -z "$DOC_TITLE" ]]; then

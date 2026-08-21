@@ -267,10 +267,14 @@ the file into cwd first, or `cd` to the file's directory before uploading.
 **"This doc has N native tabs" error:** the doc uses native tabs; use
 `tab-update.sh` (see "Updating a Single Tab") or pass `--force` to
 intentionally flatten the doc to one tab.
-**404 on write to a doc that reads fine (ADC rung):** the doc lives on a
-shared drive — Drive v3 writes need `supportsAllDrives=true` (reads work
-without it, so the 404 is misleading). The bundled ADC scripts pass it; if
-calling the API by hand, add it.
+**"File not found" / 404 on a folder or doc that exists (shared drives):** the
+resource lives on a shared drive — Drive v3 file calls need
+`supportsAllDrives=true` in their query params to see it. All bundled scripts
+(both the gws and ADC rungs) pass it on every Drive v3 create/get/update; if you
+call the Drive API by hand, add it to `--params`. Note the exceptions that work
+on shared-drive docs *without* the flag: `files.export`, and the Docs API
+(`documents.get` / `documents.batchUpdate`) — the flag is for Drive file
+operations only.
 **"remembered doc … is not readable" warning (ADC rung):** the doc in the
 state file returned 404, so a new doc was created. Drive returns 404 both for
 a deleted doc and for one you've lost access to, so check whether it was a

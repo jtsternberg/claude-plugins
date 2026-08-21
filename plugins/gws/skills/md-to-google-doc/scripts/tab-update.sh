@@ -56,12 +56,13 @@ TAB_ID=$(resolve_tab_id "$DOC_ID" "$TAB_ARG")
 # because macOS BSD mktemp can't randomize with a suffix.
 STEM="./__tmp-tabpub-$$-$RANDOM"
 CLEAN="$STEM.md"
-trap 'rm -f "$STEM".*; [[ -n "${TMP_DOC_ID:-}" ]] && gws drive files update --params "{\"fileId\": \"$TMP_DOC_ID\"}" --json "{\"trashed\": true}" >/dev/null 2>&1 || true' EXIT
+trap 'rm -f "$STEM".*; [[ -n "${TMP_DOC_ID:-}" ]] && gws drive files update --params "{\"fileId\": \"$TMP_DOC_ID\", \"supportsAllDrives\": true}" --json "{\"trashed\": true}" >/dev/null 2>&1 || true' EXIT
 
 "$SCRIPT_DIR/clean.sh" "$FILE" "$CLEAN"
 
 # 1. Server-side conversion: upload md as a throwaway Google Doc.
 TMP_DOC_ID=$(gws drive files create \
+	--params '{"supportsAllDrives": true}' \
 	--json '{"name": "TMP tab-publish (auto-deleted)", "mimeType": "application/vnd.google-apps.document"}' \
 	--upload "$CLEAN" --upload-content-type text/markdown 2>/dev/null \
 	| python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")

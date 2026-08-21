@@ -101,6 +101,7 @@ trap 'rm -f "$CLEAN"' EXIT
 # Do NOT merge stderr into stdout: gws prints a "Using keyring backend: keyring"
 # banner to stderr, which would break JSON parsing of stdout.
 RESPONSE=$(gws drive files create \
+  --params '{"supportsAllDrives": true}' \
   --json "{\"name\": $(printf '%s' "$TITLE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'), \"mimeType\": \"application/vnd.google-apps.document\", \"parents\": [\"$FOLDER_ID\"]}" \
   --upload "$CLEAN" \
   --upload-content-type text/markdown)
@@ -124,7 +125,7 @@ gws docs documents batchUpdate \
   --json '{"requests": [{"updateDocumentStyle": {"documentStyle": {"documentFormat": {"documentMode": "PAGELESS"}}, "fields": "documentFormat"}}]}' >/dev/null 2>&1
 
 # Verify document exists
-if ! gws drive files get --params "{\"fileId\": \"$DOC_ID\", \"fields\": \"id\"}" >/dev/null 2>&1; then
+if ! gws drive files get --params "{\"fileId\": \"$DOC_ID\", \"supportsAllDrives\": true, \"fields\": \"id\"}" >/dev/null 2>&1; then
   echo "WARNING: Upload appeared to succeed but verification failed. Doc ID: $DOC_ID" >&2
 fi
 

@@ -88,7 +88,7 @@ trap 'rm -f "$CLEAN"' EXIT
 # Do NOT merge stderr into stdout: gws prints a "Using keyring backend: keyring"
 # banner to stderr, which would break JSON parsing of stdout.
 RESPONSE=$(gws drive files update \
-  --params "{\"fileId\": \"$DOC_ID\"}" \
+  --params "{\"fileId\": \"$DOC_ID\", \"supportsAllDrives\": true}" \
   --upload "$CLEAN" \
   --upload-content-type text/markdown)
 
