@@ -121,9 +121,10 @@ upgrade` fails with *not configured as a Git marketplace*. Refresh that profile
 with `codex plugin add <plugin-name>@jtsternberg`, which re-materializes the
 cache at the new version **and removes the prior one**, the same reconciliation
 the Git path performs. That makes the maintainer profile a usable transition
-check whenever it still holds the previous version — but only for local content,
-so pair it with a GitHub-backed fresh install to prove publication. The isolated profile in this section is Git-backed, so
-it takes the `marketplace upgrade` path above.
+check whenever it still holds the previous version — but only for local
+content, so pair it with a GitHub-backed fresh install to prove publication. The
+isolated profile in this section is Git-backed, so it takes the `marketplace
+upgrade` path above.
 
 Start a new Codex session before exercising changed skills, hooks, MCP servers,
 or app configuration. Existing sessions may retain their previously loaded
