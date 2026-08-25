@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Draft a Gmail message from a local markdown file.
-# Converts markdown to HTML, saves as a Gmail draft (never sends), and prints
-# the Gmail drafts URL so the user can review/send from the Gmail UI.
+# Converts markdown to HTML, saves as a Gmail draft (never sends), verifies the
+# draft carries the DRAFT label, and prints the Gmail drafts URL so the user can
+# review/send from the Gmail UI.
 #
 # Usage:
-#   draft.sh <markdown-file> <recipient> [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID]
+#   draft.sh <markdown-file> <recipient> [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID] [--attach PATH]...
 #
 # <recipient> may be a literal email address (contains "@") or a name to look
 # up via Gmail search (most recent correspondent matching the name wins).
@@ -21,12 +22,21 @@
 #                          lookup). Prefer --reply-to for reliable threading.
 # Without either flag, behavior is unchanged: a standalone draft.
 #
+# Attachments (optional):
+#   --attach PATH          Attach a local file. Repeatable, and composes with
+#                          every other flag including --reply-to. With
+#                          attachments the draft is delivered as an uploaded
+#                          .eml (multipart/mixed) instead of a base64 `raw`
+#                          field: `raw` rides argv, and 620KB of PDFs encodes
+#                          to 1,118,017 bytes against a 1,048,576 ARG_MAX.
+#
 # Subject resolution order:
 #   1. --subject flag
 #   2. A leading "Subject: ..." line at the top of the markdown
-#   3. Error — caller must supply a subject
+#   3. The parent message's subject, when --reply-to is used
+#   4. Error — caller must supply a subject
 #
-# Output: a Gmail drafts URL on stdout. Errors on stderr.
+# Output: a Gmail drafts URL on stdout. Verification detail and errors on stderr.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -43,7 +53,7 @@ fi
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") <markdown-file> <recipient> [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID]
+Usage: $(basename "$0") <markdown-file> <recipient> [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID] [--attach PATH]...
 
 <recipient> may be an email address or a name to look up via Gmail search.
 
@@ -51,8 +61,19 @@ Threading:
   --reply-to MESSAGE_ID  Thread the draft onto that message's conversation
                          (sets threadId + In-Reply-To/References headers).
   --thread THREAD_ID     Attach to a threadId directly (no header lookup).
+
+Attachments:
+  --attach PATH          Attach a local file. Repeatable; composes with --reply-to.
 EOF
   exit 1
+}
+
+# Run a gws command and emit only its JSON body. gws writes an informational
+# "Using keyring backend: ..." line to stderr, so anything merging the streams
+# would corrupt the JSON — slice from the first '{' so this stays true even if a
+# future gws version chatters on stdout.
+gws_json() {
+  gws "$@" | python3 -c 'import sys; s = sys.stdin.read(); i = s.find("{"); sys.stdout.write(s[i:] if i >= 0 else s)'
 }
 
 [[ $# -lt 2 ]] && usage
@@ -69,6 +90,7 @@ REPLY_TO=""
 THREAD_ID=""
 IN_REPLY_TO=""
 REFERENCES=""
+ATTACHMENTS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --subject) SUBJECT="$2"; shift 2 ;;
@@ -77,11 +99,21 @@ while [[ $# -gt 0 ]]; do
     --from) FROM="$2"; shift 2 ;;
     --reply-to) REPLY_TO="$2"; shift 2 ;;
     --thread) THREAD_ID="$2"; shift 2 ;;
+    --attach) ATTACHMENTS+=("$2"); shift 2 ;;
     *) echo "Unknown option: $1" >&2; usage ;;
   esac
 done
+ATTACH_COUNT=${#ATTACHMENTS[@]}
 
 [[ -f "$FILE" ]] || { echo "ERROR: File not found: $FILE" >&2; exit 1; }
+
+# Fail on a bad attachment path before spending any API calls on lookups.
+if [[ $ATTACH_COUNT -gt 0 ]]; then
+  for _att in "${ATTACHMENTS[@]}"; do
+    [[ -f "$_att" ]] || { echo "ERROR: Attachment not found: $_att" >&2; exit 1; }
+    [[ -r "$_att" ]] || { echo "ERROR: Attachment not readable: $_att" >&2; exit 1; }
+  done
+fi
 
 GWS_PREFLIGHT="$SCRIPT_DIR/../../../scripts/auth-preflight.sh"
 if [[ -f "$GWS_PREFLIGHT" ]]; then
@@ -96,7 +128,7 @@ if [[ "$RECIPIENT_ARG" == *"@"* ]]; then
   TO="$RECIPIENT_ARG"
 else
   echo "Looking up '$RECIPIENT_ARG' via Gmail search..." >&2
-  LIST_JSON=$(gws gmail users messages list \
+  LIST_JSON=$(gws_json gmail users messages list \
     --params "$(python3 -c "import json,sys; print(json.dumps({'userId':'me','q':sys.argv[1],'maxResults':3}))" "$RECIPIENT_ARG")")
   MSG_ID=$(printf '%s' "$LIST_JSON" | python3 -c "
 import json, sys
@@ -128,12 +160,12 @@ fi
 # When --reply-to is given, look up the parent message's threadId and the
 # RFC 5322 threading headers (Message-ID + References) so the draft attaches
 # to the existing Gmail conversation. This both sets message.threadId on the
-# draft resource AND injects In-Reply-To / References into the raw MIME —
+# draft resource AND injects In-Reply-To / References into the message —
 # Gmail needs the headers to thread reliably, not just threadId.
 PARENT_SUBJECT=""
 if [[ -n "$REPLY_TO" ]]; then
   echo "Looking up parent message $REPLY_TO for threading..." >&2
-  PARENT_JSON=$(gws gmail users messages get --params "$(python3 -c "import json,sys; print(json.dumps({'userId':'me','id':sys.argv[1],'format':'metadata','metadataHeaders':['Message-ID','References','Subject']}))" "$REPLY_TO")") || {
+  PARENT_JSON=$(gws_json gmail users messages get --params "$(python3 -c "import json,sys; print(json.dumps({'userId':'me','id':sys.argv[1],'format':'metadata','metadataHeaders':['Message-ID','References','Subject']}))" "$REPLY_TO")") || {
     echo "ERROR: Could not fetch parent message $REPLY_TO for --reply-to." >&2
     exit 1
   }
@@ -189,7 +221,9 @@ fi
 # --- Clean + convert markdown -------------------------------------------
 TMP_MD="$(mktemp -t gmail-draft.XXXXXX).md"
 TMP_HTML="$(mktemp -t gmail-draft.XXXXXX).html"
-trap 'rm -f "$TMP_MD" "$TMP_HTML"' EXIT
+EML_DIR=""
+OUT_EML=""
+trap 'rm -f "$TMP_MD" "$TMP_HTML"; [[ -n "$EML_DIR" ]] && rm -rf "$EML_DIR"; true' EXIT
 
 bash "$SCRIPT_DIR/clean.sh" "$FILE" "$TMP_MD"
 
@@ -207,41 +241,41 @@ fi
 [[ -s "$TMP_HTML" ]] || { echo "ERROR: Converter produced empty HTML." >&2; exit 1; }
 
 # --- Create draft --------------------------------------------------------
-# Build a base64url-encoded MIME message and create the draft via the Gmail
-# API drafts.create method, then verify with drafts.get before claiming
-# success. The draft lands in the ACTIVE gws account (resolved above), which
-# may not be the caller's default — so we surface the account email and put
-# it in the URL as authuser= instead of assuming account index u/0.
-PARAMS=$(TO="$TO" SUBJECT="$SUBJECT" CC="$CC" BCC="$BCC" FROM="$FROM" \
-  THREAD_ID="$THREAD_ID" IN_REPLY_TO="$IN_REPLY_TO" REFERENCES="$REFERENCES" \
-  HTML_FILE="$TMP_HTML" python3 - <<'PY'
-import base64, json, os
-from email.mime.text import MIMEText
+# build-message.py owns header composition for both delivery paths, so the
+# attachment path and the plain path cannot drift on To/Cc/Bcc/threading.
+#
+# The draft lands in the ACTIVE gws account (resolved above), which may not be
+# the caller's default — so we surface the account email and put it in the URL
+# as authuser= instead of assuming account index u/0.
+build_message() {
+  TO="$TO" SUBJECT="$SUBJECT" CC="$CC" BCC="$BCC" FROM="$FROM" \
+    THREAD_ID="$THREAD_ID" IN_REPLY_TO="$IN_REPLY_TO" REFERENCES="$REFERENCES" \
+    HTML_FILE="$TMP_HTML" OUT_EML="$OUT_EML" \
+    python3 "$SCRIPT_DIR/build-message.py" ${ATTACHMENTS[@]+"${ATTACHMENTS[@]}"}
+}
 
-with open(os.environ['HTML_FILE'], encoding='utf-8') as fh:
-    msg = MIMEText(fh.read(), 'html', 'utf-8')
-msg['To'] = os.environ['TO']
-msg['Subject'] = os.environ['SUBJECT']
-for header, env in (('Cc', 'CC'), ('Bcc', 'BCC'), ('From', 'FROM')):
-    if os.environ.get(env):
-        msg[header] = os.environ[env]
-
-# RFC 5322 threading headers (only present when replying).
-if os.environ.get('IN_REPLY_TO'):
-    msg['In-Reply-To'] = os.environ['IN_REPLY_TO']
-if os.environ.get('REFERENCES'):
-    msg['References'] = os.environ['REFERENCES']
-
-raw = base64.urlsafe_b64encode(msg.as_bytes()).decode().rstrip('=')
-message = {'raw': raw}
-# Attach to an existing conversation when a threadId is set (--reply-to/--thread).
-if os.environ.get('THREAD_ID'):
-    message['threadId'] = os.environ['THREAD_ID']
-print(json.dumps({'message': message}))
-PY
-)
-
-RESPONSE=$(gws gmail users drafts create --params '{"userId":"me"}' --json "$PARAMS")
+if [[ $ATTACH_COUNT -gt 0 ]]; then
+  # `pwd -P` matters: gws rejects an --upload path that resolves outside the
+  # current directory, and $TMPDIR on macOS lives under the /var → /private/var
+  # symlink, so the logical path would read as "outside" its own directory.
+  EML_DIR="$(cd "$(mktemp -d -t gmail-draft-eml.XXXXXX)" && pwd -P)"
+  OUT_EML="$EML_DIR/draft.eml"
+  DRAFT_JSON="$(build_message)"
+  echo "Attaching $ATTACH_COUNT file(s); uploading as message/rfc822..." >&2
+  # --upload takes a path relative to the cwd, hence the subshell cd.
+  if [[ -n "$DRAFT_JSON" ]]; then
+    RESPONSE=$(cd "$EML_DIR" && gws_json gmail users drafts create \
+      --params '{"userId":"me"}' --json "$DRAFT_JSON" \
+      --upload draft.eml --upload-content-type message/rfc822)
+  else
+    RESPONSE=$(cd "$EML_DIR" && gws_json gmail users drafts create \
+      --params '{"userId":"me"}' \
+      --upload draft.eml --upload-content-type message/rfc822)
+  fi
+else
+  PARAMS="$(build_message)"
+  RESPONSE=$(gws_json gmail users drafts create --params '{"userId":"me"}' --json "$PARAMS")
+fi
 
 read -r DRAFT_ID MSG_ID < <(printf '%s' "$RESPONSE" | python3 -c "
 import json, sys
@@ -258,22 +292,60 @@ if [[ -z "${DRAFT_ID:-}" || -z "${MSG_ID:-}" ]]; then
   exit 1
 fi
 
-# Verify the draft actually persisted before claiming success.
-if ! gws gmail users drafts get --params "{\"userId\":\"me\",\"id\":\"$DRAFT_ID\"}" >/dev/null 2>&1; then
+# --- Verify --------------------------------------------------------------
+# Read the draft back before claiming anything. The DRAFT label is the proof
+# that this is a draft and not a sent message; the part tree is the proof that
+# the attachments landed. `format=full` is required — `metadata` omits parts.
+VERIFY_JSON=$(gws_json gmail users drafts get \
+  --params "{\"userId\":\"me\",\"id\":\"$DRAFT_ID\",\"format\":\"full\"}") || {
   echo "ERROR: Draft $DRAFT_ID was not found after creation (drafts.get failed)." >&2
   exit 1
-fi
+}
+
+VERIFY_OUT=$(printf '%s' "$VERIFY_JSON" | ATTACH_COUNT="$ATTACH_COUNT" python3 -c "
+import json, os, sys
+
+d = json.load(sys.stdin)
+msg = d.get('message', {}) or {}
+labels = msg.get('labelIds') or []
+if 'DRAFT' not in labels:
+    print('ERROR: draft %s does not carry the DRAFT label (labels: %s).'
+          % (d.get('id', '?'), ', '.join(labels) or 'none'), file=sys.stderr)
+    sys.exit(1)
+
+names = []
+def walk(part):
+    if part.get('filename'):
+        names.append(part['filename'])
+    for child in part.get('parts') or []:
+        walk(child)
+walk(msg.get('payload', {}) or {})
+
+expected = int(os.environ.get('ATTACH_COUNT', '0'))
+if len(names) != expected:
+    print('ERROR: expected %d attachment(s) on the draft, found %d: %s'
+          % (expected, len(names), ', '.join(names) or 'none'), file=sys.stderr)
+    sys.exit(1)
+
+print('Verified: DRAFT label present' + (
+    '; attachments: ' + ', '.join(names) if names else '; no attachments'))
+") || exit 1
 
 # Which mailbox did this land in? Surface it so nobody hunts for the draft in
 # the wrong account, and address the URL to that account explicitly.
 ACCOUNT_EMAIL=$(gws gmail users getProfile --params '{"userId":"me"}' 2>/dev/null | python3 -c "
 import json, sys
 try:
-    print(json.load(sys.stdin).get('emailAddress', ''))
+    s = sys.stdin.read(); i = s.find('{')
+    print(json.loads(s[i:] if i >= 0 else s).get('emailAddress', ''))
 except Exception:
     pass
 ")
 
+echo "$VERIFY_OUT" >&2
+# The draft id (not the message id in the URL) is what drafts.get/delete take —
+# surface it so a caller can clean up or re-inspect without listing drafts.
+echo "Draft id: $DRAFT_ID" >&2
 if [[ -n "$ACCOUNT_EMAIL" ]]; then
   echo "Draft created in account: $ACCOUNT_EMAIL" >&2
   echo "https://mail.google.com/mail/?authuser=$ACCOUNT_EMAIL#drafts/$MSG_ID"
