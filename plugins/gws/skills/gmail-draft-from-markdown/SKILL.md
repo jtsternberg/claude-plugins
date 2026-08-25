@@ -1,9 +1,9 @@
 ---
 name: gmail-draft-from-markdown
-description: "Turn a local markdown file into a Gmail draft via gws — converts to HTML, never sends, returns the Gmail drafts URL for review."
+description: "Turn a local markdown file into a Gmail draft via gws — converts to HTML, attaches local files, threads onto an existing message as a reply, never sends, returns the Gmail drafts URL for review."
 when_to_use: |
-  Triggers on 'draft an email from this file/note', 'gmail draft from markdown', 'create a draft in Gmail', 'draft a follow-up email', 'turn this note into an email draft'.
-argument-hint: '[file.md] [recipient-email-or-name] [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID]'
+  Triggers on 'draft an email from this file/note', 'gmail draft from markdown', 'create a draft in Gmail', 'draft a follow-up email', 'turn this note into an email draft', 'draft a reply with these files attached', 'attach these PDFs to a Gmail draft'.
+argument-hint: '[file.md] [recipient-email-or-name] [--subject "Subject"] [--cc EMAIL] [--bcc EMAIL] [--from EMAIL] [--reply-to MESSAGE_ID] [--thread THREAD_ID] [--attach PATH]'
 allowed-tools: 'Bash(gws *) Bash(bash *) Bash(python3 *) Bash(marked *) Bash(pandoc *)'
 ---
 
@@ -56,6 +56,7 @@ recipient (email or name). Subject is optional — the script derives it from a
 | `--from EMAIL` | no | Send-as alias (defaults to active account). |
 | `--reply-to MESSAGE_ID` | no | Thread the draft onto that message's conversation (see Threading). |
 | `--thread THREAD_ID` | no | Attach the draft to a threadId directly, no header lookup. Prefer `--reply-to`. |
+| `--attach PATH` | no | Attach a local file. Repeatable; composes with every other flag. |
 
 ## Behavior
 
@@ -75,7 +76,7 @@ an existing Gmail conversation so it shows up as a reply in that thread:
   `Message-ID`, and `References`. It then:
   - sets `message.threadId` on the draft resource, and
   - injects `In-Reply-To` (the parent's Message-ID) and `References` (the
-    parent's References chain plus its Message-ID) into the raw MIME message.
+    parent's References chain plus its Message-ID) into the MIME message.
   Gmail needs those RFC 5322 headers — not just `threadId` — to thread the
   reply reliably. If no `--subject` is given, the parent's subject is reused;
   in reply mode a conventional `Re: ` prefix is added when missing.
@@ -86,6 +87,26 @@ an existing Gmail conversation so it shows up as a reply in that thread:
 The `MESSAGE_ID` for `--reply-to` is a Gmail message id (as returned by
 `gws gmail users messages list` or the `gws:gmail-read` skill), not the raw
 RFC `Message-ID` header value.
+
+### Attachments
+`--attach PATH` attaches a local file, and it is repeatable. Attachments
+compose with everything else — `--reply-to`, `--cc`, `--bcc`, `--from`, subject
+resolution — so a threaded reply carrying three PDFs is one invocation.
+
+With at least one `--attach`, the script builds a complete `multipart/mixed`
+RFC 5322 message (HTML body plus one part per file, each named by its
+basename) and uploads it as `message/rfc822` media instead of packing the
+message into the draft resource's base64 `raw` field. That switch is
+mandatory, not stylistic: `raw` travels on the command line, and 620KB of
+PDFs — the size of an ordinary three-attachment email — base64-encodes to a
+1,118,017-byte `--json` argument against an `ARG_MAX` of 1,048,576, which the
+kernel refuses outright with "argument list too long".
+
+Guardrails:
+- A missing or unreadable path fails before any API call is spent.
+- Attachments totalling over Gmail's 25MB limit are refused locally.
+- MIME type comes from the file extension, falling back to
+  `application/octet-stream`.
 
 ### Subject resolution (in order)
 1. `--subject "..."` flag
@@ -104,14 +125,33 @@ Before HTML conversion, the script strips:
 - A leading `Subject: ...` header line
 - Obsidian callout headers (`> [!note]` etc.)
 
+### Verification
+The script reads the draft back before it claims anything, and fails loudly
+rather than reporting a draft it cannot confirm:
+
+- The draft must carry the `DRAFT` label. This is the check that keeps
+  "created a draft" from ever meaning "sent an email" — never report a draft
+  as sent, and never report one at all without this line in the output.
+- The attachment count and filenames on the created draft must match what was
+  passed to `--attach`.
+
+The read-back uses `format=full`; `format=metadata` omits the MIME part tree
+entirely, so filenames are invisible to it.
+
 ### Output
-On success, prints the account the draft landed in (stderr) and one URL line
-to stdout, addressed to that account explicitly:
+On success, prints the verification line, the draft id, and the account the
+draft landed in (all stderr), plus one URL line to stdout, addressed to that
+account explicitly:
 
 ```
+Verified: DRAFT label present; attachments: agenda.pdf, proposal.pdf
+Draft id: r-5387874580155353993
 Draft created in account: you@example.com
 https://mail.google.com/mail/?authuser=you@example.com#drafts/<message-id>
 ```
+
+The draft id is what `gws gmail users drafts get|delete` take; the id in the
+URL is the *message* id. They are different values.
 
 Open that URL in a browser to review and send the draft. The draft is created
 in the **active gws account** (see the `gws:account` skill) — the `authuser=`
@@ -134,7 +174,113 @@ bash "$SKILL_DIR/scripts/draft.sh" ./note.md alice@example.com
 
 # Reply draft — thread onto an existing conversation (subject/threading auto-derived)
 bash "$SKILL_DIR/scripts/draft.sh" ./reply.md alice@example.com --reply-to 19f3de2c4f9ee065
+
+# Attachments — repeatable, and composing with a threaded reply and BCCs
+bash "$SKILL_DIR/scripts/draft.sh" ./reply.md alice@example.com \
+  --reply-to 19f3de2c4f9ee065 \
+  --bcc "bob@example.com,carol@example.com" \
+  --attach ~/Documents/proposal.pdf \
+  --attach ~/Documents/site-plan.pdf
 ```
+
+For scripted or unattended use, pin the account explicitly instead of relying
+on whichever account is active — `GOOGLE_WORKSPACE_CLI_CONFIG_DIR` is the one
+knob that decides which mailbox the draft lands in:
+
+```bash
+# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+# Personal account
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws \
+  bash "$SKILL_DIR/scripts/draft.sh" ./note.md alice@example.com
+
+# Work account
+GOOGLE_WORKSPACE_CLI_CONFIG_DIR=~/.config/gws-accounts/work \
+  bash "$SKILL_DIR/scripts/draft.sh" ./note.md alice@example.com
+```
+
+Set it on every command in the sequence, including the verification and
+cleanup calls — a bare `gws` runs against the *default* account, so a draft
+created in one mailbox and verified in another looks like a silent failure.
+Use the `gws:account` skill to list the config dirs available on this machine.
+
+## Raw gws CLI survival notes
+
+For anything this skill does not cover — labels, sending, batch operations,
+attachment downloads — you will be driving `gws gmail users ...` directly.
+Four rules, each of which has already cost a session:
+
+**Run `--help` on the subcommand before the first call.** Not `gws --help`,
+the subcommand itself: `gws gmail users drafts create --help`. It lists the
+exact option set, which is short and non-obvious. Guessing flags produces 400s
+that read like auth or permission problems.
+
+**Every path, query, and URL parameter goes inside `--params '<JSON>'`.**
+There is no `--userId`, no `--q`, no `--max-results`, and no per-parameter flag
+of any kind. Request *bodies* go in `--json '<JSON>'`; everything else is
+`--params`.
+
+```bash
+# Right
+gws gmail users messages list --params '{"userId":"me","q":"has:attachment","maxResults":5}'
+# Wrong — these flags do not exist
+gws gmail users messages list --userId me --q "has:attachment" --max-results 5
+```
+
+**`gws` writes `Using keyring backend: keyring` to stderr on most calls.**
+Capture with `2>&1` and that line lands in front of the JSON, so every parse
+downstream fails on a file that looks fine at a glance. Either keep the streams
+separate (`gws ... 2>/dev/null > out.json`) or slice from the first `{` before
+parsing. Save the raw response to a file first and parse the file — a direct
+pipe into `jq` hides what actually came back.
+
+**`--upload` only accepts a path inside the current directory.** An absolute
+path elsewhere is refused with "resolves to ... which is outside the current
+directory", so `cd` to the file's directory and pass the bare filename. On
+macOS also resolve that directory with `pwd -P`: `$TMPDIR` sits under the
+`/var` → `/private/var` symlink, and the logical path reads as outside itself.
+
+### Recipes that work
+
+```bash
+# Parent message lookup for threading headers
+gws gmail users messages get --params '{"userId":"me","id":"<MSG_ID>","format":"metadata","metadataHeaders":["Message-ID","References","Subject"]}'
+
+# Create a draft from a prebuilt .eml, threaded, with attachments
+# (run from the .eml's own directory)
+gws gmail users drafts create --params '{"userId":"me"}' \
+  --json '{"message":{"threadId":"<THREAD_ID>"}}' \
+  --upload draft.eml --upload-content-type message/rfc822
+
+# Read a draft back: DRAFT label + attachment filenames.
+# format=full is required — format=metadata omits the MIME part tree.
+gws gmail users drafts get --params '{"userId":"me","id":"<DRAFT_ID>","format":"full"}'
+
+# Delete a draft (takes the DRAFT id, not the message id)
+gws gmail users drafts delete --params '{"userId":"me","id":"<DRAFT_ID>"}'
+```
+
+Build the RFC 5322 message with python's stdlib `email.message.EmailMessage`:
+`set_content(html, subtype="html")` for the body, `add_attachment(data,
+maintype=…, subtype=…, filename=…)` per file, `In-Reply-To` = the parent's
+`Message-ID`, and `References` = the parent's `References` chain plus its
+`Message-ID`. This skill's own builder already does exactly that and is
+callable on its own:
+
+Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+
+```bash
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+TO=alice@example.com SUBJECT="Re: Proposal" HTML_FILE=body.html \
+  OUT_EML=draft.eml THREAD_ID=<THREAD_ID> \
+  IN_REPLY_TO='<parent@mail.example.com>' \
+  REFERENCES='<older@mail.example.com> <parent@mail.example.com>' \
+  python3 "$SKILL_DIR/scripts/build-message.py" proposal.pdf site-plan.pdf
+```
+
+With `OUT_EML` set it writes the `.eml` and prints the draft metadata JSON;
+without it, it prints the whole `{"message":{"raw":…}}` body for
+`drafts create --json`.
 
 ## Troubleshooting
 
@@ -145,6 +291,21 @@ bash "$SKILL_DIR/scripts/draft.sh" ./reply.md alice@example.com --reply-to 19f3d
 - **`No markdown→HTML converter found`:** Install one — `npm i -g marked` or
   `brew install pandoc`.
 - **Recipient lookup returned nothing:** Pass an email address instead.
+- **`Attachment not found` / `not readable`:** The path is checked before any
+  API call — fix the path; `~` is expanded by the shell, not by the script, so
+  quote carefully.
+- **`Attachments exceed Gmail's 25MB limit`:** Link the files from Drive
+  instead (see the `gws:md-to-google-doc` skill) or send fewer per draft.
+- **`resolves to ... which is outside the current directory`:** A `--upload`
+  path restriction, not a permissions problem. See **Raw gws CLI survival
+  notes** above.
+- **`draft ... does not carry the DRAFT label`:** Stop and report it. Do not
+  retry and do not describe the message as sent — something created a message
+  that is not a draft, and that needs eyes on it.
+- **Attachment count mismatch on verification:** The draft was created but the
+  upload did not carry every part. The draft id is printed on stderr; delete it
+  with `gws gmail users drafts delete` before retrying, so a half-formed draft
+  is not left in the mailbox.
 - **Draft didn't appear in Gmail:** Check which account you're looking at —
   the draft lands in the **active gws account**, which may not be the mailbox
   you (or your verification commands) are checking. The script prints the
@@ -157,3 +318,9 @@ bash "$SKILL_DIR/scripts/draft.sh" ./reply.md alice@example.com --reply-to 19f3d
 The `gws` CLI is powerful but the markdown → HTML → draft → drafts-URL
 workflow takes 6+ tool calls to discover. This skill collapses it to one
 invocation and codifies the **draft, don't send** default.
+
+Attachments and threading are here for the same reason: composing a
+`multipart/mixed` RFC 5322 message, uploading it as `message/rfc822` from the
+one directory `--upload` accepts, and reading the result back to prove it is a
+draft is a long chain to rediscover, and each link has a failure mode that
+looks like something else.

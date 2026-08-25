@@ -107,10 +107,18 @@ bash plugins/gws/skills/gmail-read/scripts/read.sh "from:boss@example.com newer_
 
 Convert a local markdown file into a Gmail **draft** (never sends). Markdown is
 converted to HTML and saved as a draft; you review and send from Gmail's UI.
+Supports local file attachments and threading the draft onto an existing
+message as a reply, and reads the draft back to confirm the `DRAFT` label and
+the attachment filenames before reporting success.
 
 ```bash
 bash plugins/gws/skills/gmail-draft-from-markdown/scripts/draft.sh ./reply.md \
   someone@example.com --subject "Follow-up"
+
+# Threaded reply with attachments
+bash plugins/gws/skills/gmail-draft-from-markdown/scripts/draft.sh ./reply.md \
+  someone@example.com --reply-to 19f3de2c4f9ee065 \
+  --attach ~/Documents/proposal.pdf --attach ~/Documents/site-plan.pdf
 ```
 
 ### youtube
