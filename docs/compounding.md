@@ -111,12 +111,14 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   Keep the streams separate and slice from the first `{` before parsing; save the
   raw response to a file rather than piping straight into `jq`, so a bad response
   is still readable. (claude-plugins-xick, 0affe5f)
-- **Argv is a size limit, not just a leak surface.** 620KB of PDFs base64-encodes
-  to a 1,118,017-byte `--json` argument against a 1,048,576-byte `ARG_MAX`, which
-  the kernel refuses with a bare "argument list too long" — the same argv that
-  leaks secrets also caps payloads well below what a user considers ordinary. When
-  a request body can scale with user input, route it through a file upload and
-  measure the ceiling rather than assuming headroom. (0affe5f, claude-plugins-dekq)
+- **Argv is a size limit, not just a leak surface — and the binding limit is
+  per-argument.** `ARG_MAX` is the famous number (1,048,576 on macOS) but Linux caps
+  a *single* argument at `MAX_ARG_STRLEN` = 32 pages = 131,072 however large
+  `ARG_MAX` is, so a payload that passes locally at 445KB dies on the ubuntu runner;
+  either way the kernel says only "argument list too long". Route any request body
+  that scales with user input through a file upload, choose the threshold from the
+  smaller limit, and gate on measured size rather than on the flag you think implies
+  bigness. (0affe5f, claude-plugins-dekq)
 - **Payloads ride files or stdin, never argv or env.** argv is `ps`-visible to
   every local user for the process lifetime. Guard: the hotline suites assert a
   sentinel never appears in recorded argv — copy that pattern for new launchers.

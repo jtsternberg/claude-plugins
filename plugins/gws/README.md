@@ -109,7 +109,9 @@ Convert a local markdown file into a Gmail **draft** (never sends). Markdown is
 converted to HTML and saved as a draft; you review and send from Gmail's UI.
 Supports local file attachments and threading the draft onto an existing
 message as a reply, and reads the draft back to confirm the `DRAFT` label and
-the attachment filenames before reporting success.
+the attachment filenames before reporting success. Large drafts are uploaded as
+`message/rfc822` rather than passed inline, so neither big attachments nor a
+long body hits the kernel's argv limit.
 
 ```bash
 bash plugins/gws/skills/gmail-draft-from-markdown/scripts/draft.sh ./reply.md \

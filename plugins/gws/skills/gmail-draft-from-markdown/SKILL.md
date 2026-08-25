@@ -91,22 +91,37 @@ RFC `Message-ID` header value.
 ### Attachments
 `--attach PATH` attaches a local file, and it is repeatable. Attachments
 compose with everything else — `--reply-to`, `--cc`, `--bcc`, `--from`, subject
-resolution — so a threaded reply carrying three PDFs is one invocation.
-
-With at least one `--attach`, the script builds a complete `multipart/mixed`
-RFC 5322 message (HTML body plus one part per file, each named by its
-basename) and uploads it as `message/rfc822` media instead of packing the
-message into the draft resource's base64 `raw` field. That switch is
-mandatory, not stylistic: `raw` travels on the command line, and 620KB of
-PDFs — the size of an ordinary three-attachment email — base64-encodes to a
-1,118,017-byte `--json` argument against an `ARG_MAX` of 1,048,576, which the
-kernel refuses outright with "argument list too long".
+resolution — so a threaded reply carrying three PDFs is one invocation. Each
+file becomes its own `multipart/mixed` part named by its basename, alongside
+the HTML body.
 
 Guardrails:
 - A missing or unreadable path fails before any API call is spent.
 - Attachments totalling over Gmail's 25MB limit are refused locally.
 - MIME type comes from the file extension, falling back to
   `application/octet-stream`.
+
+### Delivery route (why size, not attachments, decides)
+A small draft is passed inline as a base64 `raw` field. A large one is written
+to a temp `.eml` and uploaded as `message/rfc822` media instead. The script
+picks the route by encoded size and reports the switch on stderr; there is no
+flag for it.
+
+The reason it is size and not "did you pass `--attach`" is that the limit being
+dodged belongs to argv, and **a long enough HTML body reaches it with nothing
+attached at all.** Two kernel limits bind, whichever comes first:
+
+| Limit | Value | Notes |
+|---|---|---|
+| total argv + env | 1,048,576 on macOS | `getconf ARG_MAX`; 620KB of PDFs encodes to a 1,118,017-byte argument, and a 314KB markdown note to 445,533 |
+| a single argument | 131,072 on Linux | `MAX_ARG_STRLEN`, 32 pages, regardless of `ARG_MAX` — this is the one that binds there, at roughly 96KB of message |
+
+The threshold therefore sits well under the smaller of the two. Over it, the
+kernel refuses the call outright with "argument list too long" — which reads
+like anything but a size problem.
+
+`GMAIL_DRAFT_MAX_JSON_BYTES` overrides the threshold, and `0` forces the upload
+route. It exists for testing; normal use leaves it unset.
 
 ### Subject resolution (in order)
 1. `--subject "..."` flag
@@ -278,9 +293,12 @@ TO=alice@example.com SUBJECT="Re: Proposal" HTML_FILE=body.html \
   python3 "$SKILL_DIR/scripts/build-message.py" proposal.pdf site-plan.pdf
 ```
 
-With `OUT_EML` set it writes the `.eml` and prints the draft metadata JSON;
-without it, it prints the whole `{"message":{"raw":…}}` body for
-`drafts create --json`.
+`OUT_EML` is where it may write the `.eml` — it does so only when the message
+is too large to pass inline, and prints the draft metadata JSON in that case.
+Otherwise it leaves that path alone and prints the whole
+`{"message":{"raw":…}}` body for `drafts create --json`, so whether the file
+exists afterward *is* the routing answer. `MAX_JSON_BYTES=0` forces the upload
+side.
 
 ## Troubleshooting
 
