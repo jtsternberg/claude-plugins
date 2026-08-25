@@ -24,17 +24,23 @@
 #
 # Attachments (optional):
 #   --attach PATH          Attach a local file. Repeatable, and composes with
-#                          every other flag including --reply-to. With
-#                          attachments the draft is delivered as an uploaded
-#                          .eml (multipart/mixed) instead of a base64 `raw`
-#                          field: `raw` rides argv, and 620KB of PDFs encodes
-#                          to 1,118,017 bytes against a 1,048,576 ARG_MAX.
+#                          every other flag including --reply-to.
+#
+# Delivery route: a small message is passed inline as a base64 `raw` field; a
+# large one is uploaded as a message/rfc822 .eml instead. Size decides, not the
+# presence of attachments, because the limit being dodged is argv's — 620KB of
+# PDFs encodes to 1,118,017 bytes against a 1,048,576-byte ARG_MAX here, and
+# Linux caps a single argument at 131,072 bytes however large ARG_MAX is, which
+# a long enough HTML body reaches on its own.
 #
 # Subject resolution order:
 #   1. --subject flag
 #   2. A leading "Subject: ..." line at the top of the markdown
 #   3. The parent message's subject, when --reply-to is used
 #   4. Error — caller must supply a subject
+#
+# GMAIL_DRAFT_MAX_JSON_BYTES overrides the inline-vs-upload size threshold;
+# 0 forces the upload route. Leave it unset in normal use.
 #
 # Output: a Gmail drafts URL on stdout. Verification detail and errors on stderr.
 set -euo pipefail
@@ -251,17 +257,26 @@ build_message() {
   TO="$TO" SUBJECT="$SUBJECT" CC="$CC" BCC="$BCC" FROM="$FROM" \
     THREAD_ID="$THREAD_ID" IN_REPLY_TO="$IN_REPLY_TO" REFERENCES="$REFERENCES" \
     HTML_FILE="$TMP_HTML" OUT_EML="$OUT_EML" \
+    MAX_JSON_BYTES="${GMAIL_DRAFT_MAX_JSON_BYTES:-}" \
     python3 "$SCRIPT_DIR/build-message.py" ${ATTACHMENTS[@]+"${ATTACHMENTS[@]}"}
 }
 
+# `pwd -P` matters: gws rejects an --upload path that resolves outside the
+# current directory, and $TMPDIR on macOS lives under the /var → /private/var
+# symlink, so the logical path would read as "outside" its own directory.
+EML_DIR="$(cd "$(mktemp -d -t gmail-draft-eml.XXXXXX)" && pwd -P)"
+OUT_EML="$EML_DIR/draft.eml"
+
 if [[ $ATTACH_COUNT -gt 0 ]]; then
-  # `pwd -P` matters: gws rejects an --upload path that resolves outside the
-  # current directory, and $TMPDIR on macOS lives under the /var → /private/var
-  # symlink, so the logical path would read as "outside" its own directory.
-  EML_DIR="$(cd "$(mktemp -d -t gmail-draft-eml.XXXXXX)" && pwd -P)"
-  OUT_EML="$EML_DIR/draft.eml"
-  DRAFT_JSON="$(build_message)"
-  echo "Attaching $ATTACH_COUNT file(s); uploading as message/rfc822..." >&2
+  echo "Attaching $ATTACH_COUNT file(s)..." >&2
+fi
+
+# The builder writes $OUT_EML only when the message is too large to pass inline,
+# so the file's existence *is* the routing decision — no size arithmetic here.
+DRAFT_JSON="$(build_message)"
+
+if [[ -s "$OUT_EML" ]]; then
+  echo "Message exceeds the inline argument limit; uploading as message/rfc822..." >&2
   # --upload takes a path relative to the cwd, hence the subshell cd.
   if [[ -n "$DRAFT_JSON" ]]; then
     RESPONSE=$(cd "$EML_DIR" && gws_json gmail users drafts create \
@@ -273,8 +288,7 @@ if [[ $ATTACH_COUNT -gt 0 ]]; then
       --upload draft.eml --upload-content-type message/rfc822)
   fi
 else
-  PARAMS="$(build_message)"
-  RESPONSE=$(gws_json gmail users drafts create --params '{"userId":"me"}' --json "$PARAMS")
+  RESPONSE=$(gws_json gmail users drafts create --params '{"userId":"me"}' --json "$DRAFT_JSON")
 fi
 
 read -r DRAFT_ID MSG_ID < <(printf '%s' "$RESPONSE" | python3 -c "
