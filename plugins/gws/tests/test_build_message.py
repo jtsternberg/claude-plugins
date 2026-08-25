@@ -79,7 +79,7 @@ class BuildMessageTest(unittest.TestCase):
         raw += "=" * (-len(raw) % 4)
         return payload, email.message_from_bytes(base64.urlsafe_b64decode(raw))
 
-    # --- raw mode --------------------------------------------------------
+    # --- inline route ----------------------------------------------------
 
     def test_raw_mode_emits_headers_and_html_body(self):
         stdout, _, _ = run_builder(self.base_env())

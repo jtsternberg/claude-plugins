@@ -347,14 +347,13 @@ print('Verified: DRAFT label present' + (
 
 # Which mailbox did this land in? Surface it so nobody hunts for the draft in
 # the wrong account, and address the URL to that account explicitly.
-ACCOUNT_EMAIL=$(gws gmail users getProfile --params '{"userId":"me"}' 2>/dev/null | python3 -c "
+ACCOUNT_EMAIL=$(gws_json gmail users getProfile --params '{"userId":"me"}' 2>/dev/null | python3 -c "
 import json, sys
 try:
-    s = sys.stdin.read(); i = s.find('{')
-    print(json.loads(s[i:] if i >= 0 else s).get('emailAddress', ''))
+    print(json.load(sys.stdin).get('emailAddress', ''))
 except Exception:
     pass
-")
+" || true)
 
 echo "$VERIFY_OUT" >&2
 # The draft id (not the message id in the URL) is what drafts.get/delete take —
