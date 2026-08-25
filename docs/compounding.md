@@ -105,6 +105,18 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   parser drift guard" — this entry adds only the evidence that it keeps happening:
   after both sections existed, nonce injection still grew three copies and a bug fix
   had to land in two of them. (claude-plugins-xick, 279f98e)
+- **A wrapped CLI's chatter stays out of every captured JSON.** `gws` prints
+  "Using keyring backend" to stderr and hotline hit the same class from stdout, so
+  a `2>&1` capture yields a file that looks fine and fails every parse downstream.
+  Keep the streams separate and slice from the first `{` before parsing; save the
+  raw response to a file rather than piping straight into `jq`, so a bad response
+  is still readable. (claude-plugins-xick, 0affe5f)
+- **Argv is a size limit, not just a leak surface.** 620KB of PDFs base64-encodes
+  to a 1,118,017-byte `--json` argument against a 1,048,576-byte `ARG_MAX`, which
+  the kernel refuses with a bare "argument list too long" — the same argv that
+  leaks secrets also caps payloads well below what a user considers ordinary. When
+  a request body can scale with user input, route it through a file upload and
+  measure the ceiling rather than assuming headroom. (0affe5f, claude-plugins-dekq)
 - **Payloads ride files or stdin, never argv or env.** argv is `ps`-visible to
   every local user for the process lifetime. Guard: the hotline suites assert a
   sentinel never appears in recorded argv — copy that pattern for new launchers.
