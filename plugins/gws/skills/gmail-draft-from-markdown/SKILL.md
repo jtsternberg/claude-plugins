@@ -272,7 +272,7 @@ Codex: this path resolves under Claude Code; substitute the directory containing
 ```bash
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 TO=alice@example.com SUBJECT="Re: Proposal" HTML_FILE=body.html \
-  OUT_EML=draft.eml THREAD_ID=<THREAD_ID> \
+  OUT_EML=draft.eml THREAD_ID='<THREAD_ID>' \
   IN_REPLY_TO='<parent@mail.example.com>' \
   REFERENCES='<older@mail.example.com> <parent@mail.example.com>' \
   python3 "$SKILL_DIR/scripts/build-message.py" proposal.pdf site-plan.pdf
