@@ -70,6 +70,16 @@ catalog already serves the plugin from its Claude manifest by fallback.
 
    Record the installed version and confirm it is the version currently on
    `main`, not the version in the pending release.
+
+   **This step is not recoverable after the merge.** Once the release is on
+   `main` there is no way to construct the old-version profile: a marketplace
+   pinned to the pre-release SHA cannot be upgraded (`git ls-remote` returns
+   empty for a commit, so `marketplace upgrade` fails), re-adding the same
+   marketplace name against a different ref is refused outright, and a local
+   clone is resolved as a **Directory** source rather than a Git one, so
+   `--ref` is rejected. Skip the seeding and the cache transition is
+   unverifiable for that release — §3's fresh-install fallback is all that
+   remains.
 6. Commit, push, and merge the complete release change. A local working tree is
    not evidence of what marketplace users can install.
 
@@ -109,7 +119,10 @@ A profile whose `jtsternberg` marketplace is a local **Directory** — as on the
 maintainer machine — has no Git root to upgrade: `codex plugin marketplace
 upgrade` fails with *not configured as a Git marketplace*. Refresh that profile
 with `codex plugin add <plugin-name>@jtsternberg`, which re-materializes the
-cache at the new version. The isolated profile in this section is Git-backed, so
+cache at the new version **and removes the prior one**, the same reconciliation
+the Git path performs. That makes the maintainer profile a usable transition
+check whenever it still holds the previous version — but only for local content,
+so pair it with a GitHub-backed fresh install to prove publication. The isolated profile in this section is Git-backed, so
 it takes the `marketplace upgrade` path above.
 
 Start a new Codex session before exercising changed skills, hooks, MCP servers,
@@ -150,5 +163,7 @@ subsequent `codex plugin add codex@jtsternberg` returned the same 0.1.3 path,
 and a second marketplace upgrade reported no upgraded roots.
 
 The same transition was observed on Codex CLI 0.148.0 with
-`walk-through-work-history` 1.0.0 → 1.1.0, so the reconciliation behavior is not
-specific to 0.147.0.
+`walk-through-work-history` 1.0.0 → 1.1.0, and on 0.149.0 with `gws`
+1.20.3 → 1.22.1 through the Directory path (`codex plugin add`), which also left
+only the new version cached. The reconciliation behavior is not specific to
+0.147.0 or to Git-backed marketplaces.
