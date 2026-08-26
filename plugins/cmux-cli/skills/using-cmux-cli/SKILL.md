@@ -127,8 +127,9 @@ The one-call recipe:
 # 1. Open a sibling surface next to the user's current view, NAME it, AND wait
 #    until its PTY is attached + shell is actually executing input. --title is
 #    what makes the tab findable (see "Name it, then report it by name" below);
-#    --wait-ready handles both the focus-pane attach step and a round-trip
-#    probe, exiting 3 with a diagnostic rather than returning a non-ready ref.
+#    --wait-ready round-trips a probe (whose send is what attaches the PTY, with
+#    no focus steal), exiting 3 with a diagnostic rather than returning a
+#    non-ready ref.
 # Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
 OUT=$("$SKILL_DIR/scripts/open-side-surface.sh" \
@@ -143,7 +144,8 @@ cmux send --surface "$SID" "ssh user@host\n"
 # or: cmux send --surface "$SID" "cargo watch -x test\n"
 
 # 3. Verify it actually executed — see "Send keystrokes" below for why.
-cmux read-screen --surface "$SID" --lines 20
+#    --scrollback is not optional here: the bare form follows the user's scroll.
+cmux read-screen --surface "$SID" --scrollback --lines 20
 
 # 4. Report it by NAME: "opened '$TITLE' in the '$WSNAME' workspace" — never
 #    "opened surface:258".
@@ -154,9 +156,12 @@ cmux read-screen --surface "$SID" --lines 20
 > `echo <unique-marker>` probe and grepping `read-screen` for ≥2 hits of the
 > marker (typed input + executed output). Don't rely on a `[$%#>]` prompt
 > regex — it silently misses powerline / NerdFont prompts (`❯`, `➜`, custom
-> glyphs) and spins to its retry ceiling. If `read-screen` errors with
-> `Terminal surface not found`, run `cmux focus-pane --pane <pane-ref>` first
-> to force PTY attachment.
+> glyphs) and spins to its retry ceiling. Clear the input line with a raw
+> `Ctrl-U` (`cmux send --surface "$SID" $'\025'`) before each probe — the line is
+> shared with the user, whose keystrokes would otherwise prepend to it. If
+> `read-screen` errors before you have sent anything, that is expected: **the
+> send is what attaches the PTY.** Probe first, then read; do not reach for
+> `cmux focus-pane`, which attaches by stealing the user's focus.
 
 Use `--focused` on `open-side-surface.sh` when the user says "next to the tab I'm looking at" instead of "next to yours" — the defaults diverge when the user is viewing a different tab than the one the agent lives in.
 
@@ -240,7 +245,9 @@ Same caveat applies to other agent REPLs that render input autosuggestions (open
 
 #### Gotcha: `read-screen` returns the *scrolled* viewport, not the live bottom
 
-`read-screen` (with or without `--scrollback --lines <n>`) captures whatever the surface is currently showing. If the **user has scrolled the surface up** (mouse wheel / trackpad in the cmux GUI), you get stale content from higher in the buffer — and `--scrollback --lines <n>` counts backward from the *scrolled* position, not the live tail, so it doesn't rescue you. The only tell in the captured text is a marker line:
+**Use `cmux read-screen --surface <id> --scrollback --lines <n>` for every read you will make a decision on.** Bare `read-screen` captures whatever the surface is currently showing, so if the **user has scrolled the surface up** (mouse wheel / trackpad in the cmux GUI) you get stale content from higher in the buffer. The `--scrollback --lines <n>` form reads history plus the active tail and is **viewport-independent** — verified live on cmux 0.64.22 against a pane scrolled to ~line 225, where it returned the live tail while the bare form returned the scrolled view (and confirmed in cmux's own `TerminalControllerTerminalTextTests.swift`).
+
+The stale-capture tell below still matters for the bare form, and for reasoning about a capture you did not take yourself:
 
 ```
 Jump to bottom (click) ↓
@@ -256,7 +263,7 @@ Press up to edit queued messages
 
 means messages were **queued** while the REPL was busy — i.e. your send *did* land and is waiting to be processed. Seeing it is confirmation of success, not failure.
 
-**Detection — before concluding a send failed, grep the `read-screen` output for both markers:**
+**Detection — before concluding a send failed, grep the output for both markers** (a `--scrollback` read should not show `Jump to bottom` at all, so seeing it means something took a bare capture):
 
 ```bash
 out=$(cmux read-screen --surface "$SID" --scrollback --lines 80)
@@ -264,11 +271,24 @@ printf '%s\n' "$out" | grep -qF 'Jump to bottom'            && echo "SCROLLED �
 printf '%s\n' "$out" | grep -qF 'Press up to edit queued'   && echo "QUEUED — your send landed and is waiting"
 ```
 
-**Remedy.** Treat `Jump to bottom` as "I'm looking at a scrolled-up view," never as evidence the send failed — do **not** re-send. cmux has **no CLI primitive that snaps a scrolled terminal viewport to the bottom** (verified against `cmux --help`, `cmux capabilities`, and the upstream `cli-contract.md`: the only scrollback verb is `clear-history`, which *clears* history and is destructive; `browser scroll*` is for the embedded browser only, not terminals). `send-key` accepts `page_up`/`page_down`/`home`/`end` but those go to the shell/PTY, not to Ghostty's scroll region, so they won't move a GUI-scrolled viewport. What actually works:
+**Remedy — read the live tail instead of trying to move the viewport.** Two primitives are scroll-immune, and neither moves what the user is looking at:
 
-- **Re-read after fresh output.** New output normally lands at the live bottom and pulls the viewport down with it. Wait for the REPL to emit something (or for a busy REPL to drain its queue), then `read-screen` again — the markers disappear once the view is at the live tail.
-- **Corroborate with a non-viewport signal** instead of the screen text: process state (`cmux top`/`tree` shows the REPL spinning), or `wait-for` on a signal, rather than inferring from a possibly-stale capture.
-- **Last resort:** the user can click the `Jump to bottom` marker in the GUI. `clear-history` would drop scrollback so future reads reflect only the live region, but it destroys history — avoid unless you own the surface.
+| Read | Scroll-immune? | Use it for |
+|---|---|---|
+| `read-screen --surface <id>` | **no** — follows the user's scroll | nothing you will decide on |
+| `read-screen --surface <id> --scrollback --lines <n>` | **yes** | anything a CLI read can answer |
+| `cmux rpc terminal.replay '{"workspace_id":…,"surface_id":…,"anchor":"screen"}'` | **yes** | when you need STRUCTURE (styles, cursor, row spans) rather than text |
+
+`anchor:"screen"` pins the render grid to the live primary screen; the default `"viewport"` follows the scroll. It is scroll-immune by contract — cmux's `MobileTerminalRenderGridAnchorRegistry.swift` states that primary-screen scrolling never round-trips — gated on the `terminal.render_grid.screen_anchor.v1` capability, and confirmed live on 0.64.22.
+
+Two traps around it:
+
+- **`scrolled_rows` in the reply is NOT a scroll offset.** It is forced to 0 whenever the reply is `full:true`, and every reply is, so it is structurally always 0 (`MobileTerminalRenderGrid.swift:212`). Never build a scroll check on it. Detect scroll from `history_rows` growth or row-content deltas if you genuinely need to.
+- **Param keys must be snake_case, and you must verify the target came back.** camelCase keys (`surfaceId`) are silently dropped and the call is resolved against the **focused** surface, returning `ok:true` with someone else's grid. Check `result.surface_id` against what you asked for before trusting the payload.
+
+If you are stuck with a bare capture and see `Jump to bottom`, treat it as "I'm looking at a scrolled-up view," never as evidence the send failed — do **not** re-send. There is no CLI primitive that snaps a scrolled viewport to the bottom (verified against `cmux --help`, `cmux capabilities`, and the upstream `cli-contract.md`: the only scrollback verb is `clear-history`, which *clears* history and is destructive; `browser scroll*` is for the embedded browser only). `send-key page_up`/`end` go to the shell/PTY, not to the GUI's scroll region. Re-read with `--scrollback --lines <n>` instead.
+
+Also worth knowing, because it looks like a probe and is not: **`terminal.viewport` is a SETTER.** Registering a `client_id` with `viewport_rows`/`viewport_columns` **caps the surface's grid** — a test surface went 84×289 → 37×99 and its history reflowed. `{"clear": true}` releases the cap. Do not call it to ask what the viewport is.
 
 ### Send keystrokes
 
@@ -278,7 +298,7 @@ cmux send --help
 
 Escape sequences matter: `\n` and `\r` send Enter; `\t` sends Tab. **Against a shell**, if a command should actually execute, append `\n` — otherwise you're just typing into the prompt. **Against a live TUI/Ink REPL (`claude`) the `\n` does not submit at all** — see [a trailing `\n` does not submit into a TUI/Ink REPL](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl) below before sending into one. And because that interpretation runs on your argument regardless of target, a payload whose *content* carries the two characters `\n`, `\r`, or `\t` is rewritten in transit — see [cmux rewrites a literal backslash-n in your payload](#gotcha-cmux-rewrites-a-literal-backslash-n-in-your-payload).
 
-**Always `read-screen` after `send` to confirm execution started — not just that the send succeeded.** `cmux send` returns success when bytes are delivered to the PTY; it has no opinion about whether the remote shell did anything with them. Concrete failure mode: if you `send` into a freshly-created surface before its shell has finished initializing, the trailing `\n` gets swallowed by the shell's startup output and the command sits at the prompt unexecuted. Exit code 0, nothing happened. (That is a *shell-startup* race, fixed by waiting for the PTY. A live TUI REPL produces the identical "exit 0, nothing happened" symptom from a different cause that waiting will never fix — see the [gotcha below](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl).) The only way to know is to read the screen back and look for evidence the command ran (output, new prompt line, process spinning). See the [default recipe](#default-principle-make-new-work-visible-to-the-user) for the wait-for-PTY pattern, and Troubleshooting for the `Terminal surface not found` variant. **Caveat:** the read-back only proves anything if it reflects the *live* bottom — if the user has scrolled the surface up, your capture is stale (see [read-screen returns the scrolled viewport](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom) before concluding nothing happened).
+**Always `read-screen` after `send` to confirm execution started — not just that the send succeeded.** `cmux send` returns success when bytes are delivered to the PTY; it has no opinion about whether the remote shell did anything with them. Concrete failure mode: if you `send` into a freshly-created surface before its shell has finished initializing, the trailing `\n` gets swallowed by the shell's startup output and the command sits at the prompt unexecuted. Exit code 0, nothing happened. (That is a *shell-startup* race, fixed by waiting for the PTY. A live TUI REPL produces the identical "exit 0, nothing happened" symptom from a different cause that waiting will never fix — see the [gotcha below](#gotcha-a-trailing-n-does-not-submit-into-a-tuiink-repl).) The only way to know is to read the screen back and look for evidence the command ran (output, new prompt line, process spinning). See the [default recipe](#default-principle-make-new-work-visible-to-the-user) for the wait-for-PTY pattern, and Troubleshooting for the `Terminal surface not found` variant. **Caveat:** the read-back only proves anything if it reflects the *live* bottom, so take it with `--scrollback --lines <n>` — a bare `read-screen` follows the user's scroll and hands you a stale capture (see [read-screen returns the scrolled viewport](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom) before concluding nothing happened).
 
 #### Gotcha: a trailing `\n` does not submit into a TUI/Ink REPL
 
@@ -471,7 +491,7 @@ Key options (run `--help` for the full list):
 - `--url <url>` — for browser surfaces.
 - `--title <text>` — **pass this every time.** Applies the title with `cmux rename-tab` at creation, so the tab is findable and the returned `surface_title` is something you can report. Omitting it leaves a generic auto-title and prints a hint on stderr; `title_status` in the JSON tells you whether it was `applied`, `failed`, or `unset`.
 - `--json` — emit `{surface_ref, surface_id, pane_ref, pane_id, workspace_ref, workspace_id, surface_title, workspace_name, title_status, mode, subject, surface_type, url, ready}` for chaining. Chain on the `*_id` UUIDs (`surface_id`, `workspace_id`), not the `*_ref` positional labels — and report `surface_title` + `workspace_name` to the user, never the refs.
-- `--wait-ready` — for terminal surfaces, block until the PTY is attached *and* the shell is actually executing input (forces `focus-pane`, then round-trips an `echo <marker>` probe). Without this you have to hand-roll a readiness loop and dodge the "Terminal surface not found" race. No-op for browser surfaces.
+- `--wait-ready` — for terminal surfaces, block until the PTY is attached *and* the shell is actually executing input. The probe send is what attaches the PTY (`Ctrl-U`, then `echo <marker>`, re-sent until the marker appears twice); it does **not** focus the surface. Without this you have to hand-roll a readiness loop and dodge the "Terminal surface not found" race. No-op for browser surfaces.
 - `--wait-ready-timeout <seconds>` — override the wait-ready budget (default 5).
 
 On success it prints the new surface's ref + pane + workspace, its `title:` and `workspace:` names, plus which branch it took (`new-surface` vs `new-pane`). Failure goes to stderr with exit 1 (cmux error), 2 (context error), or 3 (`--wait-ready` timed out — surface exists but PTY never echoed the probe).
@@ -631,7 +651,7 @@ When the user describes an action informally, map it to cmux vocabulary:
 cmux prints what it did (new surface ref, new workspace ID, applied title, etc.). **Read the output** — don't assume success from exit code alone.
 
 - After creating anything (`new-split`, `new-pane`, `new-surface`, `new-workspace`), confirm the new ref appears in the output, then confirm with `cmux tree --workspace <ws-uuid>` that it carries the **title you gave it**. Refs are for your follow-up calls; the title + workspace name are what you tell the user ([details](#name-it-then-report-it-by-name-required)). A report of "opened `surface:258`" is a failed report even when the command succeeded.
-- After `send`, if a command was supposed to run, verify with `read-screen` rather than trusting it landed — but a `Jump to bottom` marker in the output means the view is scrolled and stale, not that the send failed ([details](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom)).
+- After `send`, if a command was supposed to run, verify with `read-screen --scrollback --lines <n>` rather than trusting it landed — the bare form follows the user's scroll, and a `Jump to bottom` marker in a capture means the view is scrolled and stale, not that the send failed ([details](#gotcha-read-screen-returns-the-scrolled-viewport-not-the-live-bottom)).
 - After `workspace-action` or `tab-action`, re-list (`list-workspaces` / `tree`) to confirm state.
 - If output is quieter than expected, append `--id-format both` to force UUIDs + refs so there's something concrete to verify against.
 
@@ -646,7 +666,10 @@ If commands fail, work through these in order:
 5. **Version mismatch?** `cmux version` + `cmux capabilities` — if a flag the skill surfaces isn't there, the running app is older than the CLI (or vice versa).
 6. **Unknown subcommand?** `cmux --help` lists everything the current build understands. If it's not there, the build predates it — consider `cmux rpc <method>` as a last resort. (The [official API docs](https://cmux.com/docs/api) list some commands like `list-surfaces` that don't exist on every build; trust `cmux --help` over the docs when they disagree.)
 7. **Socket disabled / wrong mode?** `CMUX_SOCKET_ENABLE=1` to force-enable; `CMUX_SOCKET_MODE=allowAll` if you're calling cmux from a process it didn't spawn (CI runner, foreign wrapper). Default mode is `cmuxOnly`, which rejects non-cmux ancestry.
-8. **`Terminal surface not found` on a surface that exists?** Mostly historical — `open-side-surface.sh --wait-ready` handles this internally. If you hit it from a different code path: `cmux read-screen --surface surface:N` returns `Error: internal_error: ERROR: Terminal surface not found` but `cmux tree` clearly shows `surface:N` exists. The surface is real — its PTY backend just isn't attached yet. Common on surfaces created less than ~1 second ago. The error wording is misleading: it says "doesn't exist" but means "not attached." Two fixes:
-   - **Wait + retry** — poll `read-screen` with a short sleep; the backend usually attaches within 1–2s.
-   - **Force attachment** — `cmux focus-pane --pane <pane-ref>` on the surface's pane wakes the backend immediately. Useful when you can't afford to wait.
+8. **`Terminal surface not found` (or `Failed to read terminal text`) on a surface that exists?** Mostly historical — `open-side-surface.sh --wait-ready` handles this internally. If you hit it from a different code path: `read-screen` errors while `cmux tree` clearly shows the surface exists. The surface is real — its PTY backend just isn't attached yet, and the error wording says "doesn't exist" when it means "not attached." Common on surfaces created less than ~1 second ago.
+
+   **A `cmux send` is what attaches the PTY** — lazily, on the first send. So waiting for `read-screen` to start working will not, on its own, get you there on a `--focus false` surface: verified on cmux 0.64.22, a surface created `--focus false` answered `Error: internal_error: Failed to read terminal text` indefinitely before its first send and read fine straight after one. Send the probe, then read.
+
+   `cmux focus-pane --pane <pane-ref>` also attaches the backend, eagerly. **Don't use it for this.** It moves the user's focus into the surface, so whatever they are typing at that moment goes to the new shell — that is how a hotline launch command became `rkebash /tmp/…`, produced `zsh: command not found`, and burned a 60s boot budget. Measured saving over the probe send: ~0.1s.
+
    Don't chase this as a "stale ref" or "wrong workspace" bug — the surface is fine, the PTY just isn't ready.

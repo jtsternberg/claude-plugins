@@ -297,10 +297,14 @@ case "$1" in
     exit 43
     ;;
   close-workspace) exit 0 ;;
+  # Every send fails here, including the readiness probe — which is not what this
+  # case is testing, so the caller caps HOTLINE_SURFACE_READY_TIMEOUT rather than
+  # waiting out the real budget.
 esac
 EOF
 chmod +x "$tmp/bin/cmux"
-PATH="$tmp/bin:$PATH" bash "$SCRIPT_UNDER_TEST" --detached --cwd "$tmp/cwd" --prompt "hello" \
+PATH="$tmp/bin:$PATH" HOTLINE_SURFACE_READY_TIMEOUT=1 \
+  bash "$SCRIPT_UNDER_TEST" --detached --cwd "$tmp/cwd" --prompt "hello" \
   > "$tmp/out.json" 2> "$tmp/stderr.txt"
 rc=$?
 if [[ $rc -eq 0 ]]; then
@@ -378,7 +382,7 @@ else
   fail "side-by-side async does NOT write workspace_ref.txt"
 fi
 if [[ -n "$call_dir" && "$(cat "$call_dir/pane_ref.txt" 2>/dev/null)" == "PANE-UUID-55" ]]; then
-  pass "side-by-side async records stable pane UUID for PTY re-attach"
+  pass "side-by-side async records stable pane UUID (for diagnosis, not re-attach)"
 else
   fail "side-by-side async records stable pane UUID" "got: $(cat "$call_dir/pane_ref.txt" 2>/dev/null)"
 fi
@@ -394,10 +398,25 @@ else
   fail "side-by-side async sends launch script by stable surface UUID" \
        "send_calls=$(cat "$tmp/send_calls" 2>/dev/null)"
 fi
-if [[ "$(grep -c '^send ' "$tmp/send_calls" 2>/dev/null || true)" -eq 1 ]]; then
+# ONE launch command, not two. Counted on the launch line specifically, because the
+# send is now preceded by a Ctrl-U: the surface's input line is shared with the
+# user, and on 2026-08-26 three of their keystrokes arrived first, so the shell ran
+# `rkebash /tmp/hotline-launch-…` and the caller burned its whole 60s boot budget
+# (claude-plugins-r465.7). A second LAUNCH send would still be a double-boot.
+if [[ "$(grep -c '^send .*bash /tmp/hotline-launch' "$tmp/send_calls" 2>/dev/null || true)" -eq 1 ]]; then
   pass "first-contact launch script is delivered exactly once"
 else
   fail "first-contact launch script is delivered exactly once" \
+       "send_calls=$(cat "$tmp/send_calls" 2>/dev/null)"
+fi
+# The Ctrl-U itself: the raw 0x15 byte through the TEXT path, addressed to the SAME
+# handle as the launch. `send-key ctrl+u` would not reach the shell, and an
+# unaddressed send would land in whatever surface the user is looking at.
+# -a: the log holds a raw 0x15 byte, which GNU grep would call binary content.
+if grep -aq $'^send --surface SURFACE-UUID-777 \025$' "$tmp/send_calls" 2>/dev/null; then
+  pass "the launch line is cleared with a Ctrl-U on the same handle first"
+else
+  fail "the launch line is cleared with a Ctrl-U on the same handle first" \
        "send_calls=$(cat "$tmp/send_calls" 2>/dev/null)"
 fi
 
@@ -553,8 +572,15 @@ cat > "$tmp/bin/cmux" <<'EOF'
 ST="${CMUX_FAKE_STATE:?}"
 case "$1" in
   new-workspace) echo "$*" >> "$ST/ws_calls"; echo "OK workspace:321" ;;
-  read-screen) echo "$ " ;;
-  send) echo "$*" >> "$ST/send_calls" ;;
+  # Round-trips surface-ready.sh's probe marker — the typed line plus the shell's
+  # output line, which is the >=2 hits the probe waits for. Without it the detached
+  # path waits out its whole readiness budget on every case.
+  read-screen) cat "$ST/screen.txt" 2>/dev/null; echo "$ " ;;
+  send)
+    echo "$*" >> "$ST/send_calls"
+    m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
+    if [[ -n "$m" ]]; then { echo "$m"; echo "$m"; } >> "$ST/screen.txt"; fi
+    ;;
   *) exit 0 ;;
 esac
 EOF
@@ -621,8 +647,13 @@ cat > "$tmp/bin/cmux" <<'EOF'
 ST="${CMUX_FAKE_STATE:?}"
 case "$1" in
   new-workspace) echo "OK workspace:456" ;;
-  read-screen)   echo "$ " ;;
-  send)          echo "$*" >> "$ST/send_calls" ;;
+  # See above: the probe marker is echoed back so readiness succeeds.
+  read-screen)   cat "$ST/screen.txt" 2>/dev/null; echo "$ " ;;
+  send)
+    echo "$*" >> "$ST/send_calls"
+    m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
+    if [[ -n "$m" ]]; then { echo "$m"; echo "$m"; } >> "$ST/screen.txt"; fi
+    ;;
   close-surface) echo "$*" >> "$ST/close_calls" ;;
   *) exit 0 ;;
 esac
@@ -685,9 +716,16 @@ fork_ok_tmp="$(mktemp -d)"
 mkdir -p "$fork_ok_tmp/bin" "$fork_ok_tmp/cwd"
 cat > "$fork_ok_tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
+S="$0.screen"
 case "$1" in
   new-workspace) echo "OK workspace:123" ;;
-  read-screen)   echo "$ " ;;
+  # Round-trips surface-ready.sh's probe marker (typed line + output line) so the
+  # detached readiness step succeeds instead of waiting out its budget.
+  read-screen)   cat "$S" 2>/dev/null; echo "$ " ;;
+  send)
+    m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
+    if [[ -n "$m" ]]; then { echo "$m"; echo "$m"; } >> "$S"; fi
+    exit 0 ;;
   *)             exit 0 ;;
 esac
 EOF
@@ -723,10 +761,15 @@ rm -rf "$fork_ok_tmp"
 make_ok_cmux() {
   cat > "$1" <<'EOF'
 #!/usr/bin/env bash
+S="$0.screen"
 case "$1" in
   new-workspace) echo "OK workspace:123" ;;
-  read-screen)   echo "$ " ;;
-  send)          exit 0 ;;
+  # See above: the probe marker is echoed back so readiness succeeds.
+  read-screen)   cat "$S" 2>/dev/null; echo "$ " ;;
+  send)
+    m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
+    if [[ -n "$m" ]]; then { echo "$m"; echo "$m"; } >> "$S"; fi
+    exit 0 ;;
   *)             exit 0 ;;
 esac
 EOF

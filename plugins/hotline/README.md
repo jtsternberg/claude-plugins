@@ -129,6 +129,8 @@ Hotline also caches workspace identities (via the `hotline-pickup` skill) — na
 
 When a call routes through `cmux`, Hotline opens the callee **side-by-side with your current pane, in the same window** — you watch the call happen beside the original conversation. It does this by calling the [`cmux-cli`](https://cmux.com/) plugin's `open-side-surface.sh` (resolved at runtime — Hotline keeps no copy of the split-vs-adjacent decision tree), which waits for the new surface's PTY to attach before the prompt is sent, so the callee's first keystrokes are never dropped. Side-by-side surfaces stay open after the call (they live in your window); the caller closes them when done.
 
+**A dial never takes your focus.** Every surface and workspace a call creates is made `--focus false`, and nothing focuses a pane afterwards: the callee appears beside you and boots there while your cursor stays where it was. That is a correctness rule, not a courtesy — focus moves the input line under your keystrokes, and a stray three characters arriving ahead of the launch command once made a callee's shell run `rkebash /tmp/…` and cost the caller its whole 60-second boot budget. Every read Hotline takes of a callee's screen is scroll-immune for the same reason: you can scroll around inside a callee's pane while a call is in flight without the caller mistaking your frozen viewport for an idle REPL.
+
 **If `cmux` is running but the `cmux-cli` plugin isn't installed**, side-by-side placement isn't available, so Hotline falls back to the **headless** transport for that call (it doesn't silently drop the callee into a detached tab). `--detached` and `--window` don't need `cmux-cli` and keep working on `cmux` regardless.
 
 Two opt-outs, passed as flags on the dial command:

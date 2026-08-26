@@ -437,7 +437,8 @@ make_surface_fake_cmux() {
   cat > "$bin_dir/cmux" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
-  read-screen)    cat "${CMUX_FAKE_SCREEN:?}" ;;
+  read-screen)    echo "$@" >> "${CMUX_FAKE_STATE:?}/read_calls"; cat "${CMUX_FAKE_SCREEN:?}" ;;
+  focus-pane)     echo "$@" >> "${CMUX_FAKE_STATE:?}/focus_calls" ;;
   close-surface)  echo "$@" >> "${CMUX_FAKE_STATE:?}/close_surface_calls" ;;
   close-workspace)echo "$@" >> "${CMUX_FAKE_STATE:?}/close_workspace_calls" ;;
   *)              exit 0 ;;
@@ -463,6 +464,26 @@ if [[ $rc -eq 0 && "$out" == "surf-preset-1" ]]; then
 else
   fail "surface mode: wait-for-session reads the surface and prints the session id" \
        "rc=$rc stdout=$out stderr=$(cat "$tmp/err.txt")"
+fi
+# The boot wait is handed a pane_ref and must NOT focus it. The launcher has already
+# SENT to this target and the send is what attaches the PTY, so a focus call here
+# attaches nothing and only moves the user's cursor into a booting callee
+# (claude-plugins-r465.4).
+if [[ ! -s "$tmp/focus_calls" ]]; then
+  pass "surface mode: the boot wait never focuses the callee's pane"
+else
+  fail "surface mode: the boot wait never focuses the callee's pane" \
+       "focus=$(cat "$tmp/focus_calls" 2>/dev/null)"
+fi
+# Scroll immunity: a bare read-screen returns the user's scrolled viewport, so a
+# scrolled callee pane would look like a REPL that never booted for the whole
+# 60s budget (claude-plugins-r465.5).
+plain_reads=$(grep -vc -- '--scrollback' "$tmp/read_calls" 2>/dev/null || true)
+if [[ -s "$tmp/read_calls" && "${plain_reads:-1}" -eq 0 ]]; then
+  pass "surface mode: every boot-wait read carries --scrollback"
+else
+  fail "surface mode: every boot-wait read carries --scrollback" \
+       "reads=$(cat "$tmp/read_calls" 2>/dev/null)"
 fi
 rm -rf "$tmp"
 

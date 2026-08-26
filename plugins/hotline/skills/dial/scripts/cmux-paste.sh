@@ -157,11 +157,31 @@ if [[ -n "$BASELINE_FILE" && -f "$BASELINE_FILE" ]]; then
   BASELINE=$(cat "$BASELINE_FILE")
 fi
 
+# EVERY READ IN THIS SCRIPT IS SCROLL-IMMUNE, via read_live below. A plain
+# `cmux read-screen` returns whatever the surface is CURRENTLY SHOWING, so a user
+# who has scrolled the pane up freezes the capture — and this gate would then wait
+# out its whole budget for a box that has been drawn the entire time, refusing a
+# delivery that was perfectly safe. `--scrollback --lines N` returns the live tail
+# regardless of scroll position (repl-state.sh; verified on cmux 0.64.22).
+#
+# The result is TAILED to the live screen rows before any state judgement reads it.
+# Box presence, busy markers and box content are all bottom-of-screen facts, and a
+# 400-line read still holds `❯` echoes and elapsed-time parentheticals from turns
+# that ended long ago — matching those would report a box (or a busy REPL) that is
+# not there now. The scrollback width only exists so the read cannot be scrolled
+# out from under us, not to widen what these predicates see.
+read_live() {
+  local raw
+  raw=$(cmux_read_live "paste to surface $SURFACE_REF" --surface "$SURFACE_REF") || return 1
+  [[ -z "$raw" ]] && return 1
+  repl_screen_tail "$raw"
+}
+
 if [[ "$WAIT_BOX" != "0" ]]; then
   BOX_DEADLINE=$(( $(date +%s) + WAIT_BOX ))
   BOX_READY=false
   while [[ $(date +%s) -le $BOX_DEADLINE ]]; do
-    BOX_SCREEN=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || BOX_SCREEN=""
+    BOX_SCREEN=$(read_live) || BOX_SCREEN=""
     if [[ -n "$BOX_SCREEN" ]] && repl_box_present "$BOX_SCREEN"; then
       BOX_READY=true
       # The screen that proved the box is the freshest possible baseline.
@@ -170,11 +190,11 @@ if [[ "$WAIT_BOX" != "0" ]]; then
     fi
     sleep 0.4
   done
-  $BOX_READY || undelivered "surface $SURFACE_REF never drew a claude input box (a ❯ padded with U+00A0) within ${WAIT_BOX}s; delivering now would paste the payload into whatever IS there — a shell would run it"
+  $BOX_READY || undelivered "surface $SURFACE_REF never drew a claude input box (a ❯ padded with U+00A0) within ${WAIT_BOX}s; delivering now would paste the payload into whatever IS there — a shell would run it. The read is scroll-immune, so a scrolled pane is not the cause."
 fi
 
 if [[ -z "$BASELINE" ]]; then
-  BASELINE=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || BASELINE=""
+  BASELINE=$(read_live) || BASELINE=""
 fi
 
 # --- Deliver the paste(s). ---------------------------------------------------
@@ -314,11 +334,12 @@ confirmed_by_transcript() {
 #                        delivery; claude flushes it at the next tool boundary. The
 #                        one marker that also counts ON the box line, because claude
 #                        draws it there as a placeholder (see QUEUED_HINT below).
-#   • "Jump to bottom" — the user has scrolled the surface up, so read-screen is
-#                        returning a stale viewport and absence proves nothing.
-#                        cmux exposes no primitive to snap a scrolled terminal
-#                        back to its live tail. Re-sending here is a documented
-#                        double-submit.
+#   • "Jump to bottom" — a BACKSTOP, not the main defence. Every read here is
+#                        scroll-immune (read_live), so a scrolled pane returns the
+#                        live tail and this marker should not appear at all. It is
+#                        kept because absence of the nonce on a capture we somehow
+#                        cannot trust proves nothing, and re-sending on that
+#                        reading is a documented double-submit.
 #
 # THE LAST THREE NEED A RECENCY BASELINE. They are generic chrome, and the whole
 # point of this path is that the surface is REUSED — so a previous exchange's
@@ -382,7 +403,7 @@ screen_outside_box() {
 confirmed_by_screen() {
   local i scr outside m
   for ((i = 0; i < CONFIRM_TRIES; i++)); do
-    scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || scr=""
+    scr=$(read_live) || scr=""
     if [[ -n "$scr" ]]; then
       outside=$(screen_outside_box "$scr")
       printf '%s' "$outside" | grep -qF "$CALL_ID" && return 0
@@ -415,13 +436,14 @@ confirmed_by_screen() {
 # "Ours" is the nonce on the box line (a small paste, including the [CALL_ID:] line
 # a collapsed multi-line follow-up leaves as its first box line) or a `[Pasted text`
 # placeholder ON the box line.
-#   scrolled viewport ("Jump to bottom") → read-screen is a STALE capture, not the
-#                    live box. input_box_content's bare-`❯` fallback (repl-state.sh)
-#                    could then match a prior turn's "❯ [Pasted text #1 …" scrolled up
-#                    from history, and we'd fire Enter blind into the unseen live box
-#                    — where a ghost suggested-prompt would become a phantom turn
-#                    (ff6g). Absence of the live box proves nothing; refuse. Same
-#                    rationale as the screen tier's Jump-to-bottom handling.
+#   scrolled viewport ("Jump to bottom") → a capture we cannot trust as the live box.
+#                    read_live is scroll-immune, so this should not be reachable;
+#                    kept as a backstop because if it ever IS, then
+#                    input_box_content's bare-`❯` fallback (repl-state.sh) could
+#                    match a prior turn's "❯ [Pasted text #1 …" from history and we
+#                    would fire Enter blind into the unseen live box — where a ghost
+#                    suggested-prompt becomes a phantom turn (ff6g). Absence of the
+#                    live box proves nothing; refuse.
 #   box unchanged from the baseline — whatever is in there was in there BEFORE this
 #                    paste, so it is not ours and an Enter would submit someone
 #                    else's text. Reuse clears a dirty box and proves the clear took
@@ -430,7 +452,7 @@ confirmed_by_screen() {
 #                    yet — which is indistinguishable from "not ours" from here.
 payload_is_parked() {
   local scr box
-  scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || return 1
+  scr=$(read_live) || return 1
   [[ -z "$scr" ]] && return 1
   printf '%s' "$scr" | grep -qF 'Jump to bottom' && return 1
   repl_looks_busy "$scr" && return 1
@@ -460,7 +482,7 @@ retry_landed() {
     for t in ${TRANSCRIPTS[@]+"${TRANSCRIPTS[@]}"}; do
       [[ -s "$t" ]] && grep -qF "$CALL_ID" "$t" 2>/dev/null && { echo "transcript"; return 0; }
     done
-    scr=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || scr=""
+    scr=$(read_live) || scr=""
     if [[ -n "$scr" ]] && ! printf '%s' "$scr" | grep -qF 'Jump to bottom'; then
       if repl_looks_busy "$scr" || printf '%s' "$scr" | grep -qF "$QUEUED_HINT"; then
         echo "screen"; return 0

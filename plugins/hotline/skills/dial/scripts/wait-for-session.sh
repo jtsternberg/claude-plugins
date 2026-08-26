@@ -97,17 +97,25 @@ check_early_fail() {
 }
 
 if $CMUX_MODE; then
-  # Resolve the read-screen target: a surface (side-by-side/window) or a
-  # workspace (detached). pane_ref (surface mode) lets us re-attach the PTY
-  # if a read-screen ever races with PTY detachment.
+  # Resolve the read target: a surface (side-by-side/window) or a workspace
+  # (detached).
+  #
+  # NO focus-pane, even though a pane_ref is on hand. The launcher has already SENT
+  # to this target and the send is what attaches the PTY, so by the time this script
+  # runs there is nothing left to attach — focusing here only moves the user's cursor
+  # into a booting callee, which is how their keystrokes end up in its shell
+  # (claude-plugins-r465.4).
   if $SURFACE_MODE; then
     REF=$(cat "$CALL_DIR/surface_ref.txt")
-    READ_TARGET=(--surface "$REF")
-    [[ -f "$CALL_DIR/pane_ref.txt" ]] && \
-      cmux focus-pane --pane "$(cat "$CALL_DIR/pane_ref.txt")" >/dev/null 2>&1 || true
+    READ_FLAG="--surface"
   else
     REF=$(cat "$CALL_DIR/workspace_ref.txt")
-    READ_TARGET=(--workspace "$REF")
+    READ_FLAG="--workspace"
+  fi
+  READ_TARGET=("$READ_FLAG" "$REF")
+  if ! cmux_handle_ok "boot wait" "$REF"; then
+    echo "CMUX call_dir recorded an empty ${READ_FLAG#--} handle — launcher bug" >&2
+    exit 1
   fi
   WS_REF="$REF"
   if [[ ! -f "$CALL_DIR/session_id_preset.txt" ]]; then
@@ -162,6 +170,19 @@ if $CMUX_MODE; then
     [[ "$TRANSCRIPT_BASE_SIZE" =~ ^[0-9]+$ ]] || TRANSCRIPT_BASE_SIZE=-1
   fi
 
+  # (c) FAST-FAIL ON A MANGLED LAUNCH LINE. Before this existed, a launch command
+  # that the shell refused ("zsh: command not found: rkebash", after three of the
+  # user's keystrokes arrived ahead of it) produced no banner, no box and no
+  # transcript — so the wait ran its full 60s and then blamed --allowedTools. The
+  # screen said exactly what happened the whole time.
+  #
+  # ONE retry, not a loop: clear the input line and re-send the same launch command.
+  # A mangle is a one-off collision with the user's typing, so a clean resend
+  # usually boots; a second occurrence is a real problem and gets reported with the
+  # actual screen text. Retrying without the clear would append to the broken line.
+  LAUNCH_SCRIPT=$(cat "$CALL_DIR/launch_script.txt" 2>/dev/null || true)
+  RELAUNCHED=false
+
   SAW_BANNER=false
   SAW_TRANSCRIPT=false
   SAW_BOX=false
@@ -179,13 +200,16 @@ if $CMUX_MODE; then
       else
         DIAG=" (no banner and no input box matched on screen; transcript-file check skipped — cwd.txt absent)"
       fi
-      echo "Timed out waiting for Claude REPL to boot in cmux ${REF} (${TIMEOUT}s).${DIAG} Common causes: the launch-script claude invocation is malformed (e.g. --allowedTools split into two argv words instead of --allowedTools=<list>), or the surface/workspace lost its tty." >&2
+      echo "Timed out waiting for Claude REPL to boot in cmux ${REF} (${TIMEOUT}s).${DIAG} The screen reads are scroll-immune (--scrollback --lines), so a scrolled pane is not the cause, and a shell error on the launch line would have been reported above. Common causes: the launch-script claude invocation is malformed (e.g. --allowedTools split into two argv words instead of --allowedTools=<list>), or the surface/workspace lost its tty." >&2
       exit 1
     fi
 
-    # Signal A: banner on cmux read-screen. Signal C: the input box is drawn.
-    SCREEN=$(cmux read-screen "${READ_TARGET[@]}" --scrollback --lines 9999 \
-      2>/dev/null || true)
+    # Signal A: banner on screen. Signal C: the input box is drawn.
+    #
+    # Scroll-immune read (repl-state.sh): a plain read-screen returns the user's
+    # scrolled viewport, and a frozen capture reads as "nothing has happened yet"
+    # for the whole budget.
+    SCREEN=$(cmux_read_live "boot wait" "$READ_FLAG" "$REF" 9999 || true)
     if [[ -n "$SCREEN" ]]; then
       CLEAN=$(echo "$SCREEN" | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
       if echo "$CLEAN" | grep -qE 'Claude Code v|Welcome back'; then
@@ -198,10 +222,31 @@ if $CMUX_MODE; then
       # echoes from a previous session in the same surface. Matching those would
       # report a REPL booted before it exists, and the paste that follows would
       # go into a bare shell.
-      if repl_box_present "$(printf '%s\n' "$CLEAN" | tail -12)"; then
+      if repl_box_present "$(repl_screen_tail "$CLEAN" 12)"; then
         SAW_BOX=true
         echo "$PRESET" > "$CALL_DIR/session_id.txt"
         break
+      fi
+      # The launch line never ran. Checked only while no boot signal has fired, and
+      # scoped to errors naming OUR command (repl_launch_error_line), so a tool
+      # result or an rc-file complaint cannot fail a healthy boot.
+      LAUNCH_ERR=$(repl_launch_error_line "$CLEAN" "$LAUNCH_SCRIPT")
+      if [[ -n "$LAUNCH_ERR" ]]; then
+        if ! $RELAUNCHED && [[ -n "$LAUNCH_SCRIPT" && -f "$LAUNCH_SCRIPT" ]]; then
+          RELAUNCHED=true
+          echo "hotline: the callee's shell refused the launch line — ${LAUNCH_ERR}. Clearing the input line and re-sending it once." >&2
+          cmux_clear_input_line "launch resend" "$READ_FLAG" "$REF"
+          cmux_send_live "launch resend" "$READ_FLAG" "$REF" "bash $LAUNCH_SCRIPT\n" \
+            >/dev/null 2>&1 || true
+        else
+          {
+            echo "The callee's shell refused the launch line and a clean re-send did not help. What the surface actually shows:"
+            echo "  $LAUNCH_ERR"
+            echo "This is a launch-line transport failure in cmux ${REF}, not a problem with --allowedTools or the prompt content: the command was mangled before the shell saw it (typically the user's own keystrokes arriving on the same input line)."
+            echo "Recover by hand: cmux read-screen ${READ_FLAG} ${REF} --scrollback --lines 80, then re-send \`bash ${LAUNCH_SCRIPT:-<launch script>}\` after a Ctrl-U."
+          } >&2
+          exit 1
+        fi
       fi
     fi
 

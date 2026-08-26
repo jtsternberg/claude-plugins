@@ -107,9 +107,9 @@ Identity normally resolves inline from `$CLAUDE_CODE_SESSION_ID` (Claude Code >=
 - The new surface was created but its shell never echoed the readiness probe within the timeout (`surface-ready.sh` exited 3). Common causes: a very slow shell rc, a non-shell program in the surface, or the PTY backend never attaching.
 - Recovery: the launcher already closed the surface (no orphan) and wrote the async error. Bump the budget with `HOTLINE_SURFACE_READY_TIMEOUT=<seconds>` (default 8) and retry, or use `--detached`.
 
-**"Terminal surface not found" mid-call**
-- The surface lost (or never attached) its PTY. The wait scripts re-`focus-pane` the surface's pane each poll in surface mode to recover, but a surface the user manually closed can't be recovered.
-- Recovery: if the user closed the surface, the call is gone — re-dial. Otherwise retry; the readiness probe + focus-pane normally handles transient attach races.
+**"Terminal surface not found" / "Failed to read terminal text" mid-call**
+- The surface lost (or never attached) its PTY. `cmux send` is what attaches it, lazily, on first send — so the readiness probe (`surface-ready.sh`) is the recovery, and it runs before the launch command. Nothing focuses the pane to force attachment: focus moves the user's cursor into the callee's shell, which is how their keystrokes end up prepended to a launch command.
+- Recovery: if the user closed the surface, the call is gone — re-dial. Otherwise retry; the readiness probe normally handles transient attach races.
 
 **`--window <name>` keeps creating new windows**
 - cmux windows are not directly name-addressable, so Hotline identifies a "named window" by a workspace titled `<name>` inside it. If that titled workspace was renamed or closed, the next `--window <name>` won't find it and will create a fresh window.

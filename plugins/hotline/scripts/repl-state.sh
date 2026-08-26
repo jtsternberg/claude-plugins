@@ -16,12 +16,125 @@
 # spinner wording and the other doesn't — this repo has lost time to exactly that
 # in the transcript parser, twice.
 #
-# The screen-reading functions take a captured screen as $1 and read nothing
-# themselves, so the caller decides whether it wants the visible viewport or
-# scrollback. cmux_surface_address and input_box_is_placeholder are the functions
-# here that talk to cmux — the latter because the question it answers (placeholder
-# or unsent input?) is not present in a plain-text screen at all.
+# The screen-reading PREDICATES take a captured screen as $1 and read nothing
+# themselves. The CAPTURE, though, is not the caller's choice: a plain
+# `cmux read-screen` follows the user's scroll, so all of it goes through
+# cmux_read_live below. cmux_surface_address and input_box_is_placeholder are the
+# other two functions here that talk to cmux — the latter because the question it
+# answers (placeholder or unsent input?) is not present in a plain-text screen at
+# all.
 # =============================================================================
+
+# --- Addressing a cmux surface: never let cmux choose one for us ---------------
+# cmux resolves a MISSING or unparseable target to the FOCUSED surface instead of
+# refusing the call. Three incidents on 2026-08-26 came out of that one rule:
+# `cmux send --surface ""` typed probe text into a bystander's live REPL (twice),
+# and a `terminal.replay` whose params used camelCase keys returned ok:true
+# carrying the FOCUSED surface's grid (claude-plugins-r465.9). So an empty handle
+# never means "no target" here — it means "whatever the user is looking at".
+#
+# cmux_handle_ok <what> <handle> — 0 when the handle is safe to address.
+cmux_handle_ok() {
+  [[ -n "${2:-}" ]] && return 0
+  printf 'hotline: refusing a cmux call for %s — its target handle is empty, and cmux resolves a missing target to the FOCUSED surface rather than failing (claude-plugins-r465.9).\n' \
+    "${1:-<unnamed call>}" >&2
+  return 1
+}
+
+# --- Scroll-immune screen reads ----------------------------------------------
+# A plain `cmux read-screen` returns what the surface is CURRENTLY SHOWING, so a
+# user who has scrolled the pane up hands us a frozen capture — and "the screen
+# did not change" then reads as "the REPL is idle", which is how a destructive
+# cleanup could close a surface mid-turn. `--scrollback --lines N` returns the
+# live tail regardless of scroll position (verified on cmux 0.64.22 against a
+# pane scrolled to ~line 225, where the plain form returned the stale viewport),
+# so every read in the dial transport takes that form.
+#
+# Do NOT reach for the render grid's `scrolled_rows` to detect scroll instead: it
+# is forced to 0 whenever the reply is `full:true`, and every reply is
+# (MobileTerminalRenderGrid.swift:212). It is structurally always 0.
+#
+# TWO WIDTHS, because two different questions get asked of a capture. IDENTITY
+# questions (is our nonce in here?) want history. STATE questions (is the input
+# box drawn? is a turn in flight?) want the LIVE SCREEN only — a 400-line
+# scrollback still holds `(12s ·` elapsed parentheticals and `❯` echoes from
+# turns that ended long ago, and matching those reports a busy REPL that is
+# actually idle, which bounces every follow-up to a fresh surface.
+HOTLINE_READ_LINES="${HOTLINE_READ_LINES:-400}"
+#
+# THE TAIL IS ABOUT ONE PANE HEIGHT (60 rows; live panes measured on this machine
+# ranged 37-63), which is deliberately the same order as the viewport these
+# predicates have always been handed. Wider is the unsafe direction — a previous
+# claude session in the same surface leaves NBSP-padded box renders in the history,
+# and repl_box_present matching one reports a live REPL where a shell is now
+# running, which is how a work order gets pasted at a shell and RUN line by line.
+# Narrower only drops rows that are genuinely on screen, which costs screen-side
+# confirmation sensitivity and fails safe (undelivered/sent:true, never a false
+# success). Callers needing a tighter window pass one; wait-for-session.sh does.
+HOTLINE_SCREEN_TAIL_LINES="${HOTLINE_SCREEN_TAIL_LINES:-60}"
+
+# cmux_read_live <what> <flag> <handle> [lines] — the live tail, on stdout.
+#   0 — read succeeded    1 — cmux could not read it    2 — refused (empty handle)
+cmux_read_live() {
+  local what="$1" flag="$2" handle="$3" lines="${4:-$HOTLINE_READ_LINES}"
+  cmux_handle_ok "$what" "$handle" || return 2
+  cmux read-screen "$flag" "$handle" --scrollback --lines "$lines" 2>/dev/null || return 1
+}
+
+# repl_screen_tail <capture> [lines] — the live screen rows out of a scroll-immune
+# read. Pass a tighter count where a wider window would be actively wrong (the boot
+# wait does: on a surface a previous REPL has been through, an old NBSP-padded box
+# render 20 rows up would report a REPL that exited).
+repl_screen_tail() {
+  printf '%s\n' "$1" | tail -n "${2:-$HOTLINE_SCREEN_TAIL_LINES}"
+}
+
+# --- Sending: line hygiene and a refusal on an empty handle -------------------
+# cmux_send_live <what> <flag> <handle> <text...>
+cmux_send_live() {
+  local what="$1" flag="$2" handle="$3"
+  shift 3
+  cmux_handle_ok "$what" "$handle" || return 2
+  cmux send "$flag" "$handle" "$@"
+}
+
+# A cmux surface's input line is not ours alone — the user's keystrokes land
+# there too. On 2026-08-26 three stray characters arrived ahead of a launch
+# command and the surface ran `rkebash /tmp/…`, so the callee never booted and
+# the caller burned its whole 60s budget on a diagnostic that blamed
+# --allowedTools. Ctrl-U (0x15) kills the line in every shell line editor, so the
+# command we send is the whole command.
+#
+# Raw byte through the TEXT path, exactly like the Ctrl-C clear in
+# cmux-reuse-surface.sh: `send-key ctrl+u` does not reach the program, the same
+# way `send-key ctrl+c` does not.
+cmux_clear_input_line() {
+  local what="$1" flag="$2" handle="$3"
+  cmux_handle_ok "$what" "$handle" || return 2
+  cmux send "$flag" "$handle" $'\025' >/dev/null 2>&1 || true
+  return 0
+}
+
+# repl_launch_error_line <screen> [launch-script-path] — echoes the shell
+# diagnostic that says our launch line was MANGLED, so the boot wait can fail
+# fast with the real text instead of timing out and guessing.
+#
+# Scoped to errors that name OUR line, not any error the surface's rc files print
+# on startup: the mangle PREPENDS the user's keystrokes to the command, so the
+# offending token still contains `bash` (or the script's own name) —
+# "zsh: command not found: rkebash". A broken `.zshrc` complaining about `pyenv`
+# is not our problem and must not fail the boot.
+# The `|| true` is required, not defensive: a caller running under `set -o pipefail`
+# would take a no-match grep (the normal case — most screens hold no error) as a
+# failed command and die there.
+repl_launch_error_line() {
+  local screen="$1" script="${2:-}" base=""
+  [[ -n "$script" ]] && base="$(basename "$script")"
+  printf '%s\n' "$screen" \
+    | grep -aiE 'command not found|No such file or directory' \
+    | grep -aE "bash${base:+|$base}" \
+    | tail -1 || true
+}
 
 # --- Reading the REPL's state off its rendered screen -------------------------
 # The claude REPL draws its input box as a `❯`-prefixed line between two
@@ -103,7 +216,24 @@ input_box_is_placeholder() {
   # against the capability list rather than inferred from an empty reply, so an
   # older cmux degrades to today's behavior instead of to a guess.
   cmux capabilities 2>/dev/null | grep -qF 'terminal.render_grid.v1' || return 1
-  grid=$(python3 "$rpc" --method terminal.replay --workspace "$ws" --surface "$surf" 2>/dev/null) || return 1
+  # anchor:"screen" so a scrolled pane does not answer with a frozen viewport.
+  # `terminal.replay`'s default anchor is "viewport", which FOLLOWS the user's
+  # scroll — the box row would then be a scrolled-up echo, or absent. anchor
+  # "screen" is scroll-immune by contract (MobileTerminalRenderGridAnchorRegistry
+  # .swift:11-14, "primary-screen scrolling never round-trips") and confirmed live
+  # on cmux 0.64.22. Requested only when cmux advertises it, so an older cmux
+  # keeps today's behavior instead of getting an unknown param.
+  # `|| true` because a cmux WITHOUT the capability makes this list return 1, and a
+  # caller running under `set -e` outside a conditional would die on it.
+  local anchor=()
+  cmux capabilities 2>/dev/null \
+    | grep -qF 'terminal.render_grid.screen_anchor.v1' && anchor=(--anchor screen) || true
+  # cmux-rpc.py sends snake_case params only and exits 4 when the reply's
+  # surface_id is not the surface we asked for; both matter here, because a
+  # camelCase key or a dropped target returns the FOCUSED surface's grid with
+  # ok:true and we would judge a bystander's input box (claude-plugins-r465.9).
+  grid=$(python3 "$rpc" --method terminal.replay --workspace "$ws" --surface "$surf" \
+    ${anchor[@]+"${anchor[@]}"} 2>/dev/null) || return 1
   [[ -z "$grid" ]] && return 1
   # Exit 0 only for "every non-blank span after the box glyph is dim".
   printf '%s' "$grid" | python3 -c '

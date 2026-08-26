@@ -203,9 +203,25 @@ screen_queued() {
   printf '%s%s Run the earlier thing\n\n%s Working… (5s · ↓ 12 tokens)\n%s\n%s%sPress up to edit queued messages\n%s\n' \
     "$GLYPH" " " "✶" "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
-# The user has scrolled up, so read-screen returns a stale viewport and the
-# absence of the nonce proves nothing.
+# The user has scrolled up, so a plain read-screen returns a stale viewport and
+# the absence of the nonce proves nothing.
+#
+# THE LIVE INPUT BOX IS NOT ON THIS SCREEN, and that is the whole point of the
+# fixture. Scrolling far enough back to lose the nonce also scrolls the box —
+# which is drawn at the BOTTOM — off the visible viewport, leaving only plain-space
+# transcript echoes above the marker. An earlier version of this fixture kept the
+# box (glyph + U+00A0) visible, which is precisely the state real scroll destroys:
+# every box-shaped gate kept working against it, so no test could ever have caught
+# the reads that followed the user's scroll (claude-plugins-r465.8).
 screen_scrolled() {
+  printf '%s%s Run the earlier thing\n\n  ⏺ Reading the file now.\n\nJump to bottom (click) ↓\n' \
+    "$GLYPH" " "
+}
+# The shallower scroll, kept alongside it: the user nudged the view up a line or
+# two, so the marker is showing AND the box is still rendered. Both shapes are real
+# and the confirmation tiers have to handle each — the box-hidden one is what breaks
+# the gates, this one is what makes "Jump to bottom" look harmless.
+screen_scrolled_box_visible() {
   printf '%s%s Run the earlier thing\n\nJump to bottom (click) ↓\n%s\n%s%s\n%s\n' \
     "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
@@ -665,13 +681,19 @@ confirm_case 4 notarget screen_queued
   && pass "'Press up to edit queued messages' AS the box content counts as landed" \
   || fail "'Press up to edit queued messages' AS the box content counts as landed" "out: $CONFIRM_OUT"
 
-# A scrolled viewport is NOT a failed send: cmux has no primitive to snap a
-# terminal back to its live tail, so absence of the nonce proves nothing, and
-# re-sending on it is a documented double-submit.
+# A scrolled viewport is NOT a failed send: absence of the nonce on a capture we
+# cannot trust proves nothing, and re-sending on it is a documented double-submit.
+# Both scroll depths have to reach that same verdict — the box-hidden one is the
+# shape that defeats every box-shaped gate.
 confirm_case 5 notarget screen_scrolled
 [[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \
-  && pass "a scrolled viewport counts as landed, not as a lost paste" \
-  || fail "a scrolled viewport counts as landed, not as a lost paste" "out: $CONFIRM_OUT"
+  && pass "a scrolled viewport with the input box scrolled off counts as landed" \
+  || fail "a scrolled viewport with the input box scrolled off counts as landed" "out: $CONFIRM_OUT"
+
+confirm_case 5b notarget screen_scrolled_box_visible
+[[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \
+  && pass "…and so does a shallow scroll that still shows the box" \
+  || fail "…and so does a shallow scroll that still shows the box" "out: $CONFIRM_OUT"
 
 # Nothing anywhere: report it rather than assuming ok:true meant delivery.
 confirm_case 6 notarget screen_idle_empty
@@ -691,7 +713,7 @@ confirm_case 6 notarget screen_idle_empty
 # delivery that never happened, and the caller then blocks on wait-for-response
 # until it times out. A marker only counts if it was absent from the pre-paste
 # baseline.
-for stale in screen_pasted_placeholder screen_queued screen_scrolled; do
+for stale in screen_pasted_placeholder screen_queued screen_scrolled screen_scrolled_box_visible; do
   confirm_case "stale-${stale#screen_}" notarget "$stale" "$stale"
   [[ "$CONFIRM_OUT" == *'"delivered":false'* ]] \
     && pass "a $stale marker already on screen before the paste does NOT confirm it" \
@@ -1065,6 +1087,55 @@ CASE_RESPONSES=""; CASE_SURFACE=""
 
 # The whole point of the poison stubs: a leak is a test failure, not a stray pane
 # or a paste into the developer's own REPL.
+echo ""
+echo "  -- every screen read is scroll-immune, and no send goes out untargeted --"
+
+# THE SCROLL-IMMUNITY CONTRACT. A plain `cmux read-screen` returns whatever the
+# surface is CURRENTLY SHOWING, so a user scrolled up inside the callee's pane
+# freezes the capture: the box-presence gate misses a live REPL and the
+# idle-stability test ("the screen did not change") cannot fail, because a frozen
+# capture never differs from itself. `--scrollback --lines N` returns the live tail
+# regardless of scroll position (verified live, cmux 0.64.22). Asserted on the CALL
+# LOG rather than on behavior, because behavior is exactly what a stale capture
+# imitates — this is the only place the difference is visible in a stub
+# (claude-plugins-r465.5, r465.6).
+CASE_RESPONSES="$OK_RESPONSES" run_case scroll_immune \
+  screen_idle_empty screen_pasted_placeholder -- --prompt "follow up"
+CASE_RESPONSES=""
+reads_total=$(grep -cE '^read-screen ' "$CALLLOG" || true)
+reads_plain=$(grep -E '^read-screen ' "$CALLLOG" | grep -vc -- '--scrollback' || true)
+[[ "$reads_total" -gt 0 ]] \
+  && pass "the reuse path does read the surface (${reads_total} reads)" \
+  || fail "the reuse path does read the surface" "$(log_view)"
+[[ "$reads_plain" -eq 0 ]] \
+  && pass "every read-screen carries --scrollback, so no gate reads a scrolled viewport" \
+  || fail "every read-screen carries --scrollback, so no gate reads a scrolled viewport" \
+          "$reads_plain plain read(s): $(log_view)"
+
+# NO SEND MAY GO OUT WITH AN EMPTY TARGET. `cmux send --surface ""` does not fail —
+# it delivers to the FOCUSED surface. On 2026-08-26 that put probe keystrokes into
+# an unrelated live claude session twice, and it is the same rule that let a
+# camelCase RPC read a bystander's terminal (claude-plugins-r465.7, r465.9).
+if grep -qE "^(send|send-key|read-screen) .*--(surface|workspace) ''" "$CALLLOG"; then
+  fail "no cmux call goes out with an empty --surface/--workspace handle" "$(log_view)"
+else
+  pass "no cmux call goes out with an empty --surface/--workspace handle"
+fi
+
+# A DEEP-SCROLLED SCREEN STILL HAS TO BE REFUSED. Immunity is the fix; this gate is
+# the backstop for the day it regresses. With the box scrolled off there is no proof
+# a claude REPL is drawn, and pasting a work order into a shell makes the shell run
+# it — so this must fall back to a fresh surface, not paste.
+CASE_RESPONSES="$OK_RESPONSES" run_case scrolled_no_box screen_scrolled -- --prompt "$MULTILINE_MSG"
+CASE_RESPONSES=""
+[[ "$OUT" == *'"fallback"'* && "$OUT" == *"no claude input box"* ]] \
+  && pass "a capture with the input box scrolled off is refused, not pasted into" \
+  || fail "a capture with the input box scrolled off is refused, not pasted into" "out: $OUT"
+[[ "$(request_count)" -eq 0 ]] \
+  && pass "…and nothing is pasted while the box is unproven" \
+  || fail "…and nothing is pasted while the box is unproven" "$(requests)"
+
+echo ""
 if [[ -s "$POISON_LOG" ]]; then
   fail "no test reaches the real cmux, claude, or control socket" "$(cat "$POISON_LOG")"
 else

@@ -318,10 +318,19 @@ if $CMUX_MODE; then
   # the same evidence: the box is where an unsubmitted payload sits, and after the
   # submit deadline with nothing in the transcript, that placeholder is ours.
   #
-  # Box-scoped, via input_box_content, not screen-scoped: `[Pasted text` in the
-  # SCROLLBACK is a submitted turn's echo and would incriminate a healthy delivery.
-  # The nonce keeps its whole-screen match — it is minted for this call and cannot be
-  # a leftover, so narrowing it could only lose detections.
+  # BOX-SCOPED, BOTH SHAPES. `[Pasted text` in the scrollback is a submitted turn's
+  # echo and would incriminate a healthy delivery — and the nonce is no different.
+  # A whole-screen nonce match looks safe — a per-call nonce cannot be a leftover —
+  # and is beside the point: a SUBMITTED payload echoes its own nonce back into the
+  # transcript above the box, so finding it anywhere on screen proves arrival, never
+  # non-submission. Read through a scrolled viewport that echo is often the ONLY
+  # thing on screen, and a hard exit 1 then asserts the message is sitting
+  # unsubmitted while the callee is mid-turn on it (claude-plugins-r465.6). The box
+  # is where "arrived but never submitted" lives, and a short payload renders its
+  # nonce there verbatim, so nothing legitimate is lost.
+  #
+  # The read is also scroll-immune (cmux_read_live) and tailed to the live screen
+  # rows, so the box this looks at is the current one.
   #
   # This function looks and reports. It never presses Enter: an extra Enter on a
   # payload that did submit is a double submit, and the waiter cannot tell the two
@@ -334,14 +343,15 @@ if $CMUX_MODE; then
   nonce_visible_in_input_box() {
     [[ -z "$CALL_ID" ]] && return 2
     [[ ${#READ_TARGET[@]} -eq 0 ]] && return 2
-    local scr box
-    scr=$(cmux read-screen "${READ_TARGET[@]}" 2>/dev/null) || return 2
-    [[ -z "$scr" ]] && return 2
-    if printf '%s' "$scr" | grep -qF "$CALL_ID"; then
-      BOX_EVIDENCE="call_id=$CALL_ID is visible on the callee's screen"
+    local raw scr box
+    raw=$(cmux_read_live "response wait" "${READ_TARGET[0]}" "${READ_TARGET[1]}") || return 2
+    [[ -z "$raw" ]] && return 2
+    scr=$(repl_screen_tail "$raw")
+    box=$(input_box_content "$scr")
+    if [[ -n "$box" ]] && printf '%s' "$box" | grep -qF "$CALL_ID"; then
+      BOX_EVIDENCE="call_id=$CALL_ID is sitting in the callee's input box"
       return 0
     fi
-    box=$(input_box_content "$scr")
     if [[ -n "$box" ]] && printf '%s' "$box" | grep -qF '[Pasted text'; then
       BOX_EVIDENCE="the callee's input box is holding a collapsed paste placeholder ($box), which hides the nonce"
       return 0
@@ -476,7 +486,7 @@ if $CMUX_MODE; then
         {
           echo "Timed out after ${TIMEOUT}s in transcript mode with NO submit confirmation — nothing in the transcript ever carried call_id=$CALL_ID: no user record, no queued-command injection, no enqueue ($TRANSCRIPT_PATH)."
           echo "Could not confirm whether the message submitted: it may still be queued behind a long turn, or it may never have submitted. The script cannot tell these apart from timing alone."
-          echo "To check: cmux read-screen --surface $WS_REF — if your text is sitting in the input box it never submitted; if the callee is mid-turn it was queued. Do NOT blindly re-dial; that risks double-queueing the same work."
+          echo "To check: cmux read-screen --surface $WS_REF --scrollback --lines 80 (the --scrollback form is scroll-immune; the bare form returns whatever the pane is scrolled to) — if your text is sitting in the input box it never submitted; if the callee is mid-turn it was queued. Do NOT blindly re-dial; that risks double-queueing the same work."
           echo "To keep waiting instead, re-run this script on the same call_dir — that resumes with a fresh ${TIMEOUT}s budget and sends nothing."
         } > "$CALL_DIR/error.txt"
       else
@@ -499,8 +509,10 @@ if $CMUX_MODE; then
     sleep "$POLL_SLEEP"
     ELAPSED=$((ELAPSED + POLL_INTERVAL))
 
-    SCREEN=$(cmux read-screen "${READ_TARGET[@]}" --scrollback --lines 9999 \
-      2>/dev/null || true)
+    # Scroll-immune (repl-state.sh): a plain read-screen would hand back the user's
+    # scrolled viewport, and this loop would never see the STATUS line that is
+    # already sitting at the live tail.
+    SCREEN=$(cmux_read_live "response wait" "${READ_TARGET[0]}" "${READ_TARGET[1]}" 9999 || true)
     [[ -z "$SCREEN" ]] && continue
 
     # Strip ANSI escape sequences and carriage returns. cmux returns

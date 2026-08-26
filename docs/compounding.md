@@ -97,6 +97,35 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   screen confirm the parked payload for another two days. Every fixture in a suite
   sharing one precondition (a baseline that already carries the marker, say) is the
   tell that a direction is missing. (claude-plugins-xick round 2 #1, -y4rl)
+- **cmux resolves a missing or unparseable target to the FOCUSED surface, so hard-fail
+  on an empty handle and echo-verify every RPC target.** Three separate incidents in
+  one day: `cmux send --surface ""` typed into a bystander's live REPL twice, and a
+  `terminal.replay` with camelCase param keys returned `ok:true` carrying the focused
+  surface's grid. Refuse the call yourself before cmux can substitute a target
+  (`cmux_handle_ok` in `plugins/hotline/scripts/repl-state.sh`), send snake_case
+  params only, and compare `result.surface_id` against what you asked for — a wrong
+  answer arrives as a successful one. (claude-plugins-r465.7, -r465.9)
+- **Read a cmux screen with `--scrollback --lines N`, never bare.** Bare
+  `read-screen` returns what the pane is CURRENTLY SHOWING, so a user scrolled up
+  hands back a frozen capture — and "the screen did not change" then reads as "the
+  REPL is idle", which is how a destructive cleanup closes a surface mid-turn. The
+  `--scrollback` form is viewport-independent; `terminal.replay` needs
+  `anchor:"screen"` for the same reason, and its `scrolled_rows` is structurally
+  always 0, so it can never detect scroll for you. (claude-plugins-r465.5, -r465.6,
+  -r465.1)
+- **Never attach a PTY by focusing it.** `cmux send` attaches a surface's PTY lazily
+  on first send, so `cmux focus-pane` and `--focus true` buy ~0.1s and cost the user's
+  input line: three of their keystrokes arriving ahead of a launch command made a
+  callee's shell run `rkebash /tmp/…` and burned the caller's whole 60s boot budget.
+  Create everything `--focus false`, probe with a send, and clear the shared input
+  line with a raw Ctrl-U (`$'\025'`) before any command you need to arrive intact.
+  (claude-plugins-r465.4, -r465.7, -r465.2, -r465.3)
+- **A readiness wait must poll the thing its own first action makes possible.** A loop
+  that waited for `read-screen` to return anything could never succeed under
+  `--focus false`, because nothing had sent yet and there was no tty to read — it
+  burned its full budget and proceeded blind on every call. When flipping a flag
+  changes what attaches a resource, re-derive the wait's signal instead of keeping it.
+  (claude-plugins-r465.4, -r465.2)
 
 ## Code shape
 
@@ -170,6 +199,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   terminal.paste rework — portability bugs (BSD-only `stat`, `getppid` reparenting
   under command substitution) surface only there. Read the CI conclusion for a
   change, not just local output. (289ef4a, ad10bbf)
+- **A fixture has to model the state the bug destroys, not a milder version of it.** A
+  "user has scrolled up" screen that still rendered the input box left every
+  box-shaped gate working, so no test could have caught the reads that followed the
+  scroll; a stub that drew the box ABOVE the transcript instead of below it hid the
+  same thing. Write the fixture from what the real surface looks like in that state,
+  then check that at least one existing assertion changes verdict because of it.
+  (claude-plugins-r465.8)
 
 ## Process
 

@@ -128,15 +128,25 @@ PLACE_REF=""
 PLACE_ID=""
 PLACE_KIND=""
 if [[ "$PLACEMENT" == "detached" ]]; then
-  # --focus true is REQUIRED: without it cmux does not spawn a real tty for the
-  # workspace's terminal surface, and subsequent `cmux send` calls fail with
-  # "Terminal surface not found". Discovered via live testing.
-  WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --focus true 2>&1)
+  # --focus false, like every other creation verb here. `--focus true` is NOT
+  # required for a tty, whatever a stale comment or memory says: re-verified on cmux
+  # 0.64.22. `cmux send` attaches the PTY lazily on first send, and focus only makes
+  # that eager at the cost of moving the user's cursor into the callee's shell
+  # (claude-plugins-r465.4, r465.2).
+  #
+  # Readiness is a separate step from the flag, and this path needs it: relying on
+  # focus to have attached the tty and sending the launch command straight away
+  # leaves a swallowed `\n` as a command typed but never run. surface-ready.sh does
+  # both jobs with one probe — the send attaches the PTY, and the ≥2-hit marker
+  # check proves the shell is executing input.
+  WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --focus false 2>&1)
   WS_REF=$(echo "$WS_OUTPUT" | grep -oE 'workspace:[0-9]+' | head -1 || true)
   if [[ -z "$WS_REF" ]]; then
     jq -n --arg err "cmux new-workspace failed: $WS_OUTPUT" '{error: $err}'
     exit 1
   fi
+  bash "$SCRIPT_DIR/surface-ready.sh" --workspace "$WS_REF" \
+    --timeout "${HOTLINE_SURFACE_READY_TIMEOUT:-8}" >/dev/null 2>&1 || true
   SEND_TARGET=(--workspace "$WS_REF")
   PLACE_REF="$WS_REF"; PLACE_KIND="workspace"
 elif [[ "$PLACEMENT" == "window" ]]; then
@@ -240,6 +250,18 @@ chmod 700 "$LAUNCH_SCRIPT"
 # running the real thing (the suite's `send` stub writes to a file, so no stub
 # would ever have shown it). Capturing also gives the failure path a real
 # diagnostic instead of a bare "cmux send failed".
+#
+# THE HANDLE IS CHECKED FIRST, and Ctrl-U clears the line before the command goes
+# out. `cmux send --surface ""` does not fail — it delivers to the FOCUSED surface
+# — and the input line is shared with the user, whose three stray keystrokes on
+# 2026-08-26 turned a launch command into `rkebash /tmp/…` (claude-plugins-r465.7).
+if [[ ${#SEND_TARGET[@]} -ne 2 ]] || ! cmux_handle_ok "launch send" "${SEND_TARGET[1]}"; then
+  rm -f "$LAUNCH_SCRIPT"
+  jq -n --arg err "refusing to send the launch command: the $PLACEMENT placement produced no target handle, and cmux would deliver it to the focused surface" '{error: $err}'
+  exit 1
+fi
+cmux_clear_input_line "launch send" "${SEND_TARGET[0]}" "${SEND_TARGET[1]}"
+
 if ! SEND_OUTPUT=$(cmux send "${SEND_TARGET[@]}" "bash $LAUNCH_SCRIPT\n" 2>&1); then
   rm -f "$LAUNCH_SCRIPT"
   jq -n --arg err "cmux send failed: $(printf '%s' "$SEND_OUTPUT" | tr '\n\r\t' '   ' | cut -c1-160)" \

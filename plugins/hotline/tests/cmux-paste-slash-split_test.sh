@@ -77,20 +77,49 @@ OK_RESPONSES="$STUBROOT/responses/ok.json"
 export HOTLINE_PASTE_CONFIRM_TRIES=3
 export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
 
-# A cmux PATH stub. read-screen serves a box-drawn screen (so --wait-box passes
-# and repl_box_present fires on the NBSP-padded ❯) followed by whatever the socket
-# stub echoed — exactly how a real REPL shows the pasted bytes, which is how
-# confirmation finds the nonce. send-key is logged so the submit keystroke can be
-# asserted.
+# A cmux PATH stub. read-screen serves the submitted payload as a REPL renders it
+# in its TRANSCRIPT, and THEN a box-drawn screen, so --wait-box passes and
+# repl_box_present fires on the NBSP-padded ❯. send-key is logged so the submit
+# keystroke can be asserted.
+#
+# TWO THINGS ARE MODELLED HERE, and both are load-bearing for the readers:
+#
+#   ORDER — a terminal draws the input box at the BOTTOM, under the transcript.
+#   Emitting the box first makes the fixture indistinguishable from a screen whose
+#   box has scrolled away, and it breaks the readers outright: they take the
+#   live-screen TAIL of a scroll-immune read (repl-state.sh), so the box has to be
+#   in the last rows. Do not flip it.
+#
+#   COLLAPSE — Claude Code renders a submitted paste over ~800 chars or 3 lines as
+#   a one-line `[Pasted text +N lines]` echo, not as N literal lines. That is the
+#   whole reason this suite exists, and a stub that echoes the raw lines instead
+#   overstates how much of the payload is on screen: it puts the nonce back in the
+#   transcript, where a real large paste never leaves it, and pushes the box tens
+#   of rows down. Small payloads echo verbatim, which is why the control case can
+#   still find its nonce (claude-plugins-r465.5/.8, -pmgb).
+#
+# The transcript echo uses a PLAIN space after the glyph — the live box is the one
+# padded with U+00A0, and confirmation depends on telling them apart.
 make_cmux() {  # make_cmux <bindir> <echo-file> <sendkey-log>
   local bindir="$1" echo_file="$2" sendkey_log="$3"
   mkdir -p "$bindir"
   cat > "$bindir/cmux" <<EOF
 #!/usr/bin/env bash
+render_transcript() {
+  [[ -f "$echo_file" ]] || return 0
+  local lines bytes
+  lines=\$(wc -l < "$echo_file" | tr -d ' ')
+  bytes=\$(wc -c < "$echo_file" | tr -d ' ')
+  if (( lines > 3 || bytes > 800 )); then
+    printf '%s%s [Pasted text +%s lines]\n' "$GLYPH" " " "\$lines"
+  else
+    cat "$echo_file"
+  fi
+}
 case "\$1" in
   read-screen)
+    render_transcript
     printf '%s\n%s%s\n%s\n' "$RULE" "$GLYPH" "$NBSP" "$RULE"
-    [[ -f "$echo_file" ]] && cat "$echo_file"
     exit 0 ;;
   send-key)
     echo "\$*" >> "$sendkey_log"; exit 0 ;;
