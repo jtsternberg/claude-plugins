@@ -138,6 +138,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   rung apart. When adding a Drive v3 file call to these skills put the flag in its
   `--params`, but leave it off `files.export` and `documents.get/batchUpdate`, which
   resolve shared-drive docs without it (verified live). (claude-plugins-wxh2, ddbb035)
+- **A timer that must reach a `cmuxOnly` socket wakes an in-pane agent turn, never
+  an external process.** cmux's default `cmuxOnly` mode refuses any process without
+  cmux ancestry, so a `launchd`/`cron`/`at` job or a cloud routine fires but cannot
+  drive cmux — the launchctl-into-cmux attempt died exactly here. Schedule the
+  delivery from the agent's own in-session wait (Claude: a backgrounded until-clock
+  loop that re-invokes the same session; Codex: a blocking `functions.wait` exec
+  cell) so the send runs from a descendant of cmux. (claude-plugins-o4us)
 
 ## Testing
 
