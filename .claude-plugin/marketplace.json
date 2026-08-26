@@ -38,6 +38,7 @@
     { "name": "collab-tools", "source": "./plugins/collab-tools" },
     { "name": "slack", "source": "./plugins/slack" },
     { "name": "fable", "source": "./plugins/fable" },
-    { "name": "agentmail", "source": "./plugins/agentmail" }
+    { "name": "agentmail", "source": "./plugins/agentmail" },
+    { "name": "maestro", "source": "./plugins/maestro" }
   ]
 }

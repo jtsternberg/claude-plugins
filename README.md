@@ -152,6 +152,11 @@ Give an agent its own email address — send, receive, reply, forward, and draft
 
 **Install:** `claude plugin install agentmail@jtsternberg`
 
+#### 🎼 [maestro](plugins/maestro)
+Orchestration stance for a main agent overseeing delegated work. Ships `conduct` — boss-not-doer discipline for an implement → review → address pipeline: a fresh agent per phase (including clearing the session-routing cache, so the "reviewer" isn't the implementer resumed), work orders that carry every environment trap a predecessor hit, verify-before-relay, and a `Next for you:` contract with the human. Binds to `hotline` and `cmux-cli` when installed; falls back to subagents and headless sessions. And `patient-waiting` — the zero-token waiting ladder (background `until` loop → `Monitor` → stop and ask), which never machine-polls a human.
+
+**Install:** `claude plugin install maestro@jtsternberg`
+
 ### Workflow skills
 
 #### 💬 [git-commits](plugins/git-commits)

@@ -278,6 +278,14 @@
       "category": "Coding"
     },
     {
+      "name": "maestro",
+      "source": {
+        "source": "local",
+        "path": "./plugins/maestro"
+      },
+      "category": "Coding"
+    },
+    {
       "name": "codex",
       "source": {
         "source": "local",
