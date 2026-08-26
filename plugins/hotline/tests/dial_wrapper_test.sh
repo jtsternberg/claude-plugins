@@ -945,6 +945,127 @@ check "…and nothing is closed when it is off" $? \
   "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
 
 # ===========================================================================
+# 6j. --fresh ignores the cached session AND its surface (claude-plugins-osrz).
+#
+# Without it, forcing a new callee session meant hand-deleting the caller→target
+# entry from the sessions registry — and an orchestration run that skipped that
+# step got its "reviewer" as the implementer resumed. The flag has to do three
+# things at once: not resume, leave the cache pointing at the NEW session (or the
+# next dial routes back to the abandoned one), and hand the surface it walked away
+# from to the same cleanup a follow-up's superseded surface gets.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+: > "$OK_REQUESTS"
+# The prior exchange's nonce is in scrollback (cleanup's identity proof), the REPL
+# is idle, and the banner + input box let the REPLACEMENT surface confirm boot and
+# take the paste through the same stub screen.
+printf '\xe2\x9d\xaf [CALL_ID: nonce-fresh-1] the previous exchange\n\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
+  > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-6j" --session "6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a" \
+  --mode work_order --surface "aaaa0000-1111-4111-8111-111111111111" --call-id "nonce-fresh-1"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-6j" HOTLINE_CLEANUP_SETTLE=0 \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --fresh \
+    --prompt "review the branch with no prior context" --boot-timeout 5 2>"$t/err.txt")
+rc=$?
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch=$(launch_script_of "$call_dir")
+cache_6j="$t/home/.agents-hotline/sessions/caller-6j.json"
+target_real=$(cd "$t/target" && pwd -P)
+
+[[ "$rc" -eq 0 && "$(jq -r .status <<<"$out")" == "connected" \
+   && "$(jq -r .first_contact <<<"$out")" == "true" ]]
+check "--fresh connects and reports first_contact=true despite a cached session" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
+grep -q -- '--resume' <<<"$launch"
+if [[ $? -eq 0 ]]; then
+  fail "--fresh resumes nothing — the whole point of the flag" "launch=$launch"
+else
+  pass "--fresh resumes nothing — the whole point of the flag"
+fi
+
+jq -e '.fallbacks | index("session-cache→fresh(6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a)")' \
+  <<<"$out" >/dev/null 2>&1
+check "the ignored session is named in fallbacks, not silently dropped" $? "out=$out"
+
+# A brand-new session needs the ringing protocol loaded, which is the first-contact
+# wrapper — a --fresh dial that sent the raw message would reach a callee that
+# never loaded the skill.
+grep -q '/hotline:hotline-ringing' <<<"$(nth_paste 1)"
+check "--fresh delivers the first-contact ringing invocation" $? "paste1=$(nth_paste 1)"
+
+new_session=$(jq -r .remote_session_id <<<"$out")
+[[ -n "$new_session" && "$new_session" != "6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a" ]]
+check "the callee session is a new one, not the cached one" $? "out=$out"
+
+[[ "$(jq -r --arg t "$target_real" '.connections[$t].session_id' "$cache_6j")" == "$new_session" ]]
+check "the cache is rewritten to the NEW session (the next dial must not route back)" $? \
+  "$(cat "$cache_6j" 2>/dev/null)"
+
+[[ "$(jq -r --arg t "$target_real" '.connections[$t].surface_ref' "$cache_6j")" == "SURFACE-UUID-777" ]]
+check "…and to the new surface" $? "$(cat "$cache_6j" 2>/dev/null)"
+
+[[ "$(jq -r --arg t "$target_real" '.connections[$t].exchange_count' "$cache_6j")" == "1" ]]
+check "…as a fresh entry, not a bumped one" $? "$(cat "$cache_6j" 2>/dev/null)"
+
+jq -e '.fallbacks | index("surface-cleanup→closed(aaaa0000-1111-4111-8111-111111111111)")' \
+  <<<"$out" >/dev/null 2>&1
+check "the surface --fresh walked away from goes through the normal cleanup" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+grep -q 'close-surface --workspace WORKSPACE-UUID-1 --surface aaaa0000-1111-4111-8111-111111111111' \
+  "$t/close_calls" 2>/dev/null
+check "the close targets the abandoned surface by handle, with its workspace" $? \
+  "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
+
+! grep -q 'surface SURFACE-UUID-777' "$t/close_calls" 2>/dev/null
+check "the new surface is never the one closed" $? \
+  "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
+
+# 6j-b. --fresh with nothing cached is an ordinary first contact — no fallback,
+# because nothing was worked around.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-6j-b" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --fresh \
+    --prompt "nothing to ignore here" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+
+[[ "$(jq -r .status <<<"$out")" == "connected" \
+   && "$(jq -r '.fallbacks | length' <<<"$out")" -eq 0 ]]
+check "--fresh with no cached session records no fallback" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+[[ ! -s "$t/close_calls" ]]
+check "…and closes nothing (there was no surface to supersede)" $? \
+  "close_calls=$(cat "$t/close_calls" 2>/dev/null)"
+
+# 6j-c. --fresh and --resume are opposite instructions about which session to talk
+# to. Resolving it either way silently hands the caller the one they did not ask
+# for, so it is an args error — the same stage every other flag contradiction uses.
+t=$(new_env); note_leak "$t"
+for order in "--fresh --resume 12345678-1234-4234-8234-123456789abc" \
+             "--resume 12345678-1234-4234-8234-123456789abc --fresh"; do
+  o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-6j-c" \
+      HOTLINE_PENDING_DIR="$t/pending" \
+      timeout 10 bash "$DIAL" --target "$t/target" --mode quick --prompt x \
+        $order 2>/dev/null)
+  rc=$?
+  [[ "$rc" -eq 1 && "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" == "args" ]] \
+    && grep -q -- '--fresh' <<<"$o"
+  check "--fresh with --resume is an args error ($order)" $? "rc=$rc out=$o"
+done
+
+# ===========================================================================
 # 7. Conference mode early-returns after cmux-call.sh — no boot/response wait.
 # ===========================================================================
 t=$(new_env); note_leak "$t"

@@ -28,12 +28,20 @@
 #           (--prompt-file <path> | --prompt <text>)
 #           [--placement side|detached|window] [--window <name|ref>]
 #           [--headless] [--tools <list>]
-#           [--resume <session-id> [--no-fork]]
+#           [--resume <session-id> [--no-fork]] [--fresh]
 #           [--caller-session <id>] [--refresh-identity]
 #           [--boot-timeout <seconds>]
 #
 # --prompt-file is preferred: it keeps the message out of argv, so quoting,
 # newlines and shell metacharacters are never in play.
+#
+# --fresh ignores this caller's cached session AND cached surface for the resolved
+# target, so the dial opens a BRAND-NEW callee session instead of resuming the one
+# a previous dial left behind — the flag for a phase that must not inherit the
+# previous phase's context (a "reviewer" that would otherwise be the implementer
+# resumed). The cache is rewritten to the new session, and the surface this dial
+# supersedes goes through the same proofs and guards a follow-up's would.
+# Contradicts --resume, which names a specific session to continue.
 #
 # Statuses / exit codes (stdout is ALWAYS a single JSON object):
 #   connected            0   call is live; wait for the response separately
@@ -129,6 +137,7 @@ FORCE_HEADLESS=false
 TOOLS=""
 RESUME_ARG=""
 NO_FORK=false
+FRESH=false
 CALLER_SESSION_ARG=""
 REFRESH_IDENTITY=false
 BOOT_TIMEOUT=""
@@ -159,6 +168,7 @@ while [[ $# -gt 0 ]]; do
     --tools)           TOOLS="$2";                 shift 2 ;;
     --resume)          RESUME_ARG="$2";            shift 2 ;;
     --no-fork)         NO_FORK=true;               shift ;;
+    --fresh)           FRESH=true;                 shift ;;
     --caller-session)  CALLER_SESSION_ARG="$2";    shift 2 ;;
     --refresh-identity) REFRESH_IDENTITY=true;     shift ;;
     --boot-timeout)    BOOT_TIMEOUT="$2";          shift 2 ;;
@@ -198,6 +208,14 @@ esac
 if [[ -n "$BOOT_TIMEOUT" && ! "$BOOT_TIMEOUT" =~ ^[0-9]+$ ]]; then
   emit_error args "--boot-timeout must be a whole number of seconds, got '$BOOT_TIMEOUT'" \
     "wait-for-session.sh compares it arithmetically; a non-numeric value would break its poll loop."
+fi
+
+# Two opposite instructions about which session to talk to. Resolving it either way
+# silently would give the caller the one they did not ask for, and --fresh exists
+# precisely because a silently-resumed session is expensive to notice.
+if $FRESH && [[ -n "$RESUME_ARG" ]]; then
+  emit_error args "--fresh and --resume contradict each other" \
+    "--fresh means 'start a new callee session'; --resume <id> names one to continue. Pass one or the other."
 fi
 
 # The box wait, resolved ONCE here and threaded to every delivery site.
@@ -450,6 +468,13 @@ fi
 # ---------------------------------------------------------------------------
 # Step 4 — Existing session? (our own cache only — a user-supplied --resume is
 # somebody else's session, which is the fork path, not a follow-up)
+#
+# --fresh still READS the entry, and declines to use it. The PREV_* refs have to
+# come from somewhere for step 7 to close the surface this dial supersedes, while
+# FIRST_CONTACT staying true is what keeps the abandoned session out of
+# EFFECTIVE_RESUME and out of the reuse guard — and what routes the cache write
+# through register-call.sh's `set`, which replaces the entry with the new session
+# rather than bumping the old one's exchange count.
 # ---------------------------------------------------------------------------
 FIRST_CONTACT=true
 REMOTE_SESSION_ID=""
@@ -462,11 +487,15 @@ PREV_CALL_ID=""
 if [[ -z "$RESUME_ARG" ]]; then
   if CACHED=$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" \
                 --caller-session "$MY_SESSION_ID" 2>/dev/null) && [[ -n "$CACHED" ]]; then
-    FIRST_CONTACT=false
-    REMOTE_SESSION_ID=$(jq -r '.session_id // empty' <<<"$CACHED")
-    SURFACE_REF=$(jq -r '.surface_ref // empty' <<<"$CACHED")
-    PREV_SURFACE_REF="$SURFACE_REF"
+    PREV_SURFACE_REF=$(jq -r '.surface_ref // empty' <<<"$CACHED")
     PREV_CALL_ID=$(jq -r '.last_call_id // empty' <<<"$CACHED")
+    if $FRESH; then
+      add_fallback "session-cache→fresh($(jq -r '.session_id // "unknown"' <<<"$CACHED"))"
+    else
+      FIRST_CONTACT=false
+      REMOTE_SESSION_ID=$(jq -r '.session_id // empty' <<<"$CACHED")
+      SURFACE_REF="$PREV_SURFACE_REF"
+    fi
   fi
 fi
 
@@ -866,8 +895,13 @@ fi
 # The script itself proves the old surface is the right one and is idle, and
 # refuses with a reason otherwise — so every outcome is reported, and a refusal
 # never fails the dial.
+#
+# --fresh reaches here too, which is why FIRST_CONTACT alone does not gate it: the
+# fresh dial reports first contact, but a cached surface it deliberately ignored is
+# superseded in exactly the same sense — a REPL nobody will speak to again. PREV_*
+# are empty on a genuine first contact, so the added clause widens nothing else.
 # ---------------------------------------------------------------------------
-if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" && -n "$PREV_SURFACE_REF" \
+if { ! $FIRST_CONTACT || $FRESH; } && [[ "$TRANSPORT" == "cmux" && -n "$PREV_SURFACE_REF" \
       && "$PREV_SURFACE_REF" != "$SURFACE_REF" ]]; then
   CLEANUP=$(bash "$DIAL_SCRIPTS/close-superseded-surface.sh" \
     --surface "$PREV_SURFACE_REF" --expect-call-id "$PREV_CALL_ID" 2>/dev/null)

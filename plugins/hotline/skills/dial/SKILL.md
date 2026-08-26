@@ -73,7 +73,9 @@ Flags: `--mode quick|work_order|conference` (required),
 `--prompt-file <path>` (or `--prompt <text>` for a one-liner),
 `--headless`, `--placement detached`, `--window <name|ref>`,
 `--resume <session-id>` `[--no-fork]`, `--refresh-identity`,
-`--tools <list>`, `--boot-timeout <seconds>`, `--caller-session <id>`.
+`--fresh` (ignore the cached session for this target and start a new one —
+contradicts `--resume`), `--tools <list>`, `--boot-timeout <seconds>`,
+`--caller-session <id>`.
 
 Run `dial.sh --help` for the full contract.
 
@@ -119,6 +121,7 @@ expected, say).
 | `surface-cleanup→closed(<handle>)` | A follow-up opened a new surface, so the old one held a REPL nobody would speak to again. It was proven idle and proven to be the superseded exchange, then closed. |
 | `surface-cleanup-skipped(<reason>)` | The old surface was left alone. Common reasons: it is mid-turn; `parked-input` (real unsent text in its box, which closing would discard — Claude Code's own placeholder does not count once it is proven to be one, though anything unproven still reads as text and spares the surface); its identity couldn't be proven from the prior nonce; `positional-ref-unsafe` (the cached handle is a `surface:N` ref, which can name a different surface than it did — closing requires a UUID); it was already gone; or cmux refused (it will not close the last surface in a workspace). `HOTLINE_CLOSE_SUPERSEDED=0` reports `disabled`. |
 | `identity→refreshed` / `identity→refresh-failed(...)` | `--refresh-identity` ran (or tried to). |
+| `session-cache→fresh(<session-id>)` | `--fresh` found a cached session for this target and deliberately did not resume it; `<session-id>` is the one abandoned. The call reports `first_contact: true`, and the cache now points at the new session. |
 
 A follow-up that opens a second surface **always** records why. If you see a new
 tab with `fallbacks:[]`, that is a bug — report it rather than explaining it
@@ -161,6 +164,15 @@ default, so hotline protocol noise doesn't land in their transcript. If the
 user's intent is clearly to *help that session* ("continue that conversation",
 "help it fix its bug"), add `--no-fork` to contribute to it directly. When in
 doubt, fork.
+
+**Fresh phase, fresh session.** A re-dial to the same target silently resumes
+the cached session. When the next dispatch must NOT inherit the previous one's
+context — a reviewer for work this caller's last callee implemented, any
+pipeline phase whose value is a skeptical fresh read — pass `--fresh`: it
+ignores the cached session and surface, opens a brand-new session, and repoints
+the cache at it (`.fallbacks` records `session-cache→fresh(<abandoned id>)`).
+A plain re-dial is for continuing a conversation; `--fresh` is for starting
+one in the same workspace with a new brain.
 
 **A stale-looking candidate list.** If `needs_disambiguation` candidates carry
 empty or obviously outdated `identity` blobs, re-running with

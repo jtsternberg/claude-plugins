@@ -40,11 +40,10 @@ rules that agents get wrong without being told.
 - Implement → review → address-review are **separate agents in fresh
   sessions**. An implementer never reviews its own work; a reviewer never
   addresses its own review — each phase's value is a fresh, skeptical context.
-- Fresh means fresh: close the finished phase's agent **and clear any
+- Fresh means fresh: close the finished phase's agent **and defeat any
   session-routing cache** before dispatching the next. Hotline reuses cached
-  sessions per caller→target pair (`~/.agents-hotline/sessions/<caller>.json`
-  — delete that target's entry), or your "reviewer" is silently the
-  implementer resumed.
+  sessions per caller→target pair — dispatch the new phase with `--fresh`, or
+  your "reviewer" is silently the implementer resumed.
 - **Keep a ledger** as you close things: phase → session ID, workspace,
   surface. Closed is not gone — the surface may be, but the session survives
   on disk. Offer to resume it (in a fresh surface, if in cmux) whenever the
