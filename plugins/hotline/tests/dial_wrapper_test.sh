@@ -179,6 +179,29 @@ case "$1" in
   # exist and pushed the box out of every bottom-of-screen window.
   # Pointing a case at a socket stub started WITHOUT --echo-file models a paste
   # whose bytes never arrived.
+  #
+  # WHAT THIS ECHO STILL DOES NOT MODEL, and what it would take (claude-plugins-7u9g):
+  # a real Claude Code renders a submitted paste over ~800 chars or 3 lines as a
+  # one-line `[Pasted text +N lines]`, so the raw echo below overstates how much of
+  # the payload is on screen — it leaves the nonce in the transcript, where a large
+  # paste never leaves it. cmux-paste-slash-split_test.sh models the collapse; this
+  # suite cannot, for two reasons that have to be fixed together:
+  #   • THE ECHO FILE IS SUITE-WIDE. It is truncated once, at setup (see
+  #     SOCK_ECHO_FILE above), and every case's pastes append to it — so the
+  #     "screen" here is the concatenation of every payload the whole file has
+  #     pasted so far, and any size-based rule fires from the second case onward.
+  #     Confirmation survives that only because it greps for a per-call nonce.
+  #   • THE COLLAPSE IS PER PASTE, not per screen. First contact delivers a slash
+  #     command as TWO pastes (the invocation line verbatim, the body collapsed —
+  #     claude-plugins-pmgb), and the invocation line is where the nonce lives. A
+  #     rule applied to the concatenated file hides that nonce, which no real REPL
+  #     does: measured here, 30 cases go red for exactly that fixture reason.
+  #   So the faithful fix is per-paste records (lib/socket-stub.py writing a
+  #   separator between pastes) plus per-record collapse in this stub, in
+  #   cmux-call_test.sh's four stubs, and in slash-split's — one change across
+  #   three suites, not a tweak here.
+  # Pointing a case at a socket stub started WITHOUT --echo-file models a paste
+  # whose bytes never arrived.
   read-screen)   if [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]]; then
                    cat "$SOCK_ECHO_FILE"
                  fi
