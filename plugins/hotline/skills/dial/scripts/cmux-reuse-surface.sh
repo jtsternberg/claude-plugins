@@ -119,10 +119,31 @@ source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
 [[ -z "$SURFACE_REF" ]] && fallback_fresh "no surface_ref provided"
 [[ -z "$PROMPT"      ]] && { echo '{"error": "No --prompt or --prompt-file provided"}'; exit 1; }
 
-# Existence check: read-screen fails (non-zero) when the surface is gone. A live
+# EVERY READ HERE IS SCROLL-IMMUNE, via read_live. A plain `cmux read-screen`
+# returns whatever the surface is CURRENTLY SHOWING, so a user scrolled up inside
+# the callee's pane hands back a FROZEN capture — and every gate below then reads
+# that stale screen: the box-presence check can miss a live REPL, and the
+# idle-stability check ("the screen did not change") passes on a pane that is
+# mid-turn. The cost of getting it wrong here is surface sprawl, which is the
+# exact thing this script exists to prevent (claude-plugins-r465.5, r465.6).
+#
+# `--scrollback --lines N` returns the live tail regardless of scroll position
+# (repl-state.sh; verified on cmux 0.64.22 against a pane scrolled to ~line 225).
+# The capture is then TAILED to the live screen rows, because box presence, parked
+# text, busy markers and interrupt wording are all bottom-of-screen facts — a
+# 400-line read still holds `❯` echoes and `(12s ·` parentheticals from turns
+# that finished long ago, and matching those refuses reuse of an idle REPL.
+read_live() {
+  local raw
+  raw=$(cmux_read_live "reuse of surface $SURFACE_REF" --surface "$SURFACE_REF") || return 1
+  [[ -z "$raw" ]] && return 1
+  repl_screen_tail "$raw"
+}
+
+# Existence check: the read fails (non-zero) when the surface is gone. A live
 # surface returns its current screen (non-empty for an idle claude REPL). Treat
 # both a hard failure and an empty screen as "surface not usable" → fall back.
-if ! SCREEN=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || [[ -z "$SCREEN" ]]; then
+if ! SCREEN=$(read_live) || [[ -z "$SCREEN" ]]; then
   fallback_fresh "surface $SURFACE_REF no longer exists or is not readable"
 fi
 
@@ -138,7 +159,17 @@ fi
 # would type the whole work order at that shell and press Enter, and the shell
 # would run it — every line, as a command. So box presence is a hard gate, checked
 # before anything else touches this surface.
-if ! repl_box_present "$SCREEN"; then
+#
+# THE BOX GATE GETS A TIGHTER WINDOW THAN THE OTHER GATES ($SCREEN is one pane
+# height; HOTLINE_BOX_TAIL_LINES is the bottom of it). repl_box_present matches
+# anywhere in what it is handed, panes are not all one height, and a pane shorter
+# than the tail means the rest of that window is HISTORY — where a dead REPL's last
+# frame still holds its NBSP-padded box render, with the shell prompt that replaced
+# it sitting below. That combination passes an anywhere-in-one-pane-height check and
+# hands the work order to the shell. Every other gate below wants the wider window:
+# a spinner, interrupt wording or a nonce that is really there but a few rows up
+# must not read as absent, and each of those errs toward refusing reuse.
+if ! repl_box_present "$(repl_screen_tail "$SCREEN" "$HOTLINE_BOX_TAIL_LINES")"; then
   fallback_fresh "surface $SURFACE_REF is readable but shows no claude input box (a ❯ padded with U+00A0) — its REPL has exited or the pane has been repurposed; pasting a payload there would hand it to a shell"
 fi
 
@@ -210,8 +241,11 @@ if [[ -n "$PARKED" ]]; then
   if repl_looks_busy "$SCREEN"; then
     fallback_fresh "surface $SURFACE_REF has unsent text in its input box while a turn is in flight; clearing it would interrupt that turn and sending would weld onto the leftover"
   fi
+  # "The screen did not change" only means idle when both captures are LIVE. Read
+  # through the scrolled viewport this test passed on any scrolled-up pane, because
+  # a frozen capture never differs from itself (claude-plugins-r465.6).
   sleep 0.6
-  if ! SCREEN2=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || [[ -z "$SCREEN2" ]]; then
+  if ! SCREEN2=$(read_live) || [[ -z "$SCREEN2" ]]; then
     fallback_fresh "surface $SURFACE_REF became unreadable while checking whether its REPL was idle"
   fi
   if [[ "$SCREEN2" != "$SCREEN" ]]; then
@@ -261,9 +295,10 @@ chmod 600 "$PAYLOAD_FILE" 2>/dev/null || true
 # check: a Ctrl-C that empties the box lets Claude Code draw a placeholder into it,
 # and reading that as "still dirty" would refuse a clear that in fact worked.
 if $NEEDS_CLEAR; then
-  cmux send --surface "$SURFACE_REF" $'\003' >/dev/null 2>&1 || true
+  cmux_send_live "input-box clear on surface $SURFACE_REF" --surface "$SURFACE_REF" $'\003' \
+    >/dev/null 2>&1 || true
   sleep 0.4
-  if ! SCREEN3=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) \
+  if ! SCREEN3=$(read_live) \
      || { [[ -n "$(input_box_content "$SCREEN3")" ]] && ! box_is_ghost_placeholder; }; then
     rm -rf "$CALL_DIR"
     fallback_fresh "could not clear unsent text out of surface $SURFACE_REF's input box; refusing to type on top of it"

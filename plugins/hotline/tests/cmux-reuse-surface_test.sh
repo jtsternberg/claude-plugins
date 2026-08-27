@@ -173,6 +173,31 @@ screen_shell_prompt() {
 screen_shell_prompt_bare() {
   printf '%s%s\n' "$GLYPH" " "
 }
+# THE DEAD REPL'S LAST FRAME, still in the capture. claude exited (crash, /exit, two
+# Ctrl-Cs) and left its box render — glyph + U+00A0 and all — sitting in the surface's
+# history; the shell that took the surface over has printed a few lines since. Nothing
+# about that box is a live REPL, and a work order pasted here goes to the shell.
+#
+# The reason this needs its own fixture: the gate reads a WINDOW, not a screen. A
+# capture is tailed to about one pane height before the predicates see it, and
+# repl_box_present matches anywhere inside what it is handed — so on any pane shorter
+# than that tail, the window includes history and this frame passes. The rows between
+# the box render and the bottom are the whole point; keep more than
+# HOTLINE_BOX_TAIL_LINES of them.
+screen_dead_repl_in_history() {
+  printf '%s%s summarise the diff\n\n%s Baked for 12s\n\n%s\n%s%s\n%s\n' \
+    "$GLYPH" " " "✻" "$RULE" "$GLYPH" "$NBSP" "$RULE"
+  printf '  ? for shortcuts\n'
+  printf '~/Code/target on  main\n'
+  printf '%s%s ls\n' "$GLYPH" " "
+  printf 'README.md   package.json   src         tests\n'
+  printf 'CHANGELOG.md   docs         scripts     tmp\n'
+  printf '~/Code/target on  main\n'
+  printf '%s%s git status --short\n' "$GLYPH" " "
+  printf ' M src/index.ts\n M src/app.ts\n?? notes.txt\n'
+  printf '~/Code/target on  main\n'
+  printf '%s%s\n' "$GLYPH" " "
+}
 # A never-used REPL shows a greyed placeholder hint inside an EMPTY box.
 screen_placeholder() {
   printf '%s\n%s%sTry "how does <filepath> work?"\n%s\n' \
@@ -203,9 +228,25 @@ screen_queued() {
   printf '%s%s Run the earlier thing\n\n%s Working… (5s · ↓ 12 tokens)\n%s\n%s%sPress up to edit queued messages\n%s\n' \
     "$GLYPH" " " "✶" "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
-# The user has scrolled up, so read-screen returns a stale viewport and the
-# absence of the nonce proves nothing.
+# The user has scrolled up, so a plain read-screen returns a stale viewport and
+# the absence of the nonce proves nothing.
+#
+# THE LIVE INPUT BOX IS NOT ON THIS SCREEN, and that is the whole point of the
+# fixture. Scrolling far enough back to lose the nonce also scrolls the box —
+# which is drawn at the BOTTOM — off the visible viewport, leaving only plain-space
+# transcript echoes above the marker. An earlier version of this fixture kept the
+# box (glyph + U+00A0) visible, which is precisely the state real scroll destroys:
+# every box-shaped gate kept working against it, so no test could ever have caught
+# the reads that followed the user's scroll (claude-plugins-r465.8).
 screen_scrolled() {
+  printf '%s%s Run the earlier thing\n\n  ⏺ Reading the file now.\n\nJump to bottom (click) ↓\n' \
+    "$GLYPH" " "
+}
+# The shallower scroll, kept alongside it: the user nudged the view up a line or
+# two, so the marker is showing AND the box is still rendered. Both shapes are real
+# and the confirmation tiers have to handle each — the box-hidden one is what breaks
+# the gates, this one is what makes "Jump to bottom" look harmless.
+screen_scrolled_box_visible() {
   printf '%s%s Run the earlier thing\n\nJump to bottom (click) ↓\n%s\n%s%s\n%s\n' \
     "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"
 }
@@ -665,13 +706,19 @@ confirm_case 4 notarget screen_queued
   && pass "'Press up to edit queued messages' AS the box content counts as landed" \
   || fail "'Press up to edit queued messages' AS the box content counts as landed" "out: $CONFIRM_OUT"
 
-# A scrolled viewport is NOT a failed send: cmux has no primitive to snap a
-# terminal back to its live tail, so absence of the nonce proves nothing, and
-# re-sending on it is a documented double-submit.
+# A scrolled viewport is NOT a failed send: absence of the nonce on a capture we
+# cannot trust proves nothing, and re-sending on it is a documented double-submit.
+# Both scroll depths have to reach that same verdict — the box-hidden one is the
+# shape that defeats every box-shaped gate.
 confirm_case 5 notarget screen_scrolled
 [[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \
-  && pass "a scrolled viewport counts as landed, not as a lost paste" \
-  || fail "a scrolled viewport counts as landed, not as a lost paste" "out: $CONFIRM_OUT"
+  && pass "a scrolled viewport with the input box scrolled off counts as landed" \
+  || fail "a scrolled viewport with the input box scrolled off counts as landed" "out: $CONFIRM_OUT"
+
+confirm_case 5b notarget screen_scrolled_box_visible
+[[ "$CONFIRM_OUT" == *'"confirmed":"screen"'* ]] \
+  && pass "…and so does a shallow scroll that still shows the box" \
+  || fail "…and so does a shallow scroll that still shows the box" "out: $CONFIRM_OUT"
 
 # Nothing anywhere: report it rather than assuming ok:true meant delivery.
 confirm_case 6 notarget screen_idle_empty
@@ -691,7 +738,7 @@ confirm_case 6 notarget screen_idle_empty
 # delivery that never happened, and the caller then blocks on wait-for-response
 # until it times out. A marker only counts if it was absent from the pre-paste
 # baseline.
-for stale in screen_pasted_placeholder screen_queued screen_scrolled; do
+for stale in screen_pasted_placeholder screen_queued screen_scrolled screen_scrolled_box_visible; do
   confirm_case "stale-${stale#screen_}" notarget "$stale" "$stale"
   [[ "$CONFIRM_OUT" == *'"delivered":false'* ]] \
     && pass "a $stale marker already on screen before the paste does NOT confirm it" \
@@ -1013,15 +1060,24 @@ echo "  -- a surface with no REPL left in it is refused, not pasted into --"
 # repl_looks_busy for a spinner, and input_box_content would at most report the
 # prompt line as parked text. Delivering here does not lose the payload; it hands
 # the whole work order to a shell and presses Return.
-for shellfix in screen_shell_prompt screen_shell_prompt_bare; do
-  CASE_RESPONSES="$OK_RESPONSES" run_case "$shellfix" "$shellfix" -- --prompt "$MULTILINE_MSG"
+# Case names stay SHORT: run_case builds the stub's control-socket path out of the
+# name, and an AF_UNIX path has a hard length limit that a descriptive name blows
+# through (the failure reads as a paste error, which is confusing in a suite about
+# refusing to paste).
+for shellfix in screen_shell_prompt screen_shell_prompt_bare screen_dead_repl_in_history; do
+  case "$shellfix" in
+    screen_shell_prompt)           casename=sh1 ;;
+    screen_shell_prompt_bare)      casename=sh2 ;;
+    screen_dead_repl_in_history)   casename=dead ;;
+  esac
+  CASE_RESPONSES="$OK_RESPONSES" run_case "$casename" "$shellfix" -- --prompt "$MULTILINE_MSG"
   CASE_RESPONSES=""
   [[ "$OUT" == *'"fallback"'* && "$OUT" == *"no claude input box"* ]] \
-    && pass "$shellfix: a shell prompt is refused with the fresh-surface fallback" \
-    || fail "$shellfix: a shell prompt is refused with the fresh-surface fallback" "out: $OUT"
+    && pass "$shellfix: refused with the fresh-surface fallback, no REPL proven" \
+    || fail "$shellfix: refused with the fresh-surface fallback, no REPL proven" "out: $OUT"
   [[ "$(request_count)" -eq 0 ]] \
-    && pass "$shellfix: nothing is pasted at the shell" \
-    || fail "$shellfix: nothing is pasted at the shell" "$(requests)"
+    && pass "$shellfix: nothing is pasted into it" \
+    || fail "$shellfix: nothing is pasted into it" "$(requests)"
   [[ "$(clear_count)" -eq 0 ]] \
     && pass "$shellfix: no Ctrl-C is sent to it either" \
     || fail "$shellfix: no Ctrl-C is sent to it either" "$(log_view)"
@@ -1049,6 +1105,42 @@ BOX_OUT="$(STUB_CALLLOG="$box_dir/calls.log" STUB_SCREENS="$box_dir/screens" \
   && pass "…and no paste request is made at all" \
   || fail "…and no paste request is made at all" "$(cat "$box_dir/socket/requests.log")"
 
+# THE FIXTURE HAS TO BE THE REGRESSION SHAPE, or the two cases above prove nothing:
+# a live REPL's box IS in this capture (one pane height back), and is NOT in the
+# window the box gate reads. If a future edit widens that window, this fails here
+# with a reason instead of failing in production as a work order run by a shell.
+source "$HOTLINE_DIR/scripts/repl-state.sh"
+DEAD_FRAME="$(screen_dead_repl_in_history)"
+if repl_box_present "$(repl_screen_tail "$DEAD_FRAME")" \
+   && ! repl_box_present "$(repl_screen_tail "$DEAD_FRAME" "$HOTLINE_BOX_TAIL_LINES")"; then
+  pass "the dead-REPL fixture is genuinely box-shaped one pane height back, and not in the box window"
+else
+  fail "the dead-REPL fixture is genuinely box-shaped one pane height back, and not in the box window" \
+       "wide=$(repl_box_present "$(repl_screen_tail "$DEAD_FRAME")" && echo yes || echo no) tight=$(repl_box_present "$(repl_screen_tail "$DEAD_FRAME" "$HOTLINE_BOX_TAIL_LINES")" && echo yes || echo no)"
+fi
+
+# And the delivery gate has to refuse it too. --wait-box is the last check before
+# `terminal.paste` + Return on a first contact, so it is judged on the same window.
+dead_dir="$STUBROOT/waitbox-dead-repl"
+mkdir -p "$dead_dir/bin" "$dead_dir/screens"
+dead_sock="$(start_socket_stub "$dead_dir/socket" "$OK_RESPONSES")"
+printf '[CALL_ID: waitboxnonce2]\n%s' "$MULTILINE_MSG" > "$dead_dir/payload.txt"
+screen_dead_repl_in_history > "$dead_dir/screens/1.txt"
+echo 1 > "$dead_dir/screens/count"; echo 0 > "$dead_dir/screens/cursor"
+cp "$STUBROOT/paste_multiline/bin/cmux" "$dead_dir/bin/cmux"
+DEAD_OUT="$(STUB_CALLLOG="$dead_dir/calls.log" STUB_SCREENS="$dead_dir/screens" \
+  STUB_SURF="$SURF_UUID" STUB_WS="$WS_UUID" \
+  CMUX_SOCKET_PATH="$dead_sock" HOME="$dead_dir" \
+  PATH="$dead_dir/bin:$PATH" bash "$PASTE_SCRIPT" \
+  --surface "$SURF_UUID" --payload-file "$dead_dir/payload.txt" \
+  --call-id waitboxnonce2 --wait-box 1 2>&1)"
+[[ "$DEAD_OUT" == *'"delivered":false'* && "$DEAD_OUT" == *"never drew a claude input box"* ]] \
+  && pass "--wait-box refuses a dead REPL's box render left in history" \
+  || fail "--wait-box refuses a dead REPL's box render left in history" "out: $DEAD_OUT"
+[[ ! -s "$dead_dir/socket/requests.log" ]] \
+  && pass "…and no paste request is made at all" \
+  || fail "…and no paste request is made at all" "$(cat "$dead_dir/socket/requests.log")"
+
 echo ""
 echo "  -- legacy cached handles --"
 
@@ -1065,6 +1157,55 @@ CASE_RESPONSES=""; CASE_SURFACE=""
 
 # The whole point of the poison stubs: a leak is a test failure, not a stray pane
 # or a paste into the developer's own REPL.
+echo ""
+echo "  -- every screen read is scroll-immune, and no send goes out untargeted --"
+
+# THE SCROLL-IMMUNITY CONTRACT. A plain `cmux read-screen` returns whatever the
+# surface is CURRENTLY SHOWING, so a user scrolled up inside the callee's pane
+# freezes the capture: the box-presence gate misses a live REPL and the
+# idle-stability test ("the screen did not change") cannot fail, because a frozen
+# capture never differs from itself. `--scrollback --lines N` returns the live tail
+# regardless of scroll position (verified live, cmux 0.64.22). Asserted on the CALL
+# LOG rather than on behavior, because behavior is exactly what a stale capture
+# imitates — this is the only place the difference is visible in a stub
+# (claude-plugins-r465.5, r465.6).
+CASE_RESPONSES="$OK_RESPONSES" run_case scroll_immune \
+  screen_idle_empty screen_pasted_placeholder -- --prompt "follow up"
+CASE_RESPONSES=""
+reads_total=$(grep -cE '^read-screen ' "$CALLLOG" || true)
+reads_plain=$(grep -E '^read-screen ' "$CALLLOG" | grep -vc -- '--scrollback' || true)
+[[ "$reads_total" -gt 0 ]] \
+  && pass "the reuse path does read the surface (${reads_total} reads)" \
+  || fail "the reuse path does read the surface" "$(log_view)"
+[[ "$reads_plain" -eq 0 ]] \
+  && pass "every read-screen carries --scrollback, so no gate reads a scrolled viewport" \
+  || fail "every read-screen carries --scrollback, so no gate reads a scrolled viewport" \
+          "$reads_plain plain read(s): $(log_view)"
+
+# NO SEND MAY GO OUT WITH AN EMPTY TARGET. `cmux send --surface ""` does not fail —
+# it delivers to the FOCUSED surface. On 2026-08-26 that put probe keystrokes into
+# an unrelated live claude session twice, and it is the same rule that let a
+# camelCase RPC read a bystander's terminal (claude-plugins-r465.7, r465.9).
+if grep -qE "^(send|send-key|read-screen) .*--(surface|workspace) ''" "$CALLLOG"; then
+  fail "no cmux call goes out with an empty --surface/--workspace handle" "$(log_view)"
+else
+  pass "no cmux call goes out with an empty --surface/--workspace handle"
+fi
+
+# A DEEP-SCROLLED SCREEN STILL HAS TO BE REFUSED. Immunity is the fix; this gate is
+# the backstop for the day it regresses. With the box scrolled off there is no proof
+# a claude REPL is drawn, and pasting a work order into a shell makes the shell run
+# it — so this must fall back to a fresh surface, not paste.
+CASE_RESPONSES="$OK_RESPONSES" run_case scrolled_no_box screen_scrolled -- --prompt "$MULTILINE_MSG"
+CASE_RESPONSES=""
+[[ "$OUT" == *'"fallback"'* && "$OUT" == *"no claude input box"* ]] \
+  && pass "a capture with the input box scrolled off is refused, not pasted into" \
+  || fail "a capture with the input box scrolled off is refused, not pasted into" "out: $OUT"
+[[ "$(request_count)" -eq 0 ]] \
+  && pass "…and nothing is pasted while the box is unproven" \
+  || fail "…and nothing is pasted while the box is unproven" "$(requests)"
+
+echo ""
 if [[ -s "$POISON_LOG" ]]; then
   fail "no test reaches the real cmux, claude, or control socket" "$(cat "$POISON_LOG")"
 else

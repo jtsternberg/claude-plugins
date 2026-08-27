@@ -308,15 +308,27 @@ fail_async() {
 }
 
 # ---- Detached placement — a new workspace tab. ------------------------------
-# --focus true is REQUIRED: without it cmux does not spawn a real tty for the
-# workspace's terminal surface, and subsequent `cmux send` / `cmux read-screen`
-# calls fail with "Terminal surface not found". Discovered via live testing.
+# --focus false, like every other creation verb here. `--focus true` is NOT required
+# for a tty, whatever a stale comment or memory says: re-verified on cmux 0.64.22.
+# `cmux send` is what attaches the PTY, lazily, on first send — a full claude TUI
+# boots in a --focus false workspace, and focus only made the attachment eager at
+# the cost of moving the user's cursor into the callee's shell mid-keystroke
+# (claude-plugins-r465.4, r465.2).
+#
+# THE READINESS WAIT BELONGS TO THE FLAG. A wait that polls `cmux read-screen`
+# until non-empty can NEVER succeed under --focus false: with no send yet there is
+# no tty, and read-screen answers `Error: internal_error: Failed to read terminal
+# text` every time — so such a loop burns its whole budget and then fires the launch
+# command blind into an unattached surface, on every detached call. surface-ready.sh
+# probes with a SEND instead, which is both the attachment step and the
+# swallowed-`\n` check.
+#
 # Factored into a function so the side-by-side path can fall back to it when the
 # caller's own surface context can't be resolved (see below). Sets SEND_TARGET.
 do_detached() {
   local WS_NAME WS_OUTPUT WS_REF
   WS_NAME="${SESSION_NAME:-hotline}"
-  if ! WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --name "$WS_NAME" --focus true 2>&1); then
+  if ! WS_OUTPUT=$(cmux new-workspace --cwd "$CWD" --name "$WS_NAME" --focus false 2>&1); then
     fail_async "cmux new-workspace failed: $WS_OUTPUT"
   fi
   WS_REF=$(echo "$WS_OUTPUT" | grep -oE 'workspace:[0-9]+' | head -1 || true)
@@ -324,15 +336,16 @@ do_detached() {
   echo "$WS_REF" > "$CALL_DIR/workspace_ref.txt"
   SEND_TARGET=(--workspace "$WS_REF")
 
-  # Wait for the workspace shell to be ready before firing the launch script.
-  # Poll until the screen is non-empty (up to 5s) rather than a fixed sleep.
-  local _
-  for _ in $(seq 1 10); do
-    INIT_SCREEN=$(cmux read-screen --workspace "$WS_REF" --scrollback --lines 9999 \
-      2>/dev/null || true)
-    [[ -n "$INIT_SCREEN" ]] && break
-    sleep 0.5
-  done
+  # Attach the PTY and prove the shell is executing input, before the launch
+  # command goes anywhere near it. A timeout here is NOT fatal: the launch send
+  # below can still attach and land, and the boot wait (wait-for-session.sh) is
+  # what decides whether the callee came up. Recorded for diagnosis instead.
+  if ! bash "$SCRIPT_DIR/surface-ready.sh" --workspace "$WS_REF" \
+       --timeout "${HOTLINE_SURFACE_READY_TIMEOUT:-8}" \
+       2>>"$CALL_DIR/surface_err.txt"; then
+    echo "detached workspace $WS_REF never echoed the readiness probe; sending the launch command anyway" \
+      >> "$CALL_DIR/surface_err.txt"
+  fi
 }
 
 if [[ "$PLACEMENT" == "detached" ]]; then
@@ -410,8 +423,10 @@ else
     SURF_HANDLE="${SURF_ID:-$SURF_REF}"
     SURF_PANE_HANDLE="${SURF_PANE_ID:-$SURF_PANE}"
     # surface_ref.txt is the cmux-SURFACE-mode signal to the wait-for-* scripts
-    # (mirrors how workspace_ref.txt signals workspace mode). pane_ref.txt lets
-    # them re-attach the PTY if a read-screen ever races.
+    # (mirrors how workspace_ref.txt signals workspace mode). pane_ref.txt is
+    # recorded for diagnosis and for a human who needs to find the pane. Nothing
+    # reads it to force PTY attachment: a send attaches the PTY, and focus-pane
+    # would attach it by moving the user's cursor into the callee.
     echo "$SURF_HANDLE" > "$CALL_DIR/surface_ref.txt"
     [[ -n "$SURF_PANE_HANDLE" ]] && echo "$SURF_PANE_HANDLE" > "$CALL_DIR/pane_ref.txt"
     SEND_TARGET=(--surface "$SURF_HANDLE")
@@ -424,6 +439,22 @@ else
 fi
 
 # Fire the claude session into whichever surface/workspace we landed on.
+#
+# THE HANDLE IS CHECKED FIRST. `cmux send --surface ""` does not fail — it
+# delivers to the FOCUSED surface, so an empty SEND_TARGET would type a claude
+# launch command into whatever the user is looking at. Two real incidents on
+# 2026-08-26 came from exactly that fallback (claude-plugins-r465.7).
+if [[ ${#SEND_TARGET[@]} -ne 2 ]] || ! cmux_handle_ok "launch send" "${SEND_TARGET[1]}"; then
+  fail_async "refusing to send the launch command: the ${PLACEMENT} placement produced no target handle, and cmux would deliver it to the focused surface"
+fi
+
+# Ctrl-U before the command. The surface's input line is shared with the user, and
+# on 2026-08-26 three of their keystrokes arrived first: the shell ran
+# `rkebash /tmp/hotline-launch-…`, printed `zsh: command not found: rkebash`, and
+# the caller then spent its full 60s boot budget on a diagnostic that blamed
+# --allowedTools. wait-for-session.sh now also fails fast on that error text.
+cmux_clear_input_line "launch send" "${SEND_TARGET[0]}" "${SEND_TARGET[1]}"
+
 if ! SEND_OUTPUT=$(cmux send "${SEND_TARGET[@]}" "bash $LAUNCH_SCRIPT\n" 2>&1); then
   if [[ "$PLACEMENT" == "detached" ]]; then
     [[ "$KEEP_WORKSPACE" != "true" ]] && \

@@ -22,9 +22,13 @@
 # window, so there is nothing in cmux-cli to reuse for this. PTY readiness is
 # delegated to the sibling surface-ready.sh so a just-created surface never
 # drops the trailing \n of the launch command (fresh-PTY race) and never hits
-# "Terminal surface not found" (PTY-not-attached). New surfaces/workspaces are
-# created with --focus true, the surface-mode equivalent of
-# `new-workspace --focus true`.
+# "Terminal surface not found" (PTY-not-attached).
+#
+# Everything here is created with --focus false. `cmux send` attaches the PTY on
+# its own (verified on cmux 0.64.22: a --focus false workspace + surface answered
+# a probe send and executed it in ~0.8s, with the user's focus untouched), so
+# --focus true bought nothing here except moving the user's cursor into a callee's
+# shell mid-keystroke (claude-plugins-r465.4).
 #
 # Usage:
 #   open-window-surface.sh --window <name|ref> [--working-directory <cwd>]
@@ -102,7 +106,7 @@ else
     fi
     [[ -z "$target_win" ]] && { echo "open-window-surface: could not determine new window ref" >&2; exit 1; }
 
-    ws_out=$(cmux new-workspace --name "$WINDOW" --window "$target_win" --focus true \
+    ws_out=$(cmux new-workspace --name "$WINDOW" --window "$target_win" --focus false \
       ${CWD:+--cwd "$CWD"} 2>&1) || { echo "open-window-surface: new-workspace failed: $ws_out" >&2; exit 1; }
     target_ws=$(printf '%s' "$ws_out" | grep -oE 'workspace:[0-9]+' | head -1 || true)
     [[ -z "$target_ws" ]] && { echo "open-window-surface: could not parse new workspace ref: $ws_out" >&2; exit 1; }
@@ -111,7 +115,7 @@ else
 fi
 
 # Land a fresh surface for the callee in the resolved workspace.
-surf_args=(new-surface --type terminal --window "$target_win" --workspace "$target_ws" --focus true)
+surf_args=(new-surface --type terminal --window "$target_win" --workspace "$target_ws" --focus false)
 [[ -n "$CWD" ]] && surf_args+=(--working-directory "$CWD")
 if ! out=$(cmux "${surf_args[@]}" 2>&1); then
   echo "open-window-surface: cmux ${surf_args[*]} failed:" >&2

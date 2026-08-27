@@ -96,12 +96,27 @@ if [[ ! "$SURFACE_REF" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA
   refuse "positional-ref-unsafe: '$SURFACE_REF' is not a stable UUID, and a repositioned ref could name the replacement surface rather than the superseded one"
 fi
 
-# Identity + liveness come from two different reads. The nonce was typed in the
-# PREVIOUS exchange and has almost certainly scrolled out of the viewport, so it
-# needs --scrollback; the busy/interrupt markers are drawn at the BOTTOM of the
-# live screen, so they need the viewport.
-if ! HIST=$(cmux read-screen --surface "$SURFACE_REF" --scrollback \
-              --lines "$SCROLLBACK_LINES" 2>/dev/null) || [[ -z "$HIST" ]]; then
+# Identity and liveness ask two different questions of the same capture. Identity
+# (is our nonce in here?) wants HISTORY — the nonce was typed in the previous
+# exchange and has almost certainly scrolled out of the live screen. Liveness
+# (busy? interrupted? box drawn?) wants the LIVE SCREEN ONLY, because those markers
+# are drawn at the bottom and a full scrollback still holds `(12s ·` parentheticals
+# from turns that ended long ago.
+#
+# BOTH READS ARE SCROLL-IMMUNE, and on this path that is the difference between a
+# safe no-op and destroying someone's work. A plain `cmux read-screen` returns what
+# the surface is CURRENTLY SHOWING, so a user scrolled up inside the pane froze the
+# capture — and the "screen unchanged ⇒ idle" test below cannot fail against a
+# frozen capture, because it never differs from itself. This script CLOSES the
+# surface it judges, killing the foreground process, so that test passing spuriously
+# meant closing a pane that was mid-turn (claude-plugins-r465.6). `--scrollback
+# --lines N` returns the live tail regardless of scroll position (repl-state.sh).
+read_live() {
+  cmux_read_live "superseded-surface cleanup of $SURFACE_REF" --surface "$SURFACE_REF" \
+    "$SCROLLBACK_LINES"
+}
+
+if ! HIST=$(read_live) || [[ -z "$HIST" ]]; then
   refuse "surface $SURFACE_REF is gone or unreadable — nothing to close"
 fi
 
@@ -109,9 +124,10 @@ if ! printf '%s' "$HIST" | grep -qF "$EXPECT_CALL_ID"; then
   refuse "surface $SURFACE_REF does not carry call_id $EXPECT_CALL_ID in its scrollback; it is not provably the superseded exchange"
 fi
 
-if ! SCREEN=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || [[ -z "$SCREEN" ]]; then
+if ! RAW=$(read_live) || [[ -z "$RAW" ]]; then
   refuse "surface $SURFACE_REF became unreadable while checking whether its REPL was idle"
 fi
+SCREEN=$(repl_screen_tail "$RAW")
 
 # --- Is there still a REPL in there at all? ----------------------------------
 # FIRST, before any other liveness judgement. Closing a surface KILLS its
@@ -204,9 +220,10 @@ fi
 # A spinner wording we don't recognise still moves the screen. Bias to "busy":
 # a needless skip costs one stale tab, a wrong close destroys a running turn.
 sleep "$SETTLE"
-if ! SCREEN2=$(cmux read-screen --surface "$SURFACE_REF" 2>/dev/null) || [[ -z "$SCREEN2" ]]; then
+if ! RAW2=$(read_live) || [[ -z "$RAW2" ]]; then
   refuse "surface $SURFACE_REF became unreadable while confirming its REPL was idle"
 fi
+SCREEN2=$(repl_screen_tail "$RAW2")
 if [[ "$SCREEN2" != "$SCREEN" ]]; then
   refuse "surface $SURFACE_REF's screen is still changing, so its REPL is not provably idle"
 fi

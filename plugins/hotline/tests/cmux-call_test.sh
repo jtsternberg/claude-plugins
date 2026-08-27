@@ -114,11 +114,17 @@ case "$1" in
     ;;
   send)
     printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args"
+    # surface-ready.sh's probe: echo the marker back twice (the typed line plus the
+    # shell's output line), which is the >=2 hits it waits for. Without this the
+    # detached path waits out its whole readiness budget on every case.
+    m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
+    if [[ -n "$m" ]]; then { echo "$m"; echo "$m"; } >> "$0.screen"; fi
     # Real cmux prints this on STDOUT. The stub must too, or a script that forgets
     # to capture it looks clean here and corrupts its JSON in production.
     echo "OK ${3:-workspace:123}"
     ;;
   read-screen)
+    cat "$0.screen" 2>/dev/null
     # A booted REPL: the input box is a ❯ padded with a NO-BREAK SPACE. A plain
     # space is what a shell prompt draws, and delivery refuses to paste into that.
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
@@ -303,8 +309,15 @@ cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
   new-workspace) echo "OK workspace:123" ;;
-  send) printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args"; echo "OK workspace:123" ;;
-  read-screen) printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'; exit 0 ;;
+  send)
+    printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args"
+    # See the first stub in this file: round-trips surface-ready.sh's probe marker.
+    m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
+    if [[ -n "$m" ]]; then { echo "$m"; echo "$m"; } >> "$0.screen"; fi
+    echo "OK workspace:123" ;;
+  read-screen)
+    cat "$0.screen" 2>/dev/null
+    printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'; exit 0 ;;
   tree)
     jq -nc '{windows:[{workspaces:[{id:"WS-UUID-123",ref:"workspace:123",
       panes:[{selected_surface_id:"SURF-UUID-123",
@@ -555,8 +568,14 @@ cat > "$tmpf/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
   new-workspace) echo "OK workspace:123" ;;
-  send)          printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args"; echo "OK workspace:123" ;;
+  send)
+    printf '%s' "$*" > "${CMUX_FAKE_STATE:?}/send_args"
+    # See the first stub in this file: round-trips surface-ready.sh's probe marker.
+    m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
+    if [[ -n "$m" ]]; then { echo "$m"; echo "$m"; } >> "$0.screen"; fi
+    echo "OK workspace:123" ;;
   read-screen)
+    cat "$0.screen" 2>/dev/null
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
     [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
     exit 0 ;;

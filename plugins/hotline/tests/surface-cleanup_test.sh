@@ -192,10 +192,15 @@ SURF=$(cat "$D/surf"); WS=$(cat "$D/ws")
 case "$1" in
   read-screen)
     [[ -s "$D/unreadable" ]] && { echo "Error: surface not found" >&2; exit 1; }
-    if [[ "$*" == *--scrollback* ]]; then cat "$D/scrollback.txt"; exit 0; fi
-    cat "$D/screen.txt"
+    if [[ "$*" == *--scrollback* ]]; then cat "$D/scrollback.txt"; else cat "$D/screen.txt"; fi
     # A "moving" screen differs from one read to the next, which is how an
     # unrecognised spinner still reads as busy.
+    #
+    # IT HAS TO MOVE IN THE --scrollback READ TOO. Cleanup takes one scroll-immune
+    # read and tails it for liveness, rather than pairing a scrollback read for
+    # identity with a bare read for liveness: a bare read follows the user's
+    # scroll, and a frozen capture can never differ from itself, so this very test
+    # could not fail against a scrolled pane (claude-plugins-r465.6).
     if [[ -s "$D/moving" ]]; then
       n=$(cat "$D/reads" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$D/reads"
       echo "  reading file $n of 9"

@@ -53,10 +53,10 @@ Options:
                           the tab bar. 2-5 words naming the activity.
       --json             Emit a JSON object on success. Default: human-readable.
       --wait-ready       For terminal surfaces, block until the PTY is attached
-                          and the shell is actually executing input. Forces
-                          PTY attachment (cmux focus-pane) and round-trips a
-                          probe (echo <marker>) to verify execution. No-op
-                          for browser surfaces.
+                          and the shell is actually executing input. The PTY
+                          attaches on the first send (never by stealing focus);
+                          round-trips a probe (echo <marker>) to verify
+                          execution. No-op for browser surfaces.
       --wait-ready-timeout <seconds>
                           Override the --wait-ready timeout (default: 5).
   -h, --help             Show this help.
@@ -310,11 +310,20 @@ fi
 # --- Optional: wait for PTY readiness ---
 #
 # Solves two known footguns on freshly-spawned terminal surfaces:
-#   1. `read-screen` returns "Terminal surface not found" until the PTY backend
-#      attaches. `cmux focus-pane --pane <new_pane>` forces attachment.
+#   1. `read-screen` fails ("Terminal surface not found", or "Failed to read
+#      terminal text" on cmux 0.64.22) until something has SENT to the surface.
+#      The send is the attachment mechanism — cmux attaches a surface's PTY
+#      lazily, on first send — so the probe below is what makes the surface
+#      readable, not something that waits for another step to do it.
 #   2. The shell's `\n` gets swallowed by startup output, so `send "foo\n"` types
 #      `foo` but never executes it. We round-trip an `echo <marker>` probe and
 #      wait until the marker appears as command output (not just typed input).
+#
+# NO focus-pane here. It also attaches the PTY, eagerly, but it does so by moving
+# the user's focus into this brand-new surface — so anything the user is typing at
+# that instant goes to the new shell instead. That is a real incident, not a
+# hypothetical: three stray keystrokes turned a launch command into
+# `rkebash /tmp/…` on 2026-08-26. Measured cost of dropping it: ~0.1s.
 #
 # Re-sends the probe periodically — if a `\n` is swallowed by init, a later
 # resend will land cleanly. Same nonce across resends; we only need ≥1 hit.
@@ -322,9 +331,13 @@ ready_status="skipped"
 if [[ $WAIT_READY -eq 1 ]]; then
   if [[ "$SURFACE_TYPE" != "terminal" ]]; then
     ready_status="n/a"
+  elif [[ -z "$surface_handle" ]]; then
+    # `cmux send --surface ""` does NOT fail; it delivers to the focused surface.
+    # A probe with no handle would therefore type into whatever the user is
+    # looking at, so this is a hard error rather than a skipped check.
+    echo "open-side-surface: created $new_surface but its handle came back empty — refusing to probe, because an empty --surface would send to the FOCUSED surface." >&2
+    exit 3
   else
-    # Force the PTY backend to attach so read-screen / send actually work.
-    cmux focus-pane --pane "$pane_handle" >/dev/null 2>&1 || true
 
     nonce="$(date +%s)$$${RANDOM:-0}"
     marker="__CMUX_PTYREADY_${nonce}__"
@@ -340,7 +353,14 @@ if [[ $WAIT_READY -eq 1 ]]; then
       fi
 
       # (Re)send the probe every ~1s in case earlier sends were swallowed.
+      #
+      # Ctrl-U (0x15) first, every time. The input line is shared with the user,
+      # and a probe concatenated onto stray keystrokes produces `rkeecho MARKER`
+      # — a shell error line that still carries the marker twice and so can
+      # satisfy the ≥2-hit test below while proving nothing. Raw byte through the
+      # TEXT path: `send-key ctrl+u` does not reach the program.
       if (( attempt % 5 == 0 )); then
+        cmux send --surface "$surface_handle" $'\025' >/dev/null 2>&1 || true
         cmux send --surface "$surface_handle" "echo ${marker}\n" >/dev/null 2>&1 || true
       fi
       attempt=$((attempt + 1))
@@ -360,9 +380,10 @@ if [[ $WAIT_READY -eq 1 ]]; then
       {
         echo "open-side-surface: --wait-ready timed out after ${WAIT_READY_TIMEOUT}s for $new_surface ($new_pane)."
         echo "  Possible causes:"
-        echo "    • PTY backend never attached (try: cmux focus-pane --pane $pane_handle)"
         echo "    • Shell still initializing (slow rc files, network mounts, login banner)"
         echo "    • Surface running a non-shell program that doesn't echo input"
+        echo "    • The surface was closed while we were probing it"
+        echo "  (The read is scroll-immune — --scrollback --lines — so a scrolled pane is not the cause.)"
       } >&2
       exit 3
     fi

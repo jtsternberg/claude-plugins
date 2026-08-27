@@ -269,6 +269,59 @@ for f in "$CMUX_DOC" "$DIAL_DOC"; do
     || fail "$rel warns a queued message renders in the input box too"
 done
 
+# --- 9. Scroll immunity: the `--scrollback` form does NOT follow the scroll ---
+# The same reversed-mechanism shape as case 1, in the neighbouring gotcha. The doc
+# claimed `--scrollback --lines <n>` "counts backward from the scrolled position,
+# not the live tail, so it doesn't rescue you" — the exact opposite of what cmux
+# does, per its own TerminalControllerTerminalTextTests.swift and a live capture on
+# 0.64.22 against a pane scrolled to ~line 225. A caller believing that prose has no
+# scroll-safe read left and falls back to guessing from a frozen viewport
+# (claude-plugins-r465.1, -r465.8).
+BAD_SCROLLBACK=$(grep -niE -- "--scrollback[^.]{0,120}(does ?n.t rescue|counts backward from the .{0,12}scrolled)" \
+  "$CMUX_DOC" || true)
+if [[ -z "$BAD_SCROLLBACK" ]]; then
+  pass "the cmux doc does not claim --scrollback follows the user's scroll"
+else
+  fail "the cmux doc does not claim --scrollback follows the user's scroll" \
+    "the reversed-mechanism regression is back:"$'\n'"$BAD_SCROLLBACK"
+fi
+
+grep -qiE -- 'viewport-independent|scroll-immune' "$CMUX_DOC" \
+  && pass "the cmux doc states that --scrollback reads are viewport-independent" \
+  || fail "the cmux doc states that --scrollback reads are viewport-independent" \
+          "expected 'viewport-independent' or 'scroll-immune'"
+
+grep -qF 'anchor' "$CMUX_DOC" && grep -qF 'terminal.replay' "$CMUX_DOC" \
+  && pass "…and names terminal.replay anchor:screen for structured reads" \
+  || fail "…and names terminal.replay anchor:screen for structured reads"
+
+# scrolled_rows is forced to 0 whenever the reply is full:true, and every reply is,
+# so it is structurally always 0. A doc that offers it as a scroll offset hands the
+# reader a check that can never fire (claude-plugins-r465.1).
+grep -qE 'scrolled_rows' "$CMUX_DOC" \
+  && pass "the cmux doc warns that scrolled_rows cannot detect scroll" \
+  || fail "the cmux doc warns that scrolled_rows cannot detect scroll" \
+          "expected scrolled_rows to be named and ruled out"
+
+# --- 10. focus-pane attaches the PTY by STEALING THE USER'S FOCUS ------------
+# `cmux send` attaches the PTY on its own, lazily, on first send. focus-pane does
+# it eagerly and moves the user's cursor into the pane, so their in-flight
+# keystrokes land in the new shell — which turned a launch command into
+# `rkebash /tmp/…` and burned a 60s boot budget (claude-plugins-r465.4, -r465.7).
+# Presenting focus-pane purely as an attach mechanism is the regression this guards.
+FOCUS_LINES=$(grep -niE 'focus-pane' "$CMUX_DOC" || true)
+if printf '%s' "$FOCUS_LINES" | grep -qiE "don.t use it|do not use it|steal|moves the user"; then
+  pass "the cmux doc warns focus-pane moves the user's focus"
+else
+  fail "the cmux doc warns focus-pane moves the user's focus" \
+    "focus-pane is still presented as a plain attach mechanism:"$'\n'"$FOCUS_LINES"
+fi
+
+grep -qiE 'send.{0,40}(is what )?attaches|attaches.{0,40}on (the )?first send|attaches a surface.s PTY' \
+  "$CMUX_DOC" \
+  && pass "…and states that the send is what attaches the PTY" \
+  || fail "…and states that the send is what attaches the PTY"
+
 echo ""
 echo "newline-submit-docs: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then

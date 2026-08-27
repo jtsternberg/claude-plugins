@@ -24,17 +24,27 @@
 #               --payload-file <path> [--submit-key return|ctrl+enter|none]
 #   cmux-rpc.py --method system.capabilities
 #   cmux-rpc.py --method terminal.replay --workspace <uuid> --surface <uuid>
+#                                        [--anchor screen|viewport]
 #   cmux-rpc.py --method <any> --params-file <path-to-json>
+#
+# EVERY PARAM KEY IS snake_case, and that is not a style choice. cmux DROPS
+# unrecognised targeting keys and then resolves the call against the FOCUSED
+# surface, returning ok:true: `{"workspaceId":…,"surfaceId":…}` reads a bystander's
+# terminal and reports success (claude-plugins-r465.9). Because a silent retarget
+# cannot be detected from ok:true alone, this helper also VERIFIES that the reply's
+# result.surface_id is the surface it asked for, and exits 4 when it is not.
 #
 # The response line is echoed on stdout exactly as received, so callers can
 # jq it. Diagnostics go to stderr.
 #
 # Exit codes — an exit code alone never means "the callee got it", only "the
 # socket accepted it"; delivery is confirmed separately by the caller:
-#   0  response had ok:true
+#   0  response had ok:true, for the surface we addressed
 #   1  response had ok:false (its .error is on stderr too)
 #   2  usage error (bad flags, unreadable payload file)
 #   3  transport failure: no socket, connect/timeout, unparseable response
+#   4  ok:true but the reply names a DIFFERENT surface than the request did —
+#      treat the payload as another surface's and never act on it
 # =============================================================================
 import argparse
 import json
@@ -109,6 +119,7 @@ def main(argv):
     ap.add_argument("--payload-file")
     ap.add_argument("--params-file")
     ap.add_argument("--submit-key", default="return")
+    ap.add_argument("--anchor")
     ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
     args = ap.parse_args(argv)
 
@@ -153,6 +164,13 @@ def main(argv):
             params["workspace_id"] = args.workspace
         if args.surface:
             params["surface_id"] = args.surface
+        # anchor:"screen" pins a render_grid read to the live primary screen, so a
+        # user-scrolled pane still answers with the current tail; the default
+        # "viewport" follows the scroll. Passed through rather than defaulted here,
+        # because a cmux without terminal.render_grid.screen_anchor.v1 should not be
+        # handed a param it does not know.
+        if args.anchor:
+            params["anchor"] = args.anchor
 
     sock_path = resolve_socket_path()
     line = build_line(args.method, params)
@@ -169,6 +187,20 @@ def main(argv):
         sys.stderr.write("cmux-rpc: response was not JSON\n")
         return 3
     if parsed.get("ok") is True:
+        # Did we get an answer about the surface we ASKED about? ok:true does not
+        # say so: a dropped or unparseable target silently becomes the focused
+        # surface. Compared against the params actually sent, so a --params-file
+        # caller is covered too, and skipped when either side has no surface_id
+        # (system.capabilities has none to echo).
+        asked = params.get("surface_id") if isinstance(params, dict) else None
+        got = (parsed.get("result") or {}).get("surface_id")
+        if (isinstance(asked, str) and isinstance(got, str)
+                and asked.lower() != got.lower()):
+            sys.stderr.write(
+                "cmux-rpc: RETARGETED — asked for surface %s, reply is for %s. "
+                "cmux fell back to the focused surface; refusing to return its "
+                "payload as ours (claude-plugins-r465.9).\n" % (asked, got))
+            return 4
         return 0
     sys.stderr.write("cmux-rpc: ok:false — %s\n" % json.dumps(parsed.get("error")))
     return 1
