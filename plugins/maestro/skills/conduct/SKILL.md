@@ -77,6 +77,14 @@ give dispatched agents a findings channel ("out-of-scope discoveries go in
 your final report") so the sweep receives them, and let the orchestrator
 decide which survivors become tracked issues.
 
+Park a survivor only with its trigger planted where it fires: an inline
+comment at the edit site naming the issue, a test failure message carrying
+its ID, or machine-matchable paths in the issue a diff scan can hit — a
+tracker is pull-based and will never resurface contingent knowledge at edit
+time on its own. Knowledge with no plantable trigger lives better in the
+code or the team's ledger, with its issue closed pointing there; a closed
+issue stays readable and keeps the deep record.
+
 ## Waiting and forensics
 
 - A waiter timeout is not a failure: re-run the idempotent waiter on the same

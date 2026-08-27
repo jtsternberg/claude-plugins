@@ -227,6 +227,15 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
 - **Flags become beads tasks at the moment of noticing.** "Worth fixing later" said
   in prose evaporates; `bd create` with `discovered-from` survives the session.
   (memory: feedback_flag_becomes_beads_task)
+- **Park a bead only with its trigger planted where it fires.** Contingent
+  knowledge ("if you ever touch X, this matters") has no discovery channel in the
+  tracker — `bd ready` fires when someone asks for work, never at edit time. So a
+  parked bead needs an inline comment at the edit site naming the bead, a test
+  failure message carrying its ID, or a `tripwire-paths:` line in its description
+  that the compounding-preflight diff scan matches. Knowledge with no plantable
+  trigger lives in the code or this ledger instead, its bead closed pointing there —
+  a closed bead stays readable and keeps the deep record. (claude-plugins-7u9g is
+  the worked example: tripwire comments at four stub sites plus tripwire-paths.)
 
 ## Known false positives — do not flag these
 
