@@ -126,6 +126,12 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   burned its full budget and proceeded blind on every call. When flipping a flag
   changes what attaches a resource, re-derive the wait's signal instead of keeping it.
   (claude-plugins-r465.4, -r465.2)
+- **A sweep that reports zero matches is only clean once it is proved able to
+  match.** On macOS `/tmp` is a symlink, so `find /tmp -maxdepth 1` descends nothing
+  and answers "clean" over 291 real files — as does an unquoted `$FILES` list in a
+  `for` loop under zsh, which is one word, not a list. Give every scan a positive
+  control it must hit before reading a zero as a result; for a symlinked directory
+  that control is the trailing slash, `find /tmp/`. (claude-plugins-qq9f)
 
 ## Code shape
 
