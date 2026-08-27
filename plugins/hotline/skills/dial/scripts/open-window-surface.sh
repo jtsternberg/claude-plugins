@@ -84,27 +84,73 @@ if [[ "$WINDOW" =~ ^window:[0-9]+$ || "$WINDOW" =~ ^[0-9]+$ ]]; then
   fi
 else
   # Name form: find a workspace titled <name> anywhere; reuse its window.
+  #
+  # THE TITLE KEY IS `title`. `cmux new-workspace --name <text>` sets it and the
+  # tree reports it as `title` — there is no `name` key on a workspace object, so
+  # matching on `.name` matched nothing and EVERY `--window <name>` call fell
+  # through to the create branch and opened another window (claude-plugins-3ako,
+  # verified on cmux 0.64.22: two consecutive calls for the same name produced
+  # window:4 and window:5, each with its own correctly-titled workspace). That is
+  # the find half of find-or-create, and it is the whole point of the placement.
+  # `.name` is kept as a fallback so a cmux that ever reports it still resolves.
+  #
   # `read` returns non-zero on empty input (no match) — tolerate it under set -e.
   found_win=""; found_ws=""
   read -r found_win found_ws < <(cmux tree --all --json | jq -r --arg n "$WINDOW" '
     [ .windows[] as $win
       | $win.workspaces[]
-      | select(.name == $n)
+      | select((.title // .name // "") == $n)
       | "\($win.ref) \(.ref)" ] | .[0] // empty') || true
   if [[ -n "${found_ws:-}" ]]; then
     target_win="$found_win"
     target_ws="$found_ws"
   else
     # Create a new window, then a titled workspace inside it.
-    before=$(cmux list-windows 2>/dev/null | grep -oE 'window:[0-9]+' | sort -u || true)
+    #
+    # THE NEW WINDOW IS IDENTIFIED BY UUID AND TRANSLATED TO A REF THROUGH THE
+    # TREE. `cmux list-windows` prints `* 0: <UUID> selected_workspace=<UUID>
+    # workspaces=N` and `cmux current-window` prints a bare UUID — NEITHER emits
+    # a `window:N` token, so a before/after grep for one came back empty on both
+    # sides, the diff and its fallback both resolved to nothing, and this path
+    # died at "could not determine new window ref" every time the named window
+    # did not already exist. That killed `--window <name>` for its whole
+    # find-or-create purpose (claude-plugins-3ako, verified on cmux 0.64.22).
+    #
+    # AND THE PRINTED INDEX IS NOT THE REF. list-windows index 0 is `window:1` in
+    # the tree, so building `window:<printed index>` targets the WRONG window —
+    # a callee would land in a bystander's window. `cmux tree --all --json
+    # --id-format both` reports each window's `id` (UUID) next to its `ref`, and
+    # it is the only place that mapping is available; every resolution below goes
+    # through it.
+    win_tree() { cmux tree --all --json --id-format both 2>/dev/null || true; }
+    win_ids() { printf '%s' "$1" | jq -r '.windows[]?.id // empty' | sort -u; }
+
+    before=$(win_ids "$(win_tree)")
     cmux new-window >/dev/null 2>&1 || { echo "open-window-surface: cmux new-window failed" >&2; exit 1; }
-    after=$(cmux list-windows 2>/dev/null | grep -oE 'window:[0-9]+' | sort -u || true)
-    target_win=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -1)
-    if [[ -z "$target_win" ]]; then
-      # Fall back to the current window if the diff didn't pin it down.
-      target_win=$(cmux current-window 2>/dev/null | grep -oE 'window:[0-9]+' | head -1 || true)
+    tree_after=$(win_tree)
+    # 1. The UUID that appeared. Immune to which window cmux focused.
+    new_id=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$(win_ids "$tree_after")") | head -1)
+    if [[ -n "$new_id" ]]; then
+      target_win=$(printf '%s' "$tree_after" | jq -r --arg i "$new_id" \
+        '.windows[]? | select(.id == $i) | .ref // empty' | head -1)
     fi
-    [[ -z "$target_win" ]] && { echo "open-window-surface: could not determine new window ref" >&2; exit 1; }
+    # 2. The UUID `cmux current-window` prints, mapped through the same tree —
+    #    new-window focuses what it creates. Case-insensitive because cmux emits
+    #    uppercase UUIDs and a value that has been through another tool may not.
+    if [[ -z "$target_win" ]]; then
+      cur_id=$(cmux current-window 2>/dev/null | tr -d '[:space:]' || true)
+      [[ -n "$cur_id" ]] && target_win=$(printf '%s' "$tree_after" | jq -r --arg i "$cur_id" \
+        '.windows[]? | select(((.id // "") | ascii_downcase) == ($i | ascii_downcase)) | .ref // empty' | head -1)
+    fi
+    # 3. The tree's own idea of the current window.
+    if [[ -z "$target_win" ]]; then
+      target_win=$(printf '%s' "$tree_after" | jq -r \
+        '.windows[]? | select(.current == true) | .ref // empty' | head -1)
+    fi
+    # A HARD ERROR, never a silent fallthrough. With target_win empty, every cmux
+    # call below would resolve its missing target to the FOCUSED window and land
+    # the callee in whatever the user is looking at.
+    [[ -z "$target_win" ]] && { echo "open-window-surface: cmux new-window succeeded but its window ref could not be resolved from 'cmux tree --all --json --id-format both' (looked for a new window id, then the id 'cmux current-window' prints, then the tree's current window). Refusing to continue: without a window ref cmux would place the callee in whatever window has focus." >&2; exit 1; }
 
     ws_out=$(cmux new-workspace --name "$WINDOW" --window "$target_win" --focus false \
       ${CWD:+--cwd "$CWD"} 2>&1) || { echo "open-window-surface: new-workspace failed: $ws_out" >&2; exit 1; }
