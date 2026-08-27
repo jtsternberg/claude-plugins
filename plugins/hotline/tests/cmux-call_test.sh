@@ -128,7 +128,10 @@ case "$1" in
     # A booted REPL: the input box is a ❯ padded with a NO-BREAK SPACE. A plain
     # space is what a shell prompt draws, and delivery refuses to paste into that.
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
-    # Whatever the socket stub echoed shows up too, as a pasted payload would.
+    # Whatever the socket stub echoed shows up too, as a pasted payload would —
+    # but as N LITERAL LINES, where a real REPL collapses a submitted paste over
+    # ~800 chars or 3 lines to a one-line `[Pasted text +N lines]`. Every stub in
+    # this file shares that gap. Growing a payload fixture: claude-plugins-7u9g.
     [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
     exit 0
     ;;
@@ -413,6 +416,7 @@ case "$1" in
   send) echo "$*" >> "$ST/send_calls"; echo "OK surface:777" ;;
   read-screen)
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
+    # Literal lines, not a collapsed `[Pasted text +N lines]` — claude-plugins-7u9g.
     [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
     exit 0 ;;
   tree)
@@ -471,6 +475,7 @@ case "$1" in
     # A drawn input box: ❯ padded with a NO-BREAK SPACE, which is what delivery
     # requires before it will paste (a plain space is a shell prompt).
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
+    # Literal lines, not a collapsed `[Pasted text +N lines]` — claude-plugins-7u9g.
     [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
     exit 0 ;;
   tree)
@@ -577,6 +582,7 @@ case "$1" in
   read-screen)
     cat "$0.screen" 2>/dev/null
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
+    # Literal lines, not a collapsed `[Pasted text +N lines]` — claude-plugins-7u9g.
     [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
     exit 0 ;;
   tree)

@@ -86,6 +86,10 @@ POISON_SOCK="$(start_socket_stub "$SOCKROOT/poison")"
 # rather than one per scratch env: the request log and the echo file are shared,
 # and assertions look at the LAST terminal.paste, which is the one the case under
 # test just made.
+# The echo file being SUITE-WIDE is deliberate, and it is also what blocks a
+# size-based `[Pasted text +N lines]` collapse in make_cmux below: truncated once
+# here, appended to by every case. Any per-size rule needs per-paste records in
+# lib/socket-stub.py first — see claude-plugins-7u9g before restructuring this.
 SOCK_ECHO_FILE="$SOCKROOT/typed.txt"
 : > "$SOCK_ECHO_FILE"
 OK_SOCK="$(start_socket_stub "$SOCKROOT/ok" "$SOCK_OK_RESPONSES" "$SOCK_ECHO_FILE")"

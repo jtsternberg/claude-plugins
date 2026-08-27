@@ -96,7 +96,9 @@ export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
 #   overstates how much of the payload is on screen: it puts the nonce back in the
 #   transcript, where a real large paste never leaves it, and pushes the box tens
 #   of rows down. Small payloads echo verbatim, which is why the control case can
-#   still find its nonce (claude-plugins-r465.5/.8, -pmgb).
+#   still find its nonce (claude-plugins-r465.5/.8, -pmgb). This stub is the only
+#   one that models the collapse — dial_wrapper_test.sh's and cmux-call_test.sh's
+#   still echo the raw lines, and claude-plugins-7u9g is what closing that costs.
 #
 # The transcript echo uses a PLAIN space after the glyph — the live box is the one
 # padded with U+00A0, and confirmation depends on telling them apart.
