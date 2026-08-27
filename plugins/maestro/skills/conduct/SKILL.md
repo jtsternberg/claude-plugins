@@ -70,6 +70,12 @@ Cap output to the model's known failure modes in the dispatch itself — an
 over-producer gets "size the review to the diff; 2–3 real findings beat a
 long list." The callee can't know its own reputation.
 
+The triage lists those constraints produce are yours to drain. Before the
+batch closes, sweep them: execute what's cheap, get the human's verdict on
+the rest. A batch that mints more open issues than it closes is a failure
+mode, not thoroughness — tell dispatched agents "close work, don't create
+it" and make new-issue filing the exception that needs justifying.
+
 ## Waiting and forensics
 
 - A waiter timeout is not a failure: re-run the idempotent waiter on the same
