@@ -206,6 +206,12 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   same thing. Write the fixture from what the real surface looks like in that state,
   then check that at least one existing assertion changes verdict because of it.
   (claude-plugins-r465.8)
+- **A stub screen may only draw frames the real program can render.** An impossible
+  frame makes a whole class of bugs untestable: hotline's cmux stub echoed pasted
+  bytes BELOW the input box, which claude never draws, so it hid every
+  bottom-of-screen gate bug and broke 31 cases the moment a correct fix landed. Prove
+  a fixture change is neutral by running the suite at the prior commit with only the
+  fixture overlaid, in both orderings (180/180). (claude-plugins-r465, 8c04c1d)
 
 ## Process
 
