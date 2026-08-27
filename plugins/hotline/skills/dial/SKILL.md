@@ -300,6 +300,15 @@ If the `/cmux-cli:using-cmux-cli` skill is available and a cmux-routed call
 misbehaves, invoke it — it documents the workspace/surface/tty semantics this
 transport depends on, which beats guessing at connection failures.
 
+For what the dial flow itself speaks over cmux's control socket — the three RPC
+methods, the snake_case-and-verify-the-echo addressing rule, `terminal.replay`'s
+`anchor`, and the fact that `terminal.viewport` is a setter that would reflow the
+callee's REPL — read
+`${CLAUDE_PLUGIN_ROOT}/skills/dial/references/cmux-rpc.md`.
+
+Codex: substitute the installed Hotline plugin directory for the leading path
+segment above.
+
 ## Transparency: always surface problems
 
 **Every problem reaches the user, in the same turn you hit it.** A nonzero

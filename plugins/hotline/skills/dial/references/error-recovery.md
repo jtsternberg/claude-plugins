@@ -260,7 +260,9 @@ pastes straight in. The judgement comes from the styled render grid
 dim — so a cmux without that capability, or an RPC that fails, reads the box as real
 text and takes the clear-then-verify path instead. That direction costs at most one
 fresh surface; the other would paste a work order on top of a human's half-typed
-words.
+words. (`cmux-rpc.md` covers that call's semantics — `anchor`, the snake_case
+addressing rule, and why `result.surface_id` has to be checked before the grid is
+trusted.)
 
 `close-superseded-surface.sh` asks the same question for the opposite purpose: a
 proven placeholder is no reason to keep a superseded surface, so the dead pane gets
