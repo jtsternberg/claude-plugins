@@ -75,15 +75,9 @@ batch closes, sweep them: execute what's cheap, get the human's verdict on
 the rest. A finished batch leaves the tracker smaller than it found it —
 give dispatched agents a findings channel ("out-of-scope discoveries go in
 your final report") so the sweep receives them, and let the orchestrator
-decide which survivors become tracked issues.
-
-Park a survivor only with its trigger planted where it fires: an inline
-comment at the edit site naming the issue, a test failure message carrying
-its ID, or machine-matchable paths in the issue a diff scan can hit — a
-tracker is pull-based and will never resurface contingent knowledge at edit
-time on its own. Knowledge with no plantable trigger lives better in the
-code or the team's ledger, with its issue closed pointing there; a closed
-issue stays readable and keeps the deep record.
+decide which survivors become tracked issues — parking one only with a
+pointer planted where a future editor will trip over it (a comment at the
+edit site outlives a tracker entry nobody re-reads).
 
 ## Waiting and forensics
 
