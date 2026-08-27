@@ -116,6 +116,24 @@ read_live() {
     "$SCROLLBACK_LINES"
 }
 
+# HOW WIDE THE LIVENESS WINDOW IS — and here, unlike everywhere else in the
+# transport, TOO NARROW IS THE DANGEROUS DIRECTION. Every other site errs toward
+# refusing to paste; this one CLOSES the surface it judges, killing the foreground
+# process, so a busy marker or a box that is really on screen but outside the window
+# reads as "idle, safe to close". A fixed 60 rows is too narrow on a tall pane —
+# panes of 71 and 83 occupied rows were measured on this machine, and rows 61-83 of
+# those screens were simply invisible to this script.
+#
+# So the pane's measured height is taken as a FLOOR, never as a ceiling: never
+# narrower than the 60 rows this script has always used, wider when the pane really
+# is taller. Widening only ever finds more reasons to refuse, which is the safe
+# direction; that inversion is why this site does not use repl_screen_tail_lines'
+# answer verbatim (claude-plugins-mfhp).
+PANE_ROWS=$(cmux_screen_rows "superseded-surface cleanup of $SURFACE_REF" \
+  --surface "$SURFACE_REF" || true)
+SCREEN_TAIL=$(repl_screen_tail_lines "$PANE_ROWS")
+[[ "$SCREEN_TAIL" -lt "$HOTLINE_SCREEN_TAIL_LINES" ]] && SCREEN_TAIL="$HOTLINE_SCREEN_TAIL_LINES"
+
 if ! HIST=$(read_live) || [[ -z "$HIST" ]]; then
   refuse "surface $SURFACE_REF is gone or unreadable — nothing to close"
 fi
@@ -127,7 +145,7 @@ fi
 if ! RAW=$(read_live) || [[ -z "$RAW" ]]; then
   refuse "surface $SURFACE_REF became unreadable while checking whether its REPL was idle"
 fi
-SCREEN=$(repl_screen_tail "$RAW")
+SCREEN=$(repl_screen_tail "$RAW" "$SCREEN_TAIL")
 
 # --- Is there still a REPL in there at all? ----------------------------------
 # FIRST, before any other liveness judgement. Closing a surface KILLS its
@@ -223,7 +241,7 @@ sleep "$SETTLE"
 if ! RAW2=$(read_live) || [[ -z "$RAW2" ]]; then
   refuse "surface $SURFACE_REF became unreadable while confirming its REPL was idle"
 fi
-SCREEN2=$(repl_screen_tail "$RAW2")
+SCREEN2=$(repl_screen_tail "$RAW2" "$SCREEN_TAIL")
 if [[ "$SCREEN2" != "$SCREEN" ]]; then
   refuse "surface $SURFACE_REF's screen is still changing, so its REPL is not provably idle"
 fi

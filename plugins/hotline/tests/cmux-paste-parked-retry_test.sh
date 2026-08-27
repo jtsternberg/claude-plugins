@@ -25,10 +25,14 @@
 # marker is stale and the screen tier could not have confirmed on it anyway; 10-12
 # start from a clean baseline, where it is fresh.
 #
-# `cmux` is a PATH stub whose read-screen SEQUENCES: the first read (box-wait /
-# baseline) returns a clean empty box, later reads return the case screen — so a
-# screen marker only counts if it appeared AFTER the paste, exactly as the real
-# confirmation's recency baseline requires. send-key is logged; for the one case
+# `cmux` is a PATH stub whose read-screen switches ON THE PASTE: until the socket
+# stub's request log shows a terminal.paste it returns the pre-paste screen (a clean
+# empty box for most cases), afterwards the case screen — so a screen marker only
+# counts if it appeared AFTER the paste, exactly as the real confirmation's recency
+# baseline requires. It used to switch on the read COUNT, which quietly made every
+# fixture depend on how many times the script looks at the pane: the pane-height
+# measurement added one read and the baseline judgement was handed a screen that
+# could not exist yet. send-key is logged; for the one case
 # that models a successful retry, an Enter appends the nonce to the transcript and
 # empties the box. $CMUX_SOCKET_PATH points at the shared python socket stub.
 # =============================================================================
@@ -117,7 +121,7 @@ bare_parked() { printf '%s\n%s%s[Pasted text #1 +6 lines]\n%s\n' "$RULE" "$GLYPH
 nonce_parked() { printf '%s%s [Pasted text #1 +5 lines]\n%s\n%s%s[CALL_ID: %s]\n%s\n' \
   "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$1" "$RULE"; }
 
-# make_cmux <bindir> <baseline-file> <target-file> <counter> <sendkey-log> <transcript> <submit-mode>
+# make_cmux <bindir> <baseline-file> <target-file> <reqlog> <sendkey-log> <transcript> <submit-mode>
 # submit-mode governs what an Enter keystroke does (models the retry's outcome):
 #   yes       → append the nonce to the transcript AND empty the box (retry submitted)
 #   emptybox  → empty the box only, NO transcript write (retry submitted; caller has
@@ -127,16 +131,21 @@ nonce_parked() { printf '%s%s [Pasted text #1 +5 lines]\n%s\n%s%s[CALL_ID: %s]\n
 #               surface that closed / cmux hiccup between the gate read and re-check)
 #   keyfail   → the send-key itself exits non-zero (the keystroke never left)
 make_cmux() {
-  local bindir="$1" base="$2" tgt="$3" cnt="$4" sk="$5" tr="$6" submit="$7"
-  mkdir -p "$bindir"; echo 0 > "$cnt"
+  local bindir="$1" base="$2" tgt="$3" reqlog="$4" sk="$5" tr="$6" submit="$7"
+  mkdir -p "$bindir"
   cat > "$bindir/cmux" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
   read-screen)
     [[ -f "$bindir/.readfail" ]] && exit 1
-    n=\$(cat "$cnt" 2>/dev/null || echo 0)
-    if [[ "\$n" -lt 1 ]]; then cat "$base"; else cat "$tgt"; fi
-    echo \$((n+1)) > "$cnt"
+    # THE SCREEN CHANGES WHEN THE PASTE LANDS, not on the second read. Sequencing on
+    # a read COUNT made the fixture depend on how many times the script happens to
+    # look: any added read — the pane-height measurement (repl-state.sh's
+    # cmux_screen_rows) is one — served the POST-paste screen to a PRE-paste
+    # judgement, and the box gate or the baseline then read a screen that cannot
+    # exist yet. The socket stub's request log says when the paste actually
+    # happened, so the stub switches on that instead.
+    if grep -qF 'terminal.paste' "$reqlog" 2>/dev/null; then cat "$tgt"; else cat "$base"; fi
     exit 0 ;;
   send-key)
     echo "\$*" >> "$sk"
@@ -172,7 +181,7 @@ run_case() {
     [[ -n "$proj" ]] && { mkdir -p "$(dirname "$proj")"; printf '%s' "$seed" > "$proj"; }
     tx_args=(--cwd "$dir/cwd" --session "sess-$cid")
   fi
-  make_cmux "$bin" "$dir/baseline" "$dir/target" "$dir/cnt" "$SENDKEY_LOG" "${proj:-$dir/none}" "$submit"
+  make_cmux "$bin" "$dir/baseline" "$dir/target" "$dir/sock/requests.log" "$SENDKEY_LOG" "${proj:-$dir/none}" "$submit"
   write_python3_shim "$bin" "$dir/py-argv"
   sock="$(socket_stub_start "$dir/sock" "$OK_RESPONSES" "$dir/echo-unused")"
   printf '[CALL_ID: %s]\nline one\nline two\nline three\nline four\nline five\n' "$cid" > "$dir/payload.md"

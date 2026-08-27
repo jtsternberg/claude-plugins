@@ -325,8 +325,13 @@ case "$1" in
   read-screen)
     n=$(cat "$STUB_SCREENS/count")
     c=$(cat "$STUB_SCREENS/cursor")
+    # A BARE read is the pane-height MEASUREMENT (cmux_screen_rows), not one of the
+    # scripted judgements: it PEEKS at the screen the next judged read will get and
+    # does not advance the sequence. Real cmux behaves the same way — a bare read and
+    # a scrollback read taken in the same breath show the same rows — and a stub that
+    # burned a fixture on it would make the measurement look like a lost screen.
     c=$((c + 1)); [[ $c -gt $n ]] && c=$n
-    echo "$c" > "$STUB_SCREENS/cursor"
+    [[ "$*" == *--scrollback* ]] && echo "$c" > "$STUB_SCREENS/cursor"
     [[ "$n" -gt 0 ]] && cat "$STUB_SCREENS/$c.txt"
     exit 0
     ;;
@@ -1119,6 +1124,119 @@ else
        "wide=$(repl_box_present "$(repl_screen_tail "$DEAD_FRAME")" && echo yes || echo no) tight=$(repl_box_present "$(repl_screen_tail "$DEAD_FRAME" "$HOTLINE_BOX_TAIL_LINES")" && echo yes || echo no)"
 fi
 
+# --- The widths themselves (claude-plugins-mfhp) ------------------------------
+# A fixed 60-row tail cannot be "the live screen": panes measured on this machine
+# showed 13 to 83 occupied rows, so it reaches ~47 rows into HISTORY on the short
+# one and drops 23 rows that are genuinely on screen on the tall one. The width is
+# therefore measured, and these pin what the measurement is allowed to do.
+echo ""
+echo "  -- the live-screen width is measured, not assumed --"
+
+# The measurement itself: the LINE COUNT of one bare read. Not the render grid's
+# `rows`, which counts the pane's trailing blank rows too (84 where the text
+# capture had 62-83) and would tail that many lines into history.
+rows_dir="$STUBROOT/pane-rows"; mkdir -p "$rows_dir/bin"
+cat > "$rows_dir/bin/cmux" <<'STUB'
+#!/usr/bin/env bash
+printf '%q ' "$@" >> "$STUB_CALLLOG"; printf '\n' >> "$STUB_CALLLOG"
+case "$1" in
+  # A bare read returns the rows the pane is SHOWING; a scrollback read returns
+  # history under them. Real cmux, verified: the last <bare count> lines of the
+  # scrollback read are byte-identical to the bare read.
+  read-screen)
+    if [[ "$*" == *--scrollback* ]]; then printf 'hist-a\nhist-b\nhist-c\nhist-d\n'; fi
+    printf 'row-1\nrow-2\nrow-3\n'
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x "$rows_dir/bin/cmux"
+: > "$rows_dir/calls.log"
+measured=$(STUB_CALLLOG="$rows_dir/calls.log" PATH="$rows_dir/bin:$PATH" \
+  bash -c "source '$HOTLINE_DIR/scripts/repl-state.sh'; cmux_screen_rows probe --surface SURF-1")
+[[ "$measured" == "3" ]] \
+  && pass "cmux_screen_rows reports the rows a bare read returns (3)" \
+  || fail "cmux_screen_rows reports the rows a bare read returns" "got '$measured'"
+bare_reads=$(grep -c -- '^read-screen' "$rows_dir/calls.log" || true)
+[[ "$bare_reads" -eq 1 ]] \
+  && pass "…in exactly one cmux call" \
+  || fail "…in exactly one cmux call" "$bare_reads: $(cat "$rows_dir/calls.log")"
+# Memoized: the callers poll, and the budget for this is one extra read per call.
+: > "$rows_dir/calls.log"
+twice=$(STUB_CALLLOG="$rows_dir/calls.log" PATH="$rows_dir/bin:$PATH" \
+  bash -c "source '$HOTLINE_DIR/scripts/repl-state.sh'
+           cmux_screen_rows probe --surface SURF-1 >/dev/null
+           cmux_screen_rows probe --surface SURF-1 >/dev/null
+           cmux_screen_rows_forget
+           cmux_screen_rows probe --surface SURF-1 >/dev/null
+           grep -c -- '^read-screen' \"\$STUB_CALLLOG\"")
+[[ "$twice" == "2" ]] \
+  && pass "the measurement is memoized per handle, and cmux_screen_rows_forget re-measures" \
+  || fail "the measurement is memoized per handle" "reads=$twice"
+# An unmeasurable pane keeps today's behavior rather than guessing. PATH holds no
+# cmux at all here — not even the poison stub, whose whole job is to log a call that
+# should never have happened.
+mkdir -p "$rows_dir/nocmux"
+failed_rows=$(PATH="$rows_dir/nocmux:/usr/bin:/bin" bash -c \
+  "source '$HOTLINE_DIR/scripts/repl-state.sh'
+   cmux_screen_rows probe --surface SURF-1 || true
+   repl_screen_tail_lines \"\"" 2>/dev/null)
+[[ "$failed_rows" == "$HOTLINE_SCREEN_TAIL_LINES" ]] \
+  && pass "a pane that cannot be measured falls back to the ${HOTLINE_SCREEN_TAIL_LINES}-row constant" \
+  || fail "an unmeasurable pane falls back to the constant" "got '$failed_rows'"
+# An empty handle is refused before it reaches cmux, like every other call here:
+# cmux resolves a missing target to the FOCUSED surface (claude-plugins-r465.9).
+: > "$rows_dir/calls.log"
+STUB_CALLLOG="$rows_dir/calls.log" PATH="$rows_dir/bin:$PATH" \
+  bash -c "source '$HOTLINE_DIR/scripts/repl-state.sh'; cmux_screen_rows probe --surface ''" \
+  >/dev/null 2>&1
+[[ ! -s "$rows_dir/calls.log" ]] \
+  && pass "the measurement refuses an empty handle instead of measuring the focused surface" \
+  || fail "the measurement refuses an empty handle" "$(cat "$rows_dir/calls.log")"
+
+# The derivations. Two rules, and the box gate's is a CEILING as well as a floor:
+# never wider than the 12-row constant, never wider than the live screen either.
+w=$(bash -c "source '$HOTLINE_DIR/scripts/repl-state.sh'
+  printf '%s %s %s %s %s %s' \
+    \"\$(repl_screen_tail_lines 83)\" \"\$(repl_screen_tail_lines 13)\" \
+    \"\$(repl_screen_tail_lines '')\" \
+    \"\$(repl_box_tail_lines 83)\" \"\$(repl_box_tail_lines 4)\" \
+    \"\$(repl_box_tail_lines '')\"")
+[[ "$w" == "83 13 60 12 4 12" ]] \
+  && pass "the live-screen width is the measurement (83→83, 13→13, unknown→60)" \
+  || fail "the width derivations" "got '$w' want '83 13 60 12 4 12'"
+[[ "$w" == *" 12 4 12" ]] \
+  && pass "the box window never exceeds 12 rows, nor the pane's height (4-row pane → 4)" \
+  || fail "the box window is the smaller of the constant and the pane height" "got '$w'"
+
+# An operator who sets the env var gets exactly that width, and no measurement is
+# taken at all — silently overriding an explicit knob would make it a lie.
+: > "$rows_dir/calls.log"
+explicit=$(STUB_CALLLOG="$rows_dir/calls.log" PATH="$rows_dir/bin:$PATH" \
+  HOTLINE_SCREEN_TAIL_LINES=25 bash -c \
+  "source '$HOTLINE_DIR/scripts/repl-state.sh'
+   cmux_screen_rows probe --surface SURF-1 >/dev/null || true
+   repl_screen_tail_lines \"\$(cmux_screen_rows probe --surface SURF-1 || true)\"")
+if [[ "$explicit" == "25" && ! -s "$rows_dir/calls.log" ]]; then
+  pass "an explicit HOTLINE_SCREEN_TAIL_LINES wins and skips the measurement entirely"
+else
+  fail "an explicit HOTLINE_SCREEN_TAIL_LINES wins" "width=$explicit calls=$(cat "$rows_dir/calls.log")"
+fi
+
+# THE WHOLE POINT, end to end: the dead-REPL frame that a 12-row window already
+# refuses must ALSO be refused on a pane too short for 12 rows — where the tight
+# window was still reading history. The box window narrows to the pane, so the box
+# render sitting above the live rows is out of view either way.
+SHORT_ROWS=4
+short_win=$(bash -c "source '$HOTLINE_DIR/scripts/repl-state.sh'; repl_box_tail_lines $SHORT_ROWS")
+if [[ "$short_win" == "4" ]] \
+   && ! repl_box_present "$(repl_screen_tail "$DEAD_FRAME" "$short_win")"; then
+  pass "on a 4-row pane the box gate reads 4 rows, so a dead REPL's history frame is out of window"
+else
+  fail "a short pane narrows the box window to the live screen" \
+       "win=$short_win box=$(repl_box_present "$(repl_screen_tail "$DEAD_FRAME" "$short_win")" && echo yes || echo no)"
+fi
+
 # And the delivery gate has to refuse it too. --wait-box is the last check before
 # `terminal.paste` + Return on a first contact, so it is judged on the same window.
 dead_dir="$STUBROOT/waitbox-dead-repl"
@@ -1177,10 +1295,45 @@ reads_plain=$(grep -E '^read-screen ' "$CALLLOG" | grep -vc -- '--scrollback' ||
 [[ "$reads_total" -gt 0 ]] \
   && pass "the reuse path does read the surface (${reads_total} reads)" \
   || fail "the reuse path does read the surface" "$(log_view)"
-[[ "$reads_plain" -eq 0 ]] \
-  && pass "every read-screen carries --scrollback, so no gate reads a scrolled viewport" \
-  || fail "every read-screen carries --scrollback, so no gate reads a scrolled viewport" \
-          "$reads_plain plain read(s): $(log_view)"
+# A BARE READ IS ALLOWED ONLY AS THE PANE-HEIGHT MEASUREMENT, and the log has to
+# show it being used as one. A bare read's CONTENT follows the user's scroll, but its
+# LINE COUNT does not, and the count is all cmux_screen_rows uses. "Zero bare reads"
+# would have been the easier rule and the wrong one — it is what kept the tail a
+# fixed 60 rows on panes measured from 13 to 83 occupied (claude-plugins-mfhp).
+#
+# So the rule is what a call log can actually prove about a measurement:
+#   • it asks for the SCREEN — no --scrollback, and no --lines either. A bare read
+#     that requested history would be reading content, not counting rows.
+#   • the surface it measures is ALSO read through the immune path in the same log,
+#     so no gate's judgement rests on the bare capture.
+#   • there are few of them. This log spans two processes: cmux-reuse-surface.sh
+#     measures once, and the cmux-paste.sh it invokes measures once (again after
+#     delivery, because the paste itself changes the pane's height). More than that
+#     means a POLL started measuring, which is the cost this design refused to pay.
+python3 - "$CALLLOG" <<'PY' > "$STUBROOT/measure-audit.txt" 2>&1
+import re, sys
+reads = [l.rstrip("\n") for l in open(sys.argv[1]) if l.startswith("read-screen ")]
+def surf(line):
+    m = re.search(r"--surface ([^\s']+)", line)
+    return m.group(1) if m else ""
+bare = [l for l in reads if "--scrollback" not in l]
+immune = {surf(l) for l in reads if "--scrollback" in l}
+print(f"bare={len(bare)} total={len(reads)}")
+for l in bare:
+    if "--lines" in l:
+        print("ASKED FOR HISTORY:", l)
+    if surf(l) not in immune:
+        print("NEVER READ IMMUNELY:", l)
+PY
+audit=$(cat "$STUBROOT/measure-audit.txt")
+bare_n=$(printf '%s' "$audit" | sed -n 's/^bare=\([0-9]*\).*/\1/p')
+if [[ "$audit" == *bare=* ]] && [[ "$(printf '%s\n' "$audit" | wc -l | tr -d ' ')" -eq 1 ]] \
+   && [[ "${bare_n:-99}" -ge 1 && "${bare_n:-99}" -le 3 ]]; then
+  pass "every bare read-screen is a pane measurement (${bare_n} of them: screen-only, and every measured surface is also read with --scrollback)"
+else
+  fail "every bare read-screen is a pane measurement, and nothing else reads a scrolled viewport" \
+       "$audit"$'\n'"$(log_view)"
+fi
 
 # NO SEND MAY GO OUT WITH AN EMPTY TARGET. `cmux send --surface ""` does not fail —
 # it delivers to the FOCUSED surface. On 2026-08-26 that put probe keystrokes into

@@ -343,10 +343,17 @@ if $CMUX_MODE; then
   nonce_visible_in_input_box() {
     [[ -z "$CALL_ID" ]] && return 2
     [[ ${#READ_TARGET[@]} -eq 0 ]] && return 2
-    local raw scr box
+    local raw scr box rows
     raw=$(cmux_read_live "response wait" "${READ_TARGET[0]}" "${READ_TARGET[1]}") || return 2
     [[ -z "$raw" ]] && return 2
-    scr=$(repl_screen_tail "$raw")
+    # The window is the pane's measured height where that can be read, and the
+    # 60-row constant where it cannot (repl-state.sh; the measurement is one bare
+    # read, memoized per handle). This looks at the INPUT BOX, which is the bottom
+    # row of the live screen, so a window that overshoots onto history can only find
+    # a `❯` echo from a turn that already ended — and reading that as "the payload is
+    # sitting unsubmitted" is a hard exit 1 on a delivery that landed.
+    rows=$(cmux_screen_rows "response wait" "${READ_TARGET[0]}" "${READ_TARGET[1]}" || true)
+    scr=$(repl_screen_tail "$raw" "$(repl_screen_tail_lines "$rows")")
     box=$(input_box_content "$scr")
     if [[ -n "$box" ]] && printf '%s' "$box" | grep -qF "$CALL_ID"; then
       BOX_EVIDENCE="call_id=$CALL_ID is sitting in the callee's input box"

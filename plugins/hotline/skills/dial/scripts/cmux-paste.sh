@@ -170,18 +170,44 @@ fi
 # that ended long ago — matching those would report a box (or a busy REPL) that is
 # not there now. The scrollback width only exists so the read cannot be scrolled
 # out from under us, not to widen what these predicates see.
-read_live() {
+#
+# HOW MANY ROWS "THE LIVE SCREEN" IS, is measured where it can be — but NOT during
+# the box wait below. cmux_screen_rows counts the rows a bare read returns
+# (repl-state.sh), and that count is only the truth about a pane whose screen is
+# already drawn. During --wait-box the REPL is still coming up: a measurement taken
+# then reports the two or three rows a shell has printed, and every window derived
+# from it would stay that narrow for the rest of the call — the box gate would never
+# see the box it is waiting for (hard timeout on a healthy boot) and the baseline
+# would be nearly empty, which makes every generic screen marker look FRESH and
+# confirms deliveries that never landed. So the loop runs on the 60-row constant,
+# exactly as before, and the measurement happens once the box is proven.
+PANE_ROWS=""
+SCREEN_TAIL=$(repl_screen_tail_lines "")
+
+measure_pane() {
+  PANE_ROWS=$(cmux_screen_rows "paste to surface $SURFACE_REF" --surface "$SURFACE_REF" || true)
+  SCREEN_TAIL=$(repl_screen_tail_lines "$PANE_ROWS")
+}
+
+read_raw() {
   local raw
   raw=$(cmux_read_live "paste to surface $SURFACE_REF" --surface "$SURFACE_REF") || return 1
   [[ -z "$raw" ]] && return 1
-  repl_screen_tail "$raw"
+  printf '%s' "$raw"
 }
 
+read_live() {
+  local raw
+  raw=$(read_raw) || return 1
+  repl_screen_tail "$raw" "$SCREEN_TAIL"
+}
+
+BOX_RAW=""
 if [[ "$WAIT_BOX" != "0" ]]; then
   BOX_DEADLINE=$(( $(date +%s) + WAIT_BOX ))
   BOX_READY=false
   while [[ $(date +%s) -le $BOX_DEADLINE ]]; do
-    BOX_SCREEN=$(read_live) || BOX_SCREEN=""
+    BOX_RAW=$(read_raw) || BOX_RAW=""
     # The box gate reads only the BOTTOM of the capture, not the whole pane-height
     # tail the confirmation tiers below use. repl_box_present matches anywhere in its
     # window, so on a pane shorter than that tail the window reaches into history —
@@ -189,11 +215,13 @@ if [[ "$WAIT_BOX" != "0" ]]; then
     # proves a REPL that has exited. This gate is the one thing standing between a
     # work order and a shell that would RUN it, so it gets the tight window; the
     # nonce and busy checks keep the wider one, where a miss only costs a refusal.
-    if [[ -n "$BOX_SCREEN" ]] \
-       && repl_box_present "$(repl_screen_tail "$BOX_SCREEN" "$HOTLINE_BOX_TAIL_LINES")"; then
+    #
+    # THE CONSTANT, not a measured window: see measure_pane above. Here, too small
+    # is the harmful direction — this loop is waiting for a screen that does not
+    # exist yet.
+    if [[ -n "$BOX_RAW" ]] \
+       && repl_box_present "$(repl_screen_tail "$BOX_RAW" "$HOTLINE_BOX_TAIL_LINES")"; then
       BOX_READY=true
-      # The screen that proved the box is the freshest possible baseline.
-      BASELINE="$BOX_SCREEN"
       break
     fi
     sleep 0.4
@@ -201,8 +229,25 @@ if [[ "$WAIT_BOX" != "0" ]]; then
   $BOX_READY || undelivered "surface $SURFACE_REF never drew a claude input box (a ❯ padded with U+00A0) within ${WAIT_BOX}s; delivering now would paste the payload into whatever IS there — a shell would run it. The read is scroll-immune, so a scrolled pane is not the cause."
 fi
 
+# The box is proven (or the caller proved it and passed --wait-box 0), so the pane is
+# showing what the tiers below will judge. The BASELINE is taken at the pane's
+# measured width — preferably out of the capture that already proved the box, which
+# costs no extra cmux call — because the freshness test compares this screen against
+# the post-paste one, and a baseline NARROWER than the confirmation reads would let a
+# marker it simply could not see count as fresh and confirm a delivery that never
+# arrived.
+#
+# Only measured when we are actually taking a baseline: a caller that passes
+# --baseline has taken one at its own reading of this same pane
+# (cmux-reuse-surface.sh does), and measuring here would spend a cmux call to size
+# nothing.
 if [[ -z "$BASELINE" ]]; then
-  BASELINE=$(read_live) || BASELINE=""
+  measure_pane
+  if [[ -n "$BOX_RAW" ]]; then
+    BASELINE=$(repl_screen_tail "$BOX_RAW" "$SCREEN_TAIL")
+  else
+    BASELINE=$(read_live) || BASELINE=""
+  fi
 fi
 
 # --- Deliver the paste(s). ---------------------------------------------------
@@ -284,6 +329,16 @@ else
   # From here on the payload may be in the callee's input queue whatever we observe.
   PASTE_SENT=true
 fi
+
+# THE PANE IS RE-MEASURED NOW, because the paste is what changed its height. A
+# screen that was not already full GROWS when the turn echoes into it, so the
+# pre-paste height is a lower bound afterwards — and a window sized to it drops the
+# NEWEST rows, which is precisely where the echo the tiers below look for sits. On a
+# near-empty pane that turns a landed delivery into delivered:false/sent:true.
+# Re-measuring also keeps this window reaching zero rows into history, the same as
+# the baseline's, so "not on the pre-paste screen" keeps meaning fresh.
+cmux_screen_rows_forget
+measure_pane
 
 # --- Did the callee actually get it? ----------------------------------------
 # ok:true is the socket's ack, not delivery proof. The no-trusting-exit-codes

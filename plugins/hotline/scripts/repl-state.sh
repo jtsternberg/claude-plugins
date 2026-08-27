@@ -62,16 +62,20 @@ cmux_handle_ok() {
 # actually idle, which bounces every follow-up to a fresh surface.
 HOTLINE_READ_LINES="${HOTLINE_READ_LINES:-400}"
 #
-# THE TAIL IS ABOUT ONE PANE HEIGHT (60 rows; live panes measured on this machine
-# ranged 37-63), which is deliberately the same order as the viewport these
-# predicates have always been handed. Wider is the unsafe direction — a previous
-# claude session in the same surface leaves NBSP-padded box renders in the history,
-# and repl_box_present matching one reports a live REPL where a shell is now
-# running, which is how a work order gets pasted at a shell and RUN line by line.
-# Narrower only drops rows that are genuinely on screen, which costs screen-side
-# confirmation sensitivity and fails safe (undelivered/sent:true, never a false
-# success). Callers needing a tighter window pass one; the boot wait and the two
-# delivery box gates pass HOTLINE_BOX_TAIL_LINES, defined right below.
+# THE TAIL IS THE PANE'S OWN HEIGHT WHERE IT CAN BE MEASURED (cmux_screen_rows
+# below), and 60 rows where it cannot. 60 is a stand-in for "about one pane
+# height" — live panes measured on this machine ranged 13 to 83 occupied rows, so
+# it is simultaneously too wide on a short pane and too narrow on a tall one.
+# Wider is the unsafe direction — a previous claude session in the same surface
+# leaves NBSP-padded box renders in the history, and repl_box_present matching one
+# reports a live REPL where a shell is now running, which is how a work order gets
+# pasted at a shell and RUN line by line. Narrower only drops rows that are
+# genuinely on screen, which costs screen-side confirmation sensitivity and fails
+# safe (undelivered/sent:true, never a false success).
+#
+# Set the env var and the measurement is skipped entirely: an explicit width is an
+# operator's decision, and silently overriding it would make the knob a lie.
+HOTLINE_SCREEN_TAIL_EXPLICIT="${HOTLINE_SCREEN_TAIL_LINES:+1}"
 HOTLINE_SCREEN_TAIL_LINES="${HOTLINE_SCREEN_TAIL_LINES:-60}"
 #
 # AND ONE TIGHTER WINDOW FOR THE BOX GATES, because "about one pane height" is not
@@ -91,6 +95,16 @@ HOTLINE_SCREEN_TAIL_LINES="${HOTLINE_SCREEN_TAIL_LINES:-60}"
 # that ask "is a REPL drawn here?" cannot disagree about how far back to believe it.
 # close-superseded-surface.sh deliberately keeps the WIDE window: there, seeing a box
 # that is no longer live makes it REFUSE to close, which is the safe direction.
+#
+# THIS ONE KNOB SPANS SITES WHOSE FAILURE DIRECTIONS ARE OPPOSITE, so it is a floor
+# at some of them and a ceiling at others, and repl_box_tail_lines below is the only
+# place allowed to narrow it:
+#   boot wait (wait-for-session.sh), cmux-paste.sh's --wait-box loop — the REPL is
+#     still COMING UP and the screen is growing under us. Too small there is a HARD
+#     TIMEOUT on a boot that was fine, so these keep the constant and never measure.
+#   the two delivery box gates on an EXISTING REPL (cmux-reuse-surface.sh, and
+#     cmux-paste.sh's final gate) — the measurement is contemporaneous, and too
+#     small only costs a fresh surface. These narrow to the pane's real height.
 HOTLINE_BOX_TAIL_LINES="${HOTLINE_BOX_TAIL_LINES:-12}"
 
 # cmux_read_live <what> <flag> <handle> [lines] — the live tail, on stdout.
@@ -99,6 +113,96 @@ cmux_read_live() {
   local what="$1" flag="$2" handle="$3" lines="${4:-$HOTLINE_READ_LINES}"
   cmux_handle_ok "$what" "$handle" || return 2
   cmux read-screen "$flag" "$handle" --scrollback --lines "$lines" 2>/dev/null || return 1
+}
+
+# --- How tall is the pane, exactly? ------------------------------------------
+# cmux_screen_rows <what> <flag> <handle> — the number of rows the surface is
+# showing right now, on stdout; nothing (and non-zero) when it cannot be measured.
+#
+# THE ONE BARE `cmux read-screen` IN THE TRANSPORT, and it is not the bug the rest
+# of this file exists to prevent. A bare read returns what the surface is CURRENTLY
+# SHOWING, so its CONTENT follows the user's scroll — which is why every read that
+# is judged goes through cmux_read_live instead. Only its LINE COUNT is used here,
+# and a scrolled viewport has exactly as many rows as an unscrolled one, so scroll
+# immunity is untouched.
+#
+# Verified live on cmux 0.64.22, four panes of different heights: a bare read
+# returns the showing rows with trailing blanks stripped, and `tail -n <that count>`
+# of a `--scrollback --lines 9999` read of the same surface is byte-identical to it
+# (62/239, 13/13, 83/310, 71/1522 rows). That equality is the whole contract: this
+# number is the right width for tailing a TEXT capture.
+#
+# DO NOT SUBSTITUTE THE RENDER GRID'S `rows`. `terminal.replay --anchor screen`
+# reports the pane height INCLUDING trailing blank rows (84 for all three of the
+# panes above), while a text capture has those stripped — so tailing that many
+# lines reaches 20+ rows into history, i.e. the exact failure this measurement is
+# meant to end.
+#
+# `grep -c ''` rather than `wc -l` because tail counts a final line with no
+# trailing newline as a line and wc does not; the counter has to agree with the
+# consumer.
+#
+# MEMOIZED PER HANDLE for the life of the process: the callers poll (cmux-paste's
+# box loop reads every 0.4s), and one extra cmux call per invocation is the budget
+# this was designed to fit. A pane does not change height mid-call, and where the
+# SCREEN is still growing the constant is used instead — see HOTLINE_BOX_TAIL_LINES.
+_HOTLINE_ROWS_KEY=""
+_HOTLINE_ROWS_VAL=""
+cmux_screen_rows() {
+  local what="$1" flag="$2" handle="$3" key rows
+  [[ -n "${HOTLINE_SCREEN_TAIL_EXPLICIT:-}" ]] && return 1
+  cmux_handle_ok "$what" "$handle" || return 2
+  key="$flag $handle"
+  if [[ "$key" != "$_HOTLINE_ROWS_KEY" ]]; then
+    _HOTLINE_ROWS_KEY="$key"
+    _HOTLINE_ROWS_VAL=""
+    rows=$(cmux read-screen "$flag" "$handle" 2>/dev/null | grep -c '' || true)
+    [[ "$rows" =~ ^[0-9]+$ ]] && [[ "$rows" -gt 0 ]] && _HOTLINE_ROWS_VAL="$rows"
+  fi
+  [[ -z "$_HOTLINE_ROWS_VAL" ]] && return 1
+  printf '%s' "$_HOTLINE_ROWS_VAL"
+}
+
+# cmux_screen_rows_forget — drop the memo, so the next call measures again.
+#
+# For the one thing that genuinely changes a pane's row count mid-call: CONTENT
+# ARRIVING. A screen that is not yet full GROWS as output is appended, so a height
+# measured before a paste is a lower bound on the screen after it — and a window
+# sized to the smaller number would drop the newest rows, which is exactly where a
+# just-submitted turn's echo lives. Re-measuring after delivery keeps every window
+# reaching zero rows into history, which is what makes "this marker was not on the
+# pre-paste screen" mean fresh rather than merely out-of-window.
+cmux_screen_rows_forget() {
+  _HOTLINE_ROWS_KEY=""
+  _HOTLINE_ROWS_VAL=""
+}
+
+# repl_screen_tail_lines [rows] — how many rows of a capture are "the live screen".
+# The measurement when there is one, the constant when there is not, so an
+# unmeasurable pane keeps exactly today's behavior instead of a guess.
+repl_screen_tail_lines() {
+  local rows="${1:-}"
+  if [[ "$rows" =~ ^[0-9]+$ ]] && [[ "$rows" -gt 0 ]]; then
+    printf '%s' "$rows"
+  else
+    printf '%s' "$HOTLINE_SCREEN_TAIL_LINES"
+  fi
+}
+
+# repl_box_tail_lines [rows] — the bottom-of-screen window a box gate may believe.
+# NEVER WIDER than HOTLINE_BOX_TAIL_LINES (that is the point of the tight window)
+# and never wider than the live screen either: on a pane showing fewer rows than
+# that constant, the rest of the window is HISTORY, where a dead REPL's last frame
+# still holds its NBSP-padded box render with the shell prompt that replaced it
+# underneath — and believing that hands a work order to the shell. So: the smaller
+# of the two. Only the gates judging an EXISTING REPL pass rows; see the constant.
+repl_box_tail_lines() {
+  local rows="${1:-}" box="$HOTLINE_BOX_TAIL_LINES"
+  if [[ "$rows" =~ ^[0-9]+$ ]] && [[ "$rows" -gt 0 ]] && [[ "$rows" -lt "$box" ]]; then
+    printf '%s' "$rows"
+  else
+    printf '%s' "$box"
+  fi
 }
 
 # repl_screen_tail <capture> [lines] — the live screen rows out of a scroll-immune

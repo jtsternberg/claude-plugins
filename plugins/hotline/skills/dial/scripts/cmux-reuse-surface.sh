@@ -133,11 +133,22 @@ source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
 # text, busy markers and interrupt wording are all bottom-of-screen facts — a
 # 400-line read still holds `❯` echoes and `(12s ·` parentheticals from turns
 # that finished long ago, and matching those refuses reuse of an idle REPL.
+#
+# AND "THE LIVE SCREEN ROWS" IS MEASURED, not assumed. cmux_screen_rows takes ONE
+# bare read of this surface — the only bare read in the transport, and only its
+# LINE COUNT is used, which a scrolled viewport does not change (repl-state.sh has
+# the live verification). The REPL here already exists, so the measurement is
+# contemporaneous with every gate below: unlike the boot wait, nothing is growing
+# under us. An unmeasurable pane falls back to the 60-row constant.
+PANE_ROWS=$(cmux_screen_rows "reuse of surface $SURFACE_REF" --surface "$SURFACE_REF" || true)
+SCREEN_TAIL=$(repl_screen_tail_lines "$PANE_ROWS")
+BOX_TAIL=$(repl_box_tail_lines "$PANE_ROWS")
+
 read_live() {
   local raw
   raw=$(cmux_read_live "reuse of surface $SURFACE_REF" --surface "$SURFACE_REF") || return 1
   [[ -z "$raw" ]] && return 1
-  repl_screen_tail "$raw"
+  repl_screen_tail "$raw" "$SCREEN_TAIL"
 }
 
 # Existence check: the read fails (non-zero) when the surface is gone. A live
@@ -160,16 +171,18 @@ fi
 # would run it — every line, as a command. So box presence is a hard gate, checked
 # before anything else touches this surface.
 #
-# THE BOX GATE GETS A TIGHTER WINDOW THAN THE OTHER GATES ($SCREEN is one pane
-# height; HOTLINE_BOX_TAIL_LINES is the bottom of it). repl_box_present matches
-# anywhere in what it is handed, panes are not all one height, and a pane shorter
-# than the tail means the rest of that window is HISTORY — where a dead REPL's last
-# frame still holds its NBSP-padded box render, with the shell prompt that replaced
-# it sitting below. That combination passes an anywhere-in-one-pane-height check and
-# hands the work order to the shell. Every other gate below wants the wider window:
-# a spinner, interrupt wording or a nonce that is really there but a few rows up
-# must not read as absent, and each of those errs toward refusing reuse.
-if ! repl_box_present "$(repl_screen_tail "$SCREEN" "$HOTLINE_BOX_TAIL_LINES")"; then
+# THE BOX GATE GETS A TIGHTER WINDOW THAN THE OTHER GATES ($SCREEN is the live
+# screen; $BOX_TAIL is the bottom of it). repl_box_present matches anywhere in what
+# it is handed, panes are not all one height, and a window reaching past the live
+# screen is reading HISTORY — where a dead REPL's last frame still holds its
+# NBSP-padded box render, with the shell prompt that replaced it sitting below. That
+# combination passes an anywhere-in-one-pane-height check and hands the work order
+# to the shell. $BOX_TAIL is therefore the SMALLER of the 12-row constant and the
+# pane's measured height, so on a 4-row pane the gate sees 4 rows and not 8 rows of
+# history (repl_box_tail_lines). Every other gate below wants the wider window: a
+# spinner, interrupt wording or a nonce that is really there but a few rows up must
+# not read as absent, and each of those errs toward refusing reuse.
+if ! repl_box_present "$(repl_screen_tail "$SCREEN" "$BOX_TAIL")"; then
   fallback_fresh "surface $SURFACE_REF is readable but shows no claude input box (a ❯ padded with U+00A0) — its REPL has exited or the pane has been repurposed; pasting a payload there would hand it to a shell"
 fi
 
