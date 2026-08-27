@@ -159,7 +159,17 @@ fi
 # would type the whole work order at that shell and press Enter, and the shell
 # would run it — every line, as a command. So box presence is a hard gate, checked
 # before anything else touches this surface.
-if ! repl_box_present "$SCREEN"; then
+#
+# THE BOX GATE GETS A TIGHTER WINDOW THAN THE OTHER GATES ($SCREEN is one pane
+# height; HOTLINE_BOX_TAIL_LINES is the bottom of it). repl_box_present matches
+# anywhere in what it is handed, panes are not all one height, and a pane shorter
+# than the tail means the rest of that window is HISTORY — where a dead REPL's last
+# frame still holds its NBSP-padded box render, with the shell prompt that replaced
+# it sitting below. That combination passes an anywhere-in-one-pane-height check and
+# hands the work order to the shell. Every other gate below wants the wider window:
+# a spinner, interrupt wording or a nonce that is really there but a few rows up
+# must not read as absent, and each of those errs toward refusing reuse.
+if ! repl_box_present "$(repl_screen_tail "$SCREEN" "$HOTLINE_BOX_TAIL_LINES")"; then
   fallback_fresh "surface $SURFACE_REF is readable but shows no claude input box (a ❯ padded with U+00A0) — its REPL has exited or the pane has been repurposed; pasting a payload there would hand it to a shell"
 fi
 

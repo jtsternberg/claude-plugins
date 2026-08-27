@@ -70,8 +70,28 @@ HOTLINE_READ_LINES="${HOTLINE_READ_LINES:-400}"
 # running, which is how a work order gets pasted at a shell and RUN line by line.
 # Narrower only drops rows that are genuinely on screen, which costs screen-side
 # confirmation sensitivity and fails safe (undelivered/sent:true, never a false
-# success). Callers needing a tighter window pass one; wait-for-session.sh does.
+# success). Callers needing a tighter window pass one; the boot wait and the two
+# delivery box gates pass HOTLINE_BOX_TAIL_LINES, defined right below.
 HOTLINE_SCREEN_TAIL_LINES="${HOTLINE_SCREEN_TAIL_LINES:-60}"
+#
+# AND ONE TIGHTER WINDOW FOR THE BOX GATES, because "about one pane height" is not
+# tight enough for the one predicate whose false positive is destructive.
+# repl_box_present matches ANYWHERE in the window it is handed, and panes are not
+# all one size (measured on this machine: 13, 62, 71, 82, 83 occupied rows), so on
+# any pane shorter than the tail the rest of that window is HISTORY. A previous claude
+# session in the same surface leaves its NBSP-padded box render there, and matching
+# that reports a live REPL where a shell is now running — `terminal.paste` with
+# submit_key:"return" then types the whole work order at that shell and the shell
+# RUNS it.
+#
+# 12 rows is what the box actually needs: claude draws its box at the bottom, with
+# only a rule and one or two hint lines under it (a live capture of an idle REPL put
+# the box 4 rows from the end). The boot wait has used this width since the fast-fail
+# went in; the reuse and delivery box gates take the same one so the three places
+# that ask "is a REPL drawn here?" cannot disagree about how far back to believe it.
+# close-superseded-surface.sh deliberately keeps the WIDE window: there, seeing a box
+# that is no longer live makes it REFUSE to close, which is the safe direction.
+HOTLINE_BOX_TAIL_LINES="${HOTLINE_BOX_TAIL_LINES:-12}"
 
 # cmux_read_live <what> <flag> <handle> [lines] — the live tail, on stdout.
 #   0 — read succeeded    1 — cmux could not read it    2 — refused (empty handle)
@@ -124,16 +144,42 @@ cmux_clear_input_line() {
 # offending token still contains `bash` (or the script's own name) —
 # "zsh: command not found: rkebash". A broken `.zshrc` complaining about `pyenv`
 # is not our problem and must not fail the boot.
+#
+# THE MATCH IS ON THE OFFENDING TOKEN, not on the line. "Somewhere on this line
+# there is a not-found phrase, and somewhere on this line there is the word bash"
+# also describes a claude tool result that shells out — `bash: /tmp/x: No such file
+# or directory` echoed inside a Bash(...) block, in a REPL that is up and healthy —
+# and treating that as a refused launch line fails a boot that already happened. So
+# the token carrying `bash` (or the script's basename) has to sit immediately beside
+# the phrase, in either order, which is how the two shells word it:
+#   zsh   → "zsh: command not found: rkebash"        (phrase, then token)
+#   bash  → "bash: rkebash: command not found"       (token, then phrase)
+#   either→ "bash: /tmp/…/hotline-launch-abc: No such file or directory"
+# `bash: pyenv: command not found` has `bash` only as the SHELL'S OWN NAME, in front
+# of a token that is not ours, and no longer matches.
+#
 # The `|| true` is required, not defensive: a caller running under `set -o pipefail`
 # would take a no-match grep (the normal case — most screens hold no error) as a
 # failed command and die there.
-repl_launch_error_line() {
-  local screen="$1" script="${2:-}" base=""
+#
+# repl_launch_error_lines echoes EVERY such diagnostic. The boot wait counts them,
+# because its one-shot retry has to tell a NEW refusal from the one it already
+# retried on: after Ctrl-U + re-send, the old error line is still on screen and
+# still matches, and reading it a second time abandoned a surface where claude was
+# in fact booting (claude-plugins-r465.7 review).
+repl_launch_error_lines() {
+  local screen="$1" script="${2:-}" base="" tok="bash" phrase
   [[ -n "$script" ]] && base="$(basename "$script")"
+  [[ -n "$base" ]] && tok="bash|$base"
+  phrase='command not found|no such file or directory'
   printf '%s\n' "$screen" \
-    | grep -aiE 'command not found|No such file or directory' \
-    | grep -aE "bash${base:+|$base}" \
-    | tail -1 || true
+    | grep -aiE "($phrase)[[:space:]]*:[[:space:]]*[^[:space:]]*($tok)|:[[:space:]]*[^[:space:]]*($tok)[^[:space:]]*[[:space:]]*:[[:space:]]*($phrase)" \
+    || true
+}
+
+# The most recent one, which is the text a diagnostic quotes.
+repl_launch_error_line() {
+  repl_launch_error_lines "$@" | tail -1 || true
 }
 
 # --- Reading the REPL's state off its rendered screen -------------------------

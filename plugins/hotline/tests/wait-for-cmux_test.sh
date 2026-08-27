@@ -259,6 +259,171 @@ fi
 rm -rf "$tmp"
 
 echo ""
+echo "wait-for-session launch-line fast-fail:"
+
+# A fake cmux that serves a SEQUENCE of screens, one per read-screen, and logs
+# everything. The launch-error retry cannot be tested against a static screen: the
+# whole question is what the NEXT poll sees after the re-send went out.
+make_seq_cmux() {
+  local bin_dir="$1"
+  mkdir -p "$bin_dir"
+  cat > "$bin_dir/cmux" <<'EOF'
+#!/usr/bin/env bash
+printf '%q ' "$@" >> "${CMUX_SEQ_LOG:?CMUX_SEQ_LOG not set}"; printf '\n' >> "$CMUX_SEQ_LOG"
+case "$1" in
+  read-screen)
+    d="${CMUX_SEQ_DIR:?CMUX_SEQ_DIR not set}"
+    n=$(cat "$d/count"); c=$(cat "$d/cursor")
+    c=$((c + 1)); [[ $c -gt $n ]] && c=$n
+    echo "$c" > "$d/cursor"
+    cat "$d/$c.txt"
+    ;;
+  *) exit 0 ;;
+esac
+EOF
+  chmod +x "$bin_dir/cmux"
+}
+
+# The live claude input box pads its ❯ with U+00A0; a shell prompt pads with an
+# ordinary space. Only the first is a REPL.
+SEQ_GLYPH=$'\xe2\x9d\xaf'
+SEQ_NBSP=$'\xc2\xa0'
+
+# Stage screens/1.txt … screens/N.txt from the function names passed in.
+stage_screens() {
+  local d="$1"; shift
+  mkdir -p "$d"
+  local i=1 fn
+  for fn in "$@"; do "$fn" > "$d/$i.txt"; i=$((i + 1)); done
+  echo $((i - 1)) > "$d/count"
+  echo 0 > "$d/cursor"
+}
+
+# The mangle: three of the user's keystrokes landed ahead of our launch command, so
+# the shell refused the whole line. This is the screen the fast-fail exists for.
+seq_screen_mangled() {
+  printf 'Last login: Thu May 14 16:00:00 on ttys001\n~/Code/target\nzsh: command not found: rkebash\n~/Code/target\n'
+}
+# ONE SECOND AFTER THE RE-SEND, which is where this regressed. Ctrl-U clears the
+# input LINE, not the screen, so the refusal we already retried on is still sitting
+# there — and claude's banner needs 1-3s, so nothing has replaced it yet. Reading
+# this as "the re-send was refused too" abandoned a surface where claude was booting.
+seq_screen_mangled_resent() {
+  printf 'Last login: Thu May 14 16:00:00 on ttys001\n~/Code/target\nzsh: command not found: rkebash\n~/Code/target bash /tmp/launch\n'
+}
+# The re-send worked: the REPL is up and its box is drawn. The old error line is
+# still in the capture above it.
+seq_screen_booted() {
+  printf 'zsh: command not found: rkebash\n~/Code/target bash /tmp/launch\n\n%s\n%s%s\n%s\n  ? for shortcuts\n' \
+    "$(printf '─%.0s' {1..20})" "$SEQ_GLYPH" "$SEQ_NBSP" "$(printf '─%.0s' {1..20})"
+}
+# The re-send was refused TOO: a second, distinct diagnostic joins the first.
+seq_screen_mangled_twice() {
+  printf 'zsh: command not found: rkebash\n~/Code/target\nzsh: command not found: qqbash\n~/Code/target\n'
+}
+# A HEALTHY REPL that shelled out and hit a missing file. Both halves of the old
+# whole-line match are here — a not-found phrase, and the word bash — but `bash` is
+# the shell's own name in front of somebody else's token, so this is not our launch
+# line and must not fail the boot.
+seq_screen_tool_result() {
+  printf 'Last login: Thu May 14 16:00:00 on ttys001\n  Bash(cat /tmp/nope)\n  ⎿  bash: cat: /tmp/nope: No such file or directory\n  ⏺ That file is not there.\n'
+}
+
+run_seq_case() {  # <name> <preset> <timeout> <screen-fn>...
+  local name="$1" preset="$2" timeout="$3"; shift 3
+  SEQ_TMP=$(mktemp -d /tmp/hotline-wait-seq-XXXXXX)
+  make_seq_cmux "$SEQ_TMP/bin"
+  stage_screens "$SEQ_TMP/screens" "$@"
+  SEQ_CD="$SEQ_TMP/call"
+  stage_call_dir "$SEQ_CD" "$preset" "workspace:77"
+  # A REAL launch script, because the one-shot retry only fires when the recorded
+  # path still exists.
+  SEQ_LAUNCH="$SEQ_TMP/hotline-launch-fake"
+  echo 'exec claude' > "$SEQ_LAUNCH"
+  echo "$SEQ_LAUNCH" > "$SEQ_CD/launch_script.txt"
+  SEQ_OUT=$(PATH="$SEQ_TMP/bin:$PATH" CMUX_SEQ_DIR="$SEQ_TMP/screens" \
+    CMUX_SEQ_LOG="$SEQ_TMP/calls.log" \
+    bash "$WAIT_SESSION" "$SEQ_CD" --timeout "$timeout" 2>"$SEQ_TMP/err.txt")
+  SEQ_RC=$?
+  SEQ_ERR=$(cat "$SEQ_TMP/err.txt")
+}
+
+# Case 5: THE STALE ERROR LINE. Poll 1 sees the refusal and re-sends; poll 2 sees
+# the SAME line still on screen; poll 3 sees the box. It must boot, not exit 1.
+run_seq_case stale_err preset-uuid-5 8 \
+  seq_screen_mangled seq_screen_mangled_resent seq_screen_booted
+if [[ $SEQ_RC -eq 0 && "$SEQ_OUT" == "preset-uuid-5" ]]; then
+  pass "a stale error line after the re-send does not abandon a booting REPL"
+else
+  fail "a stale error line after the re-send does not abandon a booting REPL" \
+       "rc=$SEQ_RC stdout=$SEQ_OUT stderr=$SEQ_ERR"
+fi
+if [[ "$SEQ_ERR" == *"Clearing the input line and re-sending it once"* ]]; then
+  pass "…and the one-shot re-send did fire"
+else
+  fail "…and the one-shot re-send did fire" "stderr=$SEQ_ERR"
+fi
+if [[ "$SEQ_ERR" != *"clean re-send did not help"* ]]; then
+  pass "…without reporting the re-send as failed"
+else
+  fail "…without reporting the re-send as failed" "stderr=$SEQ_ERR"
+fi
+if grep -qE "^send --workspace workspace:77 .*bash" "$SEQ_TMP/calls.log"; then
+  pass "…and the re-send named the workspace explicitly (never the focused surface)"
+else
+  fail "…and the re-send named the workspace explicitly (never the focused surface)" \
+       "$(cat "$SEQ_TMP/calls.log")"
+fi
+rm -rf "$SEQ_TMP"
+
+# Case 5b: a NEW refusal after the re-send is still fatal, and fast. The count of
+# matching lines grows, which is what tells this apart from Case 5.
+run_seq_case twice_err preset-uuid-5b 8 \
+  seq_screen_mangled seq_screen_mangled_twice
+if [[ $SEQ_RC -ne 0 && "$SEQ_ERR" == *"clean re-send did not help"* ]]; then
+  pass "a second, distinct refusal after the re-send is reported as fatal"
+else
+  fail "a second, distinct refusal after the re-send is reported as fatal" \
+       "rc=$SEQ_RC stderr=$SEQ_ERR"
+fi
+if [[ ! -f "$SEQ_CD/session_id.txt" ]]; then
+  pass "…and session_id.txt is NOT promoted"
+else
+  fail "…and session_id.txt is NOT promoted"
+fi
+rm -rf "$SEQ_TMP"
+
+# Case 5c: TOKEN SCOPING. A healthy REPL's tool result carries a not-found phrase
+# and the word bash on one line. The old whole-line match called that a refused
+# launch line and re-sent `bash /tmp/…` into a live claude REPL.
+run_seq_case tool_result preset-uuid-5c 2 seq_screen_tool_result
+if [[ "$SEQ_ERR" != *"refused the launch line"* ]]; then
+  pass "a tool result naming bash and a missing file is not a refused launch line"
+else
+  fail "a tool result naming bash and a missing file is not a refused launch line" \
+       "stderr=$SEQ_ERR"
+fi
+if ! grep -qE "^send " "$SEQ_TMP/calls.log"; then
+  pass "…so no launch line is re-sent into it"
+else
+  fail "…so no launch line is re-sent into it" "$(cat "$SEQ_TMP/calls.log")"
+fi
+rm -rf "$SEQ_TMP"
+
+# Case 5d: the refusal we retried on and never saw replaced is quoted by the
+# timeout, so the one failure this fast-fail exists for never reads as a generic
+# "REPL did not boot" again.
+run_seq_case quoted_err preset-uuid-5d 3 \
+  seq_screen_mangled seq_screen_mangled_resent seq_screen_mangled_resent
+if [[ $SEQ_RC -ne 0 && "$SEQ_ERR" == *"Timed out waiting for Claude REPL to boot"* \
+      && "$SEQ_ERR" == *"a re-send did not visibly boot: zsh: command not found: rkebash"* ]]; then
+  pass "the timeout diagnostic quotes the refused launch line"
+else
+  fail "the timeout diagnostic quotes the refused launch line" "rc=$SEQ_RC stderr=$SEQ_ERR"
+fi
+rm -rf "$SEQ_TMP"
+
+echo ""
 echo "wait-for-response cmux mode:"
 
 # Case 4: STATUS: DONE on screen → response.json + done written, JSON emitted.

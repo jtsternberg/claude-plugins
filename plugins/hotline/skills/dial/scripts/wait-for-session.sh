@@ -182,6 +182,10 @@ if $CMUX_MODE; then
   # actual screen text. Retrying without the clear would append to the broken line.
   LAUNCH_SCRIPT=$(cat "$CALL_DIR/launch_script.txt" 2>/dev/null || true)
   RELAUNCHED=false
+  # How many launch-error lines were on screen when the retry fired, and the most
+  # recent one seen at any point (quoted by the timeout diagnostic below).
+  ERR_BASELINE=0
+  LAST_LAUNCH_ERR=""
 
   SAW_BANNER=false
   SAW_TRANSCRIPT=false
@@ -199,6 +203,12 @@ if $CMUX_MODE; then
         fi
       else
         DIAG=" (no banner and no input box matched on screen; transcript-file check skipped — cwd.txt absent)"
+      fi
+      # A refusal we retried on and never saw superseded by a boot is the most useful
+      # thing this message can carry — without it, the one case the fast-fail was
+      # built for reads as a generic timeout again.
+      if [[ -n "$LAST_LAUNCH_ERR" ]]; then
+        DIAG+=" The surface showed a refused launch line and a re-send did not visibly boot: ${LAST_LAUNCH_ERR}."
       fi
       echo "Timed out waiting for Claude REPL to boot in cmux ${REF} (${TIMEOUT}s).${DIAG} The screen reads are scroll-immune (--scrollback --lines), so a scrolled pane is not the cause, and a shell error on the launch line would have been reported above. Common causes: the launch-script claude invocation is malformed (e.g. --allowedTools split into two argv words instead of --allowedTools=<list>), or the surface/workspace lost its tty." >&2
       exit 1
@@ -222,22 +232,46 @@ if $CMUX_MODE; then
       # echoes from a previous session in the same surface. Matching those would
       # report a REPL booted before it exists, and the paste that follows would
       # go into a bare shell.
-      if repl_box_present "$(repl_screen_tail "$CLEAN" 12)"; then
+      if repl_box_present "$(repl_screen_tail "$CLEAN" "$HOTLINE_BOX_TAIL_LINES")"; then
         SAW_BOX=true
         echo "$PRESET" > "$CALL_DIR/session_id.txt"
         break
       fi
       # The launch line never ran. Checked only while no boot signal has fired, and
-      # scoped to errors naming OUR command (repl_launch_error_line), so a tool
+      # scoped to errors naming OUR command (repl_launch_error_lines), so a tool
       # result or an rc-file complaint cannot fail a healthy boot.
-      LAUNCH_ERR=$(repl_launch_error_line "$CLEAN" "$LAUNCH_SCRIPT")
+      #
+      # SCOPED TO THE LIVE SCREEN, not to the 9999-line scrollback this read is: an
+      # error line stays in history forever, so a scan over the whole capture keeps
+      # finding the one we have already recovered from.
+      #
+      # AND THE RETRY NEEDS A NEW ERROR, not the same one again. Ctrl-U clears the
+      # input line, not the screen, so ~1s after the re-send the old diagnostic is
+      # still sitting there — while claude's banner needs 1-3s. Counting the matches
+      # and requiring the count to GROW is what distinguishes "the re-send was
+      # refused too" from "the re-send is booting and the corpse of the first attempt
+      # is still on screen"; the second reading exited 1 a second after the resend,
+      # abandoning a surface where claude was in fact coming up. Counting rather than
+      # comparing text so an identical second mangle still registers.
+      ERR_LINES=$(repl_launch_error_lines \
+        "$(repl_screen_tail "$CLEAN" "$HOTLINE_BOX_TAIL_LINES")" "$LAUNCH_SCRIPT")
+      ERR_COUNT=0
+      [[ -n "$ERR_LINES" ]] && ERR_COUNT=$(printf '%s\n' "$ERR_LINES" | grep -c . || true)
+      LAUNCH_ERR=$(printf '%s\n' "$ERR_LINES" | grep . | tail -1 || true)
       if [[ -n "$LAUNCH_ERR" ]]; then
+        LAST_LAUNCH_ERR="$LAUNCH_ERR"
         if ! $RELAUNCHED && [[ -n "$LAUNCH_SCRIPT" && -f "$LAUNCH_SCRIPT" ]]; then
           RELAUNCHED=true
+          ERR_BASELINE=$ERR_COUNT
           echo "hotline: the callee's shell refused the launch line — ${LAUNCH_ERR}. Clearing the input line and re-sending it once." >&2
           cmux_clear_input_line "launch resend" "$READ_FLAG" "$REF"
           cmux_send_live "launch resend" "$READ_FLAG" "$REF" "bash $LAUNCH_SCRIPT\n" \
             >/dev/null 2>&1 || true
+        elif $RELAUNCHED && [[ "$ERR_COUNT" -le "$ERR_BASELINE" ]]; then
+          # The same refusal we already retried on. Keep waiting for the boot the
+          # re-send should produce; if it never comes, the timeout below reports this
+          # text rather than guessing.
+          :
         else
           {
             echo "The callee's shell refused the launch line and a clean re-send did not help. What the surface actually shows:"

@@ -173,6 +173,31 @@ screen_shell_prompt() {
 screen_shell_prompt_bare() {
   printf '%s%s\n' "$GLYPH" " "
 }
+# THE DEAD REPL'S LAST FRAME, still in the capture. claude exited (crash, /exit, two
+# Ctrl-Cs) and left its box render — glyph + U+00A0 and all — sitting in the surface's
+# history; the shell that took the surface over has printed a few lines since. Nothing
+# about that box is a live REPL, and a work order pasted here goes to the shell.
+#
+# The reason this needs its own fixture: the gate reads a WINDOW, not a screen. A
+# capture is tailed to about one pane height before the predicates see it, and
+# repl_box_present matches anywhere inside what it is handed — so on any pane shorter
+# than that tail, the window includes history and this frame passes. The rows between
+# the box render and the bottom are the whole point; keep more than
+# HOTLINE_BOX_TAIL_LINES of them.
+screen_dead_repl_in_history() {
+  printf '%s%s summarise the diff\n\n%s Baked for 12s\n\n%s\n%s%s\n%s\n' \
+    "$GLYPH" " " "✻" "$RULE" "$GLYPH" "$NBSP" "$RULE"
+  printf '  ? for shortcuts\n'
+  printf '~/Code/target on  main\n'
+  printf '%s%s ls\n' "$GLYPH" " "
+  printf 'README.md   package.json   src         tests\n'
+  printf 'CHANGELOG.md   docs         scripts     tmp\n'
+  printf '~/Code/target on  main\n'
+  printf '%s%s git status --short\n' "$GLYPH" " "
+  printf ' M src/index.ts\n M src/app.ts\n?? notes.txt\n'
+  printf '~/Code/target on  main\n'
+  printf '%s%s\n' "$GLYPH" " "
+}
 # A never-used REPL shows a greyed placeholder hint inside an EMPTY box.
 screen_placeholder() {
   printf '%s\n%s%sTry "how does <filepath> work?"\n%s\n' \
@@ -1035,15 +1060,24 @@ echo "  -- a surface with no REPL left in it is refused, not pasted into --"
 # repl_looks_busy for a spinner, and input_box_content would at most report the
 # prompt line as parked text. Delivering here does not lose the payload; it hands
 # the whole work order to a shell and presses Return.
-for shellfix in screen_shell_prompt screen_shell_prompt_bare; do
-  CASE_RESPONSES="$OK_RESPONSES" run_case "$shellfix" "$shellfix" -- --prompt "$MULTILINE_MSG"
+# Case names stay SHORT: run_case builds the stub's control-socket path out of the
+# name, and an AF_UNIX path has a hard length limit that a descriptive name blows
+# through (the failure reads as a paste error, which is confusing in a suite about
+# refusing to paste).
+for shellfix in screen_shell_prompt screen_shell_prompt_bare screen_dead_repl_in_history; do
+  case "$shellfix" in
+    screen_shell_prompt)           casename=sh1 ;;
+    screen_shell_prompt_bare)      casename=sh2 ;;
+    screen_dead_repl_in_history)   casename=dead ;;
+  esac
+  CASE_RESPONSES="$OK_RESPONSES" run_case "$casename" "$shellfix" -- --prompt "$MULTILINE_MSG"
   CASE_RESPONSES=""
   [[ "$OUT" == *'"fallback"'* && "$OUT" == *"no claude input box"* ]] \
-    && pass "$shellfix: a shell prompt is refused with the fresh-surface fallback" \
-    || fail "$shellfix: a shell prompt is refused with the fresh-surface fallback" "out: $OUT"
+    && pass "$shellfix: refused with the fresh-surface fallback, no REPL proven" \
+    || fail "$shellfix: refused with the fresh-surface fallback, no REPL proven" "out: $OUT"
   [[ "$(request_count)" -eq 0 ]] \
-    && pass "$shellfix: nothing is pasted at the shell" \
-    || fail "$shellfix: nothing is pasted at the shell" "$(requests)"
+    && pass "$shellfix: nothing is pasted into it" \
+    || fail "$shellfix: nothing is pasted into it" "$(requests)"
   [[ "$(clear_count)" -eq 0 ]] \
     && pass "$shellfix: no Ctrl-C is sent to it either" \
     || fail "$shellfix: no Ctrl-C is sent to it either" "$(log_view)"
@@ -1070,6 +1104,42 @@ BOX_OUT="$(STUB_CALLLOG="$box_dir/calls.log" STUB_SCREENS="$box_dir/screens" \
 [[ ! -s "$box_dir/socket/requests.log" ]] \
   && pass "…and no paste request is made at all" \
   || fail "…and no paste request is made at all" "$(cat "$box_dir/socket/requests.log")"
+
+# THE FIXTURE HAS TO BE THE REGRESSION SHAPE, or the two cases above prove nothing:
+# a live REPL's box IS in this capture (one pane height back), and is NOT in the
+# window the box gate reads. If a future edit widens that window, this fails here
+# with a reason instead of failing in production as a work order run by a shell.
+source "$HOTLINE_DIR/scripts/repl-state.sh"
+DEAD_FRAME="$(screen_dead_repl_in_history)"
+if repl_box_present "$(repl_screen_tail "$DEAD_FRAME")" \
+   && ! repl_box_present "$(repl_screen_tail "$DEAD_FRAME" "$HOTLINE_BOX_TAIL_LINES")"; then
+  pass "the dead-REPL fixture is genuinely box-shaped one pane height back, and not in the box window"
+else
+  fail "the dead-REPL fixture is genuinely box-shaped one pane height back, and not in the box window" \
+       "wide=$(repl_box_present "$(repl_screen_tail "$DEAD_FRAME")" && echo yes || echo no) tight=$(repl_box_present "$(repl_screen_tail "$DEAD_FRAME" "$HOTLINE_BOX_TAIL_LINES")" && echo yes || echo no)"
+fi
+
+# And the delivery gate has to refuse it too. --wait-box is the last check before
+# `terminal.paste` + Return on a first contact, so it is judged on the same window.
+dead_dir="$STUBROOT/waitbox-dead-repl"
+mkdir -p "$dead_dir/bin" "$dead_dir/screens"
+dead_sock="$(start_socket_stub "$dead_dir/socket" "$OK_RESPONSES")"
+printf '[CALL_ID: waitboxnonce2]\n%s' "$MULTILINE_MSG" > "$dead_dir/payload.txt"
+screen_dead_repl_in_history > "$dead_dir/screens/1.txt"
+echo 1 > "$dead_dir/screens/count"; echo 0 > "$dead_dir/screens/cursor"
+cp "$STUBROOT/paste_multiline/bin/cmux" "$dead_dir/bin/cmux"
+DEAD_OUT="$(STUB_CALLLOG="$dead_dir/calls.log" STUB_SCREENS="$dead_dir/screens" \
+  STUB_SURF="$SURF_UUID" STUB_WS="$WS_UUID" \
+  CMUX_SOCKET_PATH="$dead_sock" HOME="$dead_dir" \
+  PATH="$dead_dir/bin:$PATH" bash "$PASTE_SCRIPT" \
+  --surface "$SURF_UUID" --payload-file "$dead_dir/payload.txt" \
+  --call-id waitboxnonce2 --wait-box 1 2>&1)"
+[[ "$DEAD_OUT" == *'"delivered":false'* && "$DEAD_OUT" == *"never drew a claude input box"* ]] \
+  && pass "--wait-box refuses a dead REPL's box render left in history" \
+  || fail "--wait-box refuses a dead REPL's box render left in history" "out: $DEAD_OUT"
+[[ ! -s "$dead_dir/socket/requests.log" ]] \
+  && pass "…and no paste request is made at all" \
+  || fail "…and no paste request is made at all" "$(cat "$dead_dir/socket/requests.log")"
 
 echo ""
 echo "  -- legacy cached handles --"

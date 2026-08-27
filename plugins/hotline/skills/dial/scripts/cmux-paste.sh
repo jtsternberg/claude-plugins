@@ -182,7 +182,15 @@ if [[ "$WAIT_BOX" != "0" ]]; then
   BOX_READY=false
   while [[ $(date +%s) -le $BOX_DEADLINE ]]; do
     BOX_SCREEN=$(read_live) || BOX_SCREEN=""
-    if [[ -n "$BOX_SCREEN" ]] && repl_box_present "$BOX_SCREEN"; then
+    # The box gate reads only the BOTTOM of the capture, not the whole pane-height
+    # tail the confirmation tiers below use. repl_box_present matches anywhere in its
+    # window, so on a pane shorter than that tail the window reaches into history —
+    # and a dead REPL's final frame (its box render, a shell prompt underneath) then
+    # proves a REPL that has exited. This gate is the one thing standing between a
+    # work order and a shell that would RUN it, so it gets the tight window; the
+    # nonce and busy checks keep the wider one, where a miss only costs a refusal.
+    if [[ -n "$BOX_SCREEN" ]] \
+       && repl_box_present "$(repl_screen_tail "$BOX_SCREEN" "$HOTLINE_BOX_TAIL_LINES")"; then
       BOX_READY=true
       # The screen that proved the box is the freshest possible baseline.
       BASELINE="$BOX_SCREEN"

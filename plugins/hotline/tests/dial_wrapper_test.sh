@@ -169,15 +169,20 @@ case "$1" in
   # Both branches must end on an explicit exit 0: a trailing conditional would
   # otherwise become the stub's exit status, and a "failed" read-screen reads as
   # a dead surface.
-  read-screen)   cat "$ST/screen.txt" 2>/dev/null
-                 # Whatever the socket stub echoed shows up on the screen, as a
-                 # pasted payload would in a real REPL: that is how delivery
-                 # confirmation sees its nonce. Pointing a case at a socket stub
-                 # started WITHOUT --echo-file models a paste whose bytes never
-                 # arrived.
-                 if [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]]; then
+  # Whatever the socket stub echoed shows up on the screen ABOVE the input box, as
+  # a pasted-and-submitted payload does in a real REPL: claude echoes the turn into
+  # its transcript and redraws the box UNDERNEATH it. That order is what delivery
+  # confirmation reads (the nonce has to be findable OUTSIDE the box), and it is
+  # also the only order the box gates can be tested against — claude draws its box
+  # at the bottom with a rule and a hint line under it, never with a screenful of
+  # transcript below it, so echoing after screen.txt modelled a screen that cannot
+  # exist and pushed the box out of every bottom-of-screen window.
+  # Pointing a case at a socket stub started WITHOUT --echo-file models a paste
+  # whose bytes never arrived.
+  read-screen)   if [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]]; then
                    cat "$SOCK_ECHO_FILE"
                  fi
+                 cat "$ST/screen.txt" 2>/dev/null
                  exit 0 ;;
   send)          echo "$*" >> "$ST/send_calls"; exit 0 ;;
   send-key)      echo "$*" >> "$ST/sendkey_calls" ;;
