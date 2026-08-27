@@ -107,9 +107,10 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   answer arrives as a successful one. (claude-plugins-r465.7, -r465.9)
 - **Read a cmux screen with `--scrollback --lines N`; a bare read may only measure
   the pane** (`cmux_screen_rows`), never feed a content decision — bare reads follow
-  the user's scroll. Guards enforce this in `surface-placement_test.sh`,
-  `wait-for-cmux_test.sh`, `cmux-reuse-surface_test.sh`, and
-  `surface-ready-hygiene_test.sh`. Two facts no guard can teach a new author:
+  the user's scroll. Guards enforce this in `plugins/hotline/tests/`
+  (`surface-placement_test.sh`, `wait-for-cmux_test.sh`,
+  `cmux-reuse-surface_test.sh`) and `plugins/cmux-cli/tests/`
+  (`surface-ready-hygiene_test.sh`). Two facts no guard can teach a new author:
   `terminal.replay` is scroll-immune only with `anchor:"screen"`, and its
   `scrolled_rows` is structurally always 0 — it can never detect scroll for you.
   (claude-plugins-r465.5, -r465.6, -r465.1)
