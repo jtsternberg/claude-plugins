@@ -181,8 +181,6 @@ case "$1" in
   # at the bottom with a rule and a hint line under it, never with a screenful of
   # transcript below it, so echoing after screen.txt modelled a screen that cannot
   # exist and pushed the box out of every bottom-of-screen window.
-  # Pointing a case at a socket stub started WITHOUT --echo-file models a paste
-  # whose bytes never arrived.
   #
   # WHAT THIS ECHO STILL DOES NOT MODEL, and what it would take (claude-plugins-7u9g):
   # a real Claude Code renders a submitted paste over ~800 chars or 3 lines as a
