@@ -166,5 +166,7 @@ and a second marketplace upgrade reported no upgraded roots.
 The same transition was observed on Codex CLI 0.148.0 with
 `walk-through-work-history` 1.0.0 → 1.1.0, and on 0.149.0 with `gws`
 1.20.3 → 1.22.1 through the Directory path (`codex plugin add`), which also left
-only the new version cached. The reconciliation behavior is not specific to
+only the new version cached. On 0.149.1 it reconciled identically for three
+plugins in one release (hotline 0.28.0, cmux-cli 0.12.0, maestro 0.2.0) on the
+Git-backed path. The reconciliation behavior is not specific to
 0.147.0 or to Git-backed marketplaces.
