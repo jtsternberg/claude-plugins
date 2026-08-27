@@ -859,6 +859,65 @@ fi
   rm -f "$(cat "$call_dir/launch_script.txt")"
 rm -rf "$tmp" "$call_dir"
 
+# ---------------------------------------------------------------------------
+# Stale launch-script sweep (claude-plugins-qq9f). Every dial reaps abandoned
+# launch scripts older than 7 days before minting its own. Pointed at a scratch
+# directory via HOTLINE_LAUNCH_SWEEP_DIR so the suite never touches the real /tmp.
+# ---------------------------------------------------------------------------
+echo ""
+echo "Stale launch-script sweep:"
+
+tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/cwd" "$tmp/sweep"
+: > "$tmp/screen.txt"
+make_min_surface_cmux "$tmp/bin"
+make_side_stub "$tmp/open-side.sh"
+
+# BSD `touch -v-10d` vs GNU `date -d` — the suite runs on both macOS and CI Linux.
+stale_ts=$(date -v-10d +%Y%m%d%H%M 2>/dev/null || date -d '10 days ago' +%Y%m%d%H%M)
+for f in hotline-launch-STALE hotline-cmux-launch-STALE; do
+  echo 'exec claude' > "$tmp/sweep/$f"
+  touch -t "$stale_ts" "$tmp/sweep/$f"
+done
+# Must survive: too young, and a name that isn't ours.
+echo 'exec claude' > "$tmp/sweep/hotline-launch-FRESH"
+echo 'not ours'    > "$tmp/sweep/someone-elses-file"
+touch -t "$stale_ts" "$tmp/sweep/someone-elses-file"
+mkdir -p "$tmp/sweep/hotline-launch-DIR"   # -type f only; a call dir is not a script
+
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
+  HOTLINE_LAUNCH_SWEEP_DIR="$tmp/sweep" \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "sweep me" 2>"$tmp/stderr.txt")
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+
+if [[ ! -e "$tmp/sweep/hotline-launch-STALE" && ! -e "$tmp/sweep/hotline-cmux-launch-STALE" ]]; then
+  pass "sweep deletes stale launch scripts under BOTH launcher prefixes"
+else
+  fail "sweep deletes stale launch scripts under BOTH launcher prefixes" \
+       "remaining: $(ls "$tmp/sweep")"
+fi
+if [[ -f "$tmp/sweep/hotline-launch-FRESH" ]]; then
+  pass "sweep leaves a launch script younger than the age floor alone"
+else
+  fail "sweep leaves a launch script younger than the age floor alone"
+fi
+if [[ -f "$tmp/sweep/someone-elses-file" && -d "$tmp/sweep/hotline-launch-DIR" ]]; then
+  pass "sweep touches neither foreign filenames nor directories"
+else
+  fail "sweep touches neither foreign filenames nor directories" \
+       "remaining: $(ls "$tmp/sweep")"
+fi
+if [[ -n "$call_dir" && -f "$call_dir/launch_script.txt" ]]; then
+  pass "sweep does not disturb the launch script this dial just minted"
+else
+  fail "sweep does not disturb the launch script this dial just minted" \
+       "call_dir=$call_dir stderr=$(cat "$tmp/stderr.txt")"
+fi
+[[ -n "$call_dir" && -f "$call_dir/launch_script.txt" ]] && \
+  rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
 # The whole point of the poison stubs: a leak is a test failure, not a stray pane.
 if [[ -s "$POISON_LOG" ]]; then
   fail "no test reaches the real cmux or claude" "$(cat "$POISON_LOG")"

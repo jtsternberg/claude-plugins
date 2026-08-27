@@ -744,6 +744,110 @@ fi
 rm -rf "$tmp"
 
 echo ""
+echo "Launch-script lifecycle (claude-plugins-qq9f):"
+
+# Case L1: boot confirmed → the launch script leaves /tmp for the call dir, and
+# launch_script.txt is repointed so wait-for-response.sh's existing `rm -f` still
+# reaches it. ~270 had accumulated in /tmp because nothing on this path moved one.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_fake_cmux "$tmp/bin"
+cat > "$tmp/screen.txt" <<'EOF'
+ ▐▛███▜▌   Claude Code v2.1.141
+▝▜█████▛▘  Opus 4.7
+EOF
+cd="$tmp/call"
+stage_call_dir "$cd" "preset-uuid-L1" "workspace:99"
+launch="$tmp/hotline-launch-L1"
+echo 'exec claude' > "$launch"
+echo "$launch" > "$cd/launch_script.txt"
+
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 5 2>"$tmp/err.txt")
+rc=$?
+if [[ $rc -eq 0 && "$out" == "preset-uuid-L1" ]]; then
+  pass "boot confirmed: still prints the session id after the cleanup"
+else
+  fail "boot confirmed: still prints the session id after the cleanup" \
+       "rc=$rc stdout=$out stderr=$(cat "$tmp/err.txt")"
+fi
+if [[ ! -e "$launch" ]]; then
+  pass "boot confirmed: the launch script no longer sits at its /tmp path"
+else
+  fail "boot confirmed: the launch script no longer sits at its /tmp path" "still at $launch"
+fi
+if [[ -f "$cd/launch_script.sh" ]] && \
+   [[ "$(cat "$cd/launch_script.txt")" == "$cd/launch_script.sh" ]]; then
+  pass "boot confirmed: it moved into the call dir and launch_script.txt repointed"
+else
+  fail "boot confirmed: it moved into the call dir and launch_script.txt repointed" \
+       "launch_script.txt=$(cat "$cd/launch_script.txt") ls=$(ls "$cd")"
+fi
+# The handoff that keeps this from being a relocated leak: wait-for-response.sh
+# reads the same launch_script.txt and removes what it names.
+cat > "$tmp/screen2.txt" <<'EOF'
+ ▐▛███▜▌   Claude Code v2.1.141
+the answer is 42
+STATUS: DONE
+EOF
+PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen2.txt" \
+  bash "$WAIT_RESPONSE" "$cd" --timeout 10 >/dev/null 2>&1
+if [[ ! -e "$cd/launch_script.sh" ]]; then
+  pass "boot confirmed: wait-for-response then cleans up the moved copy on STATUS"
+else
+  fail "boot confirmed: wait-for-response then cleans up the moved copy on STATUS"
+fi
+rm -rf "$tmp"
+
+# Case L2: an EMPTY launch_script.txt must not abort the boot wait. The cleanup
+# used to be a `[[ -n … ]] && rm` one-liner, which under `set -e` exits on a
+# failed test — one line before the session id is printed.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_fake_cmux "$tmp/bin"
+cat > "$tmp/screen.txt" <<'EOF'
+ ▐▛███▜▌   Claude Code v2.1.141
+EOF
+cd="$tmp/call"
+stage_call_dir "$cd" "preset-uuid-L2" "workspace:99"
+: > "$cd/launch_script.txt"
+
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 5 2>"$tmp/err.txt")
+rc=$?
+if [[ $rc -eq 0 && "$out" == "preset-uuid-L2" ]]; then
+  pass "no recorded launch script: the boot wait still succeeds"
+else
+  fail "no recorded launch script: the boot wait still succeeds" \
+       "rc=$rc stdout=$out stderr=$(cat "$tmp/err.txt")"
+fi
+rm -rf "$tmp"
+
+# Case L3: the boot TIMED OUT → the script is KEPT. The timeout diagnostic tells
+# the user to re-send `bash <launch script>` by hand, and a surface stuck on a
+# refused launch line is a forensics target. Only the success path deletes.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_fake_cmux "$tmp/bin"
+cat > "$tmp/screen.txt" <<'EOF'
+Last login: Thu May 14 16:00:00 on ttys001
+ target  master
+EOF
+cd="$tmp/call"
+stage_call_dir "$cd" "preset-uuid-L3" "workspace:99"
+launch="$tmp/hotline-launch-L3"
+echo 'exec claude' > "$launch"
+echo "$launch" > "$cd/launch_script.txt"
+
+PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 2 >/dev/null 2>"$tmp/err.txt"
+rc=$?
+if [[ $rc -ne 0 && -f "$launch" ]]; then
+  pass "boot timeout: the launch script is KEPT for forensics and hand re-send"
+else
+  fail "boot timeout: the launch script is KEPT for forensics and hand re-send" \
+       "rc=$rc exists=$([[ -f "$launch" ]] && echo yes || echo no)"
+fi
+rm -rf "$tmp"
+
+echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
   echo ""

@@ -15,8 +15,14 @@
 #   session_id_preset.txt — the UUID we passed to `claude --session-id`,
 #                          confirmed by wait-for-session.sh when the splash
 #                          banner appears (then promoted to session_id.txt)
-#   launch_script.txt    — absolute path of the /tmp/hotline-launch-* file
-#                          (wait-for-response.sh cleans it up after STATUS)
+#   launch_script.txt    — absolute path of the launch script. Starts as the
+#                          /tmp/hotline-launch-* file the callee's shell execs;
+#                          wait-for-session.sh moves that into the call dir as
+#                          launch_script.sh once boot confirms and repoints this,
+#                          and wait-for-response.sh removes whatever it names
+#                          after STATUS. A boot that FAILED leaves the /tmp path
+#                          in place — the diagnostic tells the user to re-send it
+#                          by hand — and the age sweep below reaps those.
 #   pending_paste.md     — the prompt, 0600, awaiting delivery into the booted
 #                          REPL by cmux-paste.sh. Present in cmux surface/workspace
 #                          mode only; its presence is the signal to the caller
@@ -252,6 +258,27 @@ chmod 600 "$PENDING_PASTE" 2>/dev/null || true
 # The launch script exists to keep claude's flags off the `cmux send` line (which
 # interprets \n/\r/\t) and to cd into the target dir. It carries no prompt.
 # chmod 700 because it still names the session and the resume target.
+#
+# BEFORE minting a new one, reap the abandoned ones. Two prefixes, because both
+# launchers write here (`hotline-cmux-launch-*` is cmux-call.sh's, whose in-script
+# `trap … EXIT` self-delete does not fire when the surface is closed under it —
+# 101 of those had survived alongside 291 of ours). Deletion on the happy path
+# belongs to wait-for-session.sh at boot-confirm; this only catches what a failed
+# or abandoned call left behind, so the floor is deliberately high: 7 days is long
+# past any forensic value, and long past any surface still stuck on a refused
+# launch line. Scoped to /tmp's own level, our own name patterns, regular files
+# only, and best-effort — a dial must not fail because a sweep did
+# (claude-plugins-qq9f). `HOTLINE_LAUNCH_SWEEP_DIR` exists so the suite can point
+# the sweep at a scratch directory instead of the machine's real /tmp; nothing in
+# the dial flow sets it.
+# THE TRAILING SLASH IS LOAD-BEARING. On macOS /tmp is a symlink to private/tmp,
+# and `find /tmp` without it descends nothing: find reports the symlink itself,
+# which `-type f` then rejects, so the sweep silently matched 0 of 291 real files.
+# `find /tmp/` follows it. Harmless on Linux, where /tmp is a real directory.
+find "${HOTLINE_LAUNCH_SWEEP_DIR:-/tmp}/" -maxdepth 1 -type f \
+  \( -name 'hotline-launch-*' -o -name 'hotline-cmux-launch-*' \) \
+  -mtime +7 -delete 2>/dev/null || true
+
 LAUNCH_SCRIPT=$(mktemp /tmp/hotline-launch-XXXXX)
 chmod 700 "$LAUNCH_SCRIPT"
 {

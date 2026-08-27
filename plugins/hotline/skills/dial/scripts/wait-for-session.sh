@@ -305,6 +305,40 @@ if $CMUX_MODE; then
   # side-by-side work orders). Silent no-op if launch metadata is absent.
   bash "$(dirname "${BASH_SOURCE[0]}")/register-call.sh" "$CALL_DIR"
 
+  # ---- The launch script leaves /tmp's top level here ------------------------
+  # It only had to live at a path the CALLEE's shell could exec; once the REPL is
+  # up, nothing launches again (delivery is a paste over the socket). So it moves
+  # into the call dir, which is where this call's other scratch already lives and
+  # whose lifecycle wait-for-response.sh already owns — the `rm -f` it does on
+  # STATUS reads the same launch_script.txt, so the moved copy is cleaned up by
+  # the path that was always meant to clean this up. Before this, every dial left
+  # a /tmp/hotline-launch-* behind forever: ~270 had accumulated
+  # (claude-plugins-qq9f).
+  #
+  # MOVED, not deleted, because the launch line is the first thing anyone
+  # debugging a bad boot wants to read, and on the success path nothing else
+  # records it.
+  #
+  # THIS IS THE FIRST SAFE POINT. The one-shot resend above re-sends
+  # `bash $LAUNCH_SCRIPT`, so anything earlier could move the file out from under
+  # the retry. And ONLY on the success path: every failure exit above deliberately
+  # leaves the file exactly where it is, because the timeout diagnostic tells the
+  # user to re-send `bash <launch script>` by hand and a surface stuck on a
+  # refused launch line is a forensics target. Those are what the age sweep in
+  # cmux-call-async.sh reaps.
+  #
+  # An `if`, not a `[[ … ]] && mv` one-liner: under `set -e` an AND-list whose
+  # test fails exits the script, so an empty launch_script.txt would abort the
+  # boot wait one line before it prints the session id.
+  if [[ -n "$LAUNCH_SCRIPT" && -f "$LAUNCH_SCRIPT" ]]; then
+    if mv -f "$LAUNCH_SCRIPT" "$CALL_DIR/launch_script.sh" 2>/dev/null; then
+      echo "$CALL_DIR/launch_script.sh" > "$CALL_DIR/launch_script.txt"
+    else
+      # The move is the nice-to-have; getting it out of /tmp is the point.
+      rm -f "$LAUNCH_SCRIPT" 2>/dev/null || true
+    fi
+  fi
+
   cat "$CALL_DIR/session_id.txt"
   exit 0
 fi
