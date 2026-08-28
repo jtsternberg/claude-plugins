@@ -45,12 +45,6 @@ bash plugins/localwp-shell/skills/localwp-shell/scripts/localwpshell composer in
 bash plugins/localwp-shell/skills/localwp-shell/scripts/localwpshell mysql -e "SHOW DATABASES;"
 ```
 
-## Install
-
-```bash
-amskills install localwp-shell
-```
-
 The skill triggers automatically when Claude detects you're working inside a LocalWP site directory.
 
 ## Troubleshooting

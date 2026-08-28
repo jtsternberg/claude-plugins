@@ -90,8 +90,8 @@ instead of the de-escaped connector path.
    the latter name-collides with the gws skill.
 5. **Version bump** gws plugin (minor — new feature), single bump after QA
    per memory `feedback_version_bump_timing`.
-6. **AM Skills sync**: check `.amskills.json` for mappings of these two skills;
-   publish updates via `managing-am-skills` if mapped.
+6. **Internal skills mirror sync**: check the mirror mapping for these two skills;
+   publish updates if mapped.
 
 ## Verification
 

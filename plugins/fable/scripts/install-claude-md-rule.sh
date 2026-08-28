@@ -40,7 +40,7 @@ done
 # SKILL.md); {{SKILL_PATH}} resolves to the installed SKILL.md's absolute path.
 # Two layouts are supported: plugin-shared (script at <plugin>/scripts/, skills
 # under <plugin>/skills/<id>/) and standalone (script bundled at
-# <skill>/scripts/, e.g. an AM Skills install of a single skill).
+# <skill>/scripts/, e.g. a standalone install of a single skill).
 if [ -d "$PLUGIN_ROOT/skills" ]; then
   SKILL_DIR="$PLUGIN_ROOT/skills/$RULE_ID"
 else

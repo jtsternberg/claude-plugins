@@ -32,7 +32,7 @@ A user who disables half of pr-workflow's live skills saves ~150 tokens/session.
 ## Candidate-by-candidate
 
 ### pr-workflow — strong yes (DECIDED: split into 5 children + bundle)
-Zero coupling: no skill references a sibling, no shared plugin-root scripts/references; each skill is self-contained (verified by grep). No `.amskills.json` entries — nothing external breaks. Six skills spanning genuinely different jobs (reviewing history vs. QA walkthroughs vs. comment triage vs. PR watching) — the highest-probability plugin for "I want some of these, not all." Has `.codex-plugin`, so the split exercises the dual-harness path once, where mistakes are cheapest to find. **This is the pilot.**
+Zero coupling: no skill references a sibling, no shared plugin-root scripts/references; each skill is self-contained (verified by grep). No internal-mirror mapping entries — nothing external breaks. Six skills spanning genuinely different jobs (reviewing history vs. QA walkthroughs vs. comment triage vs. PR watching) — the highest-probability plugin for "I want some of these, not all." Has `.codex-plugin`, so the split exercises the dual-harness path once, where mistakes are cheapest to find. **This is the pilot.**
 
 Amendment from review: `address-pr-comments` + `address-pr-comments-human` are variants of one job and ship together as a single `address-pr-comments` child plugin with two skills. Final children: `address-pr-comments` (2 skills), `qa-walkthrough-pr`, `update-pr-description`, `walk-through-work-history`, `watch-pr-then-action`, plus the `pr-workflow` bundle.
 
@@ -40,7 +40,7 @@ Amendment from review: `address-pr-comments` + `address-pr-comments-human` are v
 Two skills (`commit-staged`, `commit-unstaged`) that are the same job with different staging behavior. A user who wants one almost certainly tolerates both; ~74 tok saved by dropping one. Splitting doubles its release surface for near-zero user value. **Recommend: don't split.** If duplication complaints arrive ("I have my own commit skill"), revisit.
 
 ### thinking-tools — moderate case
-Three genuinely unrelated skills (chestertons-fence, interview-mode, pink-elephant) — thematic grouping only, so subset-demand is plausible. But: two skills have `.amskills.json` mappings whose paths break on move, adding AM Skills republish work to the split. Value is real but not urgent. **Recommend: split in the follow-up wave, not the pilot.**
+Three genuinely unrelated skills (chestertons-fence, interview-mode, pink-elephant) — thematic grouping only, so subset-demand is plausible. But: two skills have internal-mirror mappings whose paths break on move, adding mirror republish work to the split. Value is real but not urgent. **Recommend: split in the follow-up wave, not the pilot.**
 
 ### beads-workflow — moderate case
 Three uncoupled skills, but they serve one audience (beads users) and one workflow arc (triage → tackle → fix-findings). A beads user plausibly wants all three; a non-beads user installs none. Subset-demand is the weakest of the three-skill plugins. **Recommend: hold. Split only if triage-beads's ~297-token description draws complaints from users who only want the other two.**

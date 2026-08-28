@@ -19,14 +19,6 @@ Any time you want Claude grounded in what a page **actually says** — not a qui
 
 If you're just asking for a casual TLDR of a blog post, Claude's regular WebFetch is fine. Reach for `fetch-docs` when details matter.
 
-## Install
-
-```bash
-amskills install fetch-docs
-```
-
-That's it. Claude Code will pick up the skill automatically.
-
 ## How to use it
 
 You don't need to remember a command. Just ask naturally:

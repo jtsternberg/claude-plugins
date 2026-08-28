@@ -53,9 +53,3 @@ Why LLMs handle negation poorly is well-documented:
 - *The Pink Elephant Problem: Why "Don't Do That" Fails with LLMs* (16x Eval, Aug 2025) — practitioner post using the same framing. [post](https://eval.16x.engineer/blog/the-pink-elephant-negative-instructions-llms-effectiveness-analysis)
 
 Full citation list and counter-evidence (when prohibitions remain legitimate, where fine-tuning helps) in `references.md`.
-
-## Install
-
-```bash
-amskills install pink-elephant
-```

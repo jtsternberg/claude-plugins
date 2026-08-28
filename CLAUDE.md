@@ -150,8 +150,7 @@ Two rules when the stance changes:
 
 Also sweep what *asserts* the stance rather than stating it: `plugins/fable/README.md`,
 `plugins/fable/skills/fable-mode/references/sonnet-guardrails.md` (which re-fences the same
-practices for Sonnet), and the AM Skills overlay README if the plugin is mapped in
-`.amskills.json`. None are derived from `SKILL.md`, all of them go stale when it changes.
+practices for Sonnet). Neither is derived from `SKILL.md`, and both go stale when it changes.
 
 ## Plugin Types
 

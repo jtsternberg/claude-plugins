@@ -29,7 +29,7 @@ Forked from Fernando Duro's upstream `sessions-recap`. Adds weekly mode, `--outp
 - **`--weekly` flag** — groups sessions by ISO week (Mon–Sun); defaults to the previous full week
 - **`--output-dir PATH`** — override the default output location
 - **`scripts/install_cron.sh`** — manages a weekly launchd job that fires `claude -p "/session-tools:sessions-weekly-recap --weekly ..."` headlessly
-- **Renamed to `sessions-weekly-recap`** to avoid clobbering upstream `sessions-recap` if re-installed via amskills
+- **Renamed to `sessions-weekly-recap`** to avoid clobbering upstream `sessions-recap` if re-installed from its upstream source
 
 #### Modes
 
@@ -315,4 +315,4 @@ Candidates for future inclusion (not built yet):
 
 ## Credits
 
-`sessions-weekly-recap` is based on [sessions-recap](https://skills.awesomemotive.com) by Fernando Duro.
+`sessions-weekly-recap` is based on `sessions-recap` by Fernando Duro.

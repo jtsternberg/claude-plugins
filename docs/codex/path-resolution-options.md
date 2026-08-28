@@ -107,7 +107,7 @@ Two copies of each affected SKILL.md, diverging per harness.
 
 - Satisfies both harnesses on day one, mechanically… by doubling the surface. This repo has already lost time **twice** to duplicated logic in the transcript parser and had to build a CI drift guard (`tests/parser-drift.test.mjs`) to stop the bleeding. That was *one* shared library; this would be ~15 skill documents.
 - Also unclear it's even expressible: Codex installs from the same marketplace source, so "the Codex variant" needs a publish-time fork or in-file conditional prose — the in-file conditional *is* option A/C wearing a trench coat.
-- Only worth revisiting if the two harnesses' divergence grows beyond paths (e.g. the frontmatter/`agents/openai.yaml` split becomes deep), at which point a publish-time overlay (like the amskills overlay) is the shape — a build step, not hand-maintained twins.
+- Only worth revisiting if the two harnesses' divergence grows beyond paths (e.g. the frontmatter/`agents/openai.yaml` split becomes deep), at which point a publish-time overlay is the shape — a build step, not hand-maintained twins.
 
 ### H. Do nothing; document as Claude-Code-only
 
