@@ -231,12 +231,15 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
 - **Park a bead only with its trigger planted where it fires.** Contingent
   knowledge ("if you ever touch X, this matters") has no discovery channel in the
   tracker — `bd ready` fires when someone asks for work, never at edit time. So a
-  parked bead needs an inline comment at the edit site naming the bead, a test
-  failure message carrying its ID, or a `tripwire-paths:` line in its description
-  that the compounding-preflight diff scan matches. Knowledge with no plantable
-  trigger lives in the code or this ledger instead, its bead closed pointing there —
-  a closed bead stays readable and keeps the deep record. (claude-plugins-7u9g is
-  the worked example: tripwire comments at four stub sites plus tripwire-paths.)
+  parked bead declares where its knowledge bites in a `tripwire-paths:` line, and
+  the guard fires it two ways: the `beads-workflow:tripwire-scan` skill matches it
+  at review/PR time (preflight step 5 calls the same matcher) and the plugin's
+  PostToolUse hook fires it at edit time. Prefer the comment anchor
+  (`# tripwire: <bead-id>` at the site; ladder: `path#name` / `path:"string"` /
+  git-ref-pinned `path@<ref>:Lstart-end` / whole `path`) — it is precise,
+  self-announcing, and drift-proof. Knowledge with no plantable trigger lives in
+  the code or this ledger instead, its bead closed pointing there. (worked example
+  claude-plugins-7u9g; mechanism claude-plugins-pnc8.)
 
 ## Known false positives — do not flag these
 

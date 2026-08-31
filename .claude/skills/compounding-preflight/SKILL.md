@@ -19,12 +19,20 @@ both directions: does the change **violate** an entry, and does it **teach** one
    patterns entries name), judgment second.
 4. **Report violations** as `rule headline → file:line → one-line fix`, most severe
    first. Anything matching a Known False Positive is not a finding.
-5. **Tripwire scan.** Open beads may carry a `tripwire-paths:` line naming files
-   whose edits their parked knowledge concerns. Collect them
-   (`bd list --json`, grep descriptions for `tripwire-paths:`) and match against
-   the change-set's files. Each hit is parked knowledge for code this diff
-   touches — report it as `bead id → matching file → the bead's one-line why` so
-   the author acts on it, consciously defers, or closes the bead as satisfied.
+5. **Tripwire scan.** Parked beads declare where their knowledge bites via a
+   `tripwire-paths:` line. Run the shared matcher — the same engine the
+   distributed `beads-workflow:tripwire-scan` skill and its PostToolUse hook use —
+   against the change-set:
+
+   ```bash
+   bash plugins/beads-workflow/scripts/tripwire-match.sh scan
+   ```
+
+   Report each hit (`bead id → matched file → the bead's one-line why`) so the
+   author acts on it, consciously defers, or closes the bead as satisfied. Pass a
+   range/commit to scan a specific delta; add `--json` for machine output. The
+   matcher handles anchor precision (comment / string / git-ref-pinned range) and
+   self-trip suppression (in_progress beads self-suppress) — no hand-grepping.
 6. **Propose compounding.** If the change-set fixed a bug class, absorbed a review
    correction, or removed accreted text, draft the entry (headline + ≤3 sentences +
    provenance) and ask whether to add it — the write gate at the top of the doc
