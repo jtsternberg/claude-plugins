@@ -54,10 +54,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if ! command -v bd >/dev/null 2>&1; then
-  echo "collect-open-beads.sh: 'bd' (beads CLI) not found on PATH" >&2
-  exit 127
-fi
+# One shared enumeration path for the whole plugin: bd-enumerate.sh (at the
+# plugin root) is the only place a `bd list` runs. tripwire-match.sh calls the
+# same script — extracting it the moment the second caller appeared is the repo
+# contract (CLAUDE.md § "Sharing Code Between Sibling Skills"). Resolve it from
+# this script's own location, not a SKILL.md token: this is a script-to-sibling
+# call, deterministic off $0.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ENUMERATE="$SCRIPT_DIR/../../../scripts/bd-enumerate.sh"
 
 # Pull the open worklist, every issue (for status resolution of deps), and the
 # frozen count. Save each raw payload to a temp file first so a parse failure
@@ -65,16 +69,17 @@ fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-list_args=(--status "$STATUS" --json --limit 0)
-[ -n "$LABEL" ] && list_args+=(--label "$LABEL")
+enum_open=(--status "$STATUS")
+[ -n "$LABEL" ] && enum_open+=(--label "$LABEL")
 
-bd list "${list_args[@]}" >"$tmp/open.json" 2>"$tmp/open.err" || {
-  echo "collect-open-beads.sh: 'bd list --status $STATUS' failed:" >&2
+bash "$ENUMERATE" "${enum_open[@]}" >"$tmp/open.json" 2>"$tmp/open.err" || {
+  rc=$?
+  echo "collect-open-beads.sh: bead enumeration failed (rc=$rc):" >&2
   cat "$tmp/open.err" >&2
-  exit 1
+  exit "$rc"
 }
-bd list --all --json --limit 0 >"$tmp/all.json" 2>/dev/null || echo '[]' >"$tmp/all.json"
-bd list --status deferred,pinned --json --limit 0 >"$tmp/frozen.json" 2>/dev/null || echo '[]' >"$tmp/frozen.json"
+bash "$ENUMERATE" --all >"$tmp/all.json" 2>/dev/null || echo '[]' >"$tmp/all.json"
+bash "$ENUMERATE" --status deferred,pinned >"$tmp/frozen.json" 2>/dev/null || echo '[]' >"$tmp/frozen.json"
 
 STATUS="$STATUS" LABEL="$LABEL" python3 - "$tmp/open.json" "$tmp/all.json" "$tmp/frozen.json" <<'PY'
 import json, os, sys
