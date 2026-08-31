@@ -205,7 +205,7 @@ case "$1" in
   # Pointing a case at a socket stub started WITHOUT --echo-file models a paste
   # whose bytes never arrived.
   read-screen)   if [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]]; then
-                   cat "$SOCK_ECHO_FILE"
+                   cat "$SOCK_ECHO_FILE"  # tripwire: claude-plugins-7u9g
                  fi
                  cat "$ST/screen.txt" 2>/dev/null
                  exit 0 ;;

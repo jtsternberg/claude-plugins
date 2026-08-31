@@ -132,7 +132,7 @@ def handle(conn):
             # Appends flat: no per-paste separator, so the file reads as one screen.
             # Per-paste records here are the prerequisite for a per-paste collapse to
             # `[Pasted text +N lines]` in the cmux stubs — claude-plugins-7u9g.
-            log(args.echo_file, req.get("params", {}).get("text", ""))
+            log(args.echo_file, req.get("params", {}).get("text", ""))  # tripwire: claude-plugins-7u9g
 
         if args.poison:
             if args.violations:

@@ -112,7 +112,7 @@ render_transcript() {
   local lines bytes
   lines=\$(wc -l < "$echo_file" | tr -d ' ')
   bytes=\$(wc -c < "$echo_file" | tr -d ' ')
-  if (( lines > 3 || bytes > 800 )); then
+  if (( lines > 3 || bytes > 800 )); then  # tripwire: claude-plugins-7u9g
     printf '%s%s [Pasted text +%s lines]\n' "$GLYPH" " " "\$lines"
   else
     cat "$echo_file"

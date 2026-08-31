@@ -132,7 +132,7 @@ case "$1" in
     # but as N LITERAL LINES, where a real REPL collapses a submitted paste over
     # ~800 chars or 3 lines to a one-line `[Pasted text +N lines]`. Every stub in
     # this file shares that gap. Growing a payload fixture: claude-plugins-7u9g.
-    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
+    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"  # tripwire: claude-plugins-7u9g
     exit 0
     ;;
   tree)
@@ -417,7 +417,7 @@ case "$1" in
   read-screen)
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
     # Literal lines, not a collapsed `[Pasted text +N lines]` — claude-plugins-7u9g.
-    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
+    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"  # tripwire: claude-plugins-7u9g
     exit 0 ;;
   tree)
     # The ref the opener DID give us resolves here to the pair the paste needs.
@@ -476,7 +476,7 @@ case "$1" in
     # requires before it will paste (a plain space is a shell prompt).
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
     # Literal lines, not a collapsed `[Pasted text +N lines]` — claude-plugins-7u9g.
-    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
+    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"  # tripwire: claude-plugins-7u9g
     exit 0 ;;
   tree)
     jq -nc '{windows:[{workspaces:[{id:"WS-UUID-5",ref:"workspace:5",
@@ -583,7 +583,7 @@ case "$1" in
     cat "$0.screen" 2>/dev/null
     printf 'Claude Code v2.1.226\n\xe2\x9d\xaf\xc2\xa0\n'
     # Literal lines, not a collapsed `[Pasted text +N lines]` — claude-plugins-7u9g.
-    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"
+    [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]] && cat "$SOCK_ECHO_FILE"  # tripwire: claude-plugins-7u9g
     exit 0 ;;
   tree)
     jq -nc '{windows:[{workspaces:[{id:"WS-UUID-123",ref:"workspace:123",
