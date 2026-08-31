@@ -1,0 +1,8 @@
+interface:
+  display_name: Tripwire Scan
+  short_description: Surface parked beads whose watched code your change-set touches
+policy:
+  # Model-invocable like triage-beads (unlike tackle-epic / fix-findings): it
+  # fires on "check tripwires" / at review time, and the PostToolUse hook needs
+  # the scan reachable without an explicit slash invocation. See SKILL.md.
+  allow_implicit_invocation: true

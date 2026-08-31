@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 10,
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/tripwire-posttooluse.sh\" || true"
+          }
+        ]
+      }
+    ]
+  }
+}
