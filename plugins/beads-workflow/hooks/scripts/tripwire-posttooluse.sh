@@ -8,11 +8,13 @@
 # the parked knowledge surfaces at the moment of the edit — not only if someone
 # later remembers to run a review scan.
 #
-# CLAUDE-PRIMARY. Under Codex, PostToolUse is a schema-backed event and hook
-# stdout can reach the model, but PostToolUse-specific context injection is
-# unverified there (docs/codex/hooks-under-codex.md; probe: claude-plugins-c34o),
-# and Codex gates hooks behind first-run trust. The tripwire-scan skill is the
-# harness-independent floor; this hook is the Claude enhancement.
+# CLAUDE-ONLY under current Codex. PostToolUse is a schema-backed Codex event
+# and the hook fires, but its output reaches the model via NEITHER channel
+# (plain stdout nor hookSpecificOutput.additionalContext) — verified on
+# codex-cli 0.151.0, unlike UserPromptSubmit where both work
+# (docs/codex/hooks-under-codex.md; probe: claude-plugins-c34o). So a PostToolUse
+# tripwire cannot warn a Codex model in-turn at all. The tripwire-scan skill is
+# the harness-independent floor; this hook is the Claude enhancement.
 #
 # Noise control: fires at most ONCE per file per session. The throttle is keyed
 # off the real session_id from the hook payload (never cwd/pid), so it holds for

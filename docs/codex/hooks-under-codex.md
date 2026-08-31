@@ -57,6 +57,32 @@ not be a context channel, and filed a bug against `handoff` on that basis. The i
 wrong. A JSON Schema constrains how a JSON body is parsed; it says nothing about what the
 harness does with output that isn't JSON. Schema shape is not behavior — probe it.
 
+## PostToolUse: neither channel reaches context (codex-cli 0.151.0, 2026-08-31)
+
+The 0.147.0 result above covers only `UserPromptSubmit`. `PostToolUse` was schema-backed but
+unprobed — and it behaves oppositely. A `PostToolUse` hook *fires* reliably (a fire-log is
+written on every tool call), but nothing it prints reaches the model, on either channel a
+`UserPromptSubmit` hook succeeds with.
+
+| `PostToolUse` hook stdout | Model's answer |
+| --- | --- |
+| `{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"…ALPHA-5501-FALCON…"}}` | `NOTOKEN` |
+| plain text: `SYSTEM NOTE: … BRAVO-6602-HERON …` | `NOTOKEN` |
+
+Each run forced a tool call (`echo`), the `PostToolUse` hook fired after it (confirmed by an
+on-disk fire-log), and the model — in the same turn, immediately after the tool result —
+reported no injected token. A same-version/model positive control (`UserPromptSubmit`
+additionalContext, nonce `CHARLIE-7703-OTTER`) returned the nonce, so the probe detects real
+injection and these are genuine negatives; it also re-confirms the 0.147.0 `UserPromptSubmit`
+finding on 0.151.0. Tested `gpt-5.6-sol` under ChatGPT auth in a scratch `CODEX_HOME` supplied
+via a `hooks.json` file (the `-c hooks.X=[…]` override fails as "expected a sequence" when the
+value is shell-quoted), same flags as the probe above, `< /dev/null` to stop `codex exec`
+blocking on stdin. Only same-turn delivery was tested — the only case a tripwire needs.
+
+Lesson holds in reverse: schema shape is not behavior — a `PostToolUse` hook Codex accepts and
+runs still cannot talk to the model. Consequence: a `PostToolUse` tripwire (or any hook that
+must warn the model in-turn) is Claude-only under current Codex, by limitation, not omission.
+
 ## Probe results
 
 The initial hook config mirrored handoff's startup entry: `SessionStart`,
