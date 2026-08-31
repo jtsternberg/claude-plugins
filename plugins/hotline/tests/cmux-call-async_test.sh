@@ -859,6 +859,45 @@ fi
   rm -f "$(cat "$call_dir/launch_script.txt")"
 rm -rf "$tmp" "$call_dir"
 
+# --- HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE threads into the launch ---------
+# The callee system-prompt override is baked into the launch script from the
+# caller's env, as a FILE path (never the raw string, which would put a
+# multi-line prompt on an argv `ps` can read), and only when the var is set.
+tmp=$(mktemp -d /tmp/hotline-sysprompt-test-XXXXXX)
+printf 'be terse.' > "$tmp/sysprompt.txt"
+
+export HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE="$tmp/sysprompt.txt"
+call_dir=$(run_detached_launch "$tmp")
+unset HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE
+if [[ -n "$call_dir" && -d "$call_dir" ]]; then
+  launch=$(cat "$(cat "$call_dir/launch_script.txt" 2>/dev/null)" 2>/dev/null || echo "")
+  if printf '%s' "$launch" | grep -q -- "--append-system-prompt-file $tmp/sysprompt.txt"; then
+    pass "sysprompt: launch bakes --append-system-prompt-file with the caller's path"
+  else
+    fail "sysprompt: launch bakes --append-system-prompt-file with the caller's path" "launch=$launch"
+  fi
+  [[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+else
+  fail "sysprompt: launcher returned a usable call_dir" "out=$(cat "$tmp/out.json" 2>/dev/null)"
+fi
+rm -rf "$tmp" "$call_dir"
+
+# Absent when the var is unset — no stray flag on the default path.
+tmp=$(mktemp -d /tmp/hotline-sysprompt-test-XXXXXX)
+call_dir=$(run_detached_launch "$tmp")
+if [[ -n "$call_dir" && -d "$call_dir" ]]; then
+  launch=$(cat "$(cat "$call_dir/launch_script.txt" 2>/dev/null)" 2>/dev/null || echo "")
+  if printf '%s' "$launch" | grep -q -- "--append-system-prompt-file"; then
+    fail "sysprompt: no --append-system-prompt-file when the var is unset" "launch=$launch"
+  else
+    pass "sysprompt: no --append-system-prompt-file when the var is unset"
+  fi
+  [[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+else
+  fail "sysprompt: launcher returned a usable call_dir (unset case)" "out=$(cat "$tmp/out.json" 2>/dev/null)"
+fi
+rm -rf "$tmp" "$call_dir"
+
 # ---------------------------------------------------------------------------
 # Stale launch-script sweep (claude-plugins-qq9f). Every dial reaps abandoned
 # launch scripts older than 7 days before minting its own. Pointed at a scratch

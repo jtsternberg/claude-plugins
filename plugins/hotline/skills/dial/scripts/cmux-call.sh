@@ -224,6 +224,11 @@ chmod 700 "$LAUNCH_SCRIPT"
   printf 'claude'
   # Model override, baked in at write time from the caller's env.
   [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && printf ' --model %q' "$HOTLINE_CLAUDE_MODEL"
+  # Callee system-prompt override, baked in the same way. The FILE form, never
+  # the raw --append-system-prompt string: a multi-line prompt on argv is
+  # readable via `ps`, the leak the work-order payload is kept off argv to avoid.
+  [[ -n "${HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE:-}" ]] && \
+    printf ' --append-system-prompt-file %q' "$HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE"
   [[ -n "$RESUME_ID" ]] && printf ' --resume %q' "$RESUME_ID"
   # --session-id only when the preset is OURS (first contact or fork).
   $PRESET_IS_OURS && [[ -n "$SESSION_ID_PRESET" ]] && \

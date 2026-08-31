@@ -104,6 +104,11 @@ fi
 # Build the command. NO positional prompt: it arrives on stdin (see above).
 CMD=(claude -p --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
 [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && CMD+=(--model "$HOTLINE_CLAUDE_MODEL")
+# Callee system-prompt override. The FILE form, never the raw
+# --append-system-prompt string: a multi-line prompt on argv is readable via
+# `ps`, the same leak the work-order payload is kept off argv to avoid.
+[[ -n "${HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE:-}" ]] && \
+  CMD+=(--append-system-prompt-file "$HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE")
 
 if [[ -n "$RESUME_ID" ]]; then
   CMD+=(--resume "$RESUME_ID")

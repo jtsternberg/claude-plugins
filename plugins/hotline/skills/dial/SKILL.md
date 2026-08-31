@@ -281,6 +281,13 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
 - **`HOTLINE_FORCE_HEADLESS=1`** — every dial takes the headless transport,
   regardless of cmux. Same destination as the per-call `--headless`.
 - **`HOTLINE_CLAUDE_MODEL=opus`** — model override for the callee.
+- **`HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE=<path>`** — appends the file's
+  contents to the callee's system prompt (`claude --append-system-prompt-file`),
+  for steering the callee's behavior — e.g. an "Opus 5" operating prompt. Passed
+  as a file, never inline, so the prompt never rides an argv where `ps` could
+  read it; the file must stay readable until the callee boots. Applies at first
+  contact only (a session's system prompt is set once, at birth); follow-ups
+  reuse that session. A missing/unreadable path fails the dial up front.
 - **`HOTLINE_CALLER_SESSION_ID=<id>`** — supply the caller identity directly.
   Skips the fingerprint dance entirely, so `replay` never happens. This is the
   escape hatch when identity discovery fails.

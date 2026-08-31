@@ -1242,6 +1242,27 @@ o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-cccc" \
 [[ "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" == "args" ]]
 check "a non-numeric --boot-timeout is rejected before it reaches arithmetic" $? "out=$o"
 
+# HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE: a missing/unreadable path fails at
+# the args stage, before any launch — otherwise it is an opaque cmux boot
+# timeout. The error names the variable so the reader knows what to fix.
+o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-cccc" \
+    HOTLINE_PENDING_DIR="$t/pending" \
+    HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE="$t/no-such-prompt.txt" \
+    timeout 5 bash "$DIAL" --target /tmp --mode quick --prompt x 2>/dev/null)
+[[ "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" == "args" ]] \
+  && grep -q 'HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE' <<<"$o"
+check "an unreadable HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE fails at args and names itself" $? "out=$o"
+
+# ...and a readable one passes validation: the dial gets past args (here it goes
+# on to fail at resolve on the bogus target, which proves args did not reject it).
+printf 'be terse.' > "$t/real-prompt.txt"
+o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-cccc" \
+    HOTLINE_PENDING_DIR="$t/pending" \
+    HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE="$t/real-prompt.txt" \
+    timeout 10 bash "$DIAL" --target "$t/nope-not-here" --mode quick --prompt x 2>/dev/null)
+[[ "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" != "args" ]]
+check "a readable HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE passes the args gate" $? "out=$o"
+
 # --window outranks --placement per SKILL.md, and must do so in EITHER order.
 for order in "--placement detached --window winname" "--window winname --placement detached"; do
   o=$(PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-cccc" \
@@ -1678,12 +1699,23 @@ EOF
 
 ARGV_LOG=$(mktemp); LEAKED+=("$ARGV_LOG")
 
+# The system-prompt override is a second class of sensitive content that also
+# must never ride an argv: it goes through --append-system-prompt-file, so only
+# the PATH is on the command line and the CONTENT stays in the file. Seed a file
+# whose CONTENT carries its own sentinel and thread it through every audit dial;
+# the closing assertion proves that content sentinel never reaches an argv, the
+# same guard the payload gets (claude-plugins-86ka).
+SP_CONTENT_SENTINEL="SYSPROMPT-CONTENT-SENTINEL-9K2"
+SP_FILE=$(mktemp); LEAKED+=("$SP_FILE")
+printf '%s\nbe terse.\n' "$SP_CONTENT_SENTINEL" > "$SP_FILE"
+
 # (a) cmux first contact.
 t=$(new_env); note_leak "$t"
 make_cmux "$t/bin"; make_side_opener "$t/side.sh"; argv_audit_env "$t"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
   HOTLINE_CALLER_SESSION_ID="caller-audit-1" HOTLINE_PENDING_DIR="$t/pending" \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE="$SP_FILE" \
   bash "$DIAL" --target "$t/target" --mode work_order \
     --prompt "$ARGV_SENTINEL cmux first contact" --boot-timeout 5 2>"$t/err.txt")
 call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
@@ -1698,6 +1730,7 @@ t=$(new_env); note_leak "$t"
 argv_audit_env "$t"; make_ps "$t/bin"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" \
   HOTLINE_CALLER_SESSION_ID="caller-audit-2" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE="$SP_FILE" \
   bash "$DIAL" --target "$t/target" --mode quick --headless \
     --prompt "$ARGV_SENTINEL headless" --boot-timeout 8 2>"$t/err.txt")
 [[ "$(jq -r .status <<<"$out")" == "connected" ]]
@@ -1711,6 +1744,7 @@ make_cmux "$t/bin"; make_side_opener "$t/side.sh"; argv_audit_env "$t"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
   HOTLINE_CALLER_SESSION_ID="caller-audit-3" HOTLINE_PENDING_DIR="$t/pending" \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE="$SP_FILE" \
   bash "$DIAL" --target "$t/target" --mode conference \
     --prompt "$ARGV_SENTINEL conference" 2>"$t/err.txt")
 [[ "$(jq -r .status <<<"$out")" == "connected" ]]
@@ -1729,6 +1763,18 @@ fi
 [[ -s "$ARGV_LOG" ]]
 check "…and the audit actually saw claude invocations (the log is non-empty)" $? \
   "the argv log is empty — the shim never ran, so the assertion above proves nothing"
+
+# System-prompt override: the FLAG threaded (so the absence below is not vacuous),
+# but the file's CONTENT never reached an argv — only its path did.
+grep -q -- '--append-system-prompt-file' "$ARGV_LOG"
+check "…and the system-prompt override threaded as --append-system-prompt-file" $? \
+  "no transport carried the flag, so the content-absence check would prove nothing"
+if grep -qF "$SP_CONTENT_SENTINEL" "$ARGV_LOG"; then
+  fail "NO transport puts system-prompt CONTENT on an argv (only its file path)" \
+       "$(grep -F "$SP_CONTENT_SENTINEL" "$ARGV_LOG" | head -3)"
+else
+  pass "NO transport puts system-prompt CONTENT on an argv (only its file path)"
+fi
 # `claude -p` with no positional prompt: the prompt arrives on stdin.
 grep -qE '^-p ' "$ARGV_LOG" || grep -q "'-p'" "$ARGV_LOG"
 check "…and headless invoked 'claude -p' with no positional prompt" $? \

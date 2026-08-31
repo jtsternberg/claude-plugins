@@ -210,6 +210,17 @@ if [[ -n "$BOOT_TIMEOUT" && ! "$BOOT_TIMEOUT" =~ ^[0-9]+$ ]]; then
     "wait-for-session.sh compares it arithmetically; a non-numeric value would break its poll loop."
 fi
 
+# Caught here, not at the launcher, because a missing system-prompt file on the
+# cmux path is otherwise an opaque boot timeout (claude exits before its REPL
+# ever draws), and on the headless path a launch error the model has to dig for.
+# The caller owns this file; it must stay readable until the callee boots.
+if [[ -n "${HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE:-}" \
+      && ! -r "$HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE" ]]; then
+  emit_error args \
+    "HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE points to a file that is not readable: $HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE" \
+    "Write the system prompt to that path first, or unset the variable to dial with the callee's default system prompt."
+fi
+
 # Two opposite instructions about which session to talk to. Resolving it either way
 # silently would give the caller the one they did not ask for, and --fresh exists
 # precisely because a silently-resumed session is expensive to notice.
@@ -387,7 +398,11 @@ fi
 # within-TTL identity can still be wrong — which is exactly the complaint that
 # makes a caller pass this flag in the first place.
 if $REFRESH_IDENTITY; then
-  if bash "$DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
+  # The callee's system-prompt override is for the user's delegated work, not for
+  # hotline's own identity plumbing — this pickup is a throwaway internal call, so
+  # unset the knob for it rather than steering a mechanical /hotline-pickup.
+  if HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE= \
+     bash "$DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
        --prompt "/hotline:hotline-pickup --fresh" >/dev/null 2>"$ERR_FILE"; then
     add_fallback "identity→refreshed"
     # Re-resolve once: a refreshed identity can change what the reference
