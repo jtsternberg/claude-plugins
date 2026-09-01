@@ -183,6 +183,11 @@ HERDR_SETTLED_ARGS=(--until "idle" --until "done" --until "blocked")
 # HERDR_AGENT_STATUS ← the agent's current lifecycle state, or "" when it cannot be
 # read — which INCLUDES an agent that has exited, since herdr clears the name along
 # with it.
+# HERDR_AGENT_PANE ← the pane the agent is running in, or "" when it cannot be read.
+# Needed because two things address a herdr callee by different handles: `agent
+# prompt` takes the AGENT NAME, while `pane send-text` — the half of a split delivery
+# that must not submit — takes a PANE ID. Read here rather than in a second `agent
+# get` of its own.
 # HERDR_AGENT_READY ← "true"/"false" as herdr reports `interactive_ready` for it, or
 # "" when the agent is unreadable OR the field is absent. Those two "" cases are
 # distinguished by HERDR_AGENT_STATUS, which is non-empty only in the second — and a
@@ -198,13 +203,16 @@ HERDR_SETTLED_ARGS=(--until "idle" --until "done" --until "blocked")
 # report it rather than abort on it.
 HERDR_AGENT_STATUS=""
 HERDR_AGENT_READY=""
+HERDR_AGENT_PANE=""
 herdr_agent_probe() {  # <name>
   HERDR_AGENT_STATUS=""
   HERDR_AGENT_READY=""
+  HERDR_AGENT_PANE=""
   herdr_cli agent get "$1" || return 0
   HERDR_AGENT_STATUS=$(jq -r '.result.agent.agent_status // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null || true)
   HERDR_AGENT_READY=$(jq -r '.result.agent // {} | if has("interactive_ready") then (.interactive_ready | tostring) else "" end' \
                         <<<"$HERDR_CLI_OUT" 2>/dev/null || true)
+  HERDR_AGENT_PANE=$(jq -r '.result.agent.pane_id // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null || true)
   return 0
 }
 

@@ -293,15 +293,12 @@ paste_one() { # <payload-file> <submit-key>  — undelivered() exits on socket r
   rm -f "$_err"
 }
 
-# Whether to split turns on the SAME predicate that decides inline-vs-leading-line
-# nonce placement in repl-state.sh — they are one design invariant (a slash command
-# gets an inline nonce AND a split delivery), so both read it from one place.
-FIRST_LINE=$(sed -n '1p' "$PAYLOAD_FILE")
+# Whether to split turns on the SAME predicate the herdr transport splits on, and on
+# the same judgement that decides inline-vs-leading-line nonce placement — they are
+# one design invariant (a slash command gets an inline nonce AND a split delivery),
+# so every reader takes it from repl-state.sh rather than restating it.
 SPLIT_PASTE=false
-if hotline_is_slash_command_first_line "$FIRST_LINE" \
-   && [[ $(sed -n '2,$p' "$PAYLOAD_FILE" | wc -c) -gt 0 ]]; then
-  SPLIT_PASTE=true
-fi
+hotline_payload_needs_split_delivery "$PAYLOAD_FILE" && SPLIT_PASTE=true
 
 if $SPLIT_PASTE; then
   HEAD_FILE=$(mktemp); BODY_FILE=$(mktemp)

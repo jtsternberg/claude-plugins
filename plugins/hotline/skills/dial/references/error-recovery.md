@@ -307,6 +307,21 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
 - `agent_pane_busy` is retried automatically (a freshly split pane needs a moment at
   its shell prompt); seeing it in a final error means it never settled.
 
+**A slash-command payload goes out as TWO writes, not one**
+- `agent prompt` submits text and Enter atomically, which is right for an ordinary
+  payload and wrong for a `/hotline:…-ringing` invocation with a work-order body: CC
+  collapses the multi-line paste, the input no longer *starts* with `/`, and the callee
+  reads the work order as plain text with no protocol — no STATUS, no call_id, and
+  `transcript-extract.sh` exits 10 forever while the answer sits in the transcript
+  (claude-plugins-fvhx). So `herdr-prompt.sh` writes the invocation line alone with
+  `pane send-text` (literal text, no Enter, nothing submitted), then submits the body
+  with `agent prompt`; CC expands the body's placeholder inside the command args. This
+  is the same rule the cmux path splits on (one predicate in `repl-state.sh`).
+- `"reports no pane_id"` is that split refusing rather than falling back: an unsplit
+  delivery would put the nonce in the transcript, report *confirmed*, and leave the
+  caller waiting forever for a protocol that never engaged. `sent` is `false` —
+  nothing was written — so re-dialing is safe. Check `herdr agent get <name>`.
+
 **`stage: deliver` — "is 'blocked' before first contact" / "never reported interactive_ready"**
 - Both are **pre-submit refusals**: the opening payload was held back, `sent` is
   `false`, and `<call_dir>/pending_paste.md` still holds it. Nothing reached the
