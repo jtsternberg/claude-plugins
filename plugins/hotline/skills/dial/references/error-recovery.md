@@ -361,9 +361,9 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   missed, and hotline reports "unconfirmed" instead of scraping something weaker.
 - The payload is still in `<call_dir>/pending_paste.md` and the agent is still live:
   `herdr agent attach <name>` (the name is in `<call_dir>/herdr_agent.txt` and in
-  `.surface_ref`). If the delivery result said `sent: true` the callee may well have
-  received it after the confirmation window — read its transcript for the call_id
-  before doing anything, and do NOT re-dial blind.
+  `.surface_ref`). **The error itself carries `sent`** — when it is `true` the callee
+  may well have received the payload after the confirmation window, so read its
+  transcript for the call_id before doing anything, and do NOT re-dial blind.
 
 **The response wait says "agent … is gone"**
 - herdr clears an agent's name when it exits, so the callee died before answering.
