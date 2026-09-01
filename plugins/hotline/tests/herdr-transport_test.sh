@@ -681,6 +681,61 @@ check "…with no cmux call anywhere in it" $? "cmux calls: $(cat "$t/cmux.log" 
 check "…and nothing is closed: the agent outlives the call (that is why herdr exists)" $? \
   "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
 
+# --- a herdr call dir NEVER file-watches to timeout (claude-plugins-r6jj) ----
+# transport.sh accepts 'herdr' and this branch handles it, but the two are separate
+# decisions, and the gap between them fails silently: a herdr dir that fell through
+# to the host-handle inference has no handle to find, so it would take the headless
+# file-watch path and poll a `done` nobody writes for the whole 1800s budget.
+#
+# Told apart by the failure they produce. The herdr branch names the agent and gives
+# up inside FILE_GRACE; the file-watch path can only ever say "Timed out waiting for
+# response", and only after the budget is gone. The generous --timeout is the point:
+# the file-watch path would still be sleeping.
+t=$(new_env)
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-r6jj-a "herdr-sess" "n0r6jj" "$t/target"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" CMUX_LOG="$t/cmux.log" HERDR_STUB_AGENT_ANY=1 \
+      HOTLINE_POLL_SLEEP=0 bash "$WAIT_RESPONSE" "$cd_path" --timeout 600 \
+      2>"$t/err.txt"); rc=$?
+[[ $rc -ne 0 ]] && grep -q 'hotline-r6jj-a' "$t/err.txt"
+check "a herdr call dir with no host handle fails as herdr, naming the agent" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+! grep -q 'Timed out waiting for response' "$t/err.txt"
+check "…never as the headless file-watch, which would sit on \`done\` for the budget" $? \
+  "stderr=$(cat "$t/err.txt")"
+[[ ! -s "$t/cmux.log" ]]
+check "…and asks cmux nothing on the way out" $? \
+  "cmux calls: $(cat "$t/cmux.log" 2>/dev/null)"
+
+# The other half of the same gap: WITH a handle present the inference reads cmux, so
+# a stale one must not be able to pull a herdr call onto the cmux path.
+#
+# Both paths read the transcript first, so a finished call cannot tell them apart.
+# An UNFINISHED one can: the gate is what differs. herdr blocks on `herdr agent
+# wait`; the cmux path asks cmux about the callee's screen and input box. So the
+# transcript below carries the nonce with no terminal STATUS, and the evidence is
+# which CLI got asked.
+t=$(new_env)
+NONCE="d00dd00dd00dd00d"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-r6jj-b "herdr-sess" "$NONCE" "$t/target"
+echo "workspace:99" > "$cd_path/workspace_ref.txt"
+echo "/tmp/hotline-launch-FAKE-$$" > "$cd_path/launch_script.txt"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "$NONCE" "" "still working"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" CMUX_LOG="$t/cmux.log" HERDR_STUB_AGENT_ANY=1 \
+      HERDR_STUB_STATUS=working HOTLINE_POLL_SLEEP=0 \
+      HOTLINE_HERDR_WAIT_SLICE_MS=50 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 6 2>"$t/err.txt"); rc=$?
+grep -q 'agent wait hotline-r6jj-b' <(tr -d '\\' < "$t/herdr.log")
+check "a stale cmux handle never diverts a herdr call off the \`agent wait\` gate" $? \
+  "rc=$rc herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+[[ ! -s "$t/cmux.log" ]]
+check "…and cmux is asked nothing about a herdr callee's screen" $? \
+  "cmux calls: $(cat "$t/cmux.log" 2>/dev/null)"
+
 # The answer was already on disk, so the gate must not have been the thing that
 # decided anything — but when it IS reached it must ask for the settled SET.
 # `--until idle` alone would hang forever on a hotline callee: herdr reports an

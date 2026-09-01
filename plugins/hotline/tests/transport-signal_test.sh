@@ -691,23 +691,79 @@ else
        "cmux calls: $(cat "$case_dir/cmux.log" 2>/dev/null || echo NONE)"
 fi
 
-# --- 'herdr' is IN the set, and must stay readable here ---------------------
-# The set is the spec's, not this tree's. Phase 1 writes 'herdr'; a Phase 0
-# waiter that refused it would turn this guard into the thing that breaks Phase 1.
+# --- 'herdr' is in the set AND has its own branch ---------------------------
+# transport.sh accepting a name and the waiters dispatching on it are two separate
+# facts, and the gap between them is a silent one: an accepted 'herdr' that fell
+# through to the host-handle inference would be read as cmux whenever a handle
+# happened to be present, and file-watched to --timeout whenever one was not.
+# (claude-plugins-r6jj)
+#
+# Two facts, one case each. The value being ACCEPTED is not the same as the value
+# being DISPATCHED ON, and only the second one keeps a herdr call off the cmux path.
+make_herdr_refusing_stub() {  # <bin-dir>
+  # herdr's branch in this waiter deliberately probes no liveness, so a stub that
+  # answers nothing is enough — and it keeps the case off whatever real herdr is
+  # installed on the machine running it.
+  cat > "$1/herdr" <<'HERDR_STUB'
+#!/usr/bin/env bash
+echo "$*" >> "${HERDR_LOG:-/dev/null}"
+exit 1
+HERDR_STUB
+  chmod +x "$1/herdr"
+}
+
 case_dir="$ROOT/known-herdr"
 mkdir -p "$case_dir/bin"
 make_cmux_stub "$case_dir/bin"
+make_herdr_refusing_stub "$case_dir/bin"
 cd_path="$case_dir/call"
 stage_call_dir "$cd_path" herdr none ""
+echo "hotline-r6jj-1" > "$cd_path/herdr_agent.txt"
 echo "herdr-session-1" > "$cd_path/session_id.txt"
-out=$(CMUX_LOG="$case_dir/cmux.log" HOME="$SANDBOX_HOME" PATH="$case_dir/bin:$PATH" \
+out=$(CMUX_LOG="$case_dir/cmux.log" HERDR_LOG="$case_dir/herdr.log" \
+  HOME="$SANDBOX_HOME" PATH="$case_dir/bin:$PATH" \
   bash "$WAIT_SESSION" "$cd_path" --timeout 5 2>"$case_dir/err.txt")
 rc=$?
 if [[ $rc -eq 0 && "$out" == "herdr-session-1" ]]; then
-  pass "transport.txt=herdr is accepted, not refused (Phase 1's value is readable)"
+  pass "transport.txt=herdr is accepted, not refused (transport.sh names it)"
 else
-  fail "transport.txt=herdr is accepted, not refused (Phase 1's value is readable)" \
+  fail "transport.txt=herdr is accepted, not refused (transport.sh names it)" \
        "rc=$rc stdout=$out stderr=$(cat "$case_dir/err.txt")"
+fi
+
+# --- and it is the HERDR branch that answers, not the cmux inference ---------
+# The discriminator has to be a state the two branches disagree about. A call dir
+# whose session_id.txt has not landed yet is one: the herdr branch waits for the
+# launcher to write it and gives up with a herdr diagnostic, while the inference —
+# handed the stale workspace handle and preset below — would promote the PRESET
+# after polling cmux. With session_id.txt already present both paths would simply
+# print it, which is why this case withholds it.
+case_dir="$ROOT/known-herdr-dispatch"
+mkdir -p "$case_dir/bin"
+make_cmux_stub "$case_dir/bin"
+make_herdr_refusing_stub "$case_dir/bin"
+banner_screen > "$case_dir/screen.txt"
+cd_path="$case_dir/call"
+stage_call_dir "$cd_path" herdr workspace "workspace:99" "cmux-preset-99"
+echo "hotline-r6jj-2" > "$cd_path/herdr_agent.txt"
+echo "w1:p9" > "$cd_path/herdr_pane.txt"
+out=$(CMUX_LOG="$case_dir/cmux.log" CMUX_SCREEN="$case_dir/screen.txt" \
+  HERDR_LOG="$case_dir/herdr.log" HOME="$SANDBOX_HOME" PATH="$case_dir/bin:$PATH" \
+  bash "$WAIT_SESSION" "$cd_path" --timeout 4 2>"$case_dir/err.txt")
+rc=$?
+if [[ $rc -ne 0 ]] && grep -q 'herdr agent list' "$case_dir/err.txt" 2>/dev/null \
+   && [[ "$out" != "cmux-preset-99" ]]; then
+  pass "…and a stale cmux handle never diverts it back to the cmux inference"
+else
+  fail "…and a stale cmux handle never diverts it back to the cmux inference" \
+       "rc=$rc stdout=$out stderr=$(cat "$case_dir/err.txt")" \
+       "cmux calls: $(cat "$case_dir/cmux.log" 2>/dev/null || echo NONE)"
+fi
+if [[ ! -s "$case_dir/cmux.log" ]]; then
+  pass "…polling no cmux host on the way out"
+else
+  fail "…polling no cmux host on the way out" \
+       "cmux calls: $(cat "$case_dir/cmux.log")"
 fi
 
 # --- an EMPTY transport.txt is 'names nothing', not 'names something wrong' --
