@@ -108,6 +108,8 @@ TRANSCRIPT_PATH_SH="$HOTLINE_SCRIPTS/transcript-path.sh"
 # two readers of the REPL's box would drift (repl-state.sh's header says why).
 # shellcheck source=../../../scripts/repl-state.sh
 source "$HOTLINE_SCRIPTS/repl-state.sh"
+# shellcheck source=../../../scripts/transport.sh
+source "$HOTLINE_SCRIPTS/transport.sh"
 
 CALL_DIR="${1:-}"
 TIMEOUT=""
@@ -152,14 +154,12 @@ done
 # Same contract as wait-for-session.sh, which documents it in full: transport.txt
 # is read FIRST and names the backend ('cmux' | 'headless'); it is COARSE, so the
 # cmux sub-mode is still surface_ref.txt vs workspace_ref.txt. An absent
-# transport.txt is a legacy call dir and falls back to the old inference. cmux
+# transport.txt is a legacy call dir and falls back to the old inference; a value
+# outside the contract's set is refused outright (scripts/transport.sh). cmux
 # still resolves through its host handle, because that is what the branch below
 # polls and because a launcher that failed before placing a host hands us a
 # handle-less dir whose error.txt only the file-watch path reports.
-TRANSPORT=""
-if [[ -f "$CALL_DIR/transport.txt" ]]; then
-  TRANSPORT=$(tr -d '[:space:]' < "$CALL_DIR/transport.txt" 2>/dev/null || true)
-fi
+TRANSPORT=$(call_dir_transport "$CALL_DIR") || exit 1
 HAS_SURFACE=false
 HAS_WORKSPACE=false
 [[ -f "$CALL_DIR/surface_ref.txt"   ]] && HAS_SURFACE=true
@@ -172,7 +172,9 @@ case "$TRANSPORT" in
     # Stated headless: never poll a cmux host, whatever else the dir holds.
     ;;
   *)
-    # 'cmux', absent (legacy inference), or a backend this tree has no verbs for.
+    # 'cmux', or absent (legacy inference); 'herdr' until Phase 1 gives it its own
+    # branch. A value outside the known set never reaches here —
+    # call_dir_transport already refused it.
     if $HAS_SURFACE || $HAS_WORKSPACE; then CMUX_MODE=true; fi
     ;;
 esac
