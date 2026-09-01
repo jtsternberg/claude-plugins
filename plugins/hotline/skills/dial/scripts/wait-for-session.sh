@@ -52,6 +52,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../../scripts/repl-state.sh
 source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
+# shellcheck source=../../../scripts/transport.sh
+source "$SCRIPT_DIR/../../../scripts/transport.sh"
 
 CALL_DIR="${1:-}"
 TIMEOUT=""
@@ -83,6 +85,10 @@ done
 # existed, or staged by hand. Infer the backend from the handle files exactly as
 # before: a handle means cmux, no handle means headless.
 #
+# A transport.txt naming a backend OUTSIDE the contract's set is refused outright
+# rather than inferred — see scripts/transport.sh for why guessing is the worse
+# failure.
+#
 # WHY cmux STILL REQUIRES ITS HANDLE. The cmux branch below polls a surface or a
 # workspace by ref, so a cmux call dir with no handle has nothing to poll — and
 # that state is real, not hypothetical: transport.txt is written with the dir,
@@ -95,10 +101,7 @@ done
 # cmux mode gets a longer default timeout (60s) because we're waiting for the
 # receiver claude REPL to actually boot, not just a file to appear. Headless mode
 # keeps its existing 30s default.
-TRANSPORT=""
-if [[ -f "$CALL_DIR/transport.txt" ]]; then
-  TRANSPORT=$(tr -d '[:space:]' < "$CALL_DIR/transport.txt" 2>/dev/null || true)
-fi
+TRANSPORT=$(call_dir_transport "$CALL_DIR") || exit 1
 HAS_SURFACE=false
 HAS_WORKSPACE=false
 [[ -f "$CALL_DIR/surface_ref.txt"   ]] && HAS_SURFACE=true
@@ -111,8 +114,10 @@ case "$TRANSPORT" in
     # Stated headless: never poll a cmux host, whatever else the dir holds.
     ;;
   *)
-    # 'cmux', absent (legacy inference), or a backend this tree has no verbs for.
-    # All three resolve through the host handle — see the note above.
+    # 'cmux', or absent (legacy inference). Both resolve through the host handle —
+    # see the note above. 'herdr' lands here too until Phase 1 gives it its own
+    # branch; nothing in this tree writes that value yet. A value outside the
+    # known set never reaches here — call_dir_transport already refused it.
     if $HAS_SURFACE || $HAS_WORKSPACE; then CMUX_MODE=true; fi
     ;;
 esac

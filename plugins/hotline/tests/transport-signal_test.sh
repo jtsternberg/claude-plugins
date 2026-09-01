@@ -19,6 +19,13 @@
 #   3. An ABSENT transport.txt behaves exactly as it did before the signal
 #      existed. Legacy call dirs — and hand-staged ones, of which this repo's own
 #      suites have many — must dispatch on file presence, unchanged.
+#   4. A value OUTSIDE the contract's set ('cmux' | 'herdr' | 'headless') is
+#      refused by both waiters, not inferred. Guessing turns a call dir written by
+#      a hotline that knows a fourth backend into a poll of the wrong kind of host,
+#      or a file-watch for a `done` nobody will write — a --timeout of silence
+#      instead of an error. An EMPTY file names nothing and keeps the inference:
+#      that is the launcher-died-mid-write case, whose own error.txt is the better
+#      diagnosis.
 #
 # Plus the inertness guard that pays for constraint 2 being coarse: a cmux call
 # dir with NO host handle (a launcher that failed placement, which writes
@@ -615,6 +622,116 @@ if [[ -n "${NOHOST_CALL_DIR:-}" && -f "$NOHOST_CALL_DIR/done" && -f "$NOHOST_CAL
 else
   fail "…and the same holds for the dir the real launcher left behind" \
        "the failing launcher in section 1 left no done+error.txt to re-check"
+fi
+
+# ===========================================================================
+echo ""
+echo "5. A transport.txt value outside the contract's set is refused, not guessed:"
+# ===========================================================================
+# The failure mode this buys: a call dir written by a hotline that knows a fourth
+# backend used to fall through to the host-handle inference, so it was polled as
+# whatever kind of host happened to be named in it — or file-watched for a `done`
+# nobody would write, which is a 30-minute silence rather than an error. Both
+# waiters now refuse the dir and say which value they could not read.
+UNKNOWN="quantum-foam"
+
+# --- wait-for-session.sh ----------------------------------------------------
+# Staged WITH a workspace handle on purpose: that handle is exactly what the old
+# fall-through would have polled, so an empty cmux log is the proof it did not.
+case_dir="$ROOT/unknown-session"
+mkdir -p "$case_dir/bin"
+make_cmux_stub "$case_dir/bin"
+banner_screen > "$case_dir/screen.txt"
+cd_path="$case_dir/call"
+stage_call_dir "$cd_path" "$UNKNOWN" workspace "workspace:66" "unknown-preset-1"
+out=$(CMUX_LOG="$case_dir/cmux.log" CMUX_SCREEN="$case_dir/screen.txt" \
+  HOME="$SANDBOX_HOME" PATH="$case_dir/bin:$PATH" \
+  bash "$WAIT_SESSION" "$cd_path" --timeout 5 2>"$case_dir/err.txt")
+rc=$?
+if [[ $rc -ne 0 ]]; then
+  pass "wait-for-session.sh refuses an unknown transport instead of inferring cmux"
+else
+  fail "wait-for-session.sh refuses an unknown transport instead of inferring cmux" \
+       "rc=$rc stdout=$out cmux calls: $(cat "$case_dir/cmux.log" 2>/dev/null || echo NONE)"
+fi
+if grep -q "$UNKNOWN" "$case_dir/err.txt" 2>/dev/null \
+   && grep -q 'cmux herdr headless' "$case_dir/err.txt" 2>/dev/null; then
+  pass "…naming the value it could not read and the set it knows"
+else
+  fail "…naming the value it could not read and the set it knows" \
+       "stderr=$(cat "$case_dir/err.txt" 2>/dev/null || echo EMPTY)"
+fi
+if [[ ! -s "$case_dir/cmux.log" ]]; then
+  pass "…without polling the workspace handle the old fall-through would have used"
+else
+  fail "…without polling the workspace handle the old fall-through would have used" \
+       "cmux calls: $(cat "$case_dir/cmux.log")"
+fi
+
+# --- wait-for-response.sh ---------------------------------------------------
+# Both waiters read the same file through the same helper, so both must refuse.
+case_dir="$ROOT/unknown-response"
+mkdir -p "$case_dir/bin"
+make_cmux_stub "$case_dir/bin"
+cd_path="$case_dir/call"
+stage_call_dir "$cd_path" "$UNKNOWN" surface "surface:66" "unknown-preset-2"
+echo "unknown-preset-2" > "$cd_path/session_id.txt"
+echo "nonce00000000bb" > "$cd_path/call_id.txt"
+status_screen "nonce00000000bb" "an answer nobody should read" > "$case_dir/screen.txt"
+out=$(CMUX_LOG="$case_dir/cmux.log" CMUX_SCREEN="$case_dir/screen.txt" \
+  HOME="$SANDBOX_HOME" PATH="$case_dir/bin:$PATH" HOTLINE_POLL_SLEEP=0 \
+  bash "$WAIT_RESPONSE" "$cd_path" --timeout 5 2>"$case_dir/err.txt")
+rc=$?
+if [[ $rc -ne 0 ]] && grep -q "$UNKNOWN" "$case_dir/err.txt" 2>/dev/null \
+   && [[ ! -s "$case_dir/cmux.log" ]]; then
+  pass "wait-for-response.sh refuses it too, and scrapes no surface on the way out"
+else
+  fail "wait-for-response.sh refuses it too, and scrapes no surface on the way out" \
+       "rc=$rc stdout=$out stderr=$(cat "$case_dir/err.txt" 2>/dev/null || echo EMPTY)" \
+       "cmux calls: $(cat "$case_dir/cmux.log" 2>/dev/null || echo NONE)"
+fi
+
+# --- 'herdr' is IN the set, and must stay readable here ---------------------
+# The set is the spec's, not this tree's. Phase 1 writes 'herdr'; a Phase 0
+# waiter that refused it would turn this guard into the thing that breaks Phase 1.
+case_dir="$ROOT/known-herdr"
+mkdir -p "$case_dir/bin"
+make_cmux_stub "$case_dir/bin"
+cd_path="$case_dir/call"
+stage_call_dir "$cd_path" herdr none ""
+echo "herdr-session-1" > "$cd_path/session_id.txt"
+out=$(CMUX_LOG="$case_dir/cmux.log" HOME="$SANDBOX_HOME" PATH="$case_dir/bin:$PATH" \
+  bash "$WAIT_SESSION" "$cd_path" --timeout 5 2>"$case_dir/err.txt")
+rc=$?
+if [[ $rc -eq 0 && "$out" == "herdr-session-1" ]]; then
+  pass "transport.txt=herdr is accepted, not refused (Phase 1's value is readable)"
+else
+  fail "transport.txt=herdr is accepted, not refused (Phase 1's value is readable)" \
+       "rc=$rc stdout=$out stderr=$(cat "$case_dir/err.txt")"
+fi
+
+# --- an EMPTY transport.txt is 'names nothing', not 'names something wrong' --
+# A launcher killed between creating the call dir and writing the value leaves
+# exactly this. Refusing it would replace the launcher's own diagnosis with ours,
+# so it takes the legacy inference — the same carve-out the handle-less-cmux guard
+# in section 4 exists to protect.
+case_dir="$ROOT/empty-transport"
+mkdir -p "$case_dir/bin"
+make_cmux_stub "$case_dir/bin"
+banner_screen > "$case_dir/screen.txt"
+cd_path="$case_dir/call"
+stage_call_dir "$cd_path" '' workspace "workspace:65" "empty-preset-1"
+: > "$cd_path/transport.txt"
+out=$(CMUX_LOG="$case_dir/cmux.log" CMUX_SCREEN="$case_dir/screen.txt" \
+  HOME="$SANDBOX_HOME" PATH="$case_dir/bin:$PATH" \
+  bash "$WAIT_SESSION" "$cd_path" --timeout 5 2>"$case_dir/err.txt")
+rc=$?
+if [[ $rc -eq 0 && "$out" == "empty-preset-1" ]] \
+   && grep -q -- '--workspace workspace:65' "$case_dir/cmux.log" 2>/dev/null; then
+  pass "an empty transport.txt falls through to the legacy inference, unrefused"
+else
+  fail "an empty transport.txt falls through to the legacy inference, unrefused" \
+       "rc=$rc stdout=$out stderr=$(cat "$case_dir/err.txt") cmux calls: $(cat "$case_dir/cmux.log" 2>/dev/null || echo NONE)"
 fi
 
 # ---------------------------------------------------------------------------
