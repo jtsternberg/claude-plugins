@@ -382,6 +382,18 @@ that:
 - **`HOTLINE_HERDR_PANE_SETTLE=<seconds>`** — pause before starting the agent in a
   freshly split pane (default 1). `agent start` requires the pane to be at its shell
   prompt, and starting too early fails `agent_pane_busy` (which is then retried).
+- **`HOTLINE_HERDR_FIRST_SETTLE=<seconds>`** — pause between `agent start`'s
+  readiness claim and the FIRST delivery into that agent (default 1). `agent start`
+  reports the REPL interactive-ready once, at return, and under load that claim can
+  lead actual keystroke acceptance; this is the wall clock a re-probe cannot buy.
+- **`HOTLINE_HERDR_READY_TRIES=<n>`** — how many times first-contact delivery
+  re-reads `agent get` waiting for `interactive_ready` and a non-`blocked` state
+  (default 20, at `HOTLINE_PASTE_CONFIRM_SLEEP`'s cadence). Exhausting it refuses the
+  delivery with `sent:false`, so nothing was submitted and a re-dial is safe.
+- **`HOTLINE_HERDR_FIRST_CONFIRM_TRIES=<n>`** — the transcript-confirmation budget
+  for a FIRST delivery (default 40, four times the follow-up budget). First contact
+  waits on the callee's transcript being *created*, not appended, so the follow-up
+  budget reported landed payloads as unconfirmed under load.
 - **`HOTLINE_HERDR_WAIT_SLICE_MS=<ms>`** — how long one `herdr agent wait` blocks
   before the response wait re-reads the transcript (default 30000).
 - **`HOTLINE_HERDR_KEEP_FAILED_PANE=1`** — keep the pane after a failed launch. Off

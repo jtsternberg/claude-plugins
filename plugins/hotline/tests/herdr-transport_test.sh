@@ -88,6 +88,9 @@ export HOTLINE_HERDR_PANE_SETTLE=0
 export HOTLINE_POLL_SLEEP=0
 export HOTLINE_PASTE_CONFIRM_TRIES=2
 export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
+export HOTLINE_HERDR_FIRST_SETTLE=0
+export HOTLINE_HERDR_READY_TRIES=2
+export HOTLINE_HERDR_FIRST_CONFIRM_TRIES=2
 # The caller may itself be running inside herdr (this suite's own session often
 # is). Strip that so pane resolution is decided by the case, not the machine — and
 # strip the hotline opt-ins for the same reason: a developer with
@@ -124,6 +127,13 @@ trap cleanup EXIT
 #   HERDR_STUB_AGENT_ANY=1    `agent get` resolves any name (for waiter cases whose
 #                             agent was never "started" through this stub)
 #   HERDR_STUB_STATUS         the agent_status `agent get` reports (default idle)
+#   HERDR_STUB_GET_READY      the interactive_ready `agent get` reports (default
+#                             true). 'omit' drops the field entirely — the herdr
+#                             that stops reporting it must not make delivery
+#                             impossible, only unproven
+#   HERDR_STUB_READY_AFTER=N  `agent get` reports interactive_ready:false for its
+#                             first N calls and true after — the readiness RACE,
+#                             which is the whole point of the first-contact gate
 #   HERDR_STUB_WAIT_STATUS    the agent_status `agent wait` settles on (default:
 #                             HERDR_STUB_STATUS, else done)
 #   HERDR_STUB_PROMPT_FAIL=1  `agent prompt` returns a server error
@@ -201,10 +211,19 @@ case "$1 ${2:-}" in
         || err agent_not_found "agent target $NAME not found"
     fi
     SID="${HERDR_STUB_OBSERVED_SID:-$(cat "$ST/session_id" 2>/dev/null || true)}"
+    READY="${HERDR_STUB_GET_READY:-true}"
+    # The readiness race: false until the Nth read, true after. Counted in the
+    # stub's own state so the count survives across the gate's separate calls.
+    if [[ -n "${HERDR_STUB_READY_AFTER:-}" ]]; then
+      GETS=0; [[ -f "$ST/gets" ]] && GETS=$(cat "$ST/gets")
+      GETS=$((GETS + 1)); echo "$GETS" > "$ST/gets"
+      if [[ "$GETS" -le "$HERDR_STUB_READY_AFTER" ]]; then READY=false; else READY=true; fi
+    fi
     jq -nc --arg n "$NAME" --arg s "${HERDR_STUB_STATUS:-idle}" --arg sid "$SID" \
-      '{id:"cli:agent:get",result:{agent:{name:$n,agent:"claude",agent_status:$s,
-         interactive_ready:true,
-         agent_session:{agent:"claude",kind:"id",source:"herdr:claude",value:$sid}}}}'
+           --arg ready "$READY" \
+      '{id:"cli:agent:get",result:{agent:({name:$n,agent:"claude",agent_status:$s,
+         agent_session:{agent:"claude",kind:"id",source:"herdr:claude",value:$sid}}
+         + (if $ready == "omit" then {} else {interactive_ready:($ready == "true")} end))}}'
     exit 0 ;;
 
   "agent prompt")
@@ -637,6 +656,96 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
    && "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "true" ]] \
   && [[ "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"no screen fallback"* ]]
 check "submitted but never confirmed → sent:TRUE and an honest 'no screen fallback' reason" $? "out=$out"
+
+# --- First contact is gated harder than a follow-up (claude-plugins-7wze.12) --
+# The opening payload is the one delivery that can lose the whole work order, and it
+# did, live, under load. Everything below is PRE-SUBMIT: the gate refuses with
+# sent:false, so a caller may re-dial without risking a double-run.
+
+# The readiness RACE, which is the whole reason the gate exists: `agent start`
+# claimed the REPL was ready, the first re-probe disagrees, the next one agrees.
+t=$(new_env)
+SID="herdr-first-1"
+NONCE="cc11dd22ee33ff44"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+printf '[CALL_ID: %s]\nthe work order\n' "$NONCE" > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      HERDR_STUB_READY_AFTER=1 \
+      bash "$HERDR_PROMPT" --agent hotline-f-1 --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" ]]
+check "first contact waits out an interactive_ready:false blink and then delivers" $? "out=$out"
+log=$(tr -d '\\' < "$t/herdr.log")
+[[ "$(grep -c 'agent get hotline-f-1' <<<"$log")" -ge 2 ]] \
+  && [[ "$(grep -n 'agent prompt' <<<"$log" | head -1 | cut -d: -f1)" -gt \
+        "$(grep -n 'agent get' <<<"$log" | tail -1 | cut -d: -f1)" ]]
+check "…re-probing until it agrees, and submitting only AFTER the last probe" $? \
+  "herdr calls: $log"
+
+# Never ready → refused, and refused sent:false. `agent start`'s claim is not a
+# submit-time fact, and a payload into whatever IS there would be lost silently.
+t=$(new_env)
+printf 'x' > "$t/payload.md"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_GET_READY=false \
+      bash "$HERDR_PROMPT" --agent hotline-f-2 --payload-file "$t/payload.md" \
+        --call-id nonce-f2 --cwd "$t/target" --session s-f2 --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"never reported interactive_ready"* ]]
+check "an agent that never becomes interactive-ready → refused, sent:FALSE (re-dial is safe)" $? \
+  "out=$out"
+! grep -q 'agent prompt' "$t/herdr.log" 2>/dev/null
+check "…with nothing submitted at all" $? "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# BLOCKED before first contact: the likelier half of the live failure. A startup
+# trust prompt IS interactive — the dialog takes keystrokes — so submitting there
+# answers the gate and the work order never becomes a turn.
+t=$(new_env)
+printf 'x' > "$t/payload.md"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=blocked \
+      bash "$HERDR_PROMPT" --agent hotline-f-3 --payload-file "$t/payload.md" \
+        --call-id nonce-f3 --cwd "$t/target" --session s-f3 --first-contact 2>/dev/null)
+[[ "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"blocked"* ]]
+check "a callee BLOCKED before first contact → refused sent:false, not fed into the gate" $? \
+  "out=$out"
+[[ "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"herdr agent attach hotline-f-3"* ]]
+check "…naming the attach command that shows what it is asking" $? "out=$out"
+! grep -q 'agent prompt' "$t/herdr.log" 2>/dev/null
+check "…and submitting nothing" $? "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# An ABSENT interactive_ready must not make delivery impossible — only unproven. A
+# herdr that stops reporting the field would otherwise block every first contact.
+t=$(new_env)
+SID="herdr-first-4"
+NONCE="dd44ee55ff66aa77"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+printf '[CALL_ID: %s]\nwork\n' "$NONCE" > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      HERDR_STUB_GET_READY=omit \
+      bash "$HERDR_PROMPT" --agent hotline-f-4 --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" ]]
+check "an absent interactive_ready is permission to proceed, not a refusal" $? "out=$out"
+
+# The gate is FIRST CONTACT ONLY. A follow-up's agent has already taken a prompt and
+# answered one, which outranks any probe — and its refusals belong to the reuse
+# script, where the caller can still fall back.
+t=$(new_env)
+printf 'x' > "$t/payload.md"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_GET_READY=false \
+      bash "$HERDR_PROMPT" --agent hotline-f-5 --payload-file "$t/payload.md" \
+        --call-id nonce-f5 --cwd "$t/target" --session s-f5 2>/dev/null)
+[[ "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "true" ]]
+check "without --first-contact the readiness gate is skipped (a follow-up is already proven)" $? \
+  "out=$out"
 
 # ===========================================================================
 echo ""
@@ -1559,6 +1668,21 @@ check "SKILL.md's pane-settle default matches herdr-call-async.sh" $? \
   && grep -q 'HOTLINE_HERDR_WAIT_SLICE_MS:-30000}' "$WAIT_RESPONSE"
 check "SKILL.md's wait-slice default matches wait-for-response.sh" $? \
   "script: $(grep -o 'HOTLINE_HERDR_WAIT_SLICE_MS:-[0-9]*' "$WAIT_RESPONSE")"
+
+[[ "$SKILL_FLAT" == *'FIRST delivery into that agent (default 1)'* ]] \
+  && grep -q 'HOTLINE_HERDR_FIRST_SETTLE:-1}' "$HERDR_PROMPT"
+check "SKILL.md's first-contact settle default matches herdr-prompt.sh" $? \
+  "script: $(grep -o 'HOTLINE_HERDR_FIRST_SETTLE:-[0-9]*' "$HERDR_PROMPT")"
+
+[[ "$SKILL_FLAT" == *'`blocked` state (default 20,'* ]] \
+  && grep -q 'HOTLINE_HERDR_READY_TRIES:-20}' "$HERDR_PROMPT"
+check "SKILL.md's readiness-tries default matches herdr-prompt.sh" $? \
+  "script: $(grep -o 'HOTLINE_HERDR_READY_TRIES:-[0-9]*' "$HERDR_PROMPT")"
+
+[[ "$SKILL_FLAT" == *'for a FIRST delivery (default 40,'* ]] \
+  && grep -q 'HOTLINE_HERDR_FIRST_CONFIRM_TRIES:-40}' "$HERDR_PROMPT"
+check "SKILL.md's first-contact confirm budget matches herdr-prompt.sh" $? \
+  "script: $(grep -o 'HOTLINE_HERDR_FIRST_CONFIRM_TRIES:-[0-9]*' "$HERDR_PROMPT")"
 
 # A herdr error hint must point at the section that actually covers herdr, not at
 # the cmux one — an error hint naming the wrong section is worse than none.

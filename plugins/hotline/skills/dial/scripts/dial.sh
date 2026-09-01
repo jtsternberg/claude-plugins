@@ -1157,6 +1157,12 @@ fi
 # A failed delivery is an ERROR here for the same reason as cmux: the callee is live
 # and was told nothing, so reporting "connected" would leave the caller waiting on a
 # response to a message that does not exist.
+#
+# --first-contact, ALWAYS, and it is not a redundant flag: pending_paste.md only
+# exists here because herdr-call-async.sh just launched this agent, so every delivery
+# reaching this block is an opening one (a follow-up delivers through step 5a). That
+# turns on the settle + readiness re-probe and the larger confirmation budget the
+# opening payload needs — see FIRST CONTACT in herdr-prompt.sh (claude-plugins-7wze.12).
 if [[ "$TRANSPORT" == "herdr" && -s "$CALL_DIR/pending_paste.md" ]]; then
   HERDR_AGENT_REF=$(cat "$CALL_DIR/herdr_agent.txt" 2>/dev/null || true)
   if [[ -z "$HERDR_AGENT_REF" ]]; then
@@ -1165,7 +1171,8 @@ if [[ "$TRANSPORT" == "herdr" && -s "$CALL_DIR/pending_paste.md" ]]; then
   fi
   DELIVERY=$(bash "$DIAL_SCRIPTS/herdr-prompt.sh" \
     --agent "$HERDR_AGENT_REF" --payload-file "$CALL_DIR/pending_paste.md" \
-    --call-id "$CALL_ID_OUT" --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID" 2>/dev/null)
+    --call-id "$CALL_ID_OUT" --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID" \
+    --first-contact 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then
     emit_error deliver "the herdr callee booted but the prompt never landed in it: $(reason_of "$DELIVERY")" \
       "\$call_dir/pending_paste.md still holds the prompt, and the agent is still live — \`herdr agent attach $HERDR_AGENT_REF\` to see its state. If \`sent\` was true in the delivery result the callee may have received it after the confirmation window, so do NOT re-dial blindly; read its transcript for the call_id first. See references/error-recovery.md § herdr Failures, which covers this case (§ Delivery describes the cmux paste)."
