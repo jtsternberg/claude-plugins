@@ -47,6 +47,8 @@ mw help models 2>&1
 
 Transcripts can be long — follow the plugin's [shared output conventions](../../shared/output-conventions.md). The short version: redirect `mw transcribe` output to `/tmp/mw-<name>.txt` and `Read` the file on demand based on what the user actually asked for (path-back for "transcribe this", Read-and-answer for "TLDR/Q&A", skip-the-redirect for short inline-text requests).
 
+**Long recordings (a big file, or hour-plus audio) take minutes — run them in the background and let the completion notification wake you.** Transcription is harness-tracked work: start it backgrounded (redirecting to the `/tmp` file as above), then wait for the completion event rather than blocking the session or foreground-`sleep`-polling for the output file. Cold-loading a large model adds to the wall time, so the first progress you see on stderr is model load, not a stall.
+
 `--format` picks the shape of that output. Which formats you can use depends on the license:
 
 | `--format` | What you get | Needs Pro |
