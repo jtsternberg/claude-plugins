@@ -143,6 +143,9 @@ trap cleanup EXIT
 #                             two reads of it
 #   HERDR_STUB_WAIT_STATUS    the agent_status `agent wait` settles on (default:
 #                             HERDR_STUB_STATUS, else done)
+#   HERDR_STUB_SCREEN         file whose contents `agent read` returns as the agent's
+#                             screen (default: an idle claude input box)
+#   HERDR_STUB_READ_FAIL=1    `agent read` returns a server error
 #   HERDR_STUB_AGENT_PANE     the pane_id `agent get` reports (default w1:p9) — what
 #                             a split delivery's `pane send-text` half addresses
 #   HERDR_STUB_NO_PANE_ID=1   `agent get` omits pane_id entirely
@@ -252,6 +255,12 @@ case "$1 ${2:-}" in
          agent_session:{agent:"claude",kind:"id",source:"herdr:claude",value:$sid}}
          + (if $ready == "omit" then {} else {interactive_ready:($ready == "true")} end)
          + (if $pane == "" then {} else {pane_id:$pane} end))}}'
+    exit 0 ;;
+
+  "agent read")
+    # PLAIN TEXT, not JSON — the real CLI prints the rendered screen.
+    [[ "${HERDR_STUB_READ_FAIL:-}" == "1" ]] && err agent_read_failed "no such agent"
+    if [[ -n "${HERDR_STUB_SCREEN:-}" ]]; then cat "$HERDR_STUB_SCREEN"; else printf '\xe2\x9d\xaf\xc2\xa0\n'; fi
     exit 0 ;;
 
   "pane send-text")
@@ -882,6 +891,189 @@ check "a callee BLOCKED before first contact → refused sent:false, not fed int
 check "…naming the attach command that shows what it is asking" $? "out=$out"
 ! grep -q 'agent prompt' "$t/herdr.log" 2>/dev/null
 check "…and submitting nothing" $? "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# THE STARTUP TRUST DIALOG (claude-plugins-59ry). herdr reports a callee sitting on it
+# as interactive_ready:true and NOT blocked — the dialog really does take keystrokes —
+# so the readiness gate above passes it and the payload answers the dialog's default
+# option, `No, exit`. Live-confirmed on CC 2.1.251 / herdr 0.8.0 in a fresh `git init`
+# directory. Only a screen read catches this.
+trust_dialog_screen() {  # <file> <cwd>
+  cat > "$1" <<TRUST
+ Accessing workspace:
+
+ $2
+
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what's in this folder first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel
+TRUST
+}
+
+# The SAME dialog as a narrow herdr pane renders it. Live-caught on a ~16-column pane
+# (five panes in one workspace): the paragraph and BOTH option lines reflow, so no raw
+# substring of the wording survives and the pre-normalization predicate waved the
+# payload through into the dialog.
+trust_dialog_screen_wrapped() {  # <file> <cwd>
+  cat > "$1" <<TRUSTW
+ Accessing
+ workspace:
+
+ $2
+
+ Quick safety
+ check: Is this a
+ project you
+ created or one
+ you trust?
+
+ Security guide
+
+ ❯ No, exit
+   Yes, I trust
+   this folder
+
+ Enter to
+ confirm · Esc
+ to cancel
+TRUSTW
+}
+
+t=$(new_env)
+trust_dialog_screen "$t/screen.txt" "$t/target"
+printf '/hotline:hotline-ringing [CALL_ID: n-t1]\nthe work order\nmore of it\n' > "$t/payload.md"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_SCREEN="$t/screen.txt" \
+      bash "$HERDR_PROMPT" --agent hotline-t-1 --payload-file "$t/payload.md" \
+        --call-id n-t1 --cwd "$t/target" --session s-t1 --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "false" ]]
+check "a callee on the startup TRUST DIALOG → refused sent:FALSE, though herdr calls it ready" $? \
+  "out=$out"
+reason=$(jq -r '.reason' <<<"$out" 2>/dev/null)
+[[ "$reason" == *"TRUST DIALOG"* && "$reason" == *"$t/target"* ]]
+check "…naming the dialog and the cwd Claude Code has not trusted" $? "reason=$reason"
+[[ "$reason" == *"No, exit"* && "$reason" == *"herdr agent attach hotline-t-1"* \
+   && "$reason" == *"HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover"* ]]
+check "…what a submit would have answered, how to look, and that the skip flag is no fix" $? \
+  "reason=$reason"
+# dial.sh forwards this through reason_of, which truncates at 300 chars — so the FIX
+# has to be inside that window or the caller never reads it (live-caught: the first
+# wording put the diagnosis first and lost every instruction).
+[[ "${reason:0:300}" == *"$t/target"* && "${reason:0:300}" == *"trust that directory"* \
+   && "${reason:0:300}" == *"re-dial"* ]]
+check "…with the cwd and the remedy inside reason_of's first 300 characters" $? \
+  "first 300: ${reason:0:300}"
+! grep -qE 'agent prompt|pane send-text' "$t/herdr.log" 2>/dev/null
+check "…and writing nothing into the dialog" $? "herdr calls: $(tr -d '\\' < "$t/herdr.log")"
+
+# The read is PRE-SUBMIT, which is the only place it can help.
+t=$(new_env)
+SID="herdr-trust-2"
+NONCE="dd00ee11ff22aa33"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+printf '[CALL_ID: %s]\nwork\n' "$NONCE" > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      bash "$HERDR_PROMPT" --agent hotline-t-2 --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" ]]
+check "an ordinary REPL screen is no obstacle: first contact still delivers" $? "out=$out"
+log=$(tr -d '\\' < "$t/herdr.log")
+READ_LINE=$(grep -n 'agent read' <<<"$log" | head -1 | cut -d: -f1)
+SUBMIT_LINE=$(grep -n 'agent prompt' <<<"$log" | head -1 | cut -d: -f1)
+[[ -n "$READ_LINE" && -n "$SUBMIT_LINE" && "$READ_LINE" -lt "$SUBMIT_LINE" ]]
+check "…having read the screen BEFORE submitting anything" $? \
+  "read=$READ_LINE submit=$SUBMIT_LINE herdr calls: $log"
+
+# An unreadable screen is permission to proceed, not a refusal — the probe can prove a
+# dialog is there, never that one is not, and a herdr whose `agent read` changes shape
+# must not make delivery impossible.
+t=$(new_env)
+SID="herdr-trust-3"
+NONCE="ee11ff22aa33bb44"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+printf '[CALL_ID: %s]\nwork\n' "$NONCE" > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      HERDR_STUB_READ_FAIL=1 \
+      bash "$HERDR_PROMPT" --agent hotline-t-3 --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" ]]
+check "a screen that cannot be read proceeds (unproven, not impossible)" $? "out=$out"
+
+# FIRST CONTACT ONLY, like the readiness gate beside it: a follow-up's agent has
+# already taken a prompt and answered one, which no startup dialog survives.
+t=$(new_env)
+trust_dialog_screen "$t/screen.txt" "$t/target"
+printf 'x' > "$t/payload.md"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_SCREEN="$t/screen.txt" \
+      bash "$HERDR_PROMPT" --agent hotline-t-4 --payload-file "$t/payload.md" \
+        --call-id n-t4 --cwd "$t/target" --session s-t4 2>/dev/null)
+[[ "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "true" ]] \
+  && ! grep -q 'agent read' "$t/herdr.log" 2>/dev/null
+check "without --first-contact no screen is read at all (the gate is the opening one)" $? \
+  "out=$out herdr calls: $(tr -d '\\' < "$t/herdr.log")"
+
+# THE NARROW PANE, end to end. Same dialog, reflowed by a ~16-column pane, and it must
+# refuse exactly the same way — this is the live-caught case the predicate's whitespace
+# normalization exists for.
+t=$(new_env)
+trust_dialog_screen_wrapped "$t/screen.txt" "$t/target"
+printf '/hotline:hotline-ringing [CALL_ID: n-t5]\nthe work order\nmore of it\n' > "$t/payload.md"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_SCREEN="$t/screen.txt" \
+      bash "$HERDR_PROMPT" --agent hotline-t-5 --payload-file "$t/payload.md" \
+        --call-id n-t5 --cwd "$t/target" --session s-t5 --first-contact 2>/dev/null)
+[[ "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"TRUST DIALOG"* ]]
+check "a NARROW pane's wrapped trust dialog is refused too (no raw substring survives it)" $? \
+  "out=$out"
+! grep -qE 'agent prompt|pane send-text' "$t/herdr.log" 2>/dev/null
+check "…writing nothing into it either" $? "herdr calls: $(tr -d '\\' < "$t/herdr.log")"
+# The fixture has to be genuinely wrapped, or the case above proves nothing.
+! grep -qF 'I trust this folder' "$t/screen.txt" && ! grep -qF 'Quick safety check' "$t/screen.txt"
+check "…and the fixture really does break every wording across lines" $? \
+  "screen: $(cat "$t/screen.txt")"
+# `--source recent`, not `visible`: a narrow pane's VIEWPORT clips the top of a wrapped
+# dialog, so the wording can be off-screen entirely (measured live at ~16 columns).
+grep -q 'agent read hotline-t-5 --source recent' <(tr -d '\\' < "$t/herdr.log")
+check "…read from --source recent, which carries the whole dialog at any width" $? \
+  "herdr calls: $(tr -d '\\' < "$t/herdr.log")"
+
+# The predicate itself: the older wording of the same dialog must still fire, because a
+# false negative kills the callee while a false positive only costs a refusal.
+source "$HOTLINE_DIR/scripts/repl-state.sh"
+# Its own full-width fixture: $t/screen.txt belongs to the case above, and reading that
+# one here would quietly test the WRAPPED text under the unwrapped label.
+trust_dialog_screen "$t/fullwidth.txt" /private/tmp/x
+repl_trust_dialog_present "$(cat "$t/fullwidth.txt")" \
+  && pass "trust dialog: the shipped CC 2.1.251 wording" \
+  || fail "trust dialog: the shipped CC 2.1.251 wording"
+repl_trust_dialog_present ' Do you trust the files in this folder?
+ ❯ 1. Yes, proceed
+   2. No, exit' \
+  && pass "trust dialog: the older 'Do you trust the files in this folder?' wording" \
+  || fail "trust dialog: the older 'Do you trust the files in this folder?' wording"
+! repl_trust_dialog_present "$(printf '\xe2\x9d\xaf\xc2\xa0\n  what would you like me to do?\n')" \
+  && pass "trust dialog: an ordinary idle REPL is not one" \
+  || fail "trust dialog: an ordinary idle REPL is not one"
+! repl_trust_dialog_present "" \
+  && pass "trust dialog: an empty capture is not one" \
+  || fail "trust dialog: an empty capture is not one"
+trust_dialog_screen_wrapped "$t/wrapped.txt" /private/tmp/x
+repl_trust_dialog_present "$(cat "$t/wrapped.txt")" \
+  && pass "trust dialog: the wording reflowed across lines by a narrow pane" \
+  || fail "trust dialog: the wording reflowed across lines by a narrow pane"
 
 # An ABSENT interactive_ready must not make delivery impossible — only unproven. A
 # herdr that stops reporting the field would otherwise block every first contact.
