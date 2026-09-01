@@ -93,7 +93,9 @@ done
 #
 # A transport.txt naming a backend OUTSIDE the contract's set is refused outright
 # rather than inferred — see scripts/transport.sh for why guessing is the worse
-# failure.
+# failure. Inside the set, every value has its own branch below: transport.sh
+# accepts a name and the dispatch here honours it, so the two never disagree
+# about what 'herdr' means (claude-plugins-r6jj).
 #
 # WHY cmux STILL REQUIRES ITS HANDLE. The cmux branch below polls a surface or a
 # workspace by ref, so a cmux call dir with no handle has nothing to poll — and
@@ -136,9 +138,11 @@ case "$TRANSPORT" in
     ;;
   *)
     # 'cmux', or absent (legacy inference). Both resolve through the host handle —
-    # see the note above. 'herdr' lands here too until Phase 1 gives it its own
-    # branch; nothing in this tree writes that value yet. A value outside the
-    # known set never reaches here — call_dir_transport already refused it.
+    # see the note above. Every backend the contract names has its own branch
+    # above, so nothing but those two reaches here: a value outside the known set
+    # was already refused by call_dir_transport, and adding a fourth backend to
+    # HOTLINE_TRANSPORTS without a branch of its own would land it here and
+    # file-watch it to --timeout (claude-plugins-r6jj).
     if $HAS_SURFACE || $HAS_WORKSPACE; then CMUX_MODE=true; fi
     ;;
 esac

@@ -187,9 +187,11 @@ case "$TRANSPORT" in
     HERDR_MODE=true
     ;;
   *)
-    # 'cmux', or absent (legacy inference); 'herdr' until Phase 1 gives it its own
-    # branch. A value outside the known set never reaches here —
-    # call_dir_transport already refused it.
+    # 'cmux', or absent (legacy inference) — nothing else. Every contract backend
+    # has its own branch above, and a value outside the set was already refused by
+    # call_dir_transport. A backend added to HOTLINE_TRANSPORTS without a branch
+    # here would land in this one and file-watch to --timeout, which is the
+    # failure claude-plugins-r6jj names.
     if $HAS_SURFACE || $HAS_WORKSPACE; then CMUX_MODE=true; fi
     ;;
 esac
@@ -260,7 +262,7 @@ if $HERDR_MODE; then
   # screen never enter herdr's host scrollback, so `agent read` cannot recover what
   # the transcript missed. An undecidable herdr call is reported as undecidable.
   # =========================================================================
-  HERDR_SCRIPTS="$SELF_DIR/../../../scripts"
+  HERDR_SCRIPTS="$HOTLINE_SCRIPTS"
   # shellcheck source=../../../scripts/herdr-state.sh
   source "$HERDR_SCRIPTS/herdr-state.sh"
   # The dual-cwd-spelling rule lives in ONE place and this is a second caller of it,
