@@ -533,6 +533,48 @@ repl_box_present() {
   grep -q "^${REPL_BOX_GLYPH}${REPL_BOX_NBSP}" <<<"$1"
 }
 
+# True when the screen is Claude Code's STARTUP TRUST DIALOG rather than a REPL
+# waiting for work.
+#
+# WHY A SCREEN READ AND NOT A LIFECYCLE STATE. This dialog is the one startup gate
+# neither transport's readiness signal catches. Verified live on CC 2.1.251 / herdr
+# 0.8.0 in a fresh `git init` directory: `agent start` returned
+# `interactive_ready:true, agent_status:"idle"` with the dialog on screen — true, in
+# its own terms (the dialog does take keystrokes) and useless as permission to
+# deliver. The dialog's DEFAULT option is `No, exit`, so a submitted payload answers
+# it that way and the callee exits: no user turn, no transcript, the whole work order
+# gone (claude-plugins-59ry).
+#
+# THE CAPTURE IS WHITESPACE-NORMALIZED BEFORE MATCHING, and that is not tidiness —
+# without it this predicate does not work at all on a narrow pane. The dialog is one
+# reflowed paragraph plus two reflowed option lines, so the terminal decides where the
+# line breaks fall. Live-caught on a ~16-column herdr pane (five panes in one
+# workspace): `Yes, I trust this\n   folder` and a header broken after
+# `Quick safety\n check`, where every raw substring test below missed and the gate
+# waved the payload through into the dialog. Collapsing every run of whitespace —
+# newlines included — to one space puts the phrases back the way they are read.
+#
+# THE MATCH IS AN OR OVER WORDINGS, DELIBERATELY, and it leans towards firing. CC has
+# already reworded this dialog once (`Do you trust the files in this folder?` →
+# `Quick safety check: …` / `Yes, I trust this folder`), and the two directions are
+# not symmetric: a false positive costs a refusal with sent:false, which the caller
+# recovers from by trusting the directory and re-dialing, while a false negative kills
+# the callee. So any one of these phrasings is enough, and a future wording should be
+# ADDED here rather than replacing what is already known.
+#
+# Not scroll-immune — herdr has no equivalent of cmux's scrollback read, so a pane a
+# human has scrolled could hand back a stale capture. Only the first-contact gate uses
+# this, against an agent seconds old that nobody has touched, and a stale read fails
+# back to the pre-existing behavior rather than to something worse.
+repl_trust_dialog_present() {
+  local flat
+  flat=$(tr -s '[:space:]' ' ' <<<"$1")
+  [[ "$flat" == *"Quick safety check"*        ]] && return 0
+  [[ "$flat" == *"I trust this folder"*       ]] && return 0
+  [[ "$flat" == *"trust the files in this"*   ]] && return 0
+  return 1
+}
+
 # --- Boot-wait budget --------------------------------------------------------
 # ONE definition of how long we wait for a callee's REPL to become usable.
 #

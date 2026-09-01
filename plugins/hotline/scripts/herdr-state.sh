@@ -223,6 +223,36 @@ herdr_agent_status() {  # <name>
   herdr_agent_probe "$1"
 }
 
+# HERDR_AGENT_SCREEN ← what the agent's terminal is showing, as plain text, or "" when
+# it cannot be read.
+#
+# The ONLY thing this is for is catching a startup dialog the lifecycle state cannot
+# see: herdr reports a callee sitting on Claude Code's trust prompt as
+# `interactive_ready:true, agent_status:"idle"`, because the dialog really does take
+# keystrokes (claude-plugins-59ry). It is NOT a delivery-confirmation tier and must
+# never become one — a claude REPL is an alternate-screen TUI, so rows that leave the
+# alternate screen never enter this capture at all, which is exactly why herdr-prompt.sh
+# has one proof tier and not two.
+#
+# `--source recent` AND NOT `visible`, decided by measurement rather than by which name
+# reads better. `visible` is the viewport, and a narrow pane's viewport CLIPS the top of
+# a wrapped dialog: on a ~16-column pane the capture began mid-sentence and the header
+# wording was simply absent, while `recent` carried the whole dialog at every width
+# tested (16, 36 and full). Neither form is scroll-immune — herdr has no
+# scrollback-read form — so callers must only ask this about a pane nobody has touched.
+#
+# Always returns 0: an unreadable screen is an answer ("") that every caller wants to
+# proceed past rather than abort on. `agent read` prints PLAIN TEXT, not JSON, so
+# herdr_cli's error sniffing finds nothing to report — which is correct, since only a
+# real error response is JSON.
+HERDR_AGENT_SCREEN=""
+herdr_agent_screen() {  # <name>
+  HERDR_AGENT_SCREEN=""
+  herdr_cli agent read "$1" --source recent --format text || return 0
+  HERDR_AGENT_SCREEN="$HERDR_CLI_OUT"
+  return 0
+}
+
 # HERDR_AGENT_SESSION_ID ← the claude session id herdr OBSERVED for this agent, or
 # "" if it has none. Worth asking even though hotline presets the id with
 # `--session-id`: herdr reads this from claude's own state, so a disagreement with

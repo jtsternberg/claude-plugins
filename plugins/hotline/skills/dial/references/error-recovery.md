@@ -322,6 +322,22 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   caller waiting forever for a protocol that never engaged. `sent` is `false` —
   nothing was written — so re-dialing is safe. Check `herdr agent get <name>`.
 
+**`stage: deliver` — "is sitting on Claude Code's startup TRUST DIALOG"**
+- The one startup gate herdr's own signals cannot see: with the trust dialog on screen
+  `agent start` reports `interactive_ready:true, agent_status:"idle"` — true in its own
+  terms, since the dialog takes keystrokes — so the readiness gate below passes it. The
+  dialog's default option is **`No, exit`**, so a submitted work order answers it that
+  way and the callee exits: no turn, no transcript, the work order gone
+  (claude-plugins-59ry). First contact therefore reads the screen once and refuses.
+- **Pre-submit**: `sent` is `false`, `pending_paste.md` still holds the payload, and
+  re-dialing cannot double-run anything.
+- Recovery: Claude Code has to trust the directory. Run `claude` in it once and answer
+  *Yes, I trust this folder*, or `herdr agent attach <name>` and answer it there, then
+  re-dial. Note that **a fresh `git init` directory gets its own trust boundary** even
+  under an already-trusted parent, and that
+  `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS` does **not** cover this — directory trust is
+  not a permission mode.
+
 **`stage: deliver` — "is 'blocked' before first contact" / "never reported interactive_ready"**
 - Both are **pre-submit refusals**: the opening payload was held back, `sent` is
   `false`, and `<call_dir>/pending_paste.md` still holds it. Nothing reached the

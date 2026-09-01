@@ -57,6 +57,16 @@
 #      so a payload submitted into it ANSWERS the gate and is consumed. No user turn,
 #      no transcript, nothing to read. That is exactly the shape that was observed.
 #
+#      BUT herdr DOES NOT REPORT THE TRUST DIALOG AS `blocked`, which is the whole
+#      reason the readiness gate missed the exact case its refusal names. Verified
+#      live on CC 2.1.251 / herdr 0.8.0 against a fresh `git init` directory:
+#      `agent start` returned `interactive_ready:true, agent_status:"idle"` with the
+#      dialog on screen, the gate above passed it, and the payload answered the
+#      dialog's DEFAULT option — `No, exit` — killing the callee (claude-plugins-59ry).
+#      So first contact also READS THE SCREEN once, and refuses on the trust dialog's
+#      signature. This is a pre-submit gate, not a proof tier: the alternate-screen
+#      argument below still holds, and nothing about confirmation changes.
+#
 #   2. THE TRANSCRIPT DOES NOT EXIST YET. A follow-up's confirmation is one append
 #      to a file already on disk; first contact needs the project directory and the
 #      session's .jsonl CREATED, behind whatever else claude is doing on startup.
@@ -204,6 +214,23 @@ if $FIRST_CONTACT; then
       undelivered "herdr agent $AGENT stopped resolving while waiting for it to become interactive-ready (${HERDR_CLI_ERR:-no such live agent}); the callee exited before first contact" false
     fi
   done
+
+  # herdr now says ready and not blocked. THE SCREEN CAN STILL DISAGREE — and for one
+  # specific gate it always does (see FIRST CONTACT above). Read it once, and refuse
+  # on the trust dialog rather than answering it.
+  #
+  # An UNREADABLE screen proceeds, on the same principle as an absent
+  # interactive_ready: this probe can prove a dialog is there, never that one is not,
+  # and turning "could not look" into a refusal would make delivery impossible instead
+  # of unproven the day `agent read` changes shape.
+  herdr_agent_screen "$AGENT"
+  if repl_trust_dialog_present "$HERDR_AGENT_SCREEN"; then
+    # THE FIX GOES FIRST in this string, deliberately: dial.sh forwards a reason
+    # through reason_of, which cuts it at 300 characters, so anything after that is
+    # not advice the caller ever sees. Diagnosis after remedy.
+    undelivered "Claude Code's startup TRUST DIALOG is on screen for ${CWD:-the callee cwd} — trust that directory (run \`claude\` in it once and answer 'Yes, I trust this folder'), then re-dial. NOTHING WAS SUBMITTED: the dialog's default option is 'No, exit', so a work order would have answered it and killed the callee. herdr reported agent $AGENT interactive_ready and not blocked because the dialog does take keystrokes; \`herdr agent attach $AGENT\` shows it. HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover this gate — directory trust is not a permission mode." false
+  fi
+
   CONFIRM_TRIES="$FIRST_CONFIRM_TRIES"
 fi
 
