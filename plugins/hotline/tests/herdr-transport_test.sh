@@ -1579,6 +1579,15 @@ out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_NEW_PANE=w1:p8" \
    && "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "deliver" ]]
 check "an unconfirmable herdr delivery errors at stage=deliver, never reports connected" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
+# `sent` FORWARDED into the error, because the recovery text tells the model to read it
+# — and an error that dropped it left that advice unactionable on the one failure where
+# double-delivery is the risk (claude-plugins-zh7p).
+[[ "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "true" ]]
+check "…carrying the delivery's own \`sent\`, which decides whether re-dialing is safe" $? \
+  "out=$out"
+[[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"\`sent\` field is true"* ]]
+check "…and a recovery that states the value rather than pointing at a result the model never sees" $? \
+  "out=$out"
 call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 [[ -n "$call_dir" && "$(cat "$call_dir/transport.txt" 2>/dev/null)" == "herdr" \
    && -s "$call_dir/herdr_agent.txt" && -s "$call_dir/pending_paste.md" ]]
@@ -1590,6 +1599,17 @@ check "…having really run launch → boot → deliver in order" $? \
 [[ ! -s "$t/cmux.log" ]]
 check "…and made no cmux call: an explicit herdr dial never consults cmux" $? \
   "cmux calls: $(cat "$t/cmux.log" 2>/dev/null)"
+
+# The same field on a PRE-SUBMIT refusal: sent:false, so the caller is free to re-dial.
+# Hardcoding it either way would make it worse than absent.
+t=$(new_env)
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_NEW_PANE=w1:p8" "HERDR_STUB_GET_READY=false" \
+        -- --target "$t/target" --mode work_order --prompt "run the suite" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "deliver" \
+   && "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "false" ]]
+check "a pre-submit refusal reports sent:FALSE on the same error field" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
 
 # --- end to end through dial.sh: the callee DOES record it -------------------
 # The plain stub cannot precompute the transcript path (it does not know the session

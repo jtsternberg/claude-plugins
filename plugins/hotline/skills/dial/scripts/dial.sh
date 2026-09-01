@@ -129,12 +129,18 @@ fb_json() {
   fi
 }
 
-emit_error() {  # emit_error <stage> <detail> <recovery>
+# The optional 4th argument is a JSON OBJECT merged into the payload. It exists so a
+# recovery string can tell the model to read a field that is actually there: the herdr
+# delivery error's advice turns on `sent`, and forwarding it beats asking the model to
+# consult a result it never sees.
+emit_error() {  # emit_error <stage> <detail> <recovery> [<extra-json-object>]
   jq -n --arg stage "$1" --arg detail "$2" --arg recovery "$3" \
         --arg call_dir "$CALL_DIR" --argjson fallbacks "$(fb_json)" \
+        --argjson extra "${4:-{\}}" \
     '{status:"error", stage:$stage, detail:$detail, recovery:$recovery,
       fallbacks:$fallbacks}
-     + (if $call_dir == "" then {} else {call_dir:$call_dir} end)'
+     + (if $call_dir == "" then {} else {call_dir:$call_dir} end)
+     + $extra'
   exit 1
 }
 
@@ -1199,8 +1205,17 @@ if [[ "$TRANSPORT" == "herdr" && -s "$CALL_DIR/pending_paste.md" ]]; then
     --call-id "$CALL_ID_OUT" --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID" \
     --first-contact 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then
+    # `sent` FORWARDED, not dropped: it is the difference between "re-dialing is safe"
+    # and "re-dialing runs the work order twice", and the recovery below tells the model
+    # to read it — which it could not do while this error was the only thing it got back
+    # (claude-plugins-zh7p). Normalized to a literal true/false so the field is always
+    # present; a delivery result too broken to parse reads as false, and the recovery's
+    # unconditional "do NOT re-dial blindly" is what covers that case.
+    DELIVERY_SENT=false
+    [[ "$(jq -r '.sent // false' <<<"$DELIVERY" 2>/dev/null)" == "true" ]] && DELIVERY_SENT=true
     emit_error deliver "the herdr callee booted but the prompt never landed in it: $(reason_of "$DELIVERY")" \
-      "\$call_dir/pending_paste.md still holds the prompt, and the agent is still live — \`herdr agent attach $HERDR_AGENT_REF\` to see its state. If \`sent\` was true in the delivery result the callee may have received it after the confirmation window, so do NOT re-dial blindly; read its transcript for the call_id first. See references/error-recovery.md § herdr Failures, which covers this case (§ Delivery describes the cmux paste)."
+      "\$call_dir/pending_paste.md still holds the prompt, and the agent is still live — \`herdr agent attach $HERDR_AGENT_REF\` to see its state. This error's own \`sent\` field is $DELIVERY_SENT: when it is true the callee may have received the payload after the confirmation window, so do NOT re-dial blindly — read its transcript for the call_id first. See references/error-recovery.md § herdr Failures, which covers this case (§ Delivery describes the cmux paste)." \
+      "{\"sent\": $DELIVERY_SENT}"
   fi
   rm -f "$CALL_DIR/pending_paste.md"
 fi
