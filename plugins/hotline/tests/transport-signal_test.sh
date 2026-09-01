@@ -34,7 +34,9 @@ set -u
 
 PASS=0
 FAIL=0
+SKIP=0
 FAILED_CASES=()
+SKIPPED_CASES=()
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOTLINE_DIR="$(cd "$TESTS_DIR/.." && pwd)"
@@ -49,6 +51,12 @@ pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() {
   FAIL=$((FAIL + 1)); FAILED_CASES+=("$1"); echo "  ✗ $1"
   [[ -n "${2:-}" ]] && echo "    $2"
+}
+# A case this environment cannot run. Counted and named in the summary: an
+# unrecorded soft-skip makes the pass count environment-dependent, so a machine
+# missing a dependency reads as a smaller green run instead of an incomplete one.
+skipped() {  # skipped <case> <reason>
+  SKIP=$((SKIP + 1)); SKIPPED_CASES+=("$1 — $2"); echo "  – $1 (SKIPPED: $2)"
 }
 
 # The real interpreter, captured before anything shims PATH.
@@ -84,6 +92,13 @@ mkdir -p "$HOTLINE_CALL_HOME"
 SANDBOX_HOME="$ROOT/home"
 mkdir -p "$SANDBOX_HOME"
 
+# Sourced here, not at its point of use: the harness's contract is that
+# socket_stub_cleanup runs from the sourcing suite's EXIT trap, and the trap is
+# installed below. Sourcing only defines functions, so a machine with no python3
+# reaches this line safely and the stub simply never starts.
+# shellcheck source=lib/socket-stub-harness.sh
+source "$TESTS_DIR/lib/socket-stub-harness.sh"
+
 # The launchers write their launch script to /tmp/hotline-launch-*, outside the
 # call dir. Collect the ones this suite causes and remove them with everything else.
 LAUNCH_SCRIPTS=()
@@ -93,6 +108,7 @@ reap_launch_script() {  # <call-dir>
 }
 cleanup() {
   local s
+  socket_stub_cleanup
   for s in ${LAUNCH_SCRIPTS[@]+"${LAUNCH_SCRIPTS[@]}"}; do rm -f "$s"; done
   rm -rf "$ROOT"
 }
@@ -304,10 +320,11 @@ fi
 # re-delivering it would run the work order twice). That is what lets us read
 # transport.txt back out of it.
 if [[ -z "$REAL_PYTHON3" ]]; then
-  echo "  – cmux-reuse-surface.sh: SKIPPED (python3 absent; the control-socket helper needs it)"
+  skipped "cmux-reuse-surface.sh writes transport.txt=cmux" \
+          "python3 absent; the control-socket helper needs it"
+  skipped "…alongside surface_ref.txt, so the follow-up still dispatches as surface mode" \
+          "python3 absent; the control-socket helper needs it"
 else
-  # shellcheck source=lib/socket-stub-harness.sh
-  source "$TESTS_DIR/lib/socket-stub-harness.sh"
   case_dir="$ROOT/launch-reuse"
   mkdir -p "$case_dir/bin" "$case_dir/home"
   socket_stub_write_responses "$case_dir/responses"
@@ -336,7 +353,6 @@ else
     fail "…alongside surface_ref.txt, so the follow-up still dispatches as surface mode" \
          "call_dir contents: $(ls "$cd_path" 2>/dev/null | tr '\n' ' ')"
   fi
-  socket_stub_cleanup
 fi
 
 # ===========================================================================
@@ -603,7 +619,12 @@ fi
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "Result: $PASS passed, $FAIL failed"
+echo "Result: $PASS passed, $FAIL failed, $SKIP skipped"
+if [[ $SKIP -gt 0 ]]; then
+  echo ""
+  echo "Skipped cases:"
+  for c in "${SKIPPED_CASES[@]}"; do echo "  - $c"; done
+fi
 if [[ -s "$POISON_LOG" ]]; then
   echo ""
   echo "TEST BUG: a case reached a real binary (missing PATH stub):"
