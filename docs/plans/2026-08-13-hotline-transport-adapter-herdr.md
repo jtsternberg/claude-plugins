@@ -214,3 +214,33 @@ Land the remote-transcript reader from O5 so `--remote` gets full structured res
 2. **Headless fallback stays.** ✅ Untouched; remains the universal degrade target (and the explicit-herdr degrade target for non-remote).
 3. **Stable wrapper contract.** ✅ `.status` / `.call_dir` / `.remote_session_id` unchanged; the opaque host handle keeps the `surface_ref` key; `transport.txt` is internal to the call dir, not part of the emitted JSON. One JSON object out, same statuses/exit codes.
 4. **Additive & phased.** ✅ Phase 0 is provably inert; Phase 1 delivers the detached/remote work-order case JT wants first; nothing is a big-bang rewrite.
+
+---
+
+## 12. Deviations (as shipped)
+
+Two places where the shipped code reads differently from the sections above.
+
+**Transport scripts are flat, not nested (§10, Phase 0).** `skills/dial/scripts/`
+holds `cmux-*`, `herdr-*` and `headless-*` side by side; there is no
+`transports/<backend>/` subtree. The prefix carries the grouping a directory
+would, and it keeps every backend's scripts one segment deep under
+`${CLAUDE_SKILL_DIR}/scripts/` — the path each `SKILL.md` block, `allowed-tools`
+matcher and sibling script resolves through.
+
+**A transport this hotline has no verbs for is refused, not degraded (§2.1, §4
+step 2).** A `transport.txt` naming a backend outside `HOTLINE_TRANSPORTS`
+(`cmux herdr headless`) exits both waiters non-zero, naming the value it could
+not read and the set it knows; the judgement lives once, in
+`scripts/transport.sh`. §4 step 2's "never silently to cmux" governs the read
+side as much as the selection side, and headless is no better a target than cmux
+here — file-watching a `done` nobody will write turns a one-word mismatch into up
+to 30 minutes of silence before `--timeout` expires, where cmux at least fails
+against a host of the wrong kind. Saying so beats both.
+
+An ABSENT or EMPTY `transport.txt` is a separate case and keeps §2.1's behavior:
+it names nothing, so the waiters infer the backend from the host handles as
+before. That is what preserves the handle-less-cmux carve-out — `transport.txt`
+is written with the call dir, well before a host is placed, so a launcher that
+dies in between hands the waiter a dir whose own `error.txt` only the file-watch
+path reports.
