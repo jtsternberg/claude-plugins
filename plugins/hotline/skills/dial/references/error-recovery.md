@@ -307,7 +307,23 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
 - `agent_pane_busy` is retried automatically (a freshly split pane needs a moment at
   its shell prompt); seeing it in a final error means it never settled.
 
+**`stage: deliver` — "is 'blocked' before first contact" / "never reported interactive_ready"**
+- Both are **pre-submit refusals**: the opening payload was held back, `sent` is
+  `false`, and `<call_dir>/pending_paste.md` still holds it. Nothing reached the
+  callee, so re-dialing cannot double-run anything.
+- `blocked` before first contact means the callee came up on a gate — most often a
+  startup trust prompt — and that gate takes keystrokes, so a work order submitted
+  into it would answer the dialog and never become a turn. `herdr agent attach <name>`
+  shows what it is asking. Unattended callees avoid the permission half by dialing
+  with `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` (a real trust decision).
+- "never reported interactive_ready" means `agent start` claimed the REPL was ready
+  and `agent get` no longer agrees. Attach and look at the pane; if the machine was
+  simply loaded, raise `HOTLINE_HERDR_READY_TRIES` / `HOTLINE_HERDR_FIRST_SETTLE`.
+
 **`stage: deliver` — the nonce never reached the callee's transcript**
+- On FIRST contact this is reported after a budget four times the follow-up one
+  (`HOTLINE_HERDR_FIRST_CONFIRM_TRIES`), because the transcript has to be *created*
+  rather than appended. Raise it before concluding a payload was lost on a loaded box.
 - **There is no screen fallback for herdr, by design.** A claude REPL is a
   full-screen alternate-screen TUI, and rows that leave the alternate screen never
   enter herdr's scrollback — so `agent read` cannot confirm what the transcript

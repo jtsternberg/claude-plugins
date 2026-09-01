@@ -182,14 +182,37 @@ HERDR_SETTLED_ARGS=(--until "idle" --until "done" --until "blocked")
 
 # HERDR_AGENT_STATUS ← the agent's current lifecycle state, or "" when it cannot be
 # read — which INCLUDES an agent that has exited, since herdr clears the name along
-# with it. Always returns 0: "no state" is an answer, not an error, and every caller
-# wants to report it rather than abort on it.
+# with it.
+# HERDR_AGENT_READY ← "true"/"false" as herdr reports `interactive_ready` for it, or
+# "" when the agent is unreadable OR the field is absent. Those two "" cases are
+# distinguished by HERDR_AGENT_STATUS, which is non-empty only in the second — and a
+# caller gating on readiness MUST treat an absent field as permission to proceed, or
+# a herdr that stops reporting it makes delivery impossible rather than unproven.
+#
+# ONE READ, BOTH FACTS, and `// empty` would be WRONG for the readiness half —
+# silently so: jq's alternative operator treats `false` as absent, collapsing the one
+# value a readiness gate exists to catch into the same "" as a missing field. Ask
+# whether the key is there, then stringify it.
+#
+# Always returns 0: "no state" is an answer, not an error, and every caller wants to
+# report it rather than abort on it.
 HERDR_AGENT_STATUS=""
-herdr_agent_status() {  # <name>
+HERDR_AGENT_READY=""
+herdr_agent_probe() {  # <name>
   HERDR_AGENT_STATUS=""
+  HERDR_AGENT_READY=""
   herdr_cli agent get "$1" || return 0
   HERDR_AGENT_STATUS=$(jq -r '.result.agent.agent_status // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null || true)
+  HERDR_AGENT_READY=$(jq -r '.result.agent // {} | if has("interactive_ready") then (.interactive_ready | tostring) else "" end' \
+                        <<<"$HERDR_CLI_OUT" 2>/dev/null || true)
   return 0
+}
+
+# The status-only spelling, kept because most callers want exactly that and reads
+# better for it. A DELEGATION, not a second implementation: two readers of one
+# `agent get` response is how this repo lost time in the transcript parser, twice.
+herdr_agent_status() {  # <name>
+  herdr_agent_probe "$1"
 }
 
 # HERDR_AGENT_SESSION_ID ← the claude session id herdr OBSERVED for this agent, or
