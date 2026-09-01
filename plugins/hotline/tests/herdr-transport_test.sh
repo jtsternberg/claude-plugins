@@ -143,10 +143,17 @@ trap cleanup EXIT
 #                             two reads of it
 #   HERDR_STUB_WAIT_STATUS    the agent_status `agent wait` settles on (default:
 #                             HERDR_STUB_STATUS, else done)
+#   HERDR_STUB_AGENT_PANE     the pane_id `agent get` reports (default w1:p9) — what
+#                             a split delivery's `pane send-text` half addresses
+#   HERDR_STUB_NO_PANE_ID=1   `agent get` omits pane_id entirely
+#   HERDR_STUB_SENDTEXT_FAIL=1 `pane send-text` returns a server error
 #   HERDR_STUB_PROMPT_FAIL=1  `agent prompt` returns a server error
-#   HERDR_STUB_TRANSCRIPT     `agent prompt` appends a realistic user record
-#                             carrying the prompt text to this .jsonl (i.e. the
-#                             callee recording what it received)
+#   HERDR_STUB_TRANSCRIPT     `agent prompt` appends a realistic user record to this
+#                             .jsonl carrying whatever `pane send-text` had already
+#                             placed in the input box PLUS the submitted text — i.e.
+#                             the callee recording the turn it actually received. A
+#                             split delivery is only confirmable if both halves
+#                             arrived, which is the point
 #   HERDR_STUB_WAIT_RC        exit code for `agent wait` (default 0)
 # ---------------------------------------------------------------------------
 make_herdr_stub() {  # <bin-dir>
@@ -237,21 +244,34 @@ case "$1 ${2:-}" in
       GETS=$((GETS + 1)); echo "$GETS" > "$ST/gets"
       if [[ "$GETS" -le "$HERDR_STUB_READY_AFTER" ]]; then READY=false; else READY=true; fi
     fi
+    PANE="${HERDR_STUB_AGENT_PANE:-w1:p9}"
+    [[ "${HERDR_STUB_NO_PANE_ID:-}" == "1" ]] && PANE=""
     jq -nc --arg n "$NAME" --arg s "$STATUS" --arg sid "$SID" \
-           --arg ready "$READY" \
+           --arg ready "$READY" --arg pane "$PANE" \
       '{id:"cli:agent:get",result:{agent:({name:$n,agent:"claude",agent_status:$s,
          agent_session:{agent:"claude",kind:"id",source:"herdr:claude",value:$sid}}
-         + (if $ready == "omit" then {} else {interactive_ready:($ready == "true")} end))}}'
+         + (if $ready == "omit" then {} else {interactive_ready:($ready == "true")} end)
+         + (if $pane == "" then {} else {pane_id:$pane} end))}}'
+    exit 0 ;;
+
+  "pane send-text")
+    # The callee's INPUT BOX, modelled: literal text with no Enter, so it
+    # accumulates until an `agent prompt` submits the whole buffer.
+    [[ "${HERDR_STUB_SENDTEXT_FAIL:-}" == "1" ]] && err pane_send_text_failed "no such pane"
+    printf '%s' "$4" >> "$ST/box"
+    echo '{"id":"cli:pane:send-text","result":{"sent":true}}'
     exit 0 ;;
 
   "agent prompt")
     [[ "${HERDR_STUB_PROMPT_FAIL:-}" == "1" ]] && err agent_prompt_failed "no such agent"
     if [[ -n "${HERDR_STUB_TRANSCRIPT:-}" ]]; then
       mkdir -p "$(dirname "$HERDR_STUB_TRANSCRIPT")"
-      jq -nc --arg t "$4" --arg sid "$(cat "$ST/session_id" 2>/dev/null || echo stub-session)" \
+      jq -nc --arg t "$(cat "$ST/box" 2>/dev/null || true)$4" \
+             --arg sid "$(cat "$ST/session_id" 2>/dev/null || echo stub-session)" \
         '{type:"user",isSidechain:false,sessionId:$sid,message:{content:$t}}' \
         >> "$HERDR_STUB_TRANSCRIPT"
     fi
+    rm -f "$ST/box"
     echo '{"id":"cli:agent:prompt","result":{"submitted":true}}'
     exit 0 ;;
 
@@ -674,6 +694,133 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
    && "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "true" ]] \
   && [[ "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"no screen fallback"* ]]
 check "submitted but never confirmed → sent:TRUE and an honest 'no screen fallback' reason" $? "out=$out"
+
+# --- A slash command with a body is delivered in TWO writes (claude-plugins-fvhx) --
+# One atomic `agent prompt` collapses the multi-line paste, the invocation stops being
+# the literal start of the input, and the callee reads the work order as plain text:
+# no ringing protocol, no STATUS, no call_id, and transcript-extract.sh exits 10
+# forever. The nonce below lives in the INVOCATION LINE only, so a confirmed delivery
+# proves both writes reached the same input box.
+
+t=$(new_env)
+SID="herdr-split-1"
+NONCE="ee55ff66aa77bb88"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+{ printf '/hotline:hotline-ringing [CALL_ID: %s] [MODE: work_order]\n' "$NONCE"
+  printf 'line one of the work order\nline two\nline three\nline four\n'; } > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      HERDR_STUB_AGENT_PANE="w1:p7" \
+      bash "$HERDR_PROMPT" --agent hotline-s-1 --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" ]]
+check "a slash-command payload with a body is delivered and confirmed" $? "out=$out"
+log=$(tr -d '\\' < "$t/herdr.log")
+grep -q 'pane send-text w1:p7 /hotline:hotline-ringing' <<<"$log"
+check "…the INVOCATION LINE goes out alone via pane send-text (no Enter, no submit)" $? \
+  "herdr calls: $log"
+# Both line numbers are required to EXIST: bash reads an empty string as 0 in an
+# arithmetic comparison, so "no send-text call at all" would otherwise satisfy
+# "send-text came first" — the exact failure this case exists to catch.
+SENDTEXT_LINE=$(grep -n 'pane send-text' <<<"$log" | head -1 | cut -d: -f1)
+PROMPT_LINE=$(grep -n 'agent prompt' <<<"$log" | head -1 | cut -d: -f1)
+[[ -n "$SENDTEXT_LINE" && -n "$PROMPT_LINE" && "$SENDTEXT_LINE" -lt "$PROMPT_LINE" ]]
+check "…before the body's submit, never after" $? \
+  "send-text=$SENDTEXT_LINE prompt=$PROMPT_LINE herdr calls: $log"
+! grep 'agent prompt' <<<"$log" | grep -q '/hotline:hotline-ringing'
+check "…and the submitted half carries the BODY only (the head is already in the box)" $? \
+  "herdr calls: $log"
+grep -q "$NONCE" "$TRANS" 2>/dev/null && grep -q 'line four' "$TRANS" 2>/dev/null
+check "…so the callee's turn holds head AND body, byte-for-byte one payload" $? \
+  "transcript: $(cat "$TRANS" 2>/dev/null)"
+
+# A ONE-LINE slash command needs no split: nothing collapses, and a second write
+# would only add a round trip.
+t=$(new_env)
+SID="herdr-split-2"
+NONCE="ff66aa77bb88cc99"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+printf '/hotline:hotline-ringing [CALL_ID: %s] status?' "$NONCE" > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      bash "$HERDR_PROMPT" --agent hotline-s-2 --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" ]] \
+  && ! grep -q 'pane send-text' "$t/herdr.log" 2>/dev/null
+check "a single-line slash command takes the one-write path unchanged" $? \
+  "out=$out herdr calls: $(tr -d '\\' < "$t/herdr.log")"
+
+# A MULTI-LINE payload that is not a slash command needs no split either: there is no
+# invocation for a placeholder to swallow.
+t=$(new_env)
+SID="herdr-split-3"
+NONCE="aa77bb88cc99dd00"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+printf '[CALL_ID: %s]\nfollow-up question\nsecond line\nthird line\n' "$NONCE" > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      bash "$HERDR_PROMPT" --agent hotline-s-3 --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" ]] \
+  && ! grep -q 'pane send-text' "$t/herdr.log" 2>/dev/null
+check "a multi-line payload with no slash command takes the one-write path" $? \
+  "out=$out herdr calls: $(tr -d '\\' < "$t/herdr.log")"
+
+# The PREDICATE decides, not the --first-contact flag: a follow-up that happens to be
+# a slash command with a body would lose its invocation exactly the same way.
+t=$(new_env)
+SID="herdr-split-4"
+NONCE="bb88cc99dd00ee11"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+{ printf '/hotline:hotline-ringing [CALL_ID: %s]\n' "$NONCE"; printf 'body\nmore body\n'; } > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      bash "$HERDR_PROMPT" --agent hotline-s-4 --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" ]] \
+  && grep -q 'pane send-text' <(tr -d '\\' < "$t/herdr.log")
+check "a FOLLOW-UP slash command with a body splits too (the predicate decides)" $? \
+  "out=$out herdr calls: $(tr -d '\\' < "$t/herdr.log")"
+
+# The first write failing is pre-submit: nothing is in the box, nothing was submitted.
+t=$(new_env)
+{ printf '/hotline:hotline-ringing [CALL_ID: n]\n'; printf 'body\nmore\n'; } > "$t/payload.md"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_SENDTEXT_FAIL=1 \
+      bash "$HERDR_PROMPT" --agent hotline-s-5 --payload-file "$t/payload.md" \
+        --call-id n --cwd "$t/target" --session s-s5 --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "false" ]]
+check "a failed invocation-line write → delivered:false sent:FALSE (re-dial is safe)" $? "out=$out"
+! grep -q 'agent prompt' "$t/herdr.log" 2>/dev/null
+check "…and the body is never submitted on its own" $? \
+  "herdr calls: $(tr -d '\\' < "$t/herdr.log")"
+
+# No pane to write the invocation line into → REFUSE. Delivering unsplit instead would
+# be a false success: the nonce would reach the transcript, delivery would report
+# confirmed, and the caller would wait forever for a protocol that never engaged.
+t=$(new_env)
+SID="herdr-split-6"
+NONCE="cc99dd00ee11ff22"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+{ printf '/hotline:hotline-ringing [CALL_ID: %s]\n' "$NONCE"; printf 'body\nmore\n'; } > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      HERDR_STUB_NO_PANE_ID=1 \
+      bash "$HERDR_PROMPT" --agent hotline-s-6 --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" --first-contact 2>/dev/null)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"no pane_id"* ]]
+check "an agent with no pane_id → refused sent:false rather than delivered unsplit" $? "out=$out"
+! grep -qE 'agent prompt|pane send-text' "$t/herdr.log" 2>/dev/null
+check "…with nothing written into the callee at all" $? \
+  "herdr calls: $(tr -d '\\' < "$t/herdr.log")"
 
 # --- First contact is gated harder than a follow-up (claude-plugins-7wze.12) --
 # The opening payload is the one delivery that can lose the whole work order, and it

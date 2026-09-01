@@ -624,6 +624,28 @@ hotline_is_slash_command_first_line() {
   [[ "$token" =~ ^/[A-Za-z0-9][A-Za-z0-9:._-]*$ ]]
 }
 
+# hotline_payload_needs_split_delivery <payload-file> — 0 when this payload must be
+# delivered as TWO writes into the callee's input box rather than one.
+#
+# The composite BOTH transports turn on, and both halves of it matter: a slash-command
+# first line, and a body beneath it. With no slash there is no invocation for a
+# `[Pasted text +N lines]` placeholder to swallow; with no body the payload is one
+# short line that arrives verbatim anyway, so splitting would buy nothing and add a
+# round trip.
+#
+# TWO MECHANISMS, ONE QUESTION. cmux-paste.sh splits one `terminal.paste` into two;
+# herdr-prompt.sh splits a `pane send-text` from an `agent prompt`. What they must
+# never disagree about is WHEN — and they already did: the split landed on the cmux
+# path (37a216d) and the herdr backend (f87501e) never adopted it, so every herdr
+# first contact carrying a multi-line work order delivered `/hotline:hotline-ringing`
+# as plain text and the ringing protocol never engaged (claude-plugins-fvhx).
+hotline_payload_needs_split_delivery() {
+  local payload_file="$1"
+  [[ -r "$payload_file" ]] || return 1
+  hotline_is_slash_command_first_line "$(sed -n '1p' "$payload_file")" || return 1
+  [[ $(sed -n '2,$p' "$payload_file" | wc -c) -gt 0 ]]
+}
+
 hotline_inject_call_id() {
   local nonce="$1" prompt="$2" first_line rest_lines token remainder
   first_line="${prompt%%$'\n'*}"

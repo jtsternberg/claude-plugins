@@ -670,11 +670,12 @@ fi
 # re-invoking it would re-run first-contact setup.
 #
 # The slash command + tags go on their OWN line, with the work-order message on
-# the line(s) below. This is what lets cmux-paste.sh deliver first contact as two
-# pastes — the invocation line pasted alone stays small enough to render verbatim
-# (a ❯-line starting with `/`), so the slash command parses; the message rides a
-# second paste that CC may collapse to a `[Pasted text +N lines]` placeholder,
-# which it expands back inside the command args on submit (claude-plugins-pmgb).
+# the line(s) below. This is what lets EITHER transport deliver first contact as two
+# writes — cmux-paste.sh as two pastes, herdr-prompt.sh as a `pane send-text` plus an
+# `agent prompt` (claude-plugins-fvhx) — because the invocation line sent alone
+# renders verbatim (a ❯-line starting with `/`), so the slash command parses; the
+# message rides the second write, which CC may collapse to a `[Pasted text +N lines]`
+# placeholder and expands back inside the command args on submit (claude-plugins-pmgb).
 # Keeping the message ON this line would let a long first message push the
 # invocation line past CC's ~800-char collapse threshold and take the `/` down
 # with it — the whole regression.

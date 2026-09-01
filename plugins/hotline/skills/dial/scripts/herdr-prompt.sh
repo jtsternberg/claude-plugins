@@ -64,6 +64,16 @@
 #      load — a false delivered:false, which is safe but wrong. First contact gets a
 #      larger budget instead, and waiting longer can never double-send.
 #
+# A SLASH-COMMAND FIRST CONTACT IS DELIVERED IN TWO WRITES, not one. `agent prompt`
+# is atomic — text and Enter together — which is right for an ordinary payload and
+# wrong for a slash command with a body beneath it: CC's TUI collapses the multi-line
+# paste, the invocation stops being the literal start of the input, and the callee
+# gets the work order as PLAIN TEXT with no ringing protocol — no STATUS, no call_id —
+# so wait-for-response reads the silence as a reassigned callee and
+# transcript-extract.sh exits 10 forever while the answer sits in the transcript
+# (claude-plugins-fvhx). See DELIVER below for the two writes; WHEN to split is
+# repl-state.sh's call, shared with cmux-paste.sh.
+#
 # WHAT THIS DELIBERATELY DOES NOT DO: retry the submit. A prevention-only fix leaves
 # no path to a double-run. Re-sending after an unconfirmed submit cannot be made
 # safe from here — an absent transcript does not distinguish "lost" from "sitting
@@ -92,6 +102,9 @@ HOTLINE_SCRIPTS="$(cd "$SCRIPT_DIR/../../.." && pwd)/scripts"
 source "$HOTLINE_SCRIPTS/herdr-state.sh"
 # shellcheck source=../../../scripts/transcript-confirm.sh
 source "$HOTLINE_SCRIPTS/transcript-confirm.sh"
+# shellcheck source=../../../scripts/repl-state.sh
+# For the split-delivery predicate, which cmux-paste.sh reads from the same place.
+source "$HOTLINE_SCRIPTS/repl-state.sh"
 
 AGENT=""
 PAYLOAD_FILE=""
@@ -153,6 +166,7 @@ herdr_on_path || undelivered "herdr is not on PATH"
 herdr_agent_probe "$AGENT"
 AGENT_STATUS="$HERDR_AGENT_STATUS"
 AGENT_READY="$HERDR_AGENT_READY"
+AGENT_PANE="$HERDR_AGENT_PANE"
 if [[ -z "$AGENT_STATUS" ]]; then
   undelivered "herdr agent $AGENT could not be read (${HERDR_CLI_ERR:-no such live agent}); the callee may have exited before delivery" false
 fi
@@ -185,6 +199,7 @@ if $FIRST_CONTACT; then
     herdr_agent_probe "$AGENT"
     AGENT_STATUS="$HERDR_AGENT_STATUS"
     AGENT_READY="$HERDR_AGENT_READY"
+    AGENT_PANE="$HERDR_AGENT_PANE"
     if [[ -z "$AGENT_STATUS" ]]; then
       undelivered "herdr agent $AGENT stopped resolving while waiting for it to become interactive-ready (${HERDR_CLI_ERR:-no such live agent}); the callee exited before first contact" false
     fi
@@ -201,13 +216,55 @@ while IFS= read -r _p; do
 done < <(hotline_transcript_candidates "$CWD" "$SESSION_ID")
 
 # --- Deliver. ---------------------------------------------------------------
+# ONE submit for an ordinary payload; TWO writes for a slash command that has a body
+# beneath it (see the header for why one would lose the whole work order). The
+# predicate is repl-state.sh's, shared with cmux-paste.sh, because the two transports
+# must never disagree about WHEN to split — they already did once, which is the bug
+# this fixes.
+#
+# The two writes, in herdr's primitives:
+#
+#   1. `pane send-text <pane> <invocation line>` — literal text with NO newline, so
+#      the box now STARTS with `/…` and nothing has been submitted. The newline is
+#      omitted deliberately: sending it here would submit the invocation ALONE.
+#   2. `agent prompt <agent> <newline + body>` — herdr's atomic, bracketed-paste-aware
+#      submit does the half that has to survive multiple lines. The body's placeholder
+#      expands back inside the command args on Enter, and head + newline + body
+#      reconstructs the payload.
+#
+# Probe-verified live on CC 2.1.251 / herdr 0.8.0: split → the harness answers
+# `Unknown command:` and lists every body line under `Args from unknown skill:`, so
+# the slash parsed and the body arrived as its args; one atomic `agent prompt` of the
+# same six lines → answered as ordinary prose, no command expansion at all.
+#
+# `pane send-text` addresses a PANE while `agent prompt` addresses the AGENT, so a
+# split needs both handles. The pane comes off the same `agent get` the probe above
+# already made; without it the split cannot be performed, and performing the
+# UNSPLIT delivery instead would be worse than refusing — the nonce would reach the
+# transcript, delivery would report confirmed, and the caller would then wait forever
+# for a protocol that never engaged.
 PROMPT_TEXT=$(cat "$PAYLOAD_FILE")
+if hotline_payload_needs_split_delivery "$PAYLOAD_FILE"; then
+  if [[ -z "$AGENT_PANE" ]]; then
+    undelivered "herdr agent $AGENT reports no pane_id, and this payload is a slash command with a body — which has to be delivered as an invocation line (\`pane send-text\`) followed by the body (\`agent prompt\`), or the slash command never parses and the callee reads the work order as plain text. Nothing was submitted; re-dial is safe." false
+  fi
+  if ! herdr_cli pane send-text "$AGENT_PANE" "$(sed -n '1p' "$PAYLOAD_FILE")"; then
+    undelivered "herdr pane send-text $AGENT_PANE failed while placing the invocation line for agent $AGENT: ${HERDR_CLI_ERR:-no diagnostic}. Nothing was submitted." false
+  fi
+  # The invocation line is in the callee's box now; a later failure must not claim
+  # nothing was sent.
+  PROMPT_SENT=true
+  PROMPT_TEXT=$'\n'"$(sed -n '2,$p' "$PAYLOAD_FILE")"
+fi
+
 PROMPT_ARGS=(agent prompt "$AGENT" "$PROMPT_TEXT")
 [[ -n "$TIMEOUT_MS" ]] && PROMPT_ARGS+=(--timeout "$TIMEOUT_MS")
 if ! herdr_cli "${PROMPT_ARGS[@]}"; then
-  # Nothing was submitted: herdr validates the target and the keys before writing
-  # any bytes, so a refusal here means the callee's input queue is untouched.
-  undelivered "herdr agent prompt $AGENT failed: ${HERDR_CLI_ERR:-no diagnostic}" false
+  # herdr validates the target and the keys before writing any bytes, so a refusal
+  # here means the callee's input queue is untouched BY THIS CALL — which is the whole
+  # truth only on the unsplit path. After a split's first write the invocation line is
+  # already in the box, so the honest answer is whatever PROMPT_SENT holds.
+  undelivered "herdr agent prompt $AGENT failed: ${HERDR_CLI_ERR:-no diagnostic}" "$PROMPT_SENT"
 fi
 # From here the payload may be in the callee's input queue whatever we observe.
 PROMPT_SENT=true

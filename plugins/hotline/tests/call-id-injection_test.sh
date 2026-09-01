@@ -184,16 +184,11 @@ done
 
 echo ""
 echo "  -- the slash-command predicate is single-sourced --"
-# Inline nonce placement (repl-state.sh) and split-paste delivery (cmux-paste.sh)
-# turn on the SAME "is the first line a slash command?" judgement. It lives in one
-# predicate so the two can never disagree; a private regex copy in cmux-paste.sh is
-# exactly the drift this guards (claude-plugins-pmgb review).
-PASTE_SRC="$HOTLINE_DIR/skills/dial/scripts/cmux-paste.sh"
-grep -q 'hotline_is_slash_command_first_line' "$PASTE_SRC" \
-  && pass "cmux-paste.sh decides the split via the shared predicate" \
-  || fail "cmux-paste.sh decides the split via the shared predicate" \
-          "no hotline_is_slash_command_first_line call in cmux-paste.sh"
-if grep -qE '\^/\[A-Za-z0-9\]' "$PASTE_SRC"; then
+# Inline nonce placement (repl-state.sh) and split delivery (cmux-paste.sh,
+# herdr-prompt.sh) turn on the SAME "is the first line a slash command?" judgement. It
+# lives in one predicate so they can never disagree; a private regex copy in a
+# delivery path is exactly the drift this guards (claude-plugins-pmgb review).
+if grep -qE '\^/\[A-Za-z0-9\]' "$HOTLINE_DIR/skills/dial/scripts/cmux-paste.sh"; then
   fail "cmux-paste.sh has no local copy of the slash-command regex" \
        "the ^/[A-Za-z0-9] regex is back in cmux-paste.sh"
 else
@@ -203,6 +198,58 @@ REGEX_HITS=$(grep -cE '\^/\[A-Za-z0-9\]\[A-Za-z0-9:._-\]' "$HOTLINE_DIR/scripts/
 [[ "$REGEX_HITS" -eq 1 ]] \
   && pass "the slash-command regex is defined exactly once, in repl-state.sh" \
   || fail "the slash-command regex is defined exactly once, in repl-state.sh" "hits=$REGEX_HITS"
+
+echo ""
+echo "  -- and so is the WHOLE split decision (claude-plugins-fvhx) --"
+# The composite — a slash first line AND a body beneath it — is what each transport
+# splits on. It lived inline in cmux-paste.sh alone, so the herdr backend never
+# adopted it and every herdr first contact with a multi-line work order delivered the
+# invocation as plain text. One predicate, two callers, no second copy.
+for f in cmux-paste.sh herdr-prompt.sh; do
+  SRC="$HOTLINE_DIR/skills/dial/scripts/$f"
+  grep -q 'hotline_payload_needs_split_delivery' "$SRC" \
+    && pass "$f decides the split via the shared predicate" \
+    || fail "$f decides the split via the shared predicate" \
+            "no hotline_payload_needs_split_delivery call in $f"
+  # `wc -c` is the emptiness test's fingerprint and appears nowhere else in either
+  # delivery path — a copy reappearing there is a second answer to "is there a body?".
+  if grep -qF 'wc -c' "$SRC"; then
+    fail "$f has no local copy of the body-emptiness test" "the wc -c body test is back in $f"
+  else
+    pass "$f has no local copy of the body-emptiness test"
+  fi
+done
+BODY_HITS=$(grep -cF 'wc -c' "$HOTLINE_DIR/scripts/repl-state.sh" || true)
+[[ "$BODY_HITS" -eq 1 ]] \
+  && pass "the body-emptiness test is written exactly once, in repl-state.sh" \
+  || fail "the body-emptiness test is written exactly once, in repl-state.sh" "hits=$BODY_HITS"
+
+# And the predicate itself: both halves have to be true, and neither alone is enough.
+SPLIT_PROBE=$(mktemp -d)
+printf '/hotline:hotline-ringing [CALL_ID: n]\nbody line\nanother\n' > "$SPLIT_PROBE/slash-body"
+printf '/hotline:hotline-ringing [CALL_ID: n] status?' > "$SPLIT_PROBE/slash-only"
+printf '[CALL_ID: n]\nplain follow-up\nsecond line\n' > "$SPLIT_PROBE/plain-body"
+printf '/Users/JT/Code/x\nsome body\n' > "$SPLIT_PROBE/path-body"
+printf '/hotline:hotline-ringing [CALL_ID: n]\n' > "$SPLIT_PROBE/slash-trailing-newline"
+hotline_payload_needs_split_delivery "$SPLIT_PROBE/slash-body" \
+  && pass "split: a slash command WITH a body" \
+  || fail "split: a slash command WITH a body"
+! hotline_payload_needs_split_delivery "$SPLIT_PROBE/slash-only" \
+  && pass "no split: a single-line slash command (nothing collapses)" \
+  || fail "no split: a single-line slash command (nothing collapses)"
+! hotline_payload_needs_split_delivery "$SPLIT_PROBE/plain-body" \
+  && pass "no split: a multi-line payload with no invocation to protect" \
+  || fail "no split: a multi-line payload with no invocation to protect"
+! hotline_payload_needs_split_delivery "$SPLIT_PROBE/path-body" \
+  && pass "no split: a leading absolute PATH is not a slash command" \
+  || fail "no split: a leading absolute PATH is not a slash command"
+! hotline_payload_needs_split_delivery "$SPLIT_PROBE/slash-trailing-newline" \
+  && pass "no split: a slash command whose only 'body' is its trailing newline" \
+  || fail "no split: a slash command whose only 'body' is its trailing newline"
+! hotline_payload_needs_split_delivery "$SPLIT_PROBE/nope" \
+  && pass "no split: an unreadable payload file (the caller reports that itself)" \
+  || fail "no split: an unreadable payload file (the caller reports that itself)"
+rm -rf "$SPLIT_PROBE"
 
 echo ""
 echo "call-id injection: $PASS passed, $FAIL failed"
