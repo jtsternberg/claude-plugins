@@ -490,7 +490,23 @@ if $HERDR_MODE; then
       # sends a reader hunting a delivery bug when what is actually there is a gate
       # the callee raised before it could record anything (a trust prompt at
       # startup, say).
-      [[ "$LAST_STATUS" == "blocked" ]] && report_blocked "no transcript at any derived path ($ALL_CANDIDATES)"
+      #
+      # THROUGH blocked_confirmed, like every other path that ends a call on this
+      # state. This one used to act on the single read above — the one exception,
+      # and the reason the documented "always re-probed" promise was not true. A
+      # blink refuted here now falls through to the message below, which reports the
+      # state the confirming probe actually found.
+      #
+      # One poll tick between the two reads, unlike the other two callers: they
+      # reach blocked_confirmed with a whole `agent wait` slice already spent since
+      # the state was read, and this branch would otherwise read twice in the same
+      # instant — which filters nothing.
+      if [[ "$LAST_STATUS" == "blocked" ]]; then
+        sleep "$POLL_SLEEP"
+        BLOCKED_SETTLE=true
+        blocked_confirmed && report_blocked "no transcript at any derived path ($ALL_CANDIDATES)"
+        BLOCKED_SETTLE=false
+      fi
       {
         echo "No transcript after ${H_ELAPSED}s at any derived path ($ALL_CANDIDATES) — a herdr callee's transcript appears as soon as its first prompt lands, so this means the prompt never reached the agent (or the session id is wrong)."
         echo "herdr reports agent ${AGENT:-<none recorded>} as '${LAST_STATUS:-unreadable}'. Check \`herdr agent get $AGENT\`, or attach to it; do NOT blindly re-dial."
