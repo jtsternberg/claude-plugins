@@ -108,9 +108,17 @@ add_fallback() { FALLBACKS+=("$(printf '%s' "$1" | tr '\n\r\t' '   ')"); }
 # parentheses. The trailing trim matters because the collapse turns jq's trailing
 # newline into a space, and the space would otherwise land mid-entry as
 # `surface-cleanup-skipped(disabled )` where add_fallback can no longer see it.
+#
+# The cut is 300, not 140. A refusal reason states the problem and then what to do
+# about it, in that order — so a cut tight enough to keep an entry to one terminal
+# line keeps only the half the reader cannot act on. 140 severed
+# `herdr agent attach <name>` off the blocked reason, which was the entire point of
+# reporting the state (claude-plugins-7wze.13). A bound is still wanted: these
+# strings end up inside a JSON array a caller reads, and one runaway diagnostic
+# should not be the whole payload.
 reason_of() {  # reason_of <json>
   jq -r '.reason // "no reason given"' <<<"${1:-}" 2>/dev/null \
-    | tr '\n\r\t' '   ' | cut -c1-140 | sed 's/[[:space:]]*$//'
+    | tr '\n\r\t' '   ' | cut -c1-300 | sed 's/[[:space:]]*$//'
 }
 
 fb_json() {
@@ -825,6 +833,15 @@ fi
 # fallback re-opens the SAME session in a new surface; this one cannot, so the
 # fallback entry says so outright instead of leaving a caller to discover that its
 # callee has amnesia.
+#
+# WITH ONE EXCEPTION: A BLOCKED AGENT IS NOT FALLEN BACK FROM, it fails the dial.
+# The fallback is only honest when the thing being worked around is GONE. A blocked
+# callee is live, and it holds the only copy of this conversation — so starting a
+# fresh one and re-keying the cache to it leaves that agent running, waiting on a
+# human, and no longer reachable through hotline. Meanwhile the response wait calls
+# the identical state "a human must look" and stops (exit 5, resumable). Two
+# verdicts for one state, and this end of the call picked the one that strands a
+# callee (claude-plugins-7wze.13). So it is an ERROR here, with the same advice.
 # ---------------------------------------------------------------------------
 if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
   if [[ -z "$SURFACE_REF" ]]; then
@@ -837,7 +854,14 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
       --agent "$SURFACE_REF" --session "$REMOTE_SESSION_ID" \
       --prompt-file "$SEND_PROMPT_FILE" --cwd "$TARGET_PATH" 2>/dev/null)
 
-    # UNDELIVERED FIRST, before the call_dir success test — the undelivered outcome
+    # BLOCKED FIRST — before anything that could start a second callee. The agent
+    # is live and confirmed waiting on input; nothing was submitted to it.
+    if [[ "$(jq -r '.blocked // false' <<<"$REUSE" 2>/dev/null)" == "true" ]]; then
+      emit_error transport "herdr agent $SURFACE_REF is BLOCKED and cannot take a follow-up: $(reason_of "$REUSE")" \
+        "A human has to clear it — \`herdr agent attach $SURFACE_REF\` shows what it is asking, and the state was confirmed by a second read, so this is not a blink. Nothing was submitted and nothing was started: once it is unblocked, re-dial exactly as you just did and the same agent is re-targeted with its context intact. hotline will NOT start a second callee for you, because that one would strand this agent and lose the conversation. (Unattended callees avoid the permission case by dialing with HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 — a real trust decision, see the plugin README.) See references/error-recovery.md § herdr Failures."
+    fi
+
+    # UNDELIVERED NEXT, before the call_dir success test — the undelivered outcome
     # carries a call_dir too (it holds the only copy of the prompt), so testing for
     # call_dir first would read a failed delivery as a successful one.
     if [[ "$(jq -r '.undelivered // false' <<<"$REUSE" 2>/dev/null)" == "true" ]]; then

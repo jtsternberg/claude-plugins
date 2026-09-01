@@ -31,6 +31,8 @@
 #   #     the submit went out and could not be confirmed. NOT a fallback: the
 #   #     payload may already be in the callee's queue, so re-delivering it
 #   #     elsewhere would run the work order twice.
+#   # → {"blocked":true,"agent":"…","reason":"…"}
+#   #     the agent is live but waiting on INPUT. Also NOT a fallback — see below.
 #
 # --prompt-file is preferred: it keeps the payload out of argv on the way in.
 # (The last hop still puts it on argv — `herdr agent prompt` takes its text
@@ -53,15 +55,32 @@
 #     session already ran it. dial.sh hands us the raw message, and re-invoking
 #     the slash command would re-run first-contact setup inside a live call.
 #
-# TWO STATES REFUSE THE REUSE, and both refuse before submitting anything:
+# TWO STATES REFUSE THE REUSE, and both refuse before submitting anything — but
+# they are NOT the same refusal, and reporting them alike orphaned a live callee:
+#
 #   gone     — no live agent answers to the name. herdr clears a name when its
-#              agent exits, so this is how a dead callee reports itself.
+#              agent exits, so this is how a dead callee reports itself. Nothing
+#              is left holding the prior context, so a fresh callee costs only the
+#              conversation that already died with it: {"fallback":"fresh"}.
+#
 #   blocked  — the callee is waiting on INPUT (a permission gate, or a genuine
 #              question). This is the herdr analogue of cmux's post-interrupt
 #              "what should Claude do instead?" refusal: a work order submitted
 #              into that state ANSWERS the gate instead of starting a turn.
-# Both come back as {"fallback":"fresh"} with the state in the reason, because
-# what to do about it is the caller's decision, not this script's.
+#              {"blocked":true}, NOT a fallback, because that agent is STILL LIVE
+#              and still holds the only copy of this conversation. Answering with
+#              a fresh callee starts a second one, re-keys the cache to it, and
+#              leaves the blocked agent running and unreachable through hotline —
+#              while the response wait treats the very same state as "a human must
+#              look" (exit 5, resumable). One state, two verdicts, is the bug
+#              (claude-plugins-7wze.13). dial.sh fails the dial instead.
+#
+# CONFIRMED WITH A SECOND READ before either verdict is returned. `blocked` can be
+# a blink — a gate the callee's own hook answered a moment later — and now that it
+# ENDS the dial rather than degrading it, a flicker would fail a follow-up that had
+# nothing wrong with it. The response wait confirms for exactly this reason
+# (blocked_confirmed in wait-for-response.sh); this is the same rule at the other
+# end of the call.
 # =============================================================================
 set -uo pipefail
 
@@ -118,7 +137,18 @@ if [[ -z "$AGENT_STATUS" ]]; then
   fallback_fresh "no live herdr agent answers to the cached host handle '$AGENT' (${HERDR_CLI_ERR:-no such agent}) — it has exited, or the handle belongs to a different transport"
 fi
 if [[ "$AGENT_STATUS" == "blocked" ]]; then
-  fallback_fresh "herdr agent $AGENT is 'blocked' — it is waiting on input (a permission gate or a question), and a follow-up submitted now would answer that instead of starting a turn. \`herdr agent attach $AGENT\` shows what it is asking"
+  # One confirming re-read: see CONFIRMED WITH A SECOND READ in the header.
+  sleep "${HOTLINE_HERDR_BLOCKED_SETTLE:-1}"
+  herdr_agent_status "$AGENT"
+  if [[ -z "$HERDR_AGENT_STATUS" ]]; then
+    fallback_fresh "the herdr agent '$AGENT' was 'blocked' and has since stopped resolving (${HERDR_CLI_ERR:-no such agent}) — it exited while waiting on that input, so nothing live holds the prior conversation"
+  fi
+  AGENT_STATUS="$HERDR_AGENT_STATUS"
+fi
+if [[ "$AGENT_STATUS" == "blocked" ]]; then
+  jq -nc --arg a "$AGENT" --arg reason "herdr agent $AGENT is 'blocked' — it is waiting on input (a permission gate or a question), and a follow-up submitted now would answer that instead of starting a turn. \`herdr agent attach $AGENT\` shows what it is asking" \
+    '{blocked: true, agent: $a, reason: $reason}'
+  exit 0
 fi
 
 # --- Wire a call dir exactly as the herdr launcher leaves one. ---------------

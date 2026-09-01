@@ -353,10 +353,22 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
 - The state is always re-probed before the call ends on it, so a `blocked` blink
   (a gate the callee's own hook answered) leaves the wait running instead.
 
+**`stage: transport` — "herdr agent … is BLOCKED and cannot take a follow-up"**
+- The cached agent is alive and confirmed (two reads) waiting on **input** — a
+  permission gate, or a question. Nothing was submitted to it and nothing was
+  started, so there is nothing to undo.
+- **hotline deliberately does not start a fresh callee here**, unlike every other
+  refused reuse. That agent holds the only copy of the conversation; a second callee
+  would leave it running, unreachable through hotline, and take the cache with it.
+- `herdr agent attach <name>` shows what it is asking. Once a human clears it,
+  re-dial exactly as before — the same agent is re-targeted and its context is
+  intact. Unattended callees avoid the permission half with
+  `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` (a real trust decision).
+
 **`.fallbacks` says `herdr-agent-reuse→fresh(…)` on a follow-up**
-- The cached agent could not be re-targeted: it has exited, or it is `blocked` on
-  input (submitting a work order there would answer the gate instead of starting a
-  turn). hotline started a fresh callee instead of failing the dial.
+- The cached agent could not be re-targeted: it has exited (which is the only reason
+  left — a `blocked` one fails the dial instead, see above). hotline started a fresh
+  callee rather than failing.
 - **The cost is in the entry, and it is real: the fresh callee has none of the prior
   conversation.** herdr cannot re-host an existing claude session — `claude --resume`
   and the `--session-id` preset the transcript path depends on are mutually

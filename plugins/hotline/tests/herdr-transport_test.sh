@@ -91,6 +91,7 @@ export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
 export HOTLINE_HERDR_FIRST_SETTLE=0
 export HOTLINE_HERDR_READY_TRIES=2
 export HOTLINE_HERDR_FIRST_CONFIRM_TRIES=2
+export HOTLINE_HERDR_BLOCKED_SETTLE=0
 # The caller may itself be running inside herdr (this suite's own session often
 # is). Strip that so pane resolution is decided by the case, not the machine — and
 # strip the hotline opt-ins for the same reason: a developer with
@@ -134,6 +135,12 @@ trap cleanup EXIT
 #   HERDR_STUB_READY_AFTER=N  `agent get` reports interactive_ready:false for its
 #                             first N calls and true after — the readiness RACE,
 #                             which is the whole point of the first-contact gate
+#   HERDR_STUB_BLOCKED_ONCE=1 `agent get` reports blocked on its FIRST call and
+#                             HERDR_STUB_STATUS after — a blocked BLINK, which every
+#                             path that ends a call on `blocked` must not act on
+#   HERDR_STUB_GONE_AFTER=N   `agent get` resolves for its first N calls and answers
+#                             agent_not_found after — an agent that exits BETWEEN
+#                             two reads of it
 #   HERDR_STUB_WAIT_STATUS    the agent_status `agent wait` settles on (default:
 #                             HERDR_STUB_STATUS, else done)
 #   HERDR_STUB_PROMPT_FAIL=1  `agent prompt` returns a server error
@@ -206,12 +213,23 @@ case "$1 ${2:-}" in
     for _gone in ${HERDR_STUB_GONE_NAMES:-}; do
       [[ "$NAME" == "$_gone" ]] && err agent_not_found "agent target $NAME not found"
     done
+    if [[ -n "${HERDR_STUB_GONE_AFTER:-}" ]]; then
+      LIVE=0; [[ -f "$ST/lives" ]] && LIVE=$(cat "$ST/lives")
+      LIVE=$((LIVE + 1)); echo "$LIVE" > "$ST/lives"
+      [[ "$LIVE" -gt "$HERDR_STUB_GONE_AFTER" ]] \
+        && err agent_not_found "agent target $NAME not found"
+    fi
     if [[ "${HERDR_STUB_AGENT_ANY:-}" != "1" ]]; then
       grep -qxF "$NAME" "$ST/started" 2>/dev/null \
         || err agent_not_found "agent target $NAME not found"
     fi
     SID="${HERDR_STUB_OBSERVED_SID:-$(cat "$ST/session_id" 2>/dev/null || true)}"
     READY="${HERDR_STUB_GET_READY:-true}"
+    STATUS="${HERDR_STUB_STATUS:-idle}"
+    # A blocked BLINK: blocked once, then whatever the case asked for.
+    if [[ "${HERDR_STUB_BLOCKED_ONCE:-}" == "1" ]]; then
+      if [[ -f "$ST/blinked" ]]; then :; else STATUS=blocked; printf 1 > "$ST/blinked"; fi
+    fi
     # The readiness race: false until the Nth read, true after. Counted in the
     # stub's own state so the count survives across the gate's separate calls.
     if [[ -n "${HERDR_STUB_READY_AFTER:-}" ]]; then
@@ -219,7 +237,7 @@ case "$1 ${2:-}" in
       GETS=$((GETS + 1)); echo "$GETS" > "$ST/gets"
       if [[ "$GETS" -le "$HERDR_STUB_READY_AFTER" ]]; then READY=false; else READY=true; fi
     fi
-    jq -nc --arg n "$NAME" --arg s "${HERDR_STUB_STATUS:-idle}" --arg sid "$SID" \
+    jq -nc --arg n "$NAME" --arg s "$STATUS" --arg sid "$SID" \
            --arg ready "$READY" \
       '{id:"cli:agent:get",result:{agent:({name:$n,agent:"claude",agent_status:$s,
          agent_session:{agent:"claude",kind:"id",source:"herdr:claude",value:$sid}}
@@ -1435,6 +1453,59 @@ REG="$t/home/.agents-hotline/sessions/caller-dial-1.json"
 check "…with the cache re-keyed, so the NEXT follow-up addresses the live callee" $? \
   "registry: $(cat "$REG" 2>/dev/null)"
 
+# --- a follow-up into a BLOCKED cached agent, THROUGH dial.sh ----------------
+# The orphan the direct-script tests above cannot see: dial.sh used to answer a
+# refused reuse by starting a SECOND callee and re-keying the cache to it, leaving
+# the blocked agent live, holding the only copy of the conversation, and no longer
+# addressable through hotline (claude-plugins-7wze.13). It fails the dial instead.
+t=$(new_env)
+stage_cache "$t" "$CACHED_SID" "$CACHED_AGENT"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_AGENT_ANY=1" "HERDR_STUB_STATUS=blocked" \
+        -- --target "$t/target" --mode work_order --prompt "step 2" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "error" \
+   && "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "transport" ]]
+check "a follow-up into a BLOCKED herdr agent FAILS the dial (stage=transport)" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+log=$(tr -d '\\' < "$t/herdr.log")
+! grep -qE 'agent start|pane split' <(printf '%s' "$log")
+check "…starting no second callee, so the blocked agent is not orphaned" $? \
+  "herdr calls: $log"
+! grep -q 'agent prompt' <(printf '%s' "$log")
+check "…and submitting nothing into the gate it is sitting on" $? "herdr calls: $log"
+REG="$t/home/.agents-hotline/sessions/caller-dial-1.json"
+[[ "$(conn surface_ref)" == "$CACHED_AGENT" && "$(conn session_id)" == "$CACHED_SID" \
+   && "$(conn exchange_count)" == "1" ]]
+check "…leaving the cache pointed at the blocked agent, NOT re-keyed to a new one" $? \
+  "registry: $(cat "$REG" 2>/dev/null)"
+
+# The actionable half of the reason has to SURVIVE. reason_of used to cut at 140,
+# which severed `herdr agent attach <name>` off the end — the one thing a reader of
+# this error can act on.
+[[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"herdr agent attach $CACHED_AGENT"* ]]
+check "…with the attach hint intact in .detail (reason_of no longer severs it)" $? \
+  "detail=$(jq -r '.detail' <<<"$out" 2>/dev/null)"
+[[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"re-dial exactly as you just did"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"context intact"* ]]
+check "…and a recovery that says the context is still there once a human clears it" $? \
+  "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
+
+# A BLINK must not fail the dial: blocked on the first read, clear on the confirming
+# one, and the follow-up lands in the same agent as though nothing happened.
+t=$(new_env)
+stage_cache "$t" "$CACHED_SID" "$CACHED_AGENT"
+wrap_herdr_transcript "$t" "$CACHED_SID"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_AGENT_ANY=1" "HERDR_STUB_BLOCKED_ONCE=1" \
+        -- --target "$t/target" --mode work_order --prompt "step 2" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)" == "$CACHED_AGENT" ]]
+check "a blocked BLINK on a follow-up neither fails the dial nor starts a second callee" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+! grep -qE 'agent start|pane split' <(tr -d '\\' < "$t/herdr.log")
+check "…reusing the cached agent, exactly as it would have without the blink" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
 # --- a cached session with no host handle at all -----------------------------
 # A prior headless exchange leaves no host to re-target. Fresh launch, and the
 # fallback says the context is gone rather than letting a caller assume continuity.
@@ -1465,18 +1536,51 @@ check "…and no liveness probe was made before the launch: there was no handle 
 # A BLOCKED agent refuses the reuse. This is the herdr analogue of cmux's
 # post-interrupt refusal: a work order submitted into a permission gate ANSWERS
 # the gate instead of starting a turn.
+#
+# And it is NOT fallback:fresh (claude-plugins-7wze.13). That agent is live and
+# holds the only copy of this conversation, so answering with a fresh callee
+# strands it — see TWO STATES REFUSE THE REUSE in the script.
 t=$(new_env)
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
       HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=blocked \
       bash "$HERDR_REUSE" --agent hotline-b-1 --session s-b --prompt "next thing" \
         --cwd "$t/target" 2>/dev/null)
-[[ "$(jq -r '.fallback' <<<"$out" 2>/dev/null)" == "fresh" \
-   && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"blocked"* ]]
-check "reuse into a BLOCKED agent refuses with fallback:fresh (it would answer the gate)" $? \
+[[ "$(jq -r '.blocked' <<<"$out" 2>/dev/null)" == "true" \
+   && "$(jq -r '.agent' <<<"$out" 2>/dev/null)" == "hotline-b-1" \
+   && "$(jq -r '.fallback // "none"' <<<"$out" 2>/dev/null)" == "none" ]]
+check "reuse into a BLOCKED agent → blocked:true, NOT fallback:fresh (a fresh callee would strand it)" $? \
   "out=$out"
 ! grep -q 'agent prompt' "$t/herdr.log" 2>/dev/null
-check "…before submitting anything, so a fresh callee is safe" $? \
+check "…before submitting anything" $? \
   "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+[[ "$(grep -c 'agent get hotline-b-1' <(tr -d '\\' < "$t/herdr.log"))" -ge 2 ]]
+check "…and only after a CONFIRMING second read, so a blink cannot fail a good follow-up" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# The blink itself: blocked on the first read, clear on the confirming one. The
+# follow-up proceeds, because nothing was ever actually wrong with it.
+t=$(new_env)
+wrap_herdr_transcript "$t" "blink-sess"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_BLOCKED_ONCE=1 \
+      bash "$HERDR_REUSE" --agent hotline-b-2 --session blink-sess --prompt "next thing" \
+        --cwd "$t/target" 2>/dev/null)
+[[ "$(jq -r '.delivery' <<<"$out" 2>/dev/null)" == "prompt" \
+   && "$(jq -r '.blocked // false' <<<"$out" 2>/dev/null)" == "false" ]]
+check "a blocked BLINK the confirming read refutes → the follow-up goes through" $? "out=$out"
+
+# Blocked, then gone: it exited while waiting on that input. Nothing live holds the
+# context any more, so this IS a legitimate fallback rather than a dial failure.
+t=$(new_env)
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=blocked \
+      HERDR_STUB_GONE_AFTER=1 \
+      bash "$HERDR_REUSE" --agent hotline-b-3 --session s-b3 --prompt "next" \
+        --cwd "$t/target" 2>/dev/null)
+[[ "$(jq -r '.fallback' <<<"$out" 2>/dev/null)" == "fresh" \
+   && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"exited while waiting"* ]]
+check "an agent that was blocked and has since EXITED falls back (nothing live to strand)" $? \
+  "out=$out"
 
 t=$(new_env)
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
@@ -1624,6 +1728,25 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
 check "blocked with no transcript reports the block, not a phantom delivery failure" $? \
   "rc=$rc stderr=$(cat "$t/err.txt")"
 
+# …but that path confirms too, like every other one that ends a call on `blocked`.
+# It used to act on a SINGLE read — the one exception, and the reason the documented
+# "always re-probed" promise was not actually true (claude-plugins-7wze.13). A blink
+# refuted here now reports what the confirming probe found instead.
+t=$(new_env)
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-blk-5 "herdr-sess" "n-blk5" "$t/target"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_BLOCKED_ONCE=1 \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 600 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 1 ]] && grep -q 'No transcript after' "$t/err.txt" \
+  && ! grep -q 'waiting on INPUT' "$t/err.txt"
+check "a blocked BLINK with no transcript is NOT reported as blocked (the probe refuted it)" $? \
+  "rc=$rc stderr=$(cat "$t/err.txt")"
+[[ "$(grep -c 'agent get hotline-blk-5' <(tr -d '\\' < "$t/herdr.log"))" -ge 2 ]]
+check "…because the no-transcript path re-probes now, like every other blocked exit" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
 # A blocked BLINK is not a verdict: the state is re-probed before the call ends, so
 # a gate that cleared itself leaves the wait running.
 t=$(new_env)
@@ -1663,6 +1786,11 @@ check "SKILL.md's split-direction default matches herdr-call-async.sh" $? \
   && grep -q 'HOTLINE_HERDR_PANE_SETTLE:-1}' "$HERDR_ASYNC"
 check "SKILL.md's pane-settle default matches herdr-call-async.sh" $? \
   "script: $(grep -o 'HOTLINE_HERDR_PANE_SETTLE:-[0-9]*' "$HERDR_ASYNC")"
+
+[[ "$SKILL_FLAT" == *'is really `blocked` (default 1)'* ]] \
+  && grep -q 'HOTLINE_HERDR_BLOCKED_SETTLE:-1}' "$HERDR_REUSE"
+check "SKILL.md's blocked-settle default matches herdr-reuse-agent.sh" $? \
+  "script: $(grep -o 'HOTLINE_HERDR_BLOCKED_SETTLE:-[0-9]*' "$HERDR_REUSE")"
 
 [[ "$SKILL_FLAT" == *'re-reads the transcript (default 30000)'* ]] \
   && grep -q 'HOTLINE_HERDR_WAIT_SLICE_MS:-30000}' "$WAIT_RESPONSE"

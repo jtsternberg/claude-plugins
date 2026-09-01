@@ -137,12 +137,19 @@ phase that will lift the restriction:
 same transcript. The named agent *is* the session, so there is no host to resolve,
 no input box to clear, and nothing superseded to close.
 
-Two ways that can fall back, both reported in `.fallbacks`, and both with the same
-cost: **the cached agent has exited**, or it is **`blocked`** on input (a follow-up
-submitted into a permission gate would answer the gate instead of starting a turn).
-Either way hotline starts a fresh callee — and that callee has **none of the prior
-conversation**, because herdr cannot re-host an existing claude session. The
-fallback entry says so outright; relay it if the answer depends on prior context.
+**A cached agent that has exited** falls back to a fresh callee, reported in
+`.fallbacks`, and that callee has **none of the prior conversation** — herdr cannot
+re-host an existing claude session. The fallback entry says so outright; relay it if
+the answer depends on prior context.
+
+**A cached agent that is `blocked` on input fails the dial instead** (`stage:
+transport`), and that difference is deliberate. A follow-up submitted into a
+permission gate would answer the gate rather than start a turn — but that agent is
+still live and still holds the only copy of the conversation, so answering with a
+fresh callee would leave it running and unreachable through hotline. Nothing is
+submitted and nothing is started: tell the user to clear it (`herdr agent attach
+<name>` shows what it is asking), then re-dial exactly as before and the same agent
+is re-targeted with its context intact.
 
 cmux stays the default and nothing selects herdr on its own. Being inside a herdr
 pane (`HERDR_ENV=1`) only makes the option *available*; the flag is what picks it.
@@ -394,6 +401,9 @@ that:
   for a FIRST delivery (default 40, four times the follow-up budget). First contact
   waits on the callee's transcript being *created*, not appended, so the follow-up
   budget reported landed payloads as unconfirmed under load.
+- **`HOTLINE_HERDR_BLOCKED_SETTLE=<seconds>`** — pause between the two reads that
+  confirm a follow-up's cached agent is really `blocked` (default 1). That state
+  fails the dial, so a blink must not be acted on.
 - **`HOTLINE_HERDR_WAIT_SLICE_MS=<ms>`** — how long one `herdr agent wait` blocks
   before the response wait re-reads the transcript (default 30000).
 - **`HOTLINE_HERDR_KEEP_FAILED_PANE=1`** — keep the pane after a failed launch. Off
