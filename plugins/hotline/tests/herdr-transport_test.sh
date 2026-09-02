@@ -638,6 +638,10 @@ REG="$t/home/.agents-hotline/sessions/caller-77.json"
 check "…and registers the call with the AGENT NAME as the opaque host handle" $? \
   "registry: $(cat "$t/home/.agents-hotline/sessions/caller-77.json" 2>/dev/null)"
 
+# The launcher-bug verdict: no agent name AND no error either. Nothing here says
+# what went wrong, so the missing handle IS the diagnosis. The case below stages
+# the same missing handle WITH the launcher's error beside it, and the two must
+# reach opposite verdicts — that is the whole point of the ordering they pin.
 t=$(new_env)
 cd_path="$t/call"
 stage_herdr_dir "$cd_path" hotline-w-2 "s" "n" "$t/target"
@@ -645,19 +649,44 @@ rm -f "$cd_path/herdr_agent.txt"
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
       HERDR_STATE="$t/state" bash "$WAIT_SESSION" "$cd_path" --timeout 3 2>"$t/err.txt"); rc=$?
 [[ $rc -ne 0 ]] && grep -q 'launcher bug' "$t/err.txt"
-check "a herdr call dir with no agent name fails loudly as a launcher bug" $? \
+check "a herdr call dir with no agent name and no error fails loudly as a launcher bug" $? \
   "rc=$rc stderr=$(cat "$t/err.txt")"
 
+# Staged the way fail_async ACTUALLY leaves the dir: herdr-call-async.sh writes
+# herdr_agent.txt only after `agent start` succeeds, so a start that failed leaves
+# error.txt + done and NO agent name. A fixture that kept the agent name modelled a
+# state the launcher never produces, and so could not see the missing-handle guard
+# firing ahead of the early-fail check and reporting herdr's own diagnostic — an
+# agent_pane_busy among them — as a hotline launcher bug. (claude-plugins-r465.8: a
+# fixture has to model the state the bug destroys.)
 t=$(new_env)
 cd_path="$t/call"
 stage_herdr_dir "$cd_path" hotline-w-3 "s" "n" "$t/target"
-rm -f "$cd_path/session_id.txt"
-echo '{"error":"herdr agent start failed: claude was not detected"}' > "$cd_path/error.txt"
+rm -f "$cd_path/session_id.txt" "$cd_path/herdr_agent.txt"
+echo '{"error":"herdr agent start failed in pane w1:p9 after 4 attempt(s): agent_pane_busy"}' > "$cd_path/error.txt"
 touch "$cd_path/done"
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
       HERDR_STATE="$t/state" bash "$WAIT_SESSION" "$cd_path" --timeout 3 2>"$t/err.txt"); rc=$?
-[[ $rc -ne 0 ]] && grep -q 'not detected' "$t/err.txt"
-check "a launcher failure is reported through the SAME early-fail path as every transport" $? \
+[[ $rc -ne 0 ]] && grep -q 'agent_pane_busy' "$t/err.txt"
+check "a launcher failure keeps ITS diagnostic, not the missing-handle guard's" $? \
+  "rc=$rc stderr=$(cat "$t/err.txt")"
+! grep -q 'launcher bug' "$t/err.txt"
+check "…so the caller is never told 'launcher bug' about herdr's own refusal" $? \
+  "stderr=$(cat "$t/err.txt")"
+
+# The earliest failure of all: the pane split itself was refused, so the dir has
+# neither an agent name nor a pane. Same verdict, and it is the shape the
+# recovery advice in the guard's message would be most wrong about.
+t=$(new_env)
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-w-4 "s" "n" "$t/target"
+rm -f "$cd_path/session_id.txt" "$cd_path/herdr_agent.txt" "$cd_path/herdr_pane.txt"
+echo '{"error":"herdr pane split from w1:p1 failed: pane_not_found"}' > "$cd_path/error.txt"
+touch "$cd_path/done"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" bash "$WAIT_SESSION" "$cd_path" --timeout 3 2>"$t/err.txt"); rc=$?
+[[ $rc -ne 0 ]] && grep -q 'pane_not_found' "$t/err.txt" && ! grep -q 'launcher bug' "$t/err.txt"
+check "a refused pane split is reported as herdr said it, not as a missing handle" $? \
   "rc=$rc stderr=$(cat "$t/err.txt")"
 
 # --- wait-for-response ----------------------------------------------------
