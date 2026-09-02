@@ -379,6 +379,16 @@ else
   fail "…with the call_id and cwd recovery tooling expects beside it" \
        "$(ls -A "$UNDEL_DIR" 2>/dev/null | tr '\n' ' ')"
 fi
+# …and naming its backend, like every other launcher's call dir. A conference is
+# never polled, but a reader of this dir still has to know which host the REPL it
+# describes lives on, and inference from host handles cannot tell it — this dir
+# carries none. (transport-signal_test.sh § 1 pins the polled launchers.)
+if [[ "$(cat "$UNDEL_DIR/transport.txt" 2>/dev/null)" == "cmux" ]]; then
+  pass "…and transport.txt=cmux, so the dir names its backend like every other"
+else
+  fail "…and transport.txt=cmux, so the dir names its backend like every other" \
+       "got: '$(cat "$UNDEL_DIR/transport.txt" 2>/dev/null)' contents: $(ls -A "$UNDEL_DIR" 2>/dev/null | tr '\n' ' ')"
+fi
 # Scoped to THIS run: the old code left these behind on every failure, so a bare
 # glob would report other runs' litter rather than this one's behavior. (There were
 # four of them on this machine when the check was written — the finding was real.)

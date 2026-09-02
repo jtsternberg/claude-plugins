@@ -3,10 +3,10 @@
 # Wait for Session: Poll until the remote session ID is available.
 #
 # Two modes. The launcher names its backend in call_dir/transport.txt ('cmux' or
-# 'headless') and that is read first; a call_dir without it is inferred from its
-# contents exactly as before the signal existed. Either way the cmux SUB-mode
-# (surface vs workspace) is still the host-handle file distinction. See the
-# dispatch block below for the full contract.
+# 'headless') and that is read first; an absent transport.txt names nothing, so
+# the backend is inferred from the call dir's host handles. Either way the cmux
+# SUB-mode (surface vs workspace) is still the host-handle file distinction. See
+# the dispatch block below for the full contract.
 #
 #   Headless mode (transport.txt=headless, or no host handle at all): poll
 #   call_dir/session_id.txt at 1s intervals; cmux-call.sh and

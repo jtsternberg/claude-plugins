@@ -20,8 +20,8 @@ HOTLINE_TRANSPORTS=(cmux herdr headless)
 #
 # Echoes the backend named in <call-dir>/transport.txt, or "" when no backend is
 # named — an absent file (a legacy or hand-staged call dir) or an empty one. Both
-# mean "infer from the host handles, as before the signal existed": a launcher
-# that died between creating the dir and writing the value hands the waiter its
+# mean "this file names nothing, so infer the backend from the host handles": a
+# launcher that died between creating the dir and writing the value hands the waiter its
 # own done+error.txt, and that is a better diagnosis than anything this function
 # could say about a file it never finished writing.
 #
