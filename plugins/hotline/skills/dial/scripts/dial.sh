@@ -685,9 +685,12 @@ fi
 # Keeping the message ON this line would let a long first message push the
 # invocation line past CC's ~800-char collapse threshold and take the `/` down
 # with it — the whole regression.
+ringing_payload() {
+  printf '/hotline:hotline-ringing [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s' \
+    "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE"
+}
 if $FIRST_CONTACT; then
-  SEND_PROMPT=$(printf '/hotline:hotline-ringing [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s' \
-    "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE")
+  SEND_PROMPT=$(ringing_payload)
 else
   SEND_PROMPT="$MESSAGE"
 fi
@@ -703,6 +706,24 @@ printf '%s' "$SEND_PROMPT" > "$SEND_PROMPT_FILE"
 trap 'rm -f "$ERR_FILE" "$SEND_PROMPT_FILE"' EXIT
 
 SESSION_NAME="hotline: $(basename "$MY_CWD") → $(basename "$TARGET_PATH") ($MODE_TAG)"
+
+# A follow-up that ends up launching a FRESH callee is first contact for the callee,
+# whatever it is for the caller. That callee never loaded the ringing skill, so a raw
+# follow-up message lands in it as prose: no STATUS line is ever emitted, and the
+# caller's waiter spends its whole budget on a protocol nobody engaged. cmux never
+# reaches this state — its fresh launch `--resume`s the same session, which already
+# loaded the skill — but herdr cannot re-host a session at all (see fire_herdr), so
+# its reuse→fresh fallback genuinely opens a new conversation.
+#
+# The PROMPT SHAPE and the --name are what change. FIRST_CONTACT is not flipped: it
+# answers "did this dial have a cached session to work from", and this one did — the
+# cache entry is real, and the emitted contract says so.
+RESHAPED_AS_FIRST_CONTACT=false
+reshape_as_first_contact() {
+  RESHAPED_AS_FIRST_CONTACT=true
+  SEND_PROMPT=$(ringing_payload)
+  printf '%s' "$SEND_PROMPT" > "$SEND_PROMPT_FILE"
+}
 
 PLACEMENT_ARGS=()
 case "$PLACEMENT" in
@@ -855,6 +876,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     # A prior exchange over headless (no host at all), or a cmux follow-up that
     # cleared a stale surface ref, leaves nothing to re-target.
     add_fallback "herdr-agent-reuse-skipped(no-cached-host-handle; the fresh callee starts without the prior context)"
+    reshape_as_first_contact
   else
     # The file, never --prompt: same reason as the cmux path (claude-plugins-86ka).
     REUSE=$(bash "$DIAL_SCRIPTS/herdr-reuse-agent.sh" \
@@ -880,6 +902,10 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
     if [[ -n "$REUSE_DIR" ]]; then
       CALL_DIR="$REUSE_DIR"
+      # herdr-reuse-agent.sh's proof tier, forwarded rather than dropped — the cmux
+      # twin above emits it, and a reader comparing two transports cannot tell a
+      # missing field from an unproven delivery.
+      DELIVERY_CONFIRMED=$(jq -r '.confirmed // empty' <<<"$REUSE" 2>/dev/null)
       [[ -s "$CALL_DIR/call_id.txt" ]] && CALL_ID_OUT=$(cat "$CALL_DIR/call_id.txt")
       # The agent is unchanged (that is the point), but bump last_contact /
       # exchange_count and record this turn's nonce.
@@ -892,6 +918,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     # gone, or blocked on input), so a fresh callee is safe. It just will not
     # remember anything.
     add_fallback "herdr-agent-reuse→fresh($(reason_of "$REUSE"); the fresh callee starts WITHOUT the prior context — herdr cannot re-host an existing claude session)"
+    reshape_as_first_contact
     SURFACE_REF=""
   fi
 fi
@@ -1017,7 +1044,10 @@ fire_cmux() {
 # fallback entry says so rather than letting a caller infer continuity.
 fire_herdr() {
   local ARGS=(--cwd "$TARGET_PATH")
-  $FIRST_CONTACT && ARGS+=(--name "$SESSION_NAME")
+  # --name on a reuse→fresh launch too: the agent it starts is a new callee like any
+  # other, and without it herdr names the agent off the cwd slug — the one launch
+  # whose name would not say which call opened it.
+  if $FIRST_CONTACT || $RESHAPED_AS_FIRST_CONTACT; then ARGS+=(--name "$SESSION_NAME"); fi
   [[ -n "$TOOLS" ]] && ARGS+=(--tools "$TOOLS")
   [[ -n "$BOOT_TIMEOUT" ]] && ARGS+=(--boot-timeout "$BOOT_TIMEOUT")
   ARGS+=(--prompt-file "$SEND_PROMPT_FILE")

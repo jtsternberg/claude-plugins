@@ -1754,6 +1754,11 @@ check "…with no superseded-host cleanup: the same agent is reused, so nothing 
 check "…keeping .surface_ref / .remote_session_id / .call_id stable in shape" $? "out=$out"
 [[ "$(jq -r '.fallbacks | length' <<<"$out" 2>/dev/null)" == "0" ]]
 check "…and recording no fallback, because nothing was worked around" $? "out=$out"
+# The proof tier herdr-reuse-agent.sh reported, forwarded like the cmux twin's. A
+# reader comparing the two transports cannot tell a dropped field from a delivery
+# nothing could prove.
+[[ "$(jq -r '.confirmed // "<absent>"' <<<"$out" 2>/dev/null)" == "transcript" ]]
+check "…and forwarding the delivery's proof tier (.confirmed), as the cmux path does" $? "out=$out"
 
 # The RAW message, not the ringing invocation: this session already ran first
 # contact, and re-invoking the slash command would re-run its setup mid-call.
@@ -1811,6 +1816,31 @@ REG="$t/home/.agents-hotline/sessions/caller-dial-1.json"
 [[ "$(conn session_id)" == "$NEW_SID" && "$(conn surface_ref)" == "$NEW_AGENT" ]]
 check "…with the cache re-keyed, so the NEXT follow-up addresses the live callee" $? \
   "registry: $(cat "$REG" 2>/dev/null)"
+
+# THE PAYLOAD IS RE-RENDERED AS FIRST CONTACT. This callee is brand new: it never
+# loaded the ringing skill, so the follow-up-shaped prompt the reuse path would have
+# sent lands as prose — no STATUS line ever emitted, and the caller's waiter spends
+# its whole budget on a protocol nobody engaged. cmux never reaches this state (its
+# fresh launch --resumes the same session); herdr cannot re-host a session at all.
+FRESH_DELIVERED="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/$NEW_SID.jsonl"
+grep -q 'hotline-ringing' "$FRESH_DELIVERED" 2>/dev/null
+check "…and the fresh callee is RUNG: its delivered prompt carries the ringing invocation" $? \
+  "delivered: $(head -c 400 "$FRESH_DELIVERED" 2>/dev/null)"
+grep -q 'and now step 2' "$FRESH_DELIVERED" 2>/dev/null \
+  && grep -q 'MODE: work_order' "$FRESH_DELIVERED" 2>/dev/null
+check "…with the follow-up message and the protocol tags beneath it" $? \
+  "delivered: $(head -c 400 "$FRESH_DELIVERED" 2>/dev/null)"
+# .first_contact still answers "did this dial have a cached session to work from",
+# and this one did. Only the prompt shape and the --name changed.
+[[ "$(jq -r '.first_contact' <<<"$out" 2>/dev/null)" == "false" ]]
+check "…while the emitted first_contact stays false: the cache entry was real" $? "out=$out"
+# --name reaches this launch too. herdr-call-async.sh mints the agent name from the
+# session name when it has one and from the callee's CWD when it does not, so a
+# fallback launch without it produces a bare cwd-slug name — the one agent in
+# `herdr agent list` that does not say which call opened it.
+[[ "$NEW_AGENT" != "hotline-$(basename "$t/target")-"* ]]
+check "…and the launch passes --name, so the new agent is not named off the cwd slug" $? \
+  "agent=$NEW_AGENT (cwd slug would be hotline-$(basename "$t/target")-*)"
 
 # --- a follow-up into a BLOCKED cached agent, THROUGH dial.sh ----------------
 # The orphan the direct-script tests above cannot see: dial.sh used to answer a
