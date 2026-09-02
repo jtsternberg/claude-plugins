@@ -564,6 +564,33 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
 [[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" ]]
 check "a symlinked cwd is confirmed via the REALPATH transcript spelling too" $? "out=$out"
 
+# --- the argv exposure boundary (claude-plugins-bwu1) -----------------------
+# The repo rule is that payloads ride files or stdin, never argv (compounding.md,
+# claude-plugins-86ka). herdr 0.8.0 offers no file or stdin form for a prompt, so
+# this one delivery verb is the documented exception — and an exception is only
+# scoped if its edge is pinned. The payload may appear in the `agent prompt` argv
+# and NOWHERE else: not in a second herdr call, not in the status read that precedes
+# it, not in the JSON this script emits.
+t=$(new_env)
+SID="herdr-argv-1"
+NONCE="cc33dd44ee55ff66"
+TRANS="$t/home/.claude/projects/$(encode_cwd "$t/target")/$SID.jsonl"
+SENTINEL="PAYLOAD-SENTINEL-DO-NOT-LEAK-9f3a"
+printf '[CALL_ID: %s]\n%s\n' "$NONCE" "$SENTINEL" > "$t/payload.md"
+printf '%s' "$SID" > "$t/state/session_id"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_TRANSCRIPT="$TRANS" \
+      bash "$HERDR_PROMPT" --agent hotline-x-argv --payload-file "$t/payload.md" \
+        --call-id "$NONCE" --cwd "$t/target" --session "$SID" 2>/dev/null)
+[[ "$(grep -c "$SENTINEL" "$t/herdr.log" 2>/dev/null)" == "1" ]]
+check "the payload reaches EXACTLY ONE herdr invocation (the argv exception, scoped)" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+[[ "$(grep "$SENTINEL" "$t/herdr.log" 2>/dev/null)" == *"agent prompt"* ]]
+check "…and that one is \`agent prompt\`, the verb with no file or stdin form" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+[[ "$out" != *"$SENTINEL"* ]]
+check "…and never the emitted JSON, which names the payload FILE instead" $? "out=$out"
+
 t=$(new_env)
 printf 'x' > "$t/payload.md"
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \

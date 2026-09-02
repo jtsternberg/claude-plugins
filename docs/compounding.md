@@ -155,10 +155,15 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   that scales with user input through a file upload, choose the threshold from the
   smaller limit, and gate on measured size rather than on the flag you think implies
   bigness. (0affe5f, claude-plugins-dekq)
-- **Payloads ride files or stdin, never argv or env.** argv is `ps`-visible to
-  every local user for the process lifetime. Guard: the hotline suites assert a
-  sentinel never appears in recorded argv — copy that pattern for new launchers.
-  (claude-plugins-86ka)
+- **Payloads ride files or stdin, never argv or env; a CLI with no such form gets
+  its exposure narrowed, not excused.** argv is `ps`-visible to every local user for
+  the process lifetime, and herdr 0.8.0 accepts a prompt only as
+  `agent prompt <TEXT>` / `pane send-text <TEXT>` — so hotline's herdr delivery
+  confines the payload to that one short-lived process and keeps it out of every
+  other call, wrapper and log. Guard: the hotline suites assert a sentinel never
+  appears in recorded argv, and `herdr-transport_test.sh` § 3 pins the herdr
+  exposure to that single invocation — copy both for new launchers.
+  (claude-plugins-86ka, claude-plugins-bwu1)
 - **Each constant has one source; docs point at it rather than restating it.** A
   box-wait "default 60" documented in two files was hardcoded 20 at both call
   sites. Where a doc must state a fact, a string canary asserts agreement — see
