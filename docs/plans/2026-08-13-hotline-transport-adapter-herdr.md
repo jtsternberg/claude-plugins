@@ -143,7 +143,7 @@ Net: the nonce protocol is **not** made redundant by herdr; it is made cheaper t
 Two identities are in play and only one changes.
 
 - **Caller identity** (`MY_SESSION_ID`) — the *caller's* claude session id, resolved by `session-init.sh` from `$CLAUDE_CODE_SESSION_ID`. Transport-independent; unchanged. (herdr injects `$HERDR_*` env, but that identifies the *pane*, not the claude session — do not confuse them.)
-- **Callee session id** (`.remote_session_id`) — the callee's claude session UUID. **Must stay a claude session id, not a herdr agent name**, because the whole filesystem response channel (`transcript-path.sh` → `~/.claude/projects/<cwd>/<session>.jsonl`) depends on it. This requires that `agent start … -- --session-id <uuid>` passthrough works so we can preset it exactly as cmux does (open question O1). If herdr will not let us preset the session id, Phase 1 must derive it another way (parse `agent get`/`agent read`, or read the newest transcript under the cwd) before the transcript reader can run — a real risk to flag.
+- **Callee session id** (`.remote_session_id`) — the callee's claude session UUID. **Must stay a claude session id, not a herdr agent name**, because the whole filesystem response channel (`transcript-path.sh` → `~/.claude/projects/<cwd>/<session>.jsonl`) depends on it. `agent start … -- --session-id <uuid>` passthrough works (§9 O1), so the callee's id is preset exactly as cmux does it, before the callee boots. `agent start` also reports the session id it observed; that observation is authoritative where it differs from the preset, so a passthrough regression surfaces as a recorded mismatch rather than a transcript path that misses in silence.
 
 **Session cache (`session-cache.sh`).** Today it stores `session_id` (claude) + `surface_ref` (an opaque cmux host handle) + `last_call_id`. The `surface_ref` key already documents itself as "opaque handle." Generalize its *meaning* without renaming it (backward compat): for herdr it holds the **herdr agent name** (the durable re-target key), optionally with the pane id. Add nothing if we can avoid it; the follow-up path just needs "the durable handle to re-address this live callee," and `agent prompt <name>` needs only the name.
 
@@ -178,7 +178,7 @@ This is also why the answer to "does herdr let us drop the nonce scraping?" is *
 
 ## 9. Open questions (verify before/while building)
 
-- **O1 — session-id passthrough.** Does `herdr agent start --kind claude … -- --session-id <uuid> --allowedTools=<…> --dangerously-skip-permissions` pass those flags to the underlying `claude`? The transcript-path derivation (§6) depends on presetting the id. If not, how do we learn the callee's session id early?
+- **O1 — session-id passthrough. RESOLVED (verified live on herdr 0.8.0).** `herdr agent start --kind claude … -- --session-id <uuid> --allowedTools=<…> --dangerously-skip-permissions` passes those flags through to the underlying `claude` verbatim, so the transcript-path derivation (§6) gets an id preset before the callee boots. `agent start` additionally reports the session id it observed, and the herdr backend treats that observation as authoritative when it disagrees with the preset — a passthrough regression then lands as a recorded mismatch instead of a transcript path that reads nothing for the whole call.
 - **O2 — readiness vs our session.** `agent start` blocks until *an* agent is detected ready (~30s). Does that guarantee the specific session we launched is up and its input box is drawn (the thing `wait-for-session.sh` signal C proves), or just that a claude process started? A paste into a not-yet-ready REPL is the one failure cmux went to great lengths to prevent.
 - **O3 — `agent prompt --wait --until` mapping.** Does `--until done`/`blocked`/`idle` settle reliably for a callee that emits the ringing protocol, and does `agent_prompt_stalled` (~5s) fire on a callee merely thinking? Need the state timeline for a real ringing exchange.
 - **O4 — resume / re-target semantics.** For follow-ups, is `agent prompt <name>` into the persisted agent always correct, or is there a case needing `claude --resume`? Confirm named agents survive the events we care about (detach, lid, SSH-drop) *and* that `agent get`/`list` reports liveness we can trust.
@@ -219,14 +219,14 @@ Land the remote-transcript reader from O5 so `--remote` gets full structured res
 
 ## 12. Deviations (as shipped)
 
-Two places where the shipped code reads differently from the sections above.
+Four places where the shipped code reads differently from the sections above.
 
-**Transport scripts are flat, not nested (§10, Phase 0).** `skills/dial/scripts/`
-holds `cmux-*`, `herdr-*` and `headless-*` side by side; there is no
-`transports/<backend>/` subtree. The prefix carries the grouping a directory
-would, and it keeps every backend's scripts one segment deep under
-`${CLAUDE_SKILL_DIR}/scripts/` — the path each `SKILL.md` block, `allowed-tools`
-matcher and sibling script resolves through.
+**Transport scripts are flat, not nested (§10, Phase 0).** As of Phase 1
+(PR #20), `skills/dial/scripts/` holds `cmux-*`, `herdr-*` and `headless-*` side
+by side; there is no `transports/<backend>/` subtree. The prefix carries the
+grouping a directory would, and it keeps every backend's scripts one segment
+deep under `${CLAUDE_SKILL_DIR}/scripts/` — the path each `SKILL.md` block,
+`allowed-tools` matcher and sibling script resolves through.
 
 **A transport this hotline has no verbs for is refused, not degraded (§2.1, §4
 step 2).** A `transport.txt` naming a backend outside `HOTLINE_TRANSPORTS`
@@ -244,3 +244,24 @@ before. That is what preserves the handle-less-cmux carve-out — `transport.txt
 is written with the call dir, well before a host is placed, so a launcher that
 dies in between hands the waiter a dir whose own `error.txt` only the file-watch
 path reports.
+
+**An explicit `--transport herdr` whose preflight fails is an error, not a
+degrade (§4 step 2, §11 constraint 2).** `dial.sh` step 3 emits a `transport`
+error carrying `check-herdr.sh`'s own reason and recovery; no `.fallbacks` entry
+is written, because nothing was fallen back to. Headless is the wrong degrade
+target for this particular ask: it has no live host to follow up into at all, so
+it answers a request for a callee that survives disconnect with one that cannot
+be re-addressed even while it runs. The universal headless fallback is
+untouched — it remains the degrade target of the cmux chain, which is every dial
+that names no transport.
+
+**`HOTLINE_TRANSPORT=herdr` env selection is not shipped (§4 step 4).** The
+shipped precedence is three steps: `--headless`/`HOTLINE_FORCE_HEADLESS` →
+headless, explicit `--transport herdr` → herdr or error, otherwise cmux with its
+existing degrade chain. Nothing reads a `HOTLINE_TRANSPORT` variable, and §10
+placed step 4 in Phase 1, so it is dropped rather than deferred to a later
+phase. `--transport herdr` reaches every case the step was for, and it does so at
+the call rather than from the ambient environment — the same reason §4 gives for
+refusing to let `HERDR_ENV=1` select a transport applies to a variable one
+settings file further away. A caller who wants a standing herdr default puts it
+in a wrapper around `dial.sh`, where it is visible to whoever reads the call.
