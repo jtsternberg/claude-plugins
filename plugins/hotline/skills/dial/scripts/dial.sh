@@ -640,7 +640,7 @@ fi
 if [[ "$TRANSPORT" == "herdr" ]] && ! $FIRST_CONTACT; then
   emit_error transport \
     "herdr Phase 1 is first-contact only, and $TARGET_PATH already has a cached session for this caller (${REMOTE_SESSION_ID:-unknown})" \
-    "Continue that conversation over cmux (drop --transport herdr). To start a FRESH herdr callee instead, drop this target's entry from ~/.agents-hotline/sessions/${MY_SESSION_ID}.json (its .connections[\"$TARGET_PATH\"]) and re-dial — that loses the prior context, which is why it is not done for you. Following up INTO a live herdr agent is Phase 2."
+    "Continue that conversation over cmux (drop --transport herdr) — but if that session is hosted by a herdr agent, CLOSE IT FIRST (\`herdr pane close \$(cat <call_dir>/herdr_pane.txt)\`, or \`herdr agent list\` to find it): a cmux follow-up plain-resumes the session, so a live herdr REPL on it leaves two claude processes appending to one transcript (claude-plugins-7wze.11). To start a FRESH herdr callee instead, drop this target's entry from ~/.agents-hotline/sessions/${MY_SESSION_ID}.json (its .connections[\"$TARGET_PATH\"]) and re-dial — that loses the prior context, which is why it is not done for you. Following up INTO a live herdr agent is Phase 2."
 fi
 
 # Resume/fork semantics for the launchers:
