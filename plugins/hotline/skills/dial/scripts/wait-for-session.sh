@@ -416,11 +416,26 @@ if $CMUX_MODE; then
   exit 0
 fi
 
-# A herdr call dir must carry its host handle. The agent NAME is the only way to
-# address the callee for delivery and for the response gate, so a herdr dir without
-# one is a launcher bug — the same class of check as the cmux preset above, and
-# worth failing loudly here rather than letting the delivery step report a missing
-# --agent it could not have supplied.
+# A launcher that already reported its own failure gets to keep the diagnosis.
+# herdr-call-async.sh writes herdr_agent.txt only after `agent start` succeeds, so
+# every launch failure BEFORE that point (pane split refused, no pane id, agent
+# start failed) hands this script a done+error.txt dir with no agent name. Checked
+# ahead of the missing-handle guard below, or those three paths — herdr's real
+# diagnostic, `agent_pane_busy` among them — get reported as a hotline launcher bug
+# instead.
+#
+# herdr only: headless writes session_id.txt mid-stream and can fail AFTER it, and
+# for that call the session id is the honest answer here — the failure is
+# wait-for-response.sh's to report. No herdr failure path reaches session_id.txt.
+if $HERDR_MODE; then
+  check_early_fail
+fi
+
+# A herdr call dir that got PAST the launcher must carry its host handle. The agent
+# NAME is the only way to address the callee for delivery and for the response gate,
+# so a herdr dir with neither an agent name nor an error is a launcher bug — the same
+# class of check as the cmux preset above, and worth failing loudly here rather than
+# letting the delivery step report a missing --agent it could not have supplied.
 if $HERDR_MODE && [[ ! -s "$CALL_DIR/herdr_agent.txt" ]]; then
   echo "herdr call_dir missing herdr_agent.txt — launcher bug (nothing can address the callee without the agent name)" >&2
   exit 1
