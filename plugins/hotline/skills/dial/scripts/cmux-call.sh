@@ -307,6 +307,11 @@ if [[ -n "$PROMPT" ]]; then
   # HOTLINE_CALL_HOME overrides the base dir (default /tmp) so test suites can own
   # and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
   CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
+  # Which backend owns this call dir. A conference REPL is a cmux surface like any
+  # other, and recovery tooling reads this dir the same way — so it names its
+  # backend even though nobody polls a conference. See wait-for-session.sh's
+  # dispatch block for the contract.
+  echo cmux > "$CALL_DIR/transport.txt"
   PASTE_PROMPT="$CALL_DIR/pending_paste.md"
   ( umask 077; printf '%s' "$PROMPT" > "$PASTE_PROMPT" )
   chmod 600 "$PASTE_PROMPT" 2>/dev/null || true

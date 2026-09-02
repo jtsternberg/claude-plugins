@@ -3,10 +3,10 @@
 # Wait for Response: poll until an async hotline call completes.
 #
 # Two modes. The launcher names its backend in call_dir/transport.txt ('cmux' or
-# 'headless') and that is read first; a call_dir without it is inferred from its
-# contents exactly as before the signal existed. The cmux SUB-mode (surface vs
-# workspace) is still the host-handle file distinction either way — see the
-# dispatch block below, and wait-for-session.sh for the full contract.
+# 'headless') and that is read first; an absent transport.txt names nothing, so
+# the backend is inferred from the call dir's host handles. The cmux SUB-mode
+# (surface vs workspace) is still the host-handle file distinction either way — see
+# the dispatch block below, and wait-for-session.sh for the full contract.
 #
 #   Headless mode (transport.txt=headless, or no host handle at all): poll
 #   call_dir/done at 2s intervals. headless-call-async.sh's own poller writes
