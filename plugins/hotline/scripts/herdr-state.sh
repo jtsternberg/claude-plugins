@@ -48,12 +48,9 @@
 #     is idle+done+blocked, and that is what herdr_settled_states names.
 # =============================================================================
 
-# THE SAME VERBS, OPTIONALLY ON ANOTHER BOX. `HOTLINE_HERDR_REMOTE=<ssh-target>`
-# makes every call below run as `ssh <target> herdr …` against THAT box's own local
-# server, which is the only way a remote callee can be driven at all: herdr's own
-# `--remote` attaches the interactive TUI and rejects every subcommand. The ssh
-# mechanics live in herdr-remote.sh; the point of routing them through herdr_cli is
-# that no verb, no preflight and no waiter has to be written twice.
+# THE SAME VERBS, OPTIONALLY ON ANOTHER BOX: `HOTLINE_HERDR_REMOTE=<ssh-target>`
+# routes every call below through herdr-remote.sh, whose header carries why an ssh
+# hop and not herdr's own `--remote`.
 HOTLINE_HERDR_STATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./herdr-remote.sh
 source "$HOTLINE_HERDR_STATE_DIR/herdr-remote.sh"

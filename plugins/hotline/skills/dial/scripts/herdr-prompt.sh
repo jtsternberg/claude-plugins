@@ -99,14 +99,9 @@
 # "sub-second". Accepted for Phase 1 and documented; revisit if herdr grows a
 # file-based prompt form.
 #
-# ON A REMOTE DIAL THAT EXPOSURE STAYS ON THE REMOTE BOX AND ONLY THERE. Every
-# herdr call here runs as `ssh <target> herdr …` (herdr-state.sh's dispatch), and
-# the payload-carrying one runs a FIXED remote command that reads stdin —
-# `herdr agent prompt <name> "$(cat)"` with the file on ssh's stdin — so the bytes
-# never enter the LOCAL ssh process's argv. Substituting them into the ssh command
-# line would have moved the sub-second `ps` window from the box that is running the
-# work order to the box the caller shares with other users, which is strictly worse:
-# it re-opens 86ka here in order to honour it over there.
+# ON A REMOTE DIAL that exposure stays on the remote box and only there, because the
+# payload rides ssh's stdin rather than the local ssh's argv — see herdr_cli_stdin in
+# herdr-state.sh for why that direction and not the other.
 #
 # THE OTHER TWO REMOTE DIFFERENCES are both about where the proof lives: the
 # transcript candidates are REMOTE paths (derived from the remote $HOME and the
