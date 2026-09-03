@@ -309,7 +309,7 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   `HOTLINE_HERDR_PANE=<pane-id>`.
 - Recovery: fix the one it named, or drop `--transport herdr` to use the cmux default.
 
-**`stage: args`/`transport` — "supports --placement side and detached, not window" / "cannot adopt an existing session (--resume)" / "--remote is not implemented"**
+**`stage: args` — "supports --placement side and detached, not window" / "cannot adopt an existing session (--resume)" / "--remote is not implemented"**
 - Not a malfunction: these are herdr's remaining boundaries, and each message names
   what is actually missing. `--window` has no herdr implementation at all — hotline
   splits a pane and never creates herdr workspaces or tabs, so there is no window to
