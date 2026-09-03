@@ -309,13 +309,17 @@ if $CMUX_MODE; then
       # and the dialog's default option is `No, exit`, which is exactly what a
       # payload pasted into it would have answered.
       #
+      # The WORDING lives in repl-state.sh, because cmux-paste.sh's --wait-box loop
+      # makes this same refusal for a conference call, which never reaches this wait.
+      #
       # THE LIVE TAIL, not the 9999-line capture this read is: a dialog answered in
       # this surface minutes ago is still in scrollback, and matching that would
       # refuse a boot that is going fine. Same reason the input-box check below is
       # tail-scoped.
       if repl_trust_dialog_present \
            "$(repl_screen_tail "$CLEAN" "$HOTLINE_BOX_TAIL_LINES")"; then
-        echo "Claude Code's startup TRUST DIALOG is on screen in cmux ${REF} for ${RECV_CWD:-the callee cwd} — trust that directory (run \`claude\` in it once and answer 'Yes, I trust this folder'), then re-dial. NOTHING WAS DELIVERED: the prompt is pasted in a later step, so the callee has received nothing and re-dialing is safe. The dialog takes keystrokes and its default option is 'No, exit', so a payload sent into it would have answered that and killed the callee. HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover this gate — directory trust is not a permission mode. Read the pane with: cmux read-screen ${READ_FLAG} ${REF} --scrollback --lines 80." >&2
+        repl_trust_dialog_refusal "$READ_FLAG" "$REF" "${RECV_CWD:-}" >&2
+        echo >&2
         exit 1
       fi
       if echo "$CLEAN" | grep -qE 'Claude Code v|Welcome back'; then
