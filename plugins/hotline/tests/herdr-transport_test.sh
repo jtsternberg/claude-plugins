@@ -2743,6 +2743,34 @@ grep -q 'cat "\$p"' "$t/ssh.log"
 check "…fetched with one \`cat\` over the already-authenticated hop" $? \
   "ssh hops: $(cat "$t/ssh.log" 2>/dev/null | tail -2)"
 
+# THE FETCH HOP IS FILTERED TOO, and it is the one hop where a notice line is not
+# merely misparsed but FATAL: its stdout becomes the mirror, transcript-extract.sh
+# slurps the whole mirror with `jq -s`, and one `# Tailscale SSH requires…` line
+# makes that fail — which the waiter reports as a read error and exits 1 on. A
+# delivered answer, reported as a failure, on any box whose tailnet is in check mode.
+t=$(remote_env)
+mkdir -p "$t/remote-home"
+cd_path=$(mktemp -d "$HOTLINE_CALL_HOME/hotline-call-XXXXX")
+echo herdr             > "$cd_path/transport.txt"
+echo p3b-remote-agent  > "$cd_path/herdr_agent.txt"
+echo "$RTARGET"        > "$cd_path/remote_target.txt"
+echo "$t/target"       > "$cd_path/cwd.txt"
+echo remote-sess-2     > "$cd_path/session_id.txt"
+echo rmt-nonce-7       > "$cd_path/call_id.txt"
+transcript_with \
+  "$t/remote-home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/remote-sess-2.jsonl" \
+  rmt-nonce-7 WORK_COMPLETE "answered through the check-mode notice"
+out=$(wcheck "$t" "HERDR_STUB_AGENT_ANY=1" "HOTLINE_POLL_SLEEP=0" \
+        "SSH_STUB_HOME=$t/remote-home" "SSH_STUB_TAILSCALE=1" \
+        -- "$WAIT_RESPONSE" "$cd_path" --timeout 20); rc=$?
+[[ $rc -eq 0 && "$(jq -r '.response' <<<"$out" 2>/dev/null)" == *"answered through the check-mode notice"* ]]
+check "a Tailscale check-mode notice on the FETCH hop does not fail a delivered answer" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+[[ -s "$cd_path/remote_transcript.jsonl" ]] \
+  && ! grep -qv '^{' "$cd_path/remote_transcript.jsonl"
+check "…because the mirror holds JSONL lines only, the notice stripped on the way in" $? \
+  "mirror: $(head -3 "$cd_path/remote_transcript.jsonl" 2>/dev/null | cut -c1-60)"
+
 # remote_target.txt is the ONLY thing that tells this separate process the agent
 # lives elsewhere. Without it the LOCAL herdr is asked, answers "no such agent",
 # and the waiter reports a working callee as dead — so its absence must not be

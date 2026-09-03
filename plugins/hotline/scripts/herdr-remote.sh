@@ -354,9 +354,13 @@ hotline_remote_transcript_candidates() {  # <remote-cwd> <session-id>
 #   0 — fetched; <local-dest> holds the transcript and stdout names its origin
 #   1 — none of them exists yet (or the hop failed; HOTLINE_REMOTE_ERR says)
 #
-# `cat` over ssh rather than scp/rsync: one already-authenticated channel, no
-# second tool to require on either end, and the transcript is append-only JSONL
-# whose partial tail the extractor already tolerates (it reads whole lines).
+# `cat` over ssh rather than scp/rsync: one already-authenticated channel and no
+# second tool to require on either end. The transcript is append-only JSONL written
+# a whole line at a time, so a fetch that catches a half-written last line is
+# unlikely — and NOT tolerated when it happens: transcript-extract.sh slurps the
+# whole mirror with `jq -s`, which fails on a truncated line, and
+# wait-for-response.sh treats that rc=1 as a read error and exits 1 rather than
+# re-reading on its next slice. Unlikely, then, is the whole of the protection.
 hotline_remote_fetch_transcript() {  # <local-dest> <remote-path>...
   local dest="$1"; shift
   [[ $# -eq 0 ]] && return 1
@@ -374,13 +378,21 @@ hotline_remote_fetch_transcript() {  # <local-dest> <remote-path>...
   [[ -n "$HOTLINE_REMOTE_CONTROL_PATH" ]] && \
     opts+=(-o ControlMaster=auto -o "ControlPersist=$HOTLINE_REMOTE_SSH_PERSIST"
            -o "ControlPath=$HOTLINE_REMOTE_CONTROL_PATH")
-  err_file=$(mktemp)
-  timeout "$budget" ssh -n "${opts[@]}" "$target" "$cmd" >"$dest" 2>"$err_file"
+  local raw_file
+  err_file=$(mktemp); raw_file=$(mktemp)
+  # Via a temp rather than straight into the mirror, because the notice filter
+  # below has to run BETWEEN ssh and the file — and because a filter in the
+  # pipeline would put grep's status where pipefail can read it as the hop's.
+  timeout "$budget" ssh -n "${opts[@]}" "$target" "$cmd" >"$raw_file" 2>"$err_file"
   rc=$?
   local chosen
   chosen=$(grep -o '^/[^[:space:]]*\.jsonl' "$err_file" 2>/dev/null | head -1 || true)
+  local url
+  url=$(grep -ho 'https://login\.tailscale\.com/[^[:space:]]*' "$raw_file" "$err_file" 2>/dev/null | head -1 || true)
+  [[ -n "$url" ]] && HOTLINE_REMOTE_AUTH_URL="$url"
   rm -f "$err_file"
   if [[ $rc -ne 0 || -z "$chosen" ]]; then
+    rm -f "$raw_file"
     HOTLINE_REMOTE_RC=$rc
     if [[ $rc -eq 124 || $rc -eq 137 ]]; then
       HOTLINE_REMOTE_ERR="fetching the remote transcript from $target timed out after ${budget}s"
@@ -394,6 +406,15 @@ hotline_remote_fetch_transcript() {  # <local-dest> <remote-path>...
     : > "$dest"
     return 1
   fi
+  # THE SAME FILTER EVERY OTHER HOP APPLIES, for a harder reason: this stream is not
+  # parsed here, it BECOMES the file transcript-extract.sh slurps. One Tailscale
+  # check-mode notice line in the mirror makes its `jq -s` fail, and
+  # wait-for-response.sh reports that rc=1 as a read error and exits 1 — a delivered
+  # answer reported as a failure. Whole JSONL lines only, therefore, on the way in.
+  grep -v -e '^# Tailscale SSH requires an additional check' \
+          -e '^To authenticate, visit https://login\.tailscale\.com/' \
+       "$raw_file" > "$dest" 2>/dev/null || true
+  rm -f "$raw_file"
   printf '%s' "$chosen"
   return 0
 }
