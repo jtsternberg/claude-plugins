@@ -309,9 +309,12 @@ an explicit non-herdr `--transport` alongside it is an **args error** rather tha
 silent win for either flag (both were typed on purpose, and remote hosting is
 herdr-only), and `--remote` **defaults placement to detached** when the caller typed
 none. The second is not an override: an explicit `--placement side` alongside
-`--remote` still gets herdr's ordinary detached-only refusal. Refusing a *bare*
-`--remote` for a placement it could never have had teaches the caller nothing, since
-nothing on another box can appear in this window.
+`--remote` is refused. That refusal is `--remote`'s own, and only because Phase 3a
+lifted herdr's detached-only rule — locally, side and detached are the same launch
+and differ only in the word `.placement` reports, so herdr now accepts both, while a
+pane on another box is beside nothing here. Refusing a *bare* `--remote` for a
+placement it could never have had would teach the caller nothing, since nothing on
+another box can appear in this window.
 
 The selection is resolved **before** the herdr validation block rather than inside
 it, which is what makes a bare `--remote` inherit every herdr refusal — conference,

@@ -333,6 +333,13 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
 - Recovery: drop `--transport` (`--remote <target>` alone is the whole invocation),
   or drop `--remote` to dial that transport locally.
 
+**`stage: args` — "--remote hosts the callee on another box, so it is detached only"**
+- The one placement refusal `--remote` owns rather than inherits. A local herdr dial
+  accepts `--placement side` because side and detached are the same launch there; a
+  pane on another box is beside nothing here, so reporting `side` for it would be
+  false. A *bare* `--remote` is not refused — it defaults to detached.
+- Recovery: drop `--placement side`, or drop `--remote` to dial side-by-side here.
+
 **`stage: fire` — "herdr pane split failed" / "herdr agent start failed" / "interactive_ready:false"**
 - The pane opened but no claude was detected in it, or herdr said it is not ready for
   input. `error.txt` in the call dir carries herdr's own diagnostic, and the pane has

@@ -151,6 +151,7 @@ conference mode both work here.
 | `--placement window` / `--window <ref>` | refused — hotline creates no herdr workspaces or tabs, so there is no window to place a callee in. Not a phase gate; a feature nobody has built |
 | `--resume <someone-else's-session-id>` | refused — herdr hosts a callee it *starts*, with a session id hotline presets so the transcript is readable; `claude --resume` cannot take that preset. Continuing a session **you** dialed needs no flag (see below) |
 | `--remote <ssh-target>` | supported — see below. Implies `--transport herdr` and, unless a placement was typed, `--detached` |
+| `--remote` with an explicit `--placement side` | refused — a pane on another box is beside nothing here. Side placement is accepted for a *local* herdr dial only |
 | `--remote` with `--transport cmux`/`headless` | refused — remote hosting is herdr-only; a cmux surface lives in this machine's window server and `claude -p` is a local process |
 
 **Follow-ups need no flag and no surface machinery.** Re-dial the same target with

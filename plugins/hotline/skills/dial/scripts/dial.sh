@@ -307,6 +307,15 @@ if [[ -n "$REMOTE_TARGET" ]]; then
   esac
   if ! $PLACEMENT_REQUESTED && ! $WINDOW_REQUESTED; then
     PLACEMENT="detached"
+  # An explicit `--placement side` is the one placement --remote has to refuse
+  # itself. Locally, side and detached are the SAME herdr launch and differ only in
+  # the word `.placement` reports, so herdr accepts both — but a pane on another box
+  # is beside nothing here, and reporting `side` for it would be the lie that
+  # acceptance is made of. (`--placement window` needs no clause: herdr refuses it
+  # for both arms, since hotline creates no herdr workspaces or tabs anywhere.)
+  elif [[ "$PLACEMENT" == "side" ]]; then
+    emit_error args "--remote hosts the callee on another box, so it is detached only" \
+      "A herdr pane on $REMOTE_TARGET cannot sit beside your own. Drop --placement side (--remote defaults to detached), or drop --remote to dial side-by-side here."
   fi
 fi
 
