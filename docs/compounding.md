@@ -152,11 +152,14 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   `resolve-workspace.sh` validates a path with `realpath`, reverse-looks-up the local
   session cache and consults the local dirmap — so given a `--remote` target it either
   refuses a good dial ("Path does not exist") or, when a same-named directory happens
-  to exist here, resolves the LOCAL one and dials a callee into the wrong tree. When a
-  transport gains a remote mode, list every step that reads the filesystem, the
-  environment or a local index, and re-ask each of them on the far side; canonicalize
-  there too, or the cache key stops matching the `cwd.txt` the launcher wrote and every
-  follow-up starts a second callee. (claude-plugins-7wze.8, 2a4cc64)
+  to exist here, resolves the LOCAL one and dials a callee into the wrong tree. The
+  transcript reader is the same shape one layer down: Claude Code encodes the cwd it
+  RESOLVED, so a `$HOME` or a realpath taken from here names a file the callee never
+  wrote — and canonicalizing on the wrong side also stops the cache key matching the
+  `cwd.txt` the launcher wrote, after which every follow-up starts a second callee.
+  When a transport gains a remote mode, list every step that reads the filesystem, the
+  environment or a local index, and re-ask each of them on the far side.
+  (claude-plugins-7wze.8, claude-plugins-7wze.10, 2a4cc64)
 - **A wrapped CLI's chatter stays out of every captured JSON.** `gws` prints
   "Using keyring backend" to stderr and hotline hit the same class from stdout, so
   a `2>&1` capture yields a file that looks fine and fails every parse downstream.
@@ -174,11 +177,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
 - **Payloads ride files or stdin, never argv or env; a CLI with no such form gets
   its exposure narrowed, not excused.** argv is `ps`-visible to every local user for
   the process lifetime, and herdr 0.8.0 accepts a prompt only as
-  `agent prompt <TEXT>` / `pane send-text <TEXT>` — so hotline's herdr delivery
-  confines the payload to that one short-lived process and keeps it out of every
-  other call, wrapper and log. Guard: the hotline suites assert a sentinel never
-  appears in recorded argv, and `herdr-transport_test.sh` § 3 pins the herdr
-  exposure to that single invocation — copy both for new launchers.
+  `agent prompt <TEXT>` / `pane send-text <TEXT>` — so hotline's local herdr delivery
+  confines the payload to that one short-lived process, and a hop to another box puts
+  it back on stdin (a fixed remote `herdr agent prompt <name> "$(cat)"` with the file
+  on ssh's stdin), because the LOCAL ssh's argv is one more place it must not appear.
+  Guard: the hotline suites assert a sentinel never appears in recorded argv, and
+  `herdr-transport_test.sh` pins the local exposure to that single invocation (§ 3)
+  and the remote form to stdin (§ 9) — copy all three for new launchers.
   (claude-plugins-86ka, claude-plugins-bwu1)
 - **Each constant has one source; docs point at it rather than restating it.** A
   box-wait "default 60" documented in two files was hardcoded 20 at both call
@@ -240,13 +245,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   bottom-of-screen gate bug and broke 31 cases the moment a correct fix landed. Prove
   a fixture change is neutral by running the suite at the prior commit with only the
   fixture overlaid, in both orderings (180/180). (claude-plugins-r465, 8c04c1d)
-  The same rule reaches a fixture's AMBIENT state, not only its content: a
+  The same rule reaches a fixture's AMBIENT state, not only what it draws: a
   same-machine stub for a REMOTE transport shares `$HOME`, the filesystem and the
-  caller's environment with the local side, so "ask the remote box for its `$HOME`"
-  and "assume the caller's" are indistinguishable — two mutations that deleted the
-  ssh hop entirely still passed. Give the simulated far side its own value for
-  whatever dimension is under test, and withhold the env var the code is supposed to
-  read from a file. (claude-plugins-7wze.8, 2a4cc64)
+  caller's environment with the local side, so "ask the far box for its `$HOME`" and
+  "assume the caller's" are indistinguishable and a mutation deleting the hop passes.
+  Give the simulated far side its own value for every dimension under test, and
+  withhold from the environment whatever the code is meant to read from a file.
+  (claude-plugins-7wze.8, 2a4cc64)
 
 ## Process
 
