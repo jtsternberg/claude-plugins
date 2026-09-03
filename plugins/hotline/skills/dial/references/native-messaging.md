@@ -1,41 +1,42 @@
 # Native Cross-Session Messaging (fast path)
 
-SKILL.md sent you here to decide one thing before the launch flow: **is this a
-lightweight message to a session that's *already running*?** If yes, you deliver it
-through Claude Code's native cross-session messaging and never launch a callee. If not,
-you go back and dial normally. This file is that decision *and* the mechanics.
+SKILL.md sent you here because the user's own words named a session that is *already
+running* and the message is one that session can answer from where it sits. This file is
+the mechanics of delivering it through Claude Code's native cross-session messaging
+(`ListAgents` + `SendMessage`, Claude Code ≥ 2.1.224, macOS/Linux) — and the fallback
+when the live sessions don't match.
 
 **This path is Claude Code only.** Codex has no `ListAgents`/`SendMessage`. If you're
 running under Codex, stop reading — use the normal dial flow in SKILL.md, which
 launches a session and works from any harness.
 
-Claude Code ships a native way for one session to message another
-(`ListAgents` + `SendMessage`, Claude Code ≥ 2.1.224, macOS/Linux). When the target
-is a **live** session, this is dramatically simpler and more robust than hotline's
+When the target is a live session, native is dramatically simpler than hotline's
 launch-and-scrape transport: no workspace resolution, no caller-identity resolution,
-no cmux surface, no `read-screen` polling. You just address the running session by
-name and send it text.
+no cmux surface, no `read-screen` polling. You address the running session by name and
+send it text.
 
-## When this path applies (all must hold)
+## The gate lives in SKILL.md — re-check it before step 1
 
-1. **The target is a session the user already has running** — phrasings like "my other
-   session", "the other terminal", "the session working on X", "the frontend one that's
-   running" — **not** a project/workspace that may be cold. Native reaches only sessions
-   that show up in `ListAgents`, on this machine (delivery for messages *you initiate*
-   is same-machine only; cross-machine / web sessions are reply-only — you cannot open a
-   conversation with them).
-2. **The request is a lightweight message or quick question**, not an autonomous work
-   order that needs its own spawned session, and not a "pair with me" conference call.
-   Handing a peer a fact ("migration's done, main is safe to rebase"), nudging it, or
-   asking it something it can answer from where it already is — those fit. "Draft the
-   about page and report back" does not; that wants a launched, observable callee.
+Native applies only when **all** of these hold. If any fails, go back to SKILL.md's
+"The one command" and dial normally — without calling `ListAgents`.
+
+1. **The user named a running session**, in their own words: "my other session", "the
+   session working on X", "the terminal/tab that's …", a `ListAgents` name they've
+   seen, a `/rename`d name, or a reply to a `<cross-session-message>` you received.
+   A workspace/project/folder name ("dial monorepo", "call dotfiles") is a launch,
+   even though `ListAgents` will usually list sessions in that folder — hotline's own
+   callees live there, so those matches are expected noise, not evidence.
+2. **The message is a lightweight ping or quick question** the session answers from
+   what it already has in front of it — "migration's done, main is safe to rebase",
+   "what branch are you on?". Anything it must fetch, read, or do (a URL, an issue, a
+   file, "draft the about page") is a work order: launch it, so it gets a surface, a
+   transcript, and a switchboard entry.
 3. **You are not dialing by a raw session ID.** A session ID is hotline's
-   fork-a-transcript path (`dial.sh --resume`), not a `ListAgents` name. Keep those on the
-   normal flow.
+   fork-a-transcript path (`dial.sh --resume`), not a `ListAgents` name.
+4. **Not a conference call.** "Pair with me" wants a launched, observable callee.
 
-**If this isn't the shape** — a cold/unknown target, a work order, a conference call, or
-a session-ID dial — **return to SKILL.md's "The one command" and dial normally.** The `ListAgents` check in step 1 below is the hard backstop: if nothing live
-matches, you fall back there too, so it's fine to err toward reading on.
+`ListAgents` is step 1 of *delivery*, not a way to decide whether native applies. The
+user's phrasing decides; in doubt, launch.
 
 ## The algorithm
 
@@ -51,13 +52,11 @@ Compare the user's reference (their exact words for the target — "my other ses
 folder-derived slugs (e.g. `myapp-3f`) unless the user set one with `/rename`.
 
 - **Exactly one confident live match** → go to step 3.
-- **More than one plausible match**, or a live match *and* it's genuinely unclear
-  whether the user wants to message the running session vs. launch a fresh call →
-  **ask** with `AskUserQuestion`. Put the candidates (or the native-vs-launch choice)
-  as options; don't guess when the wrong pick messages the wrong session.
-- **No live match** → this wasn't a native case after all. Say so briefly and fall
-  back to the normal launch flow — **SKILL.md's "The one command"**. Do not invent
-  a name.
+- **More than one plausible match** → **ask** with `AskUserQuestion`, candidates as
+  options. Don't guess when the wrong pick messages the wrong session.
+- **No live match** → the session the user meant isn't reachable here. Say so briefly
+  and fall back to the normal launch flow — **SKILL.md's "The one command"**. Do not
+  invent a name.
 
 ### 3. Send
 
@@ -102,6 +101,9 @@ so it lands in a surface and on the switchboard.
   native is the wrong tool — launch a call instead.
 - **Same filesystem required** for same-machine delivery. Two sessions in different
   containers can't reach each other even on one host.
+- **You can only open a conversation with a same-machine session.** Cross-machine and
+  web sessions are reply-only: you may answer one that messaged you, but you cannot
+  initiate. If the session the user means lives elsewhere, launch instead.
 - **Message caps / loops.** A session holds at most ~100 undelivered messages, and
   repeated identical sends in a short window are dropped as loop protection. Don't
   retry-spam a send; if it didn't land, report that rather than looping.

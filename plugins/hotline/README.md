@@ -52,19 +52,20 @@ Hotline reverse-looks up the session ID to find the workspace from the transcrip
 
 ### Messaging a Session That's Already Running (native fast path)
 
-Some calls don't need hotline to launch anything. If the target is a Claude Code
-session you *already have open* and you just want to hand it a fact or ask it something
-quick — "tell my other session the migration finished," "ask the session working on the
-frontend what port it's on" — hotline routes through Claude Code's **native
+Some calls don't need hotline to launch anything. When you name a Claude Code session
+you *already have open* — "tell my other session the migration finished," "ask the
+session working on the frontend what port it's on" — and the message is something it
+can answer from where it sits, hotline routes through Claude Code's **native
 cross-session messaging** (`ListAgents` + `SendMessage`, Claude Code ≥ 2.1.224) instead
 of spinning up a callee. It's a plain-text summary straight into the live session: no
 new surface, no scraping, no wasted launch.
 
-Hotline still owns everything native can't: launching a workspace that *isn't* running,
+The gate is your wording, not a probe. Naming a workspace or project ("dial monorepo")
+always launches, even though sessions in that folder are usually live — hotline's own
+callees run there. Anything the target must go read or do is a work order and launches
+too. Hotline owns everything native can't: launching a workspace that *isn't* running,
 resolving targets by project name, autonomous work orders, conference calls, and the
-switchboard. The native hop only kicks in for a lightweight ping to a session that's
-already alive — and if no matching live session is found, hotline quietly falls back to
-dialing normally. (Claude Code only; under Codex every call uses the launch transport.)
+switchboard. (Claude Code only; under Codex every call uses the launch transport.)
 
 ### Adding a Workspace to the Directory
 

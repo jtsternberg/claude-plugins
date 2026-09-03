@@ -36,13 +36,29 @@ status it returns.
 Strip those flags out of the args before reading `$0` and `$1+`, and pass the
 mapped wrapper flag shown above.
 
-## Native fast path — Claude Code only (read first)
+## Native fast path — Claude Code only
 
-**Under Claude Code**, before dialing, read
-`${CLAUDE_PLUGIN_ROOT}/skills/dial/references/native-messaging.md`. It decides
-whether this is a lightweight message to an *already-running* session that should
-go through Claude Code's native `SendMessage` — no launch, no surface, no
-scraping — handles it if so, and otherwise sends you back here.
+Launching is the default. Claude Code can also hand a message straight to a session
+that is *already running* (`ListAgents` + `SendMessage`) — that is the exception, and
+it needs positive evidence in the user's own words. Take it **only when both hold**:
+
+1. **The user names a running session, not a workspace.** "My other session", "the
+   session/terminal/tab that's working on X", a name they were shown from `ListAgents`
+   or set with `/rename`, or a reply to a `<cross-session-message>` you received. A
+   workspace, project, or folder name is not a session reference: "dial/call
+   <workspace>" always launches. `ListAgents` will usually show live sessions in that
+   folder — hotline's own callees live there — so a live match on a project slug is
+   expected noise, not a signal.
+2. **The message is answerable from where that session already sits** — a fact, a
+   nudge, a quick question about its own state. Anything it must go read or fetch (a
+   URL, an issue, a file) or do is a work order: launch it, so it lands on a surface
+   and the switchboard.
+
+The user's words decide this, not a probe: do not run `ListAgents` to find out whether
+native applies. In doubt, launch.
+
+When both hold, read `${CLAUDE_PLUGIN_ROOT}/skills/dial/references/native-messaging.md`
+for the mechanics; it sends you back here if the live sessions don't match.
 
 Codex: substitute the installed Hotline plugin directory for the leading path
 segment above.
