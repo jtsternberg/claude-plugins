@@ -513,15 +513,31 @@ no local substitute, so every one of these is an **error**, never a quiet local 
 - If that file is absent from a remote call's dir, it is a launcher bug — do not
   re-dial without looking.
 
-**`.fallbacks` says `session-cache→fresh(host …→…)`**
-- The cached host handle belongs to a different box (or a different backend), so it
-  was not re-addressed. `surface_ref` is an opaque string: a herdr agent name on one
-  machine is indistinguishable from one on another, and handing the wrong one over
-  would strand the real conversation somewhere unreachable while a second callee
-  answers (claude-plugins-7wze.11).
-- Usually this means a workspace dialed with `--remote` was re-dialed without it, or
-  with a different target. Re-dial with the same `--remote <target>` to continue that
-  conversation; the fresh callee this produced has none of it.
+**`stage: "transport"` — "this target's callee is herdr agent … on \<box>"**
+- The cache says this target's callee lives on a box this dial is not addressing: a
+  `--remote` workspace re-dialed without the flag, without it re-dialed *with* one, or
+  with a different box named. **Nothing was started and the cache is untouched.**
+- It is refused rather than degraded because a fresh callee here does not replace that
+  one. `surface_ref` is an opaque string — a herdr agent name on one machine is
+  indistinguishable from one on another (claude-plugins-7wze.11) — and the cache write
+  a new callee triggers REPLACES the entry that named the old one, so the remote
+  conversation is left running with nothing pointing at it and the next identical
+  re-dial mismatches again.
+- Two moves, and the `.recovery` names both with the actual box filled in:
+  - **Continue it** — re-dial with `--remote <that box>` (or with no `--remote`, when
+    the cached callee is the local one). Its context is intact and the cached handle
+    is re-addressed by name.
+  - **Abandon it** — add `--fresh`. The dial proceeds, and `.fallbacks` gains
+    `abandoned-callee(<agent> on <box>; …)` naming what is now running unattended.
+    Close it with the command that entry carries: `ssh <box> herdr pane close <pane>`
+    when a call dir still remembers the pane, otherwise `ssh <box> herdr agent list`
+    to find it.
+
+**`.fallbacks` says `session-cache→fresh(transport …→…)`**
+- The cached handle belongs to a different BACKEND on this machine — a cmux surface is
+  not a herdr agent name — so it was not re-addressed and the new callee starts without
+  the prior context. This one stays a fallback rather than a refusal: both handles are
+  local, so the superseded one is still on the user's own screen.
 
 ## Identity Cache Issues
 

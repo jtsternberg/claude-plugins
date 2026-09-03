@@ -252,10 +252,14 @@ Three more things worth telling the user:
 
 Follow-ups work exactly as the local ones do — re-dial the same target with the same
 `--remote`, and the cached agent on that box is re-targeted by name. **Re-dialing
-that workspace WITHOUT `--remote` starts a fresh callee** rather than talking to the
-remote one, reported in `.fallbacks` as a host mismatch: the cache records which box
-a handle belongs to, and an agent name from another machine cannot be re-addressed
-from here.
+that workspace WITHOUT `--remote`, or with a different box, is REFUSED**
+(`stage: transport`): the cache records which box a handle belongs to, an agent name
+from another machine cannot be re-addressed from here, and starting a fresh callee
+instead would leave that one running with nothing pointing at it — the cache write
+replaces the entry that named it. The error names the cached agent, its box, and the
+two moves: re-dial naming that box to **continue** the conversation, or add `--fresh`
+to **abandon** it and start a new callee here. `--fresh` then reports what it left
+running, and the command that closes it, as `abandoned-callee(…)`.
 
 `.fallbacks` lists what the wrapper worked around on its way. All of them are
 already handled; mention them only if the user is debugging or the degradation
@@ -279,6 +283,8 @@ expected, say).
 | `herdr-conference-focus-failed(<agent>: <reason>)` | A herdr conference connected and the callee has the prompt, but `herdr agent focus` refused — so the user's focus did not move. Tell them which pane to go to (`herdr agent attach <agent>`). |
 | `identity→refreshed` / `identity→refresh-failed(...)` | `--refresh-identity` ran (or tried to). |
 | `session-cache→fresh(<session-id>)` | `--fresh` found a cached session for this target and deliberately did not resume it; `<session-id>` is the one abandoned. The call reports `first_contact: true`, and the cache now points at the new session. |
+| `abandoned-callee(<handle> on <box>; …)` | `--fresh` overrode a box mismatch, so the callee named here is still RUNNING on `<box>` and no local cleanup will reach it. The entry carries the command that closes it (`ssh <box> herdr pane close <pane>`, or `herdr agent list` when no call dir still remembers the pane). Without `--fresh` this state is a `stage: transport` refusal instead. |
+| `session-cache→fresh(transport <a>→<b>)` | The cached handle belongs to a different BACKEND on this machine (a cmux surface is not a herdr agent name), so it was not re-addressed and the new callee starts without the prior context. A different BOX is a refusal, not this. |
 
 A follow-up that opens a second surface **always** records why. If you see a new
 tab with `fallbacks:[]`, that is a bug — report it rather than explaining it

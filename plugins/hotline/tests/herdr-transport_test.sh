@@ -2914,34 +2914,123 @@ check "…and makes no ssh hop at all" $? "ssh hops: $(cat "$t/ssh.log" 2>/dev/n
 # exactly like a local one. Re-addressing the wrong one is told "no such agent",
 # falls back to a fresh callee and re-keys the cache to it — stranding the real
 # conversation on the other box with nothing pointing at it.
-t=$(new_env)
-mkdir -p "$t/home/.agents-hotline/sessions"
-TGT_REAL=$(cd "$t/target" && pwd -P)
-jq -n --arg t "$TGT_REAL" \
-  '{caller:"/caller", caller_session_id:"caller-remote-1",
-    connections: {($t): {session_id:"remote-sess-9", started:1, last_contact:1,
-      mode:"work_order", exchange_count:1, surface_ref:"hotline-elsewhere-abc",
-      last_call_id:"old-nonce", transport:"herdr", remote:"tester@other-box.invalid"}}}' \
-  > "$t/home/.agents-hotline/sessions/caller-remote-1.json"
-cat > "$t/bin/herdr" <<STUBW
+#
+# WHICH IS WHY A BOX MISMATCH IS A REFUSAL, not a fallback. Declining the reuse and
+# starting a fresh callee here leaves the remote one running, and the cache write
+# REPLACES the entry that named it — so the fallback's own advice ("re-dial with the
+# same --remote to continue") could not be taken: the second dial mismatches too and
+# starts a third callee. The refusal is the only outcome that keeps the remote
+# conversation reachable, and --fresh is how a caller says to abandon it anyway.
+
+# One scratch env whose cache already holds a callee on a named host. Only the host
+# claim varies between the cases below; the herdr stub is the transcript-aware
+# wrapper every dial case in this file uses.
+mismatch_env() {  # mismatch_env <transport> <remote|''> <agent> <call-id>
+  local t tgt
+  t=$(remote_env)
+  mkdir -p "$t/home/.agents-hotline/sessions"
+  tgt=$(cd "$t/target" && pwd -P)
+  jq -n --arg t "$tgt" --arg tr "$1" --arg rm "$2" --arg ag "$3" --arg cid "$4" \
+    '{caller:"/caller", caller_session_id:"caller-remote-1",
+      connections: {($t): ({session_id:"prev-sess-9", started:1, last_contact:1,
+        mode:"work_order", exchange_count:1, surface_ref:$ag, last_call_id:$cid,
+        transport:$tr} + (if $rm == "" then {} else {remote:$rm} end))}}' \
+    > "$t/home/.agents-hotline/sessions/caller-remote-1.json"
+  cat > "$t/bin/herdr" <<STUBW
 #!/usr/bin/env bash
 if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
   SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo unknown)
-  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$TGT_REAL")/\$SID.jsonl"
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$tgt")/\$SID.jsonl"
 fi
 exec bash "$t/bin/herdr-real" "\$@"
 STUBW
-chmod +x "$t/bin/herdr"
-mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+  chmod +x "$t/bin/herdr"
+  mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+  printf '%s' "$t"
+}
+
+OTHERBOX="tester@other-box.invalid"
+
+# remote → local. The callee is on another box and this dial names none.
+t=$(mismatch_env herdr "$OTHERBOX" hotline-elsewhere-abc mm-nonce-1)
+# The pane that closes that callee lives in the CALL DIR, not the cache, so the
+# recovery can only name it if it looks there — by the nonce the cache does keep.
+PANEDIR=$(mktemp -d "$HOTLINE_CALL_HOME/hotline-call-XXXXX")
+echo mm-nonce-1 > "$PANEDIR/call_id.txt"
+echo w4:p7      > "$PANEDIR/herdr_pane.txt"
 out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
         -- --target "$t/target" --mode work_order --prompt "follow up" \
            --transport herdr --detached --boot-timeout 5)
-[[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"host tester@other-box.invalid→local"* ]]
-check "a cached handle from ANOTHER BOX is not re-addressed; the mismatch is reported" $? \
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "error" \
+   && "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "transport" ]] \
+  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"herdr agent hotline-elsewhere-abc on $OTHERBOX"* ]]
+check "a cached callee on ANOTHER BOX is REFUSED, not quietly replaced" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"--remote $OTHERBOX"* \
+   && "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"--fresh"* ]]
+check "…offering exactly two moves: --remote <that box> to continue, --fresh to abandon" $? \
+  "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
+[[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"ssh $OTHERBOX herdr pane close w4:p7"* ]]
+check "…and the pane that closes the abandoned one, read out of its call dir" $? \
+  "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
+! grep -q 'agent start' "$t/herdr.log" 2>/dev/null
+check "…having started NO second callee: nothing to strand and nothing to close" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+[[ "$(jq -r --arg t "$(cd "$t/target" && pwd -P)" '.connections[$t].session_id' \
+       "$t/home/.agents-hotline/sessions/caller-remote-1.json" 2>/dev/null)" == "prev-sess-9" ]]
+check "…and the cache still points at the remote callee, so the offered re-dial works" $? \
+  "cache=$(cat "$t/home/.agents-hotline/sessions/caller-remote-1.json" 2>/dev/null)"
 ! grep -q 'hotline-elsewhere-abc' <(tr -d '\\' < "$t/herdr.log")
 check "…and that foreign agent name is never handed to the local herdr" $? \
   "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# --fresh is the caller saying "abandon it". The dial proceeds — and the entry names
+# the agent and the box, because that string is the only record they get of a
+# process no local cleanup will ever reach.
+t=$(mismatch_env herdr "$OTHERBOX" hotline-elsewhere-abc mm-nonce-2)
+out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode work_order --prompt "follow up" \
+           --transport herdr --detached --fresh --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" ]] \
+  && [[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" \
+        == *"abandoned-callee(herdr agent hotline-elsewhere-abc on $OTHERBOX"* ]]
+check "…while --fresh proceeds, naming the abandoned agent AND its box" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"ssh $OTHERBOX herdr agent list"* ]]
+check "…and how to find it, when no call dir still remembers its pane" $? \
+  "fallbacks=$(jq -r '.fallbacks | join(\" \")' <<<"$out" 2>/dev/null)"
+
+# local → remote, the same rule mirrored: the callee is HERE and the dial names a
+# box, so the move that continues it is dropping --remote.
+t=$(mismatch_env herdr "" hotline-right-here-abc mm-nonce-3)
+out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode work_order --prompt "follow up" \
+           --remote "$RTARGET" --boot-timeout 5)
+[[ "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "transport" ]] \
+  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"herdr agent hotline-right-here-abc on this box"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"no --remote"* ]]
+check "the mirror image is refused too: a LOCAL callee and a --remote dial" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"herdr agent list"* \
+   && "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" != *"ssh "* ]]
+check "…and its close command carries no ssh: that pane is in this machine's herdr" $? \
+  "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
+
+# box A → box B. Neither is local, and the refusal names the box that HAS the
+# conversation rather than the one this dial asked for.
+t=$(mismatch_env herdr "$OTHERBOX" hotline-on-a-abc mm-nonce-4)
+out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode work_order --prompt "follow up" \
+           --remote "$RTARGET" --boot-timeout 5)
+[[ "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "transport" ]] \
+  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"on $OTHERBOX"* \
+     && "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"names $RTARGET"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"--remote $OTHERBOX"* ]]
+check "box A → box B is the same refusal, naming the box that HAS the conversation" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ ! -e "$t/ssh.log" ]] || ! grep -q 'agent start' "$t/ssh.log"
+check "…and no callee is started on either box" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
 
 # The transport half of the same rule: a cmux surface handle is not a herdr agent.
 t=$(new_env)
