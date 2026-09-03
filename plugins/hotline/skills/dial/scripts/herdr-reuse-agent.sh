@@ -113,6 +113,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# HOW A HUMAN REACHES THIS AGENT. `herdr agent attach <name>` is the single most
+# useful thing every refusal below tells the caller to run — and for a remote callee
+# it has to be run ON THAT BOX. An attach hint that silently omits the hop sends the
+# reader to a local herdr that has never heard of the agent, which reads as "hotline
+# lied about the agent name".
+HERDR_HOP=""
+if hotline_remote_active; then HERDR_HOP="ssh $(hotline_remote_target) "; fi
+
 fallback_fresh() {  # fallback_fresh <reason>
   jq -nc --arg reason "$1" '{fallback: "fresh", reason: $reason}'
   exit 0
@@ -125,7 +133,7 @@ fi
 [[ -z "$PROMPT" ]] && { echo '{"error": "No --prompt or --prompt-file provided"}'; exit 1; }
 
 [[ -z "$AGENT" ]] && fallback_fresh "no herdr agent name provided (the cache holds no host handle for this session)"
-herdr_on_path || fallback_fresh "herdr is not on PATH, so no live agent can be re-targeted"
+herdr_on_path || fallback_fresh "herdr is not on PATH${HOTLINE_HERDR_REMOTE:+ on $HOTLINE_HERDR_REMOTE}, so no live agent can be re-targeted"
 
 # --- Is the agent still there, and will it take a prompt? --------------------
 # The whole liveness question, in one read. "Survives a detach" is not "survives
@@ -146,7 +154,7 @@ if [[ "$AGENT_STATUS" == "blocked" ]]; then
   AGENT_STATUS="$HERDR_AGENT_STATUS"
 fi
 if [[ "$AGENT_STATUS" == "blocked" ]]; then
-  jq -nc --arg a "$AGENT" --arg reason "herdr agent $AGENT is 'blocked' — it is waiting on input (a permission gate or a question), and a follow-up submitted now would answer that instead of starting a turn. \`herdr agent attach $AGENT\` shows what it is asking" \
+  jq -nc --arg a "$AGENT" --arg reason "herdr agent $AGENT is 'blocked' — it is waiting on input (a permission gate or a question), and a follow-up submitted now would answer that instead of starting a turn. \`${HERDR_HOP}herdr agent attach $AGENT\` shows what it is asking" \
     '{blocked: true, agent: $a, reason: $reason}'
   exit 0
 fi
@@ -165,6 +173,12 @@ echo "$AGENT" > "$CALL_DIR/herdr_agent.txt"
 # predates this call, so closing it would end a conversation the caller may not
 # be finished with.
 echo true     > "$CALL_DIR/keep_workspace.txt"
+# WHICH BOX the agent lives on, for the same reason the launcher records it:
+# wait-for-response.sh is a separate process handed nothing but this dir, and a
+# remote agent asked about locally reports as dead. Absent = local.
+if hotline_remote_active; then
+  hotline_remote_target > "$CALL_DIR/remote_target.txt"
+fi
 if [[ -n "$SESSION_ID" ]]; then
   echo "$SESSION_ID" > "$CALL_DIR/session_id.txt"
   echo "$SESSION_ID" > "$CALL_DIR/session_id_preset.txt"
@@ -174,8 +188,17 @@ fi
 # transcript under the realpath spelling. Every consumer derives the transcript
 # path from this file. (Delivery and the wait both try both spellings anyway —
 # this is the half that makes them agree by construction.)
+#
+# Resolved over ssh for a remote follow-up: the path names a directory on THAT
+# filesystem, so a local `cd` would either fail (recording the unresolved spelling)
+# or succeed against an unrelated local path of the same name and record an
+# encoding the remote callee never used.
 if [[ -n "$CWD" ]]; then
-  CWD_CANON=$(cd "$CWD" 2>/dev/null && pwd -P) || CWD_CANON="$CWD"
+  if hotline_remote_active; then
+    if hotline_remote_realpath_dir "$CWD"; then CWD_CANON="$HOTLINE_REMOTE_REALCWD"; else CWD_CANON="$CWD"; fi
+  else
+    CWD_CANON=$(cd "$CWD" 2>/dev/null && pwd -P) || CWD_CANON="$CWD"
+  fi
   echo "$CWD_CANON" > "$CALL_DIR/cwd.txt"
 fi
 

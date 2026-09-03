@@ -98,6 +98,21 @@
 # (claude-plugins-86ka), narrowed here from "the whole callee session" to
 # "sub-second". Accepted for Phase 1 and documented; revisit if herdr grows a
 # file-based prompt form.
+#
+# ON A REMOTE DIAL THAT EXPOSURE STAYS ON THE REMOTE BOX AND ONLY THERE. Every
+# herdr call here runs as `ssh <target> herdr …` (herdr-state.sh's dispatch), and
+# the payload-carrying one runs a FIXED remote command that reads stdin —
+# `herdr agent prompt <name> "$(cat)"` with the file on ssh's stdin — so the bytes
+# never enter the LOCAL ssh process's argv. Substituting them into the ssh command
+# line would have moved the sub-second `ps` window from the box that is running the
+# work order to the box the caller shares with other users, which is strictly worse:
+# it re-opens 86ka here in order to honour it over there.
+#
+# THE OTHER TWO REMOTE DIFFERENCES are both about where the proof lives: the
+# transcript candidates are REMOTE paths (derived from the remote $HOME and the
+# remote realpath — asked, not assumed) and the nonce is grepped on that box. The
+# rule is unchanged, including the absence of a second tier: `agent read` over ssh
+# sees exactly as little of an alternate-screen TUI as it does locally.
 # =============================================================================
 set -uo pipefail
 
@@ -153,6 +168,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# HOW A HUMAN REACHES THIS AGENT. `herdr agent attach <name>` is the single most
+# useful thing every refusal below tells the caller to run — and for a remote callee
+# it has to be run ON THAT BOX. An attach hint that silently omits the hop sends the
+# reader to a local herdr that has never heard of the agent, which reads as "hotline
+# lied about the agent name".
+HERDR_HOP=""
+if hotline_remote_active; then HERDR_HOP="ssh $(hotline_remote_target) "; fi
+
 PROMPT_SENT=false
 undelivered() {  # undelivered <reason> [sent]
   jq -nc --arg reason "$1" --argjson sent "${2:-$PROMPT_SENT}" \
@@ -201,9 +224,9 @@ if $FIRST_CONTACT; then
     ready_try=$((ready_try + 1))
     if [[ $ready_try -ge $READY_TRIES ]]; then
       if [[ "$AGENT_STATUS" == "blocked" ]]; then
-        undelivered "herdr agent $AGENT is 'blocked' before first contact — \`herdr agent attach $AGENT\` shows what it is asking. It is waiting on INPUT (a startup trust prompt, or a permission gate), and a work order submitted into that dialog would ANSWER it and vanish without ever becoming a turn. Nothing was submitted: clear the gate and re-dial, or dial with HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 (a real trust decision, see the plugin README)." false
+        undelivered "herdr agent $AGENT is 'blocked' before first contact — \`${HERDR_HOP}herdr agent attach $AGENT\` shows what it is asking. It is waiting on INPUT (a startup trust prompt, or a permission gate), and a work order submitted into that dialog would ANSWER it and vanish without ever becoming a turn. Nothing was submitted: clear the gate and re-dial, or dial with HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 (a real trust decision, see the plugin README)." false
       fi
-      undelivered "herdr agent $AGENT never reported interactive_ready within the readiness budget (last state '$AGENT_STATUS') — \`herdr agent attach $AGENT\` shows what is actually in the pane. \`agent start\` claimed the REPL was ready; it is not now, and a payload submitted into whatever IS there would be lost silently. Nothing was submitted, so re-dialing is safe." false
+      undelivered "herdr agent $AGENT never reported interactive_ready within the readiness budget (last state '$AGENT_STATUS') — \`${HERDR_HOP}herdr agent attach $AGENT\` shows what is actually in the pane. \`agent start\` claimed the REPL was ready; it is not now, and a payload submitted into whatever IS there would be lost silently. Nothing was submitted, so re-dialing is safe." false
     fi
     sleep "$CONFIRM_SLEEP"
     herdr_agent_probe "$AGENT"
@@ -228,7 +251,7 @@ if $FIRST_CONTACT; then
     # THE FIX GOES FIRST in this string, deliberately: dial.sh forwards a reason
     # through reason_of, which cuts it at 300 characters, so anything after that is
     # not advice the caller ever sees. Diagnosis after remedy.
-    undelivered "Claude Code's startup TRUST DIALOG is on screen for ${CWD:-the callee cwd} — trust that directory (run \`claude\` in it once and answer 'Yes, I trust this folder'), then re-dial. NOTHING WAS SUBMITTED: the dialog's default option is 'No, exit', so a work order would have answered it and killed the callee. herdr reported agent $AGENT interactive_ready and not blocked because the dialog does take keystrokes; \`herdr agent attach $AGENT\` shows it. HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover this gate — directory trust is not a permission mode." false
+    undelivered "Claude Code's startup TRUST DIALOG is on screen for ${CWD:-the callee cwd} — trust that directory (run \`claude\` in it once and answer 'Yes, I trust this folder'), then re-dial. NOTHING WAS SUBMITTED: the dialog's default option is 'No, exit', so a work order would have answered it and killed the callee. herdr reported agent $AGENT interactive_ready and not blocked because the dialog does take keystrokes; \`${HERDR_HOP}herdr agent attach $AGENT\` shows it. HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover this gate — directory trust is not a permission mode." false
   fi
 
   CONFIRM_TRIES="$FIRST_CONFIRM_TRIES"
@@ -237,10 +260,35 @@ fi
 # --- Which transcripts could carry the proof? -------------------------------
 # Derived BEFORE the submit, so the confirmation loop below starts polling the
 # instant the payload is away. Both spellings of the cwd — see the shared helper.
+#
+# A REMOTE CALLEE'S TRANSCRIPTS ARE REMOTE PATHS, derived from the remote $HOME and
+# the remote realpath (asked of that box, not assumed from here), and they are
+# grepped THERE. Two helpers rather than one because both halves of the local
+# derivation are wrong across the wire and the polling shape differs too — see
+# herdr-remote.sh. What does NOT differ is the rule: the nonce in the callee's own
+# transcript is the only proof, and there is still no second tier.
 TRANSCRIPTS=()
-while IFS= read -r _p; do
-  [[ -n "$_p" ]] && TRANSCRIPTS+=("$_p")
-done < <(hotline_transcript_candidates "$CWD" "$SESSION_ID")
+if hotline_remote_active; then
+  while IFS= read -r _p; do
+    [[ -n "$_p" ]] && TRANSCRIPTS+=("$_p")
+  done < <(hotline_remote_transcript_candidates "$CWD" "$SESSION_ID")
+else
+  while IFS= read -r _p; do
+    [[ -n "$_p" ]] && TRANSCRIPTS+=("$_p")
+  done < <(hotline_transcript_candidates "$CWD" "$SESSION_ID")
+fi
+
+# One call site, two mechanisms. The local one polls a local file N times; the
+# remote one runs the whole poll inside a single ssh hop, because N hops for one
+# question is N chances for the tailnet check to stall and an answer that arrives
+# later than the window it is timing.
+confirm_nonce() {  # confirm_nonce <nonce> <tries> <sleep> <path>...
+  if hotline_remote_active; then
+    hotline_remote_confirm_nonce "$@"
+  else
+    hotline_confirm_nonce_in_transcripts "$@"
+  fi
+}
 
 # --- Deliver. ---------------------------------------------------------------
 # ONE submit for an ordinary payload; TWO writes for a slash command that has a body
@@ -275,24 +323,53 @@ if hotline_payload_needs_split_delivery "$PAYLOAD_FILE"; then
   if [[ -z "$AGENT_PANE" ]]; then
     undelivered "herdr agent $AGENT reports no pane_id, and this payload is a slash command with a body — which has to be delivered as an invocation line (\`pane send-text\`) followed by the body (\`agent prompt\`), or the slash command never parses and the callee reads the work order as plain text. Nothing was submitted; re-dial is safe." false
   fi
-  if ! herdr_cli pane send-text "$AGENT_PANE" "$(sed -n '1p' "$PAYLOAD_FILE")"; then
+  # Through the stdin form for the same reason the submit below uses it: on a
+  # remote dial this text would otherwise sit in the LOCAL ssh process's argv. It
+  # is only the invocation line, not the work order — but it carries the caller's
+  # cwd and session id, and the mechanism costs nothing to reuse.
+  HEAD_FILE=$(mktemp)
+  ( umask 077; sed -n '1p' "$PAYLOAD_FILE" | tr -d '\n' > "$HEAD_FILE" )
+  if ! herdr_cli_stdin "$HEAD_FILE" pane send-text "$AGENT_PANE" @STDIN@; then
+    rm -f "$HEAD_FILE"
     undelivered "herdr pane send-text $AGENT_PANE failed while placing the invocation line for agent $AGENT: ${HERDR_CLI_ERR:-no diagnostic}. Nothing was submitted." false
   fi
+  rm -f "$HEAD_FILE"
   # The invocation line is in the callee's box now; a later failure must not claim
   # nothing was sent.
   PROMPT_SENT=true
   PROMPT_TEXT=$'\n'"$(sed -n '2,$p' "$PAYLOAD_FILE")"
 fi
 
-PROMPT_ARGS=(agent prompt "$AGENT" "$PROMPT_TEXT")
+# THE PAYLOAD GOES THROUGH herdr_cli_stdin, NOT herdr_cli. Locally the two are the
+# same bytes on the same argv (§9.1 O8's accepted sub-second exposure, unchanged).
+# Remotely the stdin form is what keeps the work order out of the LOCAL ssh
+# process's argv, where the caller's own untrusted local users are — re-opening
+# claude-plugins-86ka on this side of the wire to close it on the other would be no
+# fix at all.
+#
+# THE CALLER'S OWN FILE where the bytes are unchanged, and only the split path
+# writes a second one: the reshaped body is not what is on disk, but an unsplit
+# delivery is, and copying a work order into a second temp file to hand it to the
+# same mechanism would put an extra copy of it on the filesystem for nothing.
+PROMPT_BODY_FILE="$PAYLOAD_FILE"
+PROMPT_BODY_TEMP=""
+if [[ "$PROMPT_TEXT" != "$(cat "$PAYLOAD_FILE")" ]]; then
+  PROMPT_BODY_TEMP=$(mktemp)
+  chmod 600 "$PROMPT_BODY_TEMP" 2>/dev/null || true
+  printf '%s' "$PROMPT_TEXT" > "$PROMPT_BODY_TEMP"
+  PROMPT_BODY_FILE="$PROMPT_BODY_TEMP"
+fi
+PROMPT_ARGS=(agent prompt "$AGENT" @STDIN@)
 [[ -n "$TIMEOUT_MS" ]] && PROMPT_ARGS+=(--timeout "$TIMEOUT_MS")
-if ! herdr_cli "${PROMPT_ARGS[@]}"; then
+if ! herdr_cli_stdin "$PROMPT_BODY_FILE" "${PROMPT_ARGS[@]}"; then
+  [[ -n "$PROMPT_BODY_TEMP" ]] && rm -f "$PROMPT_BODY_TEMP"
   # herdr validates the target and the keys before writing any bytes, so a refusal
   # here means the callee's input queue is untouched BY THIS CALL — which is the whole
   # truth only on the unsplit path. After a split's first write the invocation line is
   # already in the box, so the honest answer is whatever PROMPT_SENT holds.
   undelivered "herdr agent prompt $AGENT failed: ${HERDR_CLI_ERR:-no diagnostic}" "$PROMPT_SENT"
 fi
+[[ -n "$PROMPT_BODY_TEMP" ]] && rm -f "$PROMPT_BODY_TEMP"
 # From here the payload may be in the callee's input queue whatever we observe.
 PROMPT_SENT=true
 
@@ -304,7 +381,7 @@ if [[ ${#TRANSCRIPTS[@]} -eq 0 ]]; then
   undelivered "submitted to herdr agent $AGENT but delivery is unconfirmable: no transcript path could be derived (need both --cwd and --session). Read the callee's transcript for call_id $CALL_ID before re-dialing — a re-dial would run the work order twice."
 fi
 
-if hotline_confirm_nonce_in_transcripts "$CALL_ID" "$CONFIRM_TRIES" "$CONFIRM_SLEEP" \
+if confirm_nonce "$CALL_ID" "$CONFIRM_TRIES" "$CONFIRM_SLEEP" \
      "${TRANSCRIPTS[@]}"; then
   jq -nc --arg a "$AGENT" --arg s "${AGENT_STATUS:-unknown}" \
     '{delivered: true, sent: true, confirmed: "transcript", agent: $a, agent_status: $s}'

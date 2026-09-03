@@ -279,6 +279,16 @@ if $HERDR_MODE; then
   # the transcript missed. An undecidable herdr call is reported as undecidable.
   # =========================================================================
   HERDR_SCRIPTS="$HOTLINE_SCRIPTS"
+  # WHICH BOX, read from the call dir BEFORE herdr-state.sh is asked anything. This
+  # process gets no arguments but the call dir, so remote_target.txt is the only
+  # thing that can tell it the agent lives elsewhere — and getting it wrong is not a
+  # degraded read but a false verdict: the local herdr answers "no such agent" for a
+  # remote one, which this branch reports as "the callee exited before answering".
+  # Absent = local, which is what every call dir written before Phase 3b means.
+  if [[ -s "$CALL_DIR/remote_target.txt" ]]; then
+    HOTLINE_HERDR_REMOTE=$(tr -d '[:space:]' < "$CALL_DIR/remote_target.txt")
+    export HOTLINE_HERDR_REMOTE
+  fi
   # shellcheck source=../../../scripts/herdr-state.sh
   source "$HERDR_SCRIPTS/herdr-state.sh"
   # The dual-cwd-spelling rule lives in ONE place and this is a second caller of it,
@@ -288,6 +298,17 @@ if $HERDR_MODE; then
   # never reached the agent" about a transcript that held the finished answer.
   # shellcheck source=../../../scripts/transcript-confirm.sh
   source "$HERDR_SCRIPTS/transcript-confirm.sh"
+
+  # HOW A HUMAN REACHES THIS AGENT. `herdr agent attach <name>` is the single most
+  # useful thing every refusal below tells the caller to run — and for a remote callee
+  # it has to be run ON THAT BOX. An attach hint that silently omits the hop sends the
+  # reader to a local herdr that has never heard of the agent, which reads as "hotline
+  # lied about the agent name".
+  HERDR_HOP=""
+  # An `if`, not an `&&` chain: this script runs under `set -e`, where a
+  # short-circuited list is a failing command and would abort the wait outright on
+  # every LOCAL call — the common case.
+  if hotline_remote_active; then HERDR_HOP="ssh $(hotline_remote_target) "; fi
 
   AGENT=""
   [[ -s "$CALL_DIR/herdr_agent.txt" ]] && AGENT=$(tr -d '[:space:]' < "$CALL_DIR/herdr_agent.txt")
@@ -314,12 +335,29 @@ if $HERDR_MODE; then
   # (/tmp on macOS) writes to the realpath encoding. The launcher now canonicalizes
   # cwd.txt so the two normally coincide, but a hand-staged or older call dir does
   # not, and asking the shared helper costs nothing.
+  #
+  # A REMOTE CALLEE'S CANDIDATES ARE REMOTE PATHS, and the derivation moves with
+  # them: the remote $HOME and the remote realpath are asked of that box rather than
+  # taken from here (claude-plugins-7wze.10). The transcript is then FETCHED into a
+  # local mirror each poll and handed to an UNCHANGED transcript-extract.sh — which
+  # is the whole reason the answer half of hotline needed no remote fork (§8): the
+  # extractor reads a file, and a file is the one thing ssh can move.
   TRANSCRIPT_CANDIDATES=()
+  REMOTE_MIRROR=""
   if [[ -n "$SESSION_ID" && -n "$CALL_ID" && -f "$CALL_DIR/cwd.txt" && -x "$TRANSCRIPT_PATH_SH" ]]; then
     RECV_CWD=$(cat "$CALL_DIR/cwd.txt")
-    while IFS= read -r _cand; do
-      [[ -n "$_cand" ]] && TRANSCRIPT_CANDIDATES+=("$_cand")
-    done < <(hotline_transcript_candidates "$RECV_CWD" "$SESSION_ID")
+    if hotline_remote_active; then
+      while IFS= read -r _cand; do
+        [[ -n "$_cand" ]] && TRANSCRIPT_CANDIDATES+=("$_cand")
+      done < <(hotline_remote_transcript_candidates "$RECV_CWD" "$SESSION_ID")
+      # Inside the call dir, so it is wiped with the call and a reader who wants to
+      # see what the waiter actually read can find it next to everything else.
+      REMOTE_MIRROR="$CALL_DIR/remote_transcript.jsonl"
+    else
+      while IFS= read -r _cand; do
+        [[ -n "$_cand" ]] && TRANSCRIPT_CANDIDATES+=("$_cand")
+      done < <(hotline_transcript_candidates "$RECV_CWD" "$SESSION_ID")
+    fi
   fi
   if [[ ${#TRANSCRIPT_CANDIDATES[@]} -eq 0 ]]; then
     {
@@ -335,8 +373,20 @@ if $HERDR_MODE; then
   # the first candidate, so a diagnostic always names something concrete.
   TRANSCRIPT_PATH="${TRANSCRIPT_CANDIDATES[0]}"
   ALL_CANDIDATES="${TRANSCRIPT_CANDIDATES[*]}"
+  # The LOCAL path to read this poll, or nothing when no transcript exists yet.
+  # Remote: one ssh hop fetches whichever candidate exists into the mirror and the
+  # mirror is what the extractor reads, so every downstream branch below is
+  # transport-blind. TRANSCRIPT_PATH keeps naming the REMOTE path in that case —
+  # every diagnostic here is read by a human who has to go look at the file, and
+  # the mirror is a copy this script made, not a thing they can inspect on the box.
   herdr_live_transcript() {
     local c
+    if hotline_remote_active; then
+      if hotline_remote_fetch_transcript "$REMOTE_MIRROR" "${TRANSCRIPT_CANDIDATES[@]}" >/dev/null; then
+        printf '%s' "$REMOTE_MIRROR"; return 0
+      fi
+      return 1
+    fi
     for c in "${TRANSCRIPT_CANDIDATES[@]}"; do
       if [[ -f "$c" ]]; then printf '%s' "$c"; return 0; fi
     done
@@ -389,7 +439,7 @@ if $HERDR_MODE; then
   report_blocked() {  # report_blocked <what-we-had-read>
     {
       echo "herdr agent $AGENT is BLOCKED and its transcript carries no terminal STATUS for call_id=$CALL_ID — the callee is waiting on INPUT, not still working, and this is not a timeout."
-      echo "That is a permission gate or a genuine question, and only a human can clear it: \`herdr agent attach $AGENT\` shows what it is asking. (Unattended callees avoid the permission case by dialing with HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 — a real trust decision, see the plugin README.)"
+      echo "That is a permission gate or a genuine question, and only a human can clear it: \`${HERDR_HOP}herdr agent attach $AGENT\` shows what it is asking. (Unattended callees avoid the permission case by dialing with HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 — a real trust decision, see the plugin README.)"
       echo "Read so far: $1 (transcript $TRANSCRIPT_PATH)."
       echo "Nothing was sent by this script and no answer was discarded. Once the callee is unblocked, re-run this script on the same call_dir to resume with a fresh ${TIMEOUT}s budget."
     } > "$CALL_DIR/error.txt"
@@ -423,7 +473,12 @@ if $HERDR_MODE; then
     # started at all), and asking herdr to wait for a state change that has already
     # happened would burn a whole slice to learn nothing.
     LIVE_TRANSCRIPT=$(herdr_live_transcript) || LIVE_TRANSCRIPT=""
-    [[ -n "$LIVE_TRANSCRIPT" ]] && TRANSCRIPT_PATH="$LIVE_TRANSCRIPT"
+    # Only for a local call: remotely LIVE_TRANSCRIPT is the mirror this script
+    # wrote, and reporting it as "the transcript" would send a reader to a temp copy
+    # instead of the file on the box that is still being appended to.
+    if [[ -n "$LIVE_TRANSCRIPT" ]] && ! hotline_remote_active; then
+      TRANSCRIPT_PATH="$LIVE_TRANSCRIPT"
+    fi
     if [[ -n "$LIVE_TRANSCRIPT" ]]; then
       set +e
       T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$LIVE_TRANSCRIPT" "$CALL_ID" 2>/dev/null)
@@ -448,7 +503,7 @@ if $HERDR_MODE; then
             echo "Callee reassigned mid-call — a new prompt arrived in its session after ours, so it will never emit STATUS for call_id=$CALL_ID."
             echo "Preempting prompt: $T_OUT"
             echo "herdr agent: $AGENT · transcript: $TRANSCRIPT_PATH"
-            echo "Our work order may well have completed anyway — read the transcript, or \`herdr agent attach $AGENT\`, before re-dialing."
+            echo "Our work order may well have completed anyway — read the transcript, or \`${HERDR_HOP}herdr agent attach $AGENT\`, before re-dialing."
           } > "$CALL_DIR/error.txt"
           touch "$CALL_DIR/done"
           cat "$CALL_DIR/error.txt" >&2
@@ -466,7 +521,7 @@ if $HERDR_MODE; then
             SUBMIT_UNCONFIRMED=true
             LAST_STATUS=""
             $HAS_GATE && { herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"; }
-            echo "hotline: no submit confirmation within ${SUBMIT_DEADLINE}s — nothing in $TRANSCRIPT_PATH carries call_id=$CALL_ID. herdr reports agent ${AGENT:-<none recorded>} as '${LAST_STATUS:-unreadable}'. Still waiting (up to ${TIMEOUT}s); \`herdr agent attach $AGENT\` shows what it is actually doing." >&2
+            echo "hotline: no submit confirmation within ${SUBMIT_DEADLINE}s — nothing in $TRANSCRIPT_PATH carries call_id=$CALL_ID. herdr reports agent ${AGENT:-<none recorded>} as '${LAST_STATUS:-unreadable}'. Still waiting (up to ${TIMEOUT}s); \`${HERDR_HOP}herdr agent attach $AGENT\` shows what it is actually doing." >&2
           fi
           ;;
         *)   # extractor usage / read error — no second tier to fall back to
@@ -600,7 +655,7 @@ if $HERDR_MODE; then
       echo "Timed out waiting for the herdr callee to finish (${TIMEOUT}s) — $TRANSCRIPT_PATH, agent $AGENT, last state '${LAST_STATUS:-unreadable}'."
       echo "The callee may simply be slower than the budget."
     fi
-    echo "Re-run this script on the same call_dir to resume with a fresh ${TIMEOUT}s budget; it re-reads the transcript and sends nothing. The agent is still live — \`herdr agent attach $AGENT\` to look."
+    echo "Re-run this script on the same call_dir to resume with a fresh ${TIMEOUT}s budget; it re-reads the transcript and sends nothing. The agent is still live — \`${HERDR_HOP}herdr agent attach $AGENT\` to look."
   } > "$CALL_DIR/error.txt"
   record_waiter_timeout "mode=herdr"
   touch "$CALL_DIR/done"
