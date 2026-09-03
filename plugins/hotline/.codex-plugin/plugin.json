@@ -13,12 +13,14 @@
     "cross-workspace",
     "delegation",
     "multi-agent",
-    "cmux"
+    "cmux",
+    "remote",
+    "ssh"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Hotline",
-    "shortDescription": "Call another workspace's agent",
+    "shortDescription": "Call another workspace's agent, local or remote over SSH",
     "longDescription": "Give your agents a phone. Dial another Claude Code workspace to ask a quick question, hand off an autonomous work order, or collaborate back-and-forth — with a live switchboard dashboard of every call.",
     "developerName": "JT Sternberg",
     "category": "Developer Tools",

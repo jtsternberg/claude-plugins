@@ -25,8 +25,12 @@ Identity normally resolves inline from `$CLAUDE_CODE_SESSION_ID` (Claude Code >=
 
 **"Could not find claude process in ancestry"**
 - The legacy fallback ran and found no `claude` ancestor — so you're not inside a Claude Code session, or the process tree is unusual, *and* no native or Codex identity was available either.
-- **If you're running under Codex:** this is expected — Codex has no `claude` ancestor. `session-init.sh` should have already returned a `caller_kind: "codex"` identity instead of this error. If you still see the error under Codex, confirm `$CODEX_THREAD_ID` is set in your shell (`printf '%s\n' "$CODEX_THREAD_ID"`) and see `references/codex-caller.md`.
+- **If you're running under Codex:** this is expected — Codex has no `claude` ancestor. `session-init.sh` should have already returned a `caller_kind: "codex"` identity instead of this error. If you still see the error under Codex, confirm `$CODEX_THREAD_ID` is set in your shell (`printf '%s\n' "$CODEX_THREAD_ID"`), then read
+  `${CLAUDE_PLUGIN_ROOT}/skills/dial/references/codex-caller.md`.
 - Recovery (other non-Claude callers): set `HOTLINE_CALLER_SESSION_ID=<stable-id>` in the environment to supply a caller identity directly, or ask the user for their session ID. As a last resort, proceed with a generated UUID — dialing works, but session caching won't persist across restarts.
+
+Codex: substitute the installed Hotline plugin directory for the leading path
+segment above.
 
 **"Fingerprint not found in recent transcripts"** (legacy fallback only)
 - The fingerprint was planted but the transcript file wasn't written yet (both steps ran in the same tool call), or the transcript directory path doesn't match.
