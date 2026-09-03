@@ -297,7 +297,9 @@ is kept, reported as `surface-cleanup-skipped(parked-input)`.
 ## herdr Failures
 
 The herdr transport is opt-in (`--transport herdr`, or `HOTLINE_TRANSPORT_AUTO=1`
-inside a herdr pane) and local-only.
+inside a herdr pane). It hosts the callee locally by default and on another box
+with `--remote <ssh-target>` — see **Remote herdr Failures** below for the
+failures that only exist across the wire.
 Every refusal below is a **refusal, not a degradation**: the caller asked for a
 callee that survives a disconnect, and quietly giving them a cmux surface instead
 would be a lie they discover hours later. Report `.detail` and `.recovery` as-is.
@@ -309,18 +311,23 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   `HOTLINE_HERDR_PANE=<pane-id>`.
 - Recovery: fix the one it named, or drop `--transport herdr` to use the cmux default.
 
-**`stage: args` — "supports --placement side and detached, not window" / "cannot adopt an existing session (--resume)" / "--remote is not implemented"**
+**`stage: args` — "supports --placement side and detached, not window" / "cannot adopt an existing session (--resume)"**
 - Not a malfunction: these are herdr's remaining boundaries, and each message names
   what is actually missing. `--window` has no herdr implementation at all — hotline
   splits a pane and never creates herdr workspaces or tabs, so there is no window to
-  place a callee in. `--remote` needs a remote-transcript reader, because the callee's
-  transcript would live on the remote box while every hotline answer is read from the
-  local `~/.claude/projects` tree (Phase 3). `--resume` is a conflict rather than a
-  gap: herdr hosts a callee it *starts*, with a `--session-id` preset that is the only
-  reason the transcript is readable, and `claude --resume` cannot take that preset.
+  place a callee in. `--resume` is a conflict rather than a gap: herdr hosts a callee
+  it *starts*, with a `--session-id` preset that is the only reason the transcript is
+  readable, and `claude --resume` cannot take that preset.
 - Recovery: re-dial without `--window` (side or detached), or over cmux when a real
   window is the point. To continue a session you already dialed, drop `--resume`
   entirely — the cached herdr agent is re-targeted by name with no flag at all.
+
+**`stage: args` — "--remote names a box to host the callee, and --transport … cannot host one"**
+- `--remote` is a transport CHOICE: herdr is the only backend that can host anywhere
+  but here, so `--remote` selects it on its own. Naming `cmux` or `headless` alongside
+  it is two explicit, incompatible asks.
+- Recovery: drop `--transport` (`--remote <target>` alone is the whole invocation),
+  or drop `--remote` to dial that transport locally.
 
 **`stage: fire` — "herdr pane split failed" / "herdr agent start failed" / "interactive_ready:false"**
 - The pane opened but no claude was detected in it, or herdr said it is not ready for
@@ -434,7 +441,87 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
 **A pane is left over after a finished call**
 - Expected. Persistence is why herdr exists, and a follow-up re-targets that same
   agent, so hotline does not close it the way it closes a detached cmux tab.
-  Teardown: `herdr pane close $(cat <call_dir>/herdr_pane.txt)`.
+  Teardown: `herdr pane close $(cat <call_dir>/herdr_pane.txt)`, or
+  `ssh <.remote_target> herdr pane close <.remote_pane>` for a remote call — both
+  handles are in the emitted JSON for exactly this.
+
+## Remote herdr Failures (`--remote <ssh-target>`)
+
+Everything in **herdr Failures** applies unchanged: the launch, the delivery proof,
+the trust-dialog refusal and the lifecycle gate are the same code, running one ssh
+hop away. What follows is only what the hop adds. `--remote` is an explicit ask with
+no local substitute, so every one of these is an **error**, never a quiet local call.
+
+**`stage: transport` — "could not be reached over ssh"**
+- The hop failed before anything about herdr was asked, which is the right order:
+  reporting "herdr is not installed" about a box we could not reach would be a lie.
+- Recovery is in the message: prove `ssh -o BatchMode=yes <target> true` by hand. It
+  has to work **non-interactively** — hotline never answers a password or a browser
+  check. The three usual causes:
+  - **the wrong host.** A tailnet MagicDNS name and its `.local` mDNS name are
+    different hosts: the first goes through Tailscale SSH, the second to plain
+    `sshd`, which then denies publickey. `foo` and `foo.local` failing differently
+    is the tell.
+  - **the wrong user.** A tailnet SSH policy grants specific users; one that is not
+    permitted is refused with "tailnet policy does not permit you to SSH as user X"
+    however good your keys are.
+  - **no identity available.** Under Tailscale SSH none is needed; under plain sshd
+    an agent or key has to be there for a non-interactive hop.
+
+**`stage: transport` — "Tailscale SSH wants a browser check" / a hop that "timed out"**
+- Tailscale SSH can run in **check mode**: it prints
+  `# Tailscale SSH requires an additional check. To authenticate, visit
+  https://login.tailscale.com/a/…` and, once the check period has lapsed, a
+  `BatchMode` hop blocks on an authentication it cannot perform.
+- Every hop is time-boxed precisely so that becomes an error naming the URL rather
+  than a half-hour of silence mid-work-order. Those notice lines are also filtered
+  out of every read — nothing downstream ever parses them as data.
+- Recovery: the **user** visits the URL (or runs `ssh <target> true` themselves once),
+  then re-dial. Raising `HOTLINE_REMOTE_SSH_TIMEOUT` cannot help: nothing is going to
+  answer the browser.
+
+**`stage: transport` — "herdr is not on PATH on <target>" / "no server answered" / "no pane could be resolved"**
+- The same three questions, asked of that box. Two things differ:
+  - **`HERDR_ENV=1` proves nothing here.** Being inside a herdr pane means a server
+    hosts *this* process; the remote server is checked outright, so a stopped one is
+    reported as a stopped server rather than as "no pane to split".
+  - **the pane override is `HOTLINE_HERDR_REMOTE_PANE`**, not `HOTLINE_HERDR_PANE`.
+    A pane id means nothing on another machine, so the local override is ignored for
+    a remote dial (as is the caller's own `$HERDR_PANE_ID`).
+
+**`stage: transport` — "claude is not on the PATH a non-login ssh command gets"**
+- The one preflight check with no local counterpart. `ssh host cmd` runs with that
+  box's own non-login PATH, so a `claude` under `~/.local/bin` can resolve for a human
+  who logged in and not for the command that starts the agent.
+- Recovery: `ssh <target> command -v claude`. If it resolves interactively but not
+  there, add its directory to that box's non-login environment
+  (`~/.ssh/environment`, or whatever rc the ssh command actually reads).
+
+**The response wait says "No transcript at any derived path"**
+- The paths it names are on the REMOTE box: `~/.claude/projects/<encoded
+  realpath>/<session>.jsonl` under **that** box's `$HOME`, with the realpath resolved
+  **there**. Both halves are asked of it rather than assumed from here, which is what
+  makes a symlinked remote checkout readable at all.
+- So check the file on that box — `ssh <target> ls ~/.claude/projects/…` — before
+  concluding delivery failed. `<call_dir>/remote_transcript.jsonl` is the local mirror
+  the waiter last fetched, and is worth reading first.
+
+**The wait reports the agent as gone, or asks about the wrong box**
+- `<call_dir>/remote_target.txt` is what tells the waiter the agent lives elsewhere;
+  it runs as a separate process and receives nothing else. Missing or empty, the LOCAL
+  herdr is asked, answers "no such agent", and a working callee is reported dead.
+- If that file is absent from a remote call's dir, it is a launcher bug — do not
+  re-dial without looking.
+
+**`.fallbacks` says `session-cache→fresh(host …→…)`**
+- The cached host handle belongs to a different box (or a different backend), so it
+  was not re-addressed. `surface_ref` is an opaque string: a herdr agent name on one
+  machine is indistinguishable from one on another, and handing the wrong one over
+  would strand the real conversation somewhere unreachable while a second callee
+  answers (claude-plugins-7wze.11).
+- Usually this means a workspace dialed with `--remote` was re-dialed without it, or
+  with a different target. Re-dial with the same `--remote <target>` to continue that
+  conversation; the fresh callee this produced has none of it.
 
 ## Identity Cache Issues
 
