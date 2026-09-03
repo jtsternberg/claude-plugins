@@ -344,12 +344,27 @@ if $HERDR_MODE; then
   # extractor reads a file, and a file is the one thing ssh can move.
   TRANSCRIPT_CANDIDATES=()
   REMOTE_MIRROR=""
+  # The hop's diagnostic when the REMOTE derivation failed, "" otherwise. Kept
+  # because zero candidates then means something else entirely (below).
+  REMOTE_DERIVE_ERR=""
   if [[ -n "$SESSION_ID" && -n "$CALL_ID" && -f "$CALL_DIR/cwd.txt" && -x "$TRANSCRIPT_PATH_SH" ]]; then
     RECV_CWD=$(cat "$CALL_DIR/cwd.txt")
     if hotline_remote_active; then
-      while IFS= read -r _cand; do
-        [[ -n "$_cand" ]] && TRANSCRIPT_CANDIDATES+=("$_cand")
-      done < <(hotline_remote_transcript_candidates "$RECV_CWD" "$SESSION_ID")
+      # A REDIRECTION TO A FILE, not the process substitution the local twin uses,
+      # and not a command substitution either. Two things have to survive this call
+      # and only this form keeps both: the EXIT STATUS (`< <(…)` discards it, so an
+      # unreachable box would be indistinguishable from a box with nothing to read)
+      # and HOTLINE_REMOTE_ERR, which the hop sets in whatever shell it runs in —
+      # a `$(…)` subshell's copy dies with the subshell, taking the diagnostic.
+      _cand_file=$(mktemp)
+      if hotline_remote_transcript_candidates "$RECV_CWD" "$SESSION_ID" > "$_cand_file"; then
+        while IFS= read -r _cand; do
+          [[ -n "$_cand" ]] && TRANSCRIPT_CANDIDATES+=("$_cand")
+        done < "$_cand_file"
+      else
+        REMOTE_DERIVE_ERR="${HOTLINE_REMOTE_ERR:-no diagnostic}"
+      fi
+      rm -f "$_cand_file"
       # Inside the call dir, so it is wiped with the call and a reader who wants to
       # see what the waiter actually read can find it next to everything else.
       REMOTE_MIRROR="$CALL_DIR/remote_transcript.jsonl"
@@ -361,9 +376,20 @@ if $HERDR_MODE; then
   fi
   if [[ ${#TRANSCRIPT_CANDIDATES[@]} -eq 0 ]]; then
     {
-      echo "Cannot read a herdr callee's response: no transcript path could be derived from $CALL_DIR."
-      echo "Needed: session_id.txt (or session_id_preset.txt)=${SESSION_ID:-MISSING}, call_id.txt=${CALL_ID:-MISSING}, cwd.txt=$( [[ -f "$CALL_DIR/cwd.txt" ]] && cat "$CALL_DIR/cwd.txt" || echo MISSING )."
-      echo "herdr has no screen fallback — a claude REPL runs on the terminal's alternate screen, so its output is not in herdr's scrollback. Read the callee's transcript directly, or re-dial."
+      if [[ -n "$REMOTE_DERIVE_ERR" ]]; then
+        # A BOX THAT WENT AWAY IS NOT A MISSING INPUT. Half this derivation is a
+        # question put to that box — its own $HOME, its own realpath
+        # (claude-plugins-7wze.10) — so an unreachable box lands here with all three
+        # local inputs present, and the wording below would list them as present
+        # while blaming the call dir for the failure.
+        echo "Cannot read a herdr callee's response: its transcript path has to be derived ON $(hotline_remote_target), and that box did not answer — $REMOTE_DERIVE_ERR"
+        echo "The call dir is fine: session_id=$SESSION_ID, call_id=$CALL_ID, cwd=$RECV_CWD. What is missing is that box's own \$HOME and realpath, which cannot be assumed from here."
+        echo "Prove the hop by hand — \`ssh -o BatchMode=yes $(hotline_remote_target) true\` — then re-run this script on the same call_dir: nothing was sent, no answer was discarded, and the callee is still whatever it was."
+      else
+        echo "Cannot read a herdr callee's response: no transcript path could be derived from $CALL_DIR."
+        echo "Needed: session_id.txt (or session_id_preset.txt)=${SESSION_ID:-MISSING}, call_id.txt=${CALL_ID:-MISSING}, cwd.txt=$( [[ -f "$CALL_DIR/cwd.txt" ]] && cat "$CALL_DIR/cwd.txt" || echo MISSING )."
+        echo "herdr has no screen fallback — a claude REPL runs on the terminal's alternate screen, so its output is not in herdr's scrollback. Read the callee's transcript directly, or re-dial."
+      fi
     } >&2
     exit 1
   fi

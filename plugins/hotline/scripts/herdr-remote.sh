@@ -329,13 +329,19 @@ hotline_remote_have_cmd() {  # <command>
 # deliberately not reused: every component here — $HOME, the realpath, the
 # existence test — belongs to the other box.
 #
-# Emits nothing (exit 0) when a component is missing, exactly as the local twin
+# Emits nothing (exit 0) when a component is MISSING, exactly as the local twin
 # does: a caller that was never told the callee's cwd or session has no transcript
 # to read, and that is an answer rather than an error.
+#
+# A FAILED HOP IS NOT THAT ANSWER, and returns 1. The local twin cannot fail — it
+# reads $HOME and a realpath — but half of this derivation is a question put to
+# another machine, and collapsing "that box did not answer" into "there is nothing
+# to read" makes the waiter report a missing input while listing all three inputs as
+# present. HOTLINE_REMOTE_ERR holds the hop's own diagnostic for the caller to quote.
 hotline_remote_transcript_candidates() {  # <remote-cwd> <session-id>
   local cwd="$1" session="$2" spelling encoded seen=""
   [[ -z "$cwd" || -z "$session" ]] && return 0
-  hotline_remote_home || return 0
+  hotline_remote_home || return 1
   local resolved=""
   if hotline_remote_realpath_dir "$cwd"; then resolved="$HOTLINE_REMOTE_REALCWD"; fi
   for spelling in "$cwd" "$resolved"; do

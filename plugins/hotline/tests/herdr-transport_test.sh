@@ -2802,6 +2802,29 @@ grep -q "herdr 'agent' 'get'" "$t/ssh.log"
 check "…having asked the REMOTE herdr about the agent, over the hop" $? \
   "ssh hops: $(cat "$t/ssh.log" 2>/dev/null | tail -2)"
 
+# A BOX THAT WENT AWAY IS ITS OWN ERROR. Half the transcript-path derivation is a
+# question put to that box, so an unreachable one produced zero candidates — and the
+# zero-candidate report is written for a missing input: it blamed the call dir while
+# listing session_id, call_id and cwd as present. Two opposite fixes, one message.
+t=$(remote_env)
+cd_path=$(mktemp -d "$HOTLINE_CALL_HOME/hotline-call-XXXXX")
+echo herdr            > "$cd_path/transport.txt"
+echo p3b-gone-box     > "$cd_path/herdr_agent.txt"
+echo "$RTARGET"       > "$cd_path/remote_target.txt"
+echo "$t/target"      > "$cd_path/cwd.txt"
+echo remote-sess-5    > "$cd_path/session_id.txt"
+echo rmt-nonce-6      > "$cd_path/call_id.txt"
+out=$(wcheck "$t" "HERDR_STUB_AGENT_ANY=1" "HOTLINE_POLL_SLEEP=0" "SSH_STUB_FAIL=1" \
+        -- "$WAIT_RESPONSE" "$cd_path" --timeout 20 2>&1); rc=$?
+ERRTXT=$(cat "$t/err.txt")
+[[ $rc -ne 0 && "$ERRTXT" == *"has to be derived ON $RTARGET"* \
+   && "$ERRTXT" == *"Could not resolve hostname"* ]]
+check "an UNREACHABLE box during the transcript derivation is reported as the hop" $? \
+  "rc=$rc err=$ERRTXT"
+[[ "$ERRTXT" != *"Needed: session_id"* && "$ERRTXT" == *"The call dir is fine"* ]]
+check "…and not as a missing call-dir input, which is the opposite fix" $? \
+  "err=$ERRTXT"
+
 # --- dial.sh: --remote picks the transport and the placement -----------------
 
 remote_dial() {  # remote_dial <scratch> <extra-env...> -- <dial args...>
