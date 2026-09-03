@@ -1703,12 +1703,14 @@ check "…before any hop, so the option never reaches an ssh argv" $? \
   "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
 
 # The transport list a caller is handed has to describe the transport they get:
-# herdr stopped being local-only when --remote landed.
+# herdr stopped being local-only when --remote landed, and detached-only when Phase
+# 3a accepted side placement.
 t=$(new_env)
 out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" --transport nope)
 [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"--remote"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"side or detached"* ]] \
   && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" != *"detached, local, opt-in"* ]]
-check "the --transport list no longer calls herdr local-only" $? \
+check "the --transport list calls herdr neither local-only nor detached-only" $? \
   "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
 
 # Side placement is the one refusal --remote owns. Locally, side and detached are

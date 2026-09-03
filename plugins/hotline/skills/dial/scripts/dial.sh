@@ -373,7 +373,7 @@ case "$TRANSPORT_REQ" in
     ;;
   *)
     emit_error args "Unknown --transport '$TRANSPORT_REQ'" \
-      "Valid transports: cmux (default), herdr (detached, here or on another box with --remote, opt-in), headless." ;;
+      "Valid transports: cmux (default), herdr (side or detached, here or on another box with --remote; opt-in), headless." ;;
 esac
 
 # --- The ssh hop, armed once, for every script this dial runs ----------------
