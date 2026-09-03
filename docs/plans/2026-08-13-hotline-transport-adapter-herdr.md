@@ -282,7 +282,9 @@ proposed "add conference via `herdr session attach`". Shipped (Phase 3a) is the
 ordinary herdr launch plus `herdr agent focus <name>` after delivery — see O9 in
 §9.1 for why the attach framing was wrong: the callee is *already* in a pane beside
 the caller, so nothing needed attaching. `--placement side` is accepted for the same
-reason and reports the word the caller used, `detached` when they named none.
+reason and reports the word the caller used — `side` when they named none, which is
+`dial.sh`'s default placement and the true one here, the same word the identical
+flagless dial reports over cmux.
 `--placement window` stays refused, but the refusal now names the missing feature
 (hotline creates no herdr layout beyond its one split) instead of naming a phase,
 because no phase is pending for it.
