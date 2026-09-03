@@ -55,8 +55,9 @@
 #   # → {"call_dir":"…","agent":"hotline-…","pane":"w6:p2","session_id":"…"}
 #
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
-# --detached is accepted and ignored: it is the only placement herdr Phase 1
-# supports, and dial.sh rejects the others before it ever reaches this script.
+# --detached is accepted and ignored, and so is a side placement: a herdr callee is
+# a pane split off the caller's, which is both — the placement word only changes
+# what dial.sh reports. `--window` never reaches here; dial.sh refuses it.
 # =============================================================================
 set -uo pipefail
 
@@ -91,8 +92,9 @@ while [[ $# -gt 0 ]]; do
     --boot-timeout) BOOT_TIMEOUT="$2";  shift 2 ;;
     --resume)       RESUME_ID="$2";     shift 2 ;;
     --fork-session) FORK_SESSION=true;  shift   ;;
-    # The only placement herdr Phase 1 supports; accepted for symmetry with the
-    # other launchers so dial.sh can pass its placement args unconditionally.
+    # Placement is not this launcher's decision — one split serves side and
+    # detached alike. Accepted for symmetry with the other launchers, so dial.sh can
+    # pass its placement args unconditionally.
     --detached|--new-workspace) shift ;;
     *) shift ;;
   esac
@@ -211,8 +213,10 @@ fail_async() {  # fail_async <reason>
 }
 
 # ---- Open the host: a sibling pane, in the callee's cwd. --------------------
-# --no-focus deliberately: a work order is background work, and stealing the
-# user's focus to a pane they did not ask for is the opposite of detached.
+# --no-focus deliberately, for EVERY call including a conference: a callee whose
+# REPL is still booting must not hold the user's cursor, or their next keystrokes
+# land in it. A conference is focused later, by dial.sh, once the payload is
+# confirmed in the callee's transcript.
 SPLIT_DIRECTION="${HOTLINE_HERDR_SPLIT_DIRECTION:-right}"
 NEW_PANE=""
 herdr_cli pane split --pane "$SPLIT_FROM" \

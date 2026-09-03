@@ -312,9 +312,6 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   local `~/.claude/projects` tree (Phase 3). `--resume` is a conflict rather than a
   gap: herdr hosts a callee it *starts*, with a `--session-id` preset that is the only
   reason the transcript is readable, and `claude --resume` cannot take that preset.
-- Placement and conference are **no longer refused**: side and detached are the same
-  split under herdr, and `--mode conference` delivers and then focuses the callee's
-  pane.
 - Recovery: re-dial without `--window` (side or detached), or over cmux when a real
   window is the point. To continue a session you already dialed, drop `--resume`
   entirely — the cached herdr agent is re-targeted by name with no flag at all.
