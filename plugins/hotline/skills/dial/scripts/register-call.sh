@@ -65,11 +65,28 @@ if [[ -s "$CALL_DIR/call_id.txt" ]]; then
   CALL_ID_ARGS=(--call-id "$(cat "$CALL_DIR/call_id.txt")")
 fi
 
+# WHICH BACKEND, AND WHICH BOX, that handle belongs to. surface_ref is opaque by
+# design, so a cmux surface handle, a local herdr agent name and a REMOTE herdr
+# agent name are indistinguishable strings — and a follow-up that re-addresses the
+# wrong kind is told "no such agent" and quietly starts a second callee while the
+# real one keeps running somewhere unreachable (claude-plugins-7wze.11). Recorded
+# from FIRST CONTACT, here, because that is where the entry is created; both fields
+# are omitted when there is nothing to say, so a local cmux entry keeps exactly the
+# shape it has always had.
+TRANSPORT_ARGS=()
+if [[ -s "$CALL_DIR/transport.txt" ]]; then
+  TRANSPORT_ARGS=(--transport "$(tr -d '[:space:]' < "$CALL_DIR/transport.txt")")
+fi
+if [[ -s "$CALL_DIR/remote_target.txt" ]]; then
+  TRANSPORT_ARGS+=(--remote "$(tr -d '[:space:]' < "$CALL_DIR/remote_target.txt")")
+fi
+
 bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
   --caller-session "$CALLER_SESSION" \
   --session "$SESSION_ID" \
   --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} \
-  ${CALL_ID_ARGS[@]+"${CALL_ID_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
+  ${CALL_ID_ARGS[@]+"${CALL_ID_ARGS[@]}"} \
+  ${TRANSPORT_ARGS[@]+"${TRANSPORT_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
 
 # Dial history: "who called THIS workspace", keyed by the RECEIVER's cwd.
 # --session keeps its historical meaning (the CALLER's session id); the callee's

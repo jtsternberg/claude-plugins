@@ -17,6 +17,13 @@
 #   3. --clear-surface and --surface together are REFUSED rather than resolved
 #      by jq-clause ordering.
 #
+#   4. transport/remote are OPTIONAL and BACKWARD-COMPATIBLE. They say which
+#      backend, and which box, the opaque surface_ref belongs to — without them a
+#      herdr agent name from another box is indistinguishable from a local one, and
+#      re-addressing it strands the real conversation (claude-plugins-7wze.11). An
+#      entry that predates them must keep reading exactly as it always did, because
+#      every entry in every existing cache file is one.
+#
 # $HOME is redirected per case, so nothing here touches the real
 # ~/.agents-hotline. No external binaries are involved at all.
 # =============================================================================
@@ -136,6 +143,67 @@ CACHE_FILE="$T/home2/.agents-hotline/sessions/caller-2.json"
 [[ "$(conn last_call_id)" == "nonce-3" && "$(conn surface_ref)" == "<absent>" ]]
 check "set on a new cache file records the nonce and omits an empty surface" $? \
   "$(cat "$CACHE_FILE" 2>/dev/null)"
+
+# --- transport / remote: additive, and old entries still read -----------------
+
+# An entry written before these fields existed. Hand-built rather than produced by
+# an older `set`, because "what the previous version wrote" is the thing under test.
+mkdir -p "$T/home3/.agents-hotline/sessions"
+# The REALPATH spelling: session-cache.sh canonicalizes its target, so a
+# hand-built entry keyed on the unresolved path is an entry `get` cannot find.
+TARGET_REAL=$(realpath "$TARGET" 2>/dev/null || echo "$TARGET")
+jq -n --arg t "$TARGET_REAL" \
+  '{caller:"/caller", caller_session_id:"caller-3",
+    connections: {($t): {session_id:"sess-legacy", started:1, last_contact:1,
+      mode:"work_order", exchange_count:3, surface_ref:"surface-uuid-legacy",
+      last_call_id:"nonce-legacy"}}}' > "$T/home3/.agents-hotline/sessions/caller-3.json"
+got=$(HOME="$T/home3" bash "$CACHE" get "$TARGET" --caller-session caller-3)
+[[ "$(jq -r '.surface_ref' <<<"$got")" == "surface-uuid-legacy" \
+   && "$(jq -r '.session_id' <<<"$got")" == "sess-legacy" \
+   && "$(jq -r '.transport // "<absent>"' <<<"$got")" == "<absent>" \
+   && "$(jq -r '.remote // "<absent>"' <<<"$got")" == "<absent>" ]]
+check "an entry with no transport/remote reads back unchanged (absent means local)" $? \
+  "got=$got"
+
+# …and an update of it still works, without inventing either field.
+HOME="$T/home3" bash "$CACHE" update "$TARGET" --caller-session caller-3 --call-id nonce-4 >/dev/null
+got=$(HOME="$T/home3" bash "$CACHE" get "$TARGET" --caller-session caller-3)
+[[ "$(jq -r '.last_call_id' <<<"$got")" == "nonce-4" \
+   && "$(jq -r '.exchange_count' <<<"$got")" == "4" \
+   && "$(jq -r '.transport // "<absent>"' <<<"$got")" == "<absent>" ]]
+check "…and updating it does not fabricate a transport it never had" $? "got=$got"
+
+# A remote entry round-trips both fields.
+mkdir -p "$T/home4"
+HOME="$T/home4" bash "$CACHE" set "$TARGET" --caller-session caller-4 \
+  --session sess-remote --mode work_order --surface hotline-remote-1 \
+  --transport herdr --remote "user@box.example" >/dev/null
+got=$(HOME="$T/home4" bash "$CACHE" get "$TARGET" --caller-session caller-4)
+[[ "$(jq -r '.transport' <<<"$got")" == "herdr" \
+   && "$(jq -r '.remote' <<<"$got")" == "user@box.example" ]]
+check "set records transport and remote alongside the host handle" $? "got=$got"
+
+# --clear-surface removes them WITH the handle: they describe that handle, so an
+# entry with no handle must not keep claiming which backend and box it was on.
+HOME="$T/home4" bash "$CACHE" update "$TARGET" --caller-session caller-4 --clear-surface >/dev/null
+got=$(HOME="$T/home4" bash "$CACHE" get "$TARGET" --caller-session caller-4)
+[[ "$(jq -r '.surface_ref // "<absent>"' <<<"$got")" == "<absent>" \
+   && "$(jq -r '.transport // "<absent>"' <<<"$got")" == "<absent>" \
+   && "$(jq -r '.remote // "<absent>"' <<<"$got")" == "<absent>" ]]
+check "--clear-surface drops transport/remote too — they describe the handle" $? "got=$got"
+
+# An omitted --transport/--remote leaves whatever is there untouched, exactly as an
+# omitted --surface does: a follow-up that has nothing new to say says nothing.
+HOME="$T/home4" bash "$CACHE" set "$TARGET" --caller-session caller-4 \
+  --session sess-remote --mode work_order --surface hotline-remote-2 \
+  --transport herdr --remote "user@box.example" >/dev/null
+HOME="$T/home4" bash "$CACHE" update "$TARGET" --caller-session caller-4 \
+  --surface hotline-remote-2 --call-id nonce-9 >/dev/null
+got=$(HOME="$T/home4" bash "$CACHE" get "$TARGET" --caller-session caller-4)
+[[ "$(jq -r '.transport' <<<"$got")" == "herdr" \
+   && "$(jq -r '.remote' <<<"$got")" == "user@box.example" \
+   && "$(jq -r '.last_call_id' <<<"$got")" == "nonce-9" ]]
+check "an omitted --transport/--remote leaves both untouched" $? "got=$got"
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
