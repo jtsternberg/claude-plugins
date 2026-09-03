@@ -354,10 +354,13 @@ while [[ $i -lt ${#ARGS[@]} ]]; do
 done
 printf '%s :: %s\n' "$TARGET" "$CMD" >> "${SSH_LOG:?SSH_LOG not set}"
 # THE FULL ARGV TOO, one line per invocation, in a second log beside the first.
-# The parse above throws every option away, which means no assertion on that log
-# can witness one: delete `-o BatchMode=yes` (a hop that can then sit on a password
+# The parse above throws every option away, so nothing asserted on THAT log can
+# witness one: delete `-o BatchMode=yes` (a hop that can then sit on a password
 # prompt) or `-n` (a hop that eats its caller's stdin) from herdr-remote.sh and the
-# whole suite still passes. This log is what pins them.
+# parsed log is byte-identical. This log is what pins them, and it is read from BOTH
+# ends — the delivery block covers the hops hotline_remote_run makes, the fetch
+# block covers hotline_remote_fetch_transcript's. One option set, two callers, so
+# either end alone would leave the other's hop unpinned.
 printf '%s\n' "$*" >> "${SSH_LOG}.argv"
 if [[ "${SSH_STUB_FAIL:-}" == "1" ]]; then
   echo "ssh: Could not resolve hostname ${TARGET#*@}: nodename nor servname provided" >&2
@@ -2842,6 +2845,24 @@ check "…via a local mirror in the call dir, so what it read is inspectable" $?
 grep -q 'cat "\$p"' "$t/ssh.log"
 check "…fetched with one \`cat\` over the already-authenticated hop" $? \
   "ssh hops: $(cat "$t/ssh.log" 2>/dev/null | tail -2)"
+
+# AND CARRYING THE SAME OPTIONS, asserted here because this hop is built by the
+# OTHER caller of hotline_remote_ssh_opts: the delivery block's identical assertion
+# never sees it (nothing in a dial fetches a transcript — the waiter does), so for a
+# while `-o BatchMode=yes` could be deleted from this site with the whole suite
+# still green. It is the hop that repeats every poll, i.e. the likeliest of all to
+# sit on a lapsed tailnet check. The `cat "$p"` grep is what keeps this from passing
+# vacuously over hops that are not the fetch.
+ARGV="$t/ssh.log.argv"
+HOPS=$(grep -c '' "$ARGV" 2>/dev/null || echo 0)
+[[ $HOPS -ge 2 ]] \
+  && grep -qF -- 'cat "$p"' "$ARGV" \
+  && [[ "$(grep -cF -- '-o BatchMode=yes' "$ARGV")" -eq "$HOPS" ]] \
+  && [[ "$(grep -cF -- '-o ConnectTimeout=' "$ARGV")" -eq "$HOPS" ]] \
+  && [[ "$(grep -cF -- '-o ControlMaster=auto' "$ARGV")" -eq "$HOPS" ]] \
+  && [[ "$(grep -cF -- '-o ControlPath=' "$ARGV")" -eq "$HOPS" ]]
+check "…with the same BatchMode/ConnectTimeout/ControlPath every other hop carries" $? \
+  "$HOPS hops: $(cat "$ARGV" 2>/dev/null)"
 
 # THE FETCH HOP IS FILTERED TOO, and it is the one hop where a notice line is not
 # merely misparsed but FATAL: its stdout becomes the mirror, transcript-extract.sh
