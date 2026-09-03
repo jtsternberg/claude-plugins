@@ -93,6 +93,11 @@ PICKUP_SCRIPTS="$HOTLINE_ROOT/skills/pickup/scripts"
 # needs it to find the surface inside a workspace-addressed call.
 # shellcheck source=../../../scripts/repl-state.sh
 source "$PLUGIN_SCRIPTS/repl-state.sh"
+# The ssh hop, for the ONE thing dial.sh has to ask the remote box itself: whether
+# the --remote target names a directory over there, and what its realpath is. Every
+# other remote question belongs to a sub-script.
+# shellcheck source=../../../scripts/herdr-remote.sh
+source "$PLUGIN_SCRIPTS/herdr-remote.sh"
 
 # Pending-fingerprint state. NOT in /tmp: the file is keyed by the claude PID, so
 # a reused PID would inherit a dead session's fingerprint, and /tmp is
@@ -392,6 +397,17 @@ if $FRESH && [[ -n "$RESUME_ARG" ]]; then
     "--fresh means 'start a new callee session'; --resume <id> names one to continue. Pass one or the other."
 fi
 
+# The identity cache is a LOCAL mechanism: `hotline-pickup` runs a headless claude
+# IN the target directory and writes what it learned. For a --remote target that
+# directory is on another box, so the refresh would run a claude here, in a path
+# that is not here, and burn programmatic credit to fail. Refused rather than
+# attempted-and-degraded, because it is an explicit ask for an expensive action.
+if $REFRESH_IDENTITY && [[ -n "$REMOTE_TARGET" ]]; then
+  emit_error args \
+    "--refresh-identity cannot run against a --remote target" \
+    "Refreshing an identity means running \`hotline-pickup\` IN the target directory, and that directory is on $REMOTE_TARGET — a local refresh would run claude here against a path that is not here. Drop --refresh-identity. (A remote workspace has no local identity cache, so \`identity_stale\` reads true for it; that is unknown, not stale.)"
+fi
+
 # The box wait, resolved ONCE here and threaded to every delivery site.
 #
 # Two waits, one event: wait-for-session.sh waits for the callee's REPL to exist,
@@ -533,8 +549,38 @@ resolve_once() {
     --caller-session "$MY_SESSION_ID" 2>"$ERR_FILE"
 }
 
-TARGET_PATH=""
-if ! TARGET_PATH=$(resolve_once); then
+# A --remote TARGET IS RESOLVED ON THE REMOTE BOX, not here. resolve-workspace.sh's
+# whole chain is local by construction — it validates a path with `realpath`, reverse-
+# looks-up a session in the local cache, and consults the local dirmap — and none of
+# that knows anything about another machine's directories. Run against a remote path
+# it does the worst possible thing: refuses a perfectly good dial with "Path does not
+# exist", or (if a same-named directory happens to exist here) resolves to the LOCAL
+# one and dials a callee into the wrong tree.
+#
+# So the equivalent of its step 1 — absolute path, exists, canonicalized — is asked
+# over ssh instead. Canonicalizing matters for more than tidiness: register-call.sh
+# keys the session cache on cwd.txt, which the launcher writes as the REMOTE realpath,
+# and a dial that looked the cache up under the un-resolved spelling would never find
+# its own entry, so every follow-up would start a second callee.
+#
+# A non-absolute reference is refused rather than guessed at: fuzzy matching and
+# dirmap ids are local knowledge, and there is no remote dirmap to consult.
+if [[ -n "$REMOTE_TARGET" ]]; then
+  if [[ "$TARGET_REF" != /* ]]; then
+    emit_error resolve \
+      "--remote needs an absolute path on $REMOTE_TARGET, got '$TARGET_REF'" \
+      "Fuzzy names, dirmap ids and session-id lookups all resolve against THIS machine, and the callee is going to run on $REMOTE_TARGET. Pass the absolute path as it exists there — \`ssh $REMOTE_TARGET pwd\` or \`ssh $REMOTE_TARGET ls\` if you need to check."
+  fi
+  if ! hotline_remote_realpath_dir "$TARGET_REF"; then
+    emit_error resolve \
+      "$TARGET_REF is not a directory on $REMOTE_TARGET (or could not be resolved there): ${HOTLINE_REMOTE_ERR:-no diagnostic}" \
+      "Check it on that box: \`ssh $REMOTE_TARGET ls -d $TARGET_REF\`. If the hop itself is failing, \`ssh -o BatchMode=yes $REMOTE_TARGET true\` has to work non-interactively first."
+  fi
+  TARGET_PATH="$HOTLINE_REMOTE_REALCWD"
+fi
+
+TARGET_PATH="${TARGET_PATH:-}"
+if [[ -z "$TARGET_PATH" ]] && ! TARGET_PATH=$(resolve_once); then
   ERRTXT=$(cat "$ERR_FILE")
   # resolve-workspace.sh signals ambiguity with a candidates ARRAY on stderr.
   if jq -e 'type == "array"' <<<"$ERRTXT" >/dev/null 2>&1; then
@@ -552,6 +598,11 @@ fi
 # Identity freshness of the RESOLVED target. Reported always (one cheap
 # is-stale check); refreshed only on request, because the refresh is a real
 # headless claude call — tens of seconds and programmatic-usage credit.
+# For a remote target this reads `true` and means "unknown": the identity cache is
+# keyed by the path string and is only ever WRITTEN by a pickup that ran in that
+# directory, which for another box's path never happened here. Reported as-is rather
+# than asserted false — see the --refresh-identity refusal above for why refreshing
+# it is not on offer.
 IDENTITY_STALE=false
 if bash "$PICKUP_SCRIPTS/identity-cache.sh" is-stale --cwd "$TARGET_PATH" >/dev/null 2>&1; then
   IDENTITY_STALE=true
