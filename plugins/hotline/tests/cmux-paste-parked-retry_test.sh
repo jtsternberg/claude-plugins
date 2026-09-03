@@ -115,6 +115,17 @@ clean_parked() { printf '%s%s do the thing\n\n%s Baked for 12s\n%s\n%s%s[Pasted 
   "$GLYPH" " " "✻" "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
 # A surface with no scrollback echo at all: nothing but the box, holding the placeholder.
 bare_parked() { printf '%s\n%s%s[Pasted text #1 +6 lines]\n%s\n' "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
+# --- The trust-dialog screens (claude-plugins-6y0s, conference half) ------------
+# Claude Code's startup trust prompt: no input box, and none is ever coming. This is
+# what a conference call's --wait-box loop stares at for its whole budget when the
+# callee's cwd is untrusted.
+trust_dialog() { printf '%s\n│ Quick safety check: Is this a project you │\n│ created or one you trust?                │\n│ %s 1. No, exit                            │\n│   2. Yes, I trust this folder            │\n%s\n' \
+  "$RULE" "$GLYPH" "$RULE"; }
+# The same dialog text, ANSWERED minutes ago and still in the capture, with a LIVE box
+# under it. Refusing this would refuse a delivery that was perfectly safe.
+trust_answered_then_box() { printf 'Quick safety check: Is this a project you created or one you trust?\n  2. Yes, I trust this folder\n%s%s do the thing\n%s\n%s%s\n%s\n' \
+  "$GLYPH" " " "$RULE" "$GLYPH" "$NBSP" "$RULE"; }
+
 # A payload short enough that the NONCE renders verbatim in the box. Paired with
 # collapsed_baseline, so the stale `[Pasted text #1` echo above it is not a fresh marker
 # and the nonce on the box line is the only thing the screen tier could match.
@@ -324,6 +335,42 @@ OUT13=$(run_case "$c13" "$N13" "$(queued_box_only)" "" no "$(clean_baseline)" no
 check "queued hint AS the box content → confirmed as delivered" $? "out=$OUT13"
 [[ ! -s "$c13/sendkey" ]]
 check "queued hint AS the box content → NO retry Enter fired" $? "sendkey=$(cat "$c13/sendkey")"
+
+# 14. THE STARTUP TRUST DIALOG in the --wait-box loop (claude-plugins-6y0s). A
+#     conference call reaches this script directly (dial.sh step 5b → cmux-call.sh),
+#     never through wait-for-session.sh where the same guard already lives — so
+#     without this gate an untrusted cwd burned the whole box budget and then reported
+#     a REPL that "never drew a claude input box", with `trust` never mentioned. It
+#     must refuse FAST, name the cwd and the fix, say nothing was delivered, and
+#     report sent:false so the caller knows re-dialing is safe.
+c14="$STUBROOT/trust-dialog"; N14="park0000000000c1"
+START=$SECONDS
+OUT14=$(run_case "$c14" "$N14" "$(trust_dialog)" "" no "$(trust_dialog)")
+ELAPSED14=$((SECONDS - START))
+[[ "$(jq -r '.delivered' <<<"$OUT14" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$OUT14" 2>/dev/null)" == "false" ]]
+check "trust dialog in the box wait → delivered:false sent:false" $? "out=$OUT14"
+R14=$(jq -r '.reason' <<<"$OUT14" 2>/dev/null)
+[[ "$R14" == *"TRUST DIALOG"* && "$R14" == *"$c14/cwd"* \
+   && "$R14" == *"Yes, I trust this folder"* && "$R14" == *"NOTHING WAS DELIVERED"* ]]
+check "trust dialog → names the untrusted cwd, the fix, and that nothing landed" $? \
+  "reason=$R14"
+[[ $ELAPSED14 -lt 3 ]]
+check "trust dialog → fails FAST instead of burning the box budget" $? \
+  "took ${ELAPSED14}s of a 3s budget"
+[[ ! -s "$c14/sendkey" ]] && ! grep -qF 'terminal.paste' "$c14/sock/requests.log" 2>/dev/null
+check "trust dialog → nothing was pasted and no key was sent into it" $? \
+  "sendkey=$(cat "$c14/sendkey") requests=$(cat "$c14/sock/requests.log" 2>/dev/null)"
+
+# 15. The OTHER direction, the twin of wait-for-cmux_test.sh case 3f: the same dialog
+#     text ANSWERED and left in the capture, with a live box under it. The guard runs
+#     only when no box is drawn, so a healthy delivery is untouched.
+c15="$STUBROOT/trust-answered"; N15="park0000000000c2"
+OUT15=$(run_case "$c15" "$N15" "$(empty_box)" "{\"type\":\"user\",\"nonce\":\"$N15\"}" no \
+          "$(trust_answered_then_box)")
+[[ "$(jq -r '.delivered' <<<"$OUT15" 2>/dev/null)" == "true" ]]
+check "an ANSWERED trust dialog above a live box does not refuse the delivery" $? \
+  "out=$OUT15"
 
 [[ ! -s "$POISON_LOG" ]]
 check "no test reached the real cmux or control socket" $? "$(cat "$POISON_LOG" 2>/dev/null)"

@@ -219,10 +219,27 @@ if [[ "$WAIT_BOX" != "0" ]]; then
     # THE CONSTANT, not a measured window: see measure_pane above. Here, too small
     # is the harmful direction — this loop is waiting for a screen that does not
     # exist yet.
-    if [[ -n "$BOX_RAW" ]] \
-       && repl_box_present "$(repl_screen_tail "$BOX_RAW" "$HOTLINE_BOX_TAIL_LINES")"; then
+    BOX_WINDOW=""
+    [[ -n "$BOX_RAW" ]] && BOX_WINDOW=$(repl_screen_tail "$BOX_RAW" "$HOTLINE_BOX_TAIL_LINES")
+    if [[ -n "$BOX_WINDOW" ]] && repl_box_present "$BOX_WINDOW"; then
       BOX_READY=true
       break
+    fi
+    # THE STARTUP TRUST DIALOG, which is why this loop can otherwise wait out its
+    # whole budget and then report a REPL that "never drew a claude input box": a
+    # callee launched into a directory Claude Code has not trusted parks on the trust
+    # prompt, which draws no box and never will. wait-for-session.sh makes this same
+    # refusal for every other cmux dial, but a CONFERENCE never reaches it — dial.sh
+    # step 5b goes through cmux-call.sh straight to this script — so without this the
+    # one path that first surfaced claude-plugins-6y0s stayed uncovered.
+    #
+    # CHECKED ONLY WHEN NO BOX IS DRAWN, unlike the boot wait, which checks the dialog
+    # first. Here a live box is proof the REPL is past this gate, so a dialog somebody
+    # answered in this surface earlier — still sitting in the same tail window — can
+    # never refuse a delivery that was safe. Nothing has been pasted at this point,
+    # which is what lets the refusal promise that and report sent:false.
+    if [[ -n "$BOX_WINDOW" ]] && repl_trust_dialog_present "$BOX_WINDOW"; then
+      undelivered "$(repl_trust_dialog_refusal --surface "$SURFACE_REF" "$CWD")" false
     fi
     sleep 0.4
   done

@@ -354,7 +354,12 @@ if [[ -n "$PROMPT" ]]; then
     # The surface stays open: its REPL is live, and the prompt stays in the call dir
     # so a human (or the caller) can still deliver it. The session is already
     # registered above, so the next dial finds it instead of opening a second pane.
-    jq -n --arg err "the conference REPL booted but the prompt never landed in it: $(jq -r '.reason // "no reason given"' <<<"$CONF_DELIVERY" 2>/dev/null | tr '\n\r\t' '   ' | cut -c1-200)" \
+    #
+    # 500 CHARS, not the 200 this used to cut at: the trust-dialog refusal
+    # (repl-state.sh) is the one reason here that a caller has to ACT on, and at 200
+    # it was truncated mid-message — the cwd and the fix survived, "NOTHING WAS
+    # DELIVERED" did not, which is the half that says re-dialing is safe.
+    jq -n --arg err "the conference REPL booted but the prompt never landed in it: $(jq -r '.reason // "no reason given"' <<<"$CONF_DELIVERY" 2>/dev/null | tr '\n\r\t' '   ' | cut -c1-500)" \
           --arg pf "$PASTE_PROMPT" --arg dir "$CALL_DIR" \
       '{error: $err, undelivered: true, prompt_file: $pf, call_dir: $dir}'
     exit 1

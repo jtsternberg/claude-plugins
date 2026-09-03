@@ -575,6 +575,27 @@ repl_trust_dialog_present() {
   return 1
 }
 
+# repl_trust_dialog_refusal <read-flag> <handle> [callee-cwd] — the refusal text,
+# on stdout.
+#
+# ONE wording, because TWO cmux gates catch this dialog and a caller must not learn
+# different things from them. wait-for-session.sh's boot wait catches it for a quick
+# call or a work order; cmux-paste.sh's --wait-box loop catches it for a CONFERENCE,
+# which never reaches the boot wait at all (dial.sh step 5b → cmux-call.sh →
+# cmux-paste.sh --wait-box) and so burned the whole box budget and blamed a REPL that
+# never drew a box, with `trust` unmentioned — the original claude-plugins-6y0s
+# symptom, on the one path the first fix did not cover.
+#
+# Both gates run BEFORE anything is written to the pane, which is why the text can
+# promise that nothing was delivered and that re-dialing is safe. Do not call it from
+# a post-paste site. herdr's own refusal (herdr-prompt.sh) is deliberately NOT this
+# string: it names herdr's readiness lie and `agent attach`, and its payload sits in
+# pending_paste.md rather than being pasted in a later step.
+repl_trust_dialog_refusal() {
+  local flag="$1" handle="$2" cwd="${3:-}"
+  printf '%s' "Claude Code's startup TRUST DIALOG is on screen in cmux ${handle} for ${cwd:-the callee cwd} — trust that directory (run \`claude\` in it once and answer 'Yes, I trust this folder'), then re-dial. NOTHING WAS DELIVERED: the prompt is pasted in a later step, so the callee has received nothing and re-dialing is safe. The dialog takes keystrokes and its default option is 'No, exit', so a payload sent into it would have answered that and killed the callee. HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover this gate — directory trust is not a permission mode. Read the pane with: cmux read-screen ${flag} ${handle} --scrollback --lines 80."
+}
+
 # --- Boot-wait budget --------------------------------------------------------
 # ONE definition of how long we wait for a callee's REPL to become usable.
 #

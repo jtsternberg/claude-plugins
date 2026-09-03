@@ -103,6 +103,12 @@ Identity normally resolves inline from `$CLAUDE_CODE_SESSION_ID` (Claude Code >=
   folder*, then re-dial. A fresh `git init` directory gets its own trust boundary even
   under an already-trusted parent, and `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS` does
   **not** cover this — directory trust is not a permission mode.
+- **A cmux CONFERENCE reports the same refusal as `stage: "deliver"`**, wrapped in
+  "the conference REPL booted but the prompt never landed in it". It never reaches the
+  boot wait — `dial.sh` step 5b goes through `cmux-call.sh` to `cmux-paste.sh`, whose
+  `--wait-box` loop makes the identical refusal (one wording, in `repl-state.sh`).
+  Read it as this section, not as a lost paste: nothing was pasted, and re-dialing
+  after trusting the directory is safe.
 
 **"Failed to create CMUX workspace"** (`stage: "fire"`)
 - CMUX couldn't open a new workspace (maybe at workspace limit).
