@@ -1509,15 +1509,18 @@ out=$(dial "$t" "HERDR_PANE_ID=w1:p1" -- --target "$t/target" --mode work_order 
 check "--transport herdr --placement side CONNECTS, reporting placement=side" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
-# …and a herdr dial that names NO placement still reports detached — what every
-# herdr dial emitted before side was accepted, unchanged (T1).
+# …and a herdr dial that names NO placement reports SIDE, exactly as the identical
+# flagless dial does over cmux. `side` is dial.sh's default placement and it is the
+# true one here: the callee is a pane split off the caller's own. There is no
+# legacy flagless herdr dial to stay compatible with — before side was accepted, a
+# flagless `--transport herdr` was REFUSED (T1).
 t=$(new_env)
 wrap_herdr_transcript "$t" unused
 out=$(dial "$t" "HERDR_PANE_ID=w1:p1" -- --target "$t/target" --mode work_order \
         --prompt "hi" --transport herdr --boot-timeout 5)
 [[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
-   && "$(jq -r '.placement' <<<"$out" 2>/dev/null)" == "detached" ]]
-check "…while a herdr dial naming no placement keeps reporting detached" $? \
+   && "$(jq -r '.placement' <<<"$out" 2>/dev/null)" == "side" ]]
+check "…while a herdr dial naming no placement reports side, as cmux does" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
 # WINDOW IS STILL REFUSED, and the refusal names the missing feature (hotline
@@ -1680,9 +1683,9 @@ out=$(dial "$t" "HOTLINE_TRANSPORT_AUTO=1" "HERDR_ENV=1" "HERDR_PANE_ID=w1:p1" \
    && "$(jq -r '.transport' <<<"$out" 2>/dev/null)" == "herdr" ]]
 check "AUTO=1 + HERDR_ENV=1 + a usable preflight SELECTS herdr with no --transport" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
-[[ "$(jq -r '.placement' <<<"$out" 2>/dev/null)" == "detached" ]] \
+[[ "$(jq -r '.placement' <<<"$out" 2>/dev/null)" == "side" ]] \
   && [[ ! -s "$t/cmux.log" ]]
-check "…reporting the placement a flagless herdr dial reports, and never touching cmux" $? \
+check "…reporting side, the placement a flagless dial reports, and never touching cmux" $? \
   "out=$out cmux calls: $(cat "$t/cmux.log" 2>/dev/null)"
 
 # The auto path's failure is a DEGRADE, not an error — the opposite of the explicit

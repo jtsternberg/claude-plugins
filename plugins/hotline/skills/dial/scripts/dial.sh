@@ -158,11 +158,6 @@ PROMPT_FILE=""
 PROMPT_INLINE=""
 HAVE_PROMPT=false
 PLACEMENT="side"
-# Did the caller NAME a placement? Only the herdr arm asks, and only to report:
-# side and detached are one launch there, so `.placement` echoes the word the caller
-# used and says detached when they used none (see step 6b). cmux distinguishes the
-# two for real and reads $PLACEMENT directly, as it always has.
-PLACEMENT_EXPLICIT=false
 WINDOW_REF=""
 FORCE_HEADLESS=false
 # Which backend the caller ASKED for, "" when they did not ask. Kept separate from
@@ -198,9 +193,9 @@ while [[ $# -gt 0 ]]; do
     --mode)            MODE_IN="$2";               shift 2 ;;
     --prompt-file)     PROMPT_FILE="$2";           HAVE_PROMPT=true; shift 2 ;;
     --prompt)          PROMPT_INLINE="$2";         HAVE_PROMPT=true; shift 2 ;;
-    --placement)       PLACEMENT="$2"; PLACEMENT_EXPLICIT=true; shift 2 ;;
-    --window)          WINDOW_REQUESTED=true; WINDOW_REF="$2"; PLACEMENT_EXPLICIT=true; shift 2 ;;
-    --detached|--new-workspace) PLACEMENT="detached"; PLACEMENT_EXPLICIT=true; shift ;;
+    --placement)       PLACEMENT="$2";             shift 2 ;;
+    --window)          WINDOW_REQUESTED=true; WINDOW_REF="$2"; shift 2 ;;
+    --detached|--new-workspace) PLACEMENT="detached";   shift ;;
     --transport)       TRANSPORT_REQ="$2";         shift 2 ;;
     # Accepted so the refusal below can EXPLAIN itself. Left out of the parser it
     # would land in the unrecognized-argument catch-all, which tells a caller their
@@ -1147,15 +1142,13 @@ fi
 # herdr hosts the callee in a pane split off the caller's own, and that is the SAME
 # launch whether the caller said side or detached — the words describe what they are
 # claiming about the callee (adjacency, persistence) and herdr gives both. So
-# `.placement` echoes the word they used, and says detached when they used none:
-# every herdr dial that works today passes --detached and keeps reporting exactly
-# that, and no fourth placement word enters the emitted contract.
+# `.placement` is the CALLER'S OWN WORD, read straight off $PLACEMENT: --detached
+# reports detached, --placement side reports side, and a dial that names neither
+# reports side because the default is true here — the callee IS beside the caller.
+# That is the same word the identical flagless dial reports over cmux, which is the
+# point: one dial, one placement, whichever transport hosts it.
 if [[ "$TRANSPORT" == "herdr" ]]; then
-  if $PLACEMENT_EXPLICIT; then
-    PLACEMENT_EFFECTIVE="$PLACEMENT"
-  else
-    PLACEMENT_EFFECTIVE="detached"
-  fi
+  PLACEMENT_EFFECTIVE="$PLACEMENT"
 fi
 # The launcher records a preset-vs-observed session-id disagreement in the call dir.
 # It belongs in the emitted JSON too: it is the single most diagnostic signal when a
