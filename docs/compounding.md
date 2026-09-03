@@ -42,6 +42,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   deliver-stage hints pointed at the boot section, which never mentioned the
   surviving payload copy. When adding a hint, open the section it names and confirm
   it covers this failure. (claude-plugins-xick, round 2 #10)
+- **A refusal names the missing capability, not a phase.** hotline refused herdr's
+  side placement and its conference mode as "Phase 3 = attach" for two things herdr
+  could already do, and the phase label made a wrong premise look scheduled rather
+  than checkable, so two phases shipped without anyone re-testing it. When writing a
+  refusal, name the feature nobody has built or the open question that gates it; a
+  phase label is honest only when a phase actually gates the work.
+  (claude-plugins-7wze.8, jtsternberg/claude-plugins#22, design doc §12)
 
 ## Verification
 
