@@ -88,6 +88,22 @@ Identity normally resolves inline from `$CLAUDE_CODE_SESSION_ID` (Claude Code >=
   `.fallbacks`. cmux is optional; tell the user about the degradation when a visible
   pane was the point.
 
+**`stage: "boot"` — "Claude Code's startup TRUST DIALOG is on screen"**
+- The callee was launched into a directory Claude Code has not trusted, so it parked
+  on the startup trust prompt: no banner, no session (so no transcript), no input box
+  — none of the boot wait's three signals can fire. Before this was recognized, the
+  wait spent its whole 60s budget and then blamed a malformed `--allowedTools` or a
+  lost tty, and never said "trust" (claude-plugins-6y0s). It is the cmux twin of the
+  herdr arm's pre-submit refusal below, with the same semantics.
+- **Nothing was delivered**: the prompt is pasted in a later step, so the callee has
+  received nothing and re-dialing after trusting the directory is safe. Do not send
+  anything into that pane — the dialog takes keystrokes and its default option is
+  `No, exit`.
+- Recovery: run `claude` in the callee's directory once and answer *Yes, I trust this
+  folder*, then re-dial. A fresh `git init` directory gets its own trust boundary even
+  under an already-trusted parent, and `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS` does
+  **not** cover this — directory trust is not a permission mode.
+
 **"Failed to create CMUX workspace"** (`stage: "fire"`)
 - CMUX couldn't open a new workspace (maybe at workspace limit).
 - Recovery: this one does *not* auto-degrade — the launcher failed after transport was
@@ -274,7 +290,8 @@ is kept, reported as `surface-cleanup-skipped(parked-input)`.
 
 ## herdr Failures
 
-The herdr transport is opt-in (`--transport herdr`), detached-only, and local-only.
+The herdr transport is opt-in (`--transport herdr`, or `HOTLINE_TRANSPORT_AUTO=1`
+inside a herdr pane) and local-only.
 Every refusal below is a **refusal, not a degradation**: the caller asked for a
 callee that survives a disconnect, and quietly giving them a cmux surface instead
 would be a lie they discover hours later. Report `.detail` and `.recovery` as-is.
@@ -286,18 +303,21 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   `HOTLINE_HERDR_PANE=<pane-id>`.
 - Recovery: fix the one it named, or drop `--transport herdr` to use the cmux default.
 
-**`stage: args`/`transport` — "supports --placement detached only" / "does not support --mode conference" / "cannot adopt an existing session (--resume)" / "--remote is not implemented"**
-- Not a malfunction: these are herdr's current boundaries, and each message names
-  what lifts it. Placement and conference need herdr's attach story (Phase 3);
-  `--remote` needs a remote-transcript reader, because the callee's transcript would
-  live on the remote box while every hotline answer is read from the local
-  `~/.claude/projects` tree (Phase 3). `--resume` is different — it is not a phase
-  boundary but a conflict: herdr hosts a callee it *starts*, with a `--session-id`
-  preset that is the only reason the transcript is readable, and `claude --resume`
-  cannot take that preset.
-- Recovery: re-dial as `--transport herdr --detached`, or over cmux for anything
-  else. To continue a session you already dialed, drop `--resume` entirely — the
-  cached herdr agent is re-targeted by name with no flag at all.
+**`stage: args`/`transport` — "supports --placement side and detached, not window" / "cannot adopt an existing session (--resume)" / "--remote is not implemented"**
+- Not a malfunction: these are herdr's remaining boundaries, and each message names
+  what is actually missing. `--window` has no herdr implementation at all — hotline
+  splits a pane and never creates herdr workspaces or tabs, so there is no window to
+  place a callee in. `--remote` needs a remote-transcript reader, because the callee's
+  transcript would live on the remote box while every hotline answer is read from the
+  local `~/.claude/projects` tree (Phase 3). `--resume` is a conflict rather than a
+  gap: herdr hosts a callee it *starts*, with a `--session-id` preset that is the only
+  reason the transcript is readable, and `claude --resume` cannot take that preset.
+- Placement and conference are **no longer refused**: side and detached are the same
+  split under herdr, and `--mode conference` delivers and then focuses the callee's
+  pane.
+- Recovery: re-dial without `--window` (side or detached), or over cmux when a real
+  window is the point. To continue a session you already dialed, drop `--resume`
+  entirely — the cached herdr agent is re-targeted by name with no flag at all.
 
 **`stage: fire` — "herdr pane split failed" / "herdr agent start failed" / "interactive_ready:false"**
 - The pane opened but no claude was detected in it, or herdr said it is not ready for

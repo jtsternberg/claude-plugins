@@ -295,6 +295,29 @@ if $CMUX_MODE; then
     SCREEN=$(cmux_read_live "boot wait" "$READ_FLAG" "$REF" 9999 || true)
     if [[ -n "$SCREEN" ]]; then
       CLEAN=$(echo "$SCREEN" | sed "s/${ESC}\[[0-9;]*[mGKHFJKsu]//g; s/${ESC}(B//g; s/\r//g")
+      # THE TRUST DIALOG, BEFORE ANY BOOT SIGNAL. A callee launched into a directory
+      # Claude Code has not trusted parks on the startup trust prompt, which no
+      # signal below can distinguish from a slow boot: it draws no banner, opens no
+      # session (so no transcript), and draws no input box. Left to them this wait
+      # spent its whole 60s budget and then blamed a malformed --allowedTools or a
+      # lost tty — neither true, and 'trust' never mentioned (claude-plugins-6y0s).
+      #
+      # This is the cmux half of the refusal the herdr arm already makes
+      # pre-submit (herdr-prompt.sh, O2/O6): fail fast, name the cwd, name the fix,
+      # and say plainly that nothing was delivered. NOTHING IS SENT from here — the
+      # paste is a later step — so re-dialing after trusting the directory is safe,
+      # and the dialog's default option is `No, exit`, which is exactly what a
+      # payload pasted into it would have answered.
+      #
+      # THE LIVE TAIL, not the 9999-line capture this read is: a dialog answered in
+      # this surface minutes ago is still in scrollback, and matching that would
+      # refuse a boot that is going fine. Same reason the input-box check below is
+      # tail-scoped.
+      if repl_trust_dialog_present \
+           "$(repl_screen_tail "$CLEAN" "$HOTLINE_BOX_TAIL_LINES")"; then
+        echo "Claude Code's startup TRUST DIALOG is on screen in cmux ${REF} for ${RECV_CWD:-the callee cwd} — trust that directory (run \`claude\` in it once and answer 'Yes, I trust this folder'), then re-dial. NOTHING WAS DELIVERED: the prompt is pasted in a later step, so the callee has received nothing and re-dialing is safe. The dialog takes keystrokes and its default option is 'No, exit', so a payload sent into it would have answered that and killed the callee. HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover this gate — directory trust is not a permission mode. Read the pane with: cmux read-screen ${READ_FLAG} ${REF} --scrollback --lines 80." >&2
+        exit 1
+      fi
       if echo "$CLEAN" | grep -qE 'Claude Code v|Welcome back'; then
         SAW_BANNER=true
         echo "$PRESET" > "$CALL_DIR/session_id.txt"

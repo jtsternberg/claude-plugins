@@ -258,6 +258,85 @@ else
 fi
 rm -rf "$tmp"
 
+# Case 3e: the STARTUP TRUST DIALOG. A callee launched into a directory Claude Code
+# has not trusted parks on it, drawing no banner, opening no session and drawing no
+# input box — so every signal above stays silent and the wait used to spend its whole
+# budget and then blame --allowedTools or a lost tty (claude-plugins-6y0s). It must
+# fail FAST, name the cwd and the fix, and say that nothing was delivered.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_fake_cmux "$tmp/bin"
+cat > "$tmp/screen.txt" <<'EOF'
+╭──────────────────────────────────────────────╮
+│ Quick safety check: Is this a project you    │
+│ created or one you trust?                    │
+│                                              │
+│ ❯ 1. No, exit                                │
+│   2. Yes, I trust this folder                │
+╰──────────────────────────────────────────────╯
+EOF
+cd="$tmp/call"
+stage_call_dir "$cd" "preset-uuid-3e" "workspace:99"
+RECV_CWD="/private/tmp/untrusted-scratch"
+echo "$RECV_CWD" > "$cd/cwd.txt"
+
+START=$SECONDS
+out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 20 2>"$tmp/err.txt")
+rc=$?
+ELAPSED=$((SECONDS - START))
+if [[ $rc -ne 0 ]] && grep -q "TRUST DIALOG" "$tmp/err.txt" \
+   && grep -qF "$RECV_CWD" "$tmp/err.txt"; then
+  pass "trust dialog: refused, naming the untrusted cwd"
+else
+  fail "trust dialog: refused, naming the untrusted cwd" \
+       "rc=$rc stderr=$(cat "$tmp/err.txt")"
+fi
+if grep -q "Yes, I trust this folder" "$tmp/err.txt" \
+   && grep -q "NOTHING WAS DELIVERED" "$tmp/err.txt"; then
+  pass "trust dialog: the message carries the fix and says nothing was sent"
+else
+  fail "trust dialog: the message carries the fix and says nothing was sent" \
+       "stderr=$(cat "$tmp/err.txt")"
+fi
+if [[ $ELAPSED -lt 10 ]]; then
+  pass "trust dialog: fails FAST instead of burning the boot budget"
+else
+  fail "trust dialog: fails FAST instead of burning the boot budget" \
+       "took ${ELAPSED}s of a 20s budget"
+fi
+if [[ ! -f "$cd/session_id.txt" ]]; then
+  pass "trust dialog: never promotes a session id for a callee that has no session"
+else
+  fail "trust dialog: never promotes a session id for a callee that has no session"
+fi
+rm -rf "$tmp"
+
+# Case 3f: the same dialog text, but in SCROLLBACK — a dialog somebody answered in
+# this surface minutes ago, with a live REPL below it. Matching that would refuse a
+# boot that is going fine, which is why the check reads the live tail only.
+tmp=$(mktemp -d /tmp/hotline-wait-test-XXXXXX)
+make_fake_cmux "$tmp/bin"
+{
+  echo "Quick safety check: Is this a project you created or one you trust?"
+  echo "  2. Yes, I trust this folder"
+  for i in $(seq 1 20); do echo "scrollback line $i"; done
+  echo " ▐▛███▜▌   Claude Code v2.1.141"
+} > "$tmp/screen.txt"
+cd="$tmp/call"
+stage_call_dir "$cd" "preset-uuid-3f" "workspace:99"
+echo "/Users/fake/Code/proj" > "$cd/cwd.txt"
+
+out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 5 2>"$tmp/err.txt")
+rc=$?
+if [[ $rc -eq 0 && "$out" == "preset-uuid-3f" ]]; then
+  pass "an ANSWERED trust dialog left in scrollback does not refuse a healthy boot"
+else
+  fail "an ANSWERED trust dialog left in scrollback does not refuse a healthy boot" \
+       "rc=$rc stdout=$out stderr=$(cat "$tmp/err.txt")"
+fi
+rm -rf "$tmp"
+
 echo ""
 echo "wait-for-session launch-line fast-fail:"
 

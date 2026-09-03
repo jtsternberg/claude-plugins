@@ -33,11 +33,16 @@
 #           [--boot-timeout <seconds>]
 #
 # --transport picks the multiplexer that HOSTS the callee. cmux is the default and
-# nothing about it changes; `herdr` is opt-in and, for now, detached-and-local only
-# (see the rejections in the validation block below). A requested herdr that fails
+# nothing about it changes; `herdr` is opt-in and LOCAL only — it takes side and
+# detached placements and every mode, including conference (see the validation
+# block below for what it still refuses, and why). A requested herdr that fails
 # preflight is an ERROR, never a silent fall-back to cmux: a caller who asked for
 # herdr asked for a callee that survives disconnects, and quietly giving them one
 # that does not is worse than saying no.
+#
+# HOTLINE_TRANSPORT_AUTO=1 is the one way herdr is chosen WITHOUT --transport: it
+# is an opt-in setting, and even then only inside a herdr pane and only when the
+# preflight passes. See step 3.
 #
 # --prompt-file is preferred: it keeps the message out of argv, so quoting,
 # newlines and shell metacharacters are never in play.
@@ -153,6 +158,11 @@ PROMPT_FILE=""
 PROMPT_INLINE=""
 HAVE_PROMPT=false
 PLACEMENT="side"
+# Did the caller NAME a placement? Only the herdr arm asks, and only to report:
+# side and detached are one launch there, so `.placement` echoes the word the caller
+# used and says detached when they used none (see step 6b). cmux distinguishes the
+# two for real and reads $PLACEMENT directly, as it always has.
+PLACEMENT_EXPLICIT=false
 WINDOW_REF=""
 FORCE_HEADLESS=false
 # Which backend the caller ASKED for, "" when they did not ask. Kept separate from
@@ -188,9 +198,9 @@ while [[ $# -gt 0 ]]; do
     --mode)            MODE_IN="$2";               shift 2 ;;
     --prompt-file)     PROMPT_FILE="$2";           HAVE_PROMPT=true; shift 2 ;;
     --prompt)          PROMPT_INLINE="$2";         HAVE_PROMPT=true; shift 2 ;;
-    --placement)       PLACEMENT="$2";             shift 2 ;;
-    --window)          WINDOW_REQUESTED=true; WINDOW_REF="$2"; shift 2 ;;
-    --detached|--new-workspace) PLACEMENT="detached"; shift ;;
+    --placement)       PLACEMENT="$2"; PLACEMENT_EXPLICIT=true; shift 2 ;;
+    --window)          WINDOW_REQUESTED=true; WINDOW_REF="$2"; PLACEMENT_EXPLICIT=true; shift 2 ;;
+    --detached|--new-workspace) PLACEMENT="detached"; PLACEMENT_EXPLICIT=true; shift ;;
     --transport)       TRANSPORT_REQ="$2";         shift 2 ;;
     # Accepted so the refusal below can EXPLAIN itself. Left out of the parser it
     # would land in the unrecognized-argument catch-all, which tells a caller their
@@ -242,8 +252,9 @@ esac
 # explicit ask for a specific hosting model, and the combinations below are not
 # things hotline can approximate: silently giving the caller side-by-side cmux when
 # they asked for a callee that outlives a disconnect would be a lie that only shows
-# up hours later. Each message names the phase that will lift the restriction so the
-# refusal is actionable rather than final.
+# up hours later. Each message names what is actually missing — a feature nobody has
+# built, or the open question that gates it — so the refusal is actionable rather
+# than final.
 case "$TRANSPORT_REQ" in
   ""|cmux)  ;;
   # The same destination as --headless, so it goes through the same variable
@@ -260,15 +271,21 @@ case "$TRANSPORT_REQ" in
         "--headless and --transport herdr ask for different backends" \
         "Pick one: --headless for \`claude -p\`'s structured output, or --transport herdr --detached for a callee that survives a disconnect. They cannot both apply to one dial."
     fi
-    if $WINDOW_REQUESTED || [[ "$PLACEMENT" != "detached" ]]; then
+    # SIDE AND DETACHED ARE BOTH ACCEPTED, and they run the SAME launch: every
+    # herdr callee is hosted in a pane split off the caller's own pane
+    # (HOTLINE_HERDR_PANE, or the caller's), so side-by-side is what herdr already
+    # does. The two words differ only in what `.placement` reports — adjacency or
+    # persistence — and a herdr callee is both.
+    #
+    # WINDOW IS STILL REFUSED, and not on placement grounds: hotline never creates
+    # herdr layout beyond that one split, so a herdr window would need
+    # `workspace create`, a pane to resolve inside it, and a meaning for --window's
+    # ref. That is a feature to build, so the refusal names the gap rather than a
+    # phase that will lift it.
+    if [[ "$PLACEMENT" == "window" ]]; then
       emit_error args \
-        "--transport herdr supports --placement detached only, got '$([[ $WINDOW_REQUESTED == true ]] && echo window || echo "$PLACEMENT")'" \
-        "herdr hosts a callee in its own persistent pane; it has no side-by-side-in-your-window placement (its equivalent is \`herdr session attach\`, which is Phase 3). Re-dial as: --transport herdr --detached. Or drop --transport to use the cmux default, which does support side and window placements."
-    fi
-    if [[ "$MODE_TAG" == "conference_call" ]]; then
-      emit_error args \
-        "--transport herdr does not support --mode conference" \
-        "A conference call hands the user a VISIBLE session next to their own; herdr's equivalent is attach-in-place (\`herdr session attach\`), which is Phase 3. Use --mode work_order or quick with herdr, or drop --transport for a cmux conference."
+        "--transport herdr supports --placement side and detached, not window" \
+        "herdr hosts every callee in a pane split off the caller's pane, and hotline creates no herdr workspaces or tabs — so there is no window to place one in. Re-dial with --placement side (or --detached), or drop --transport to use the cmux default, which does support --window."
     fi
     # --resume names SOMEBODY ELSE's session — the fork path, not a follow-up — and
     # herdr cannot re-host one at all: `claude --resume` and `--session-id` are
@@ -522,7 +539,9 @@ fi
 # Precedence, first match wins:
 #   1. --headless            → headless                          (unchanged)
 #   2. --transport herdr     → herdr, or ERROR
-#   3. otherwise             → cmux, with the existing cmux→headless degrade chain,
+#   3. HOTLINE_TRANSPORT_AUTO=1 + HERDR_ENV=1 + preflight passes
+#                            → herdr, or DEGRADE to step 4 with a .fallbacks entry
+#   4. otherwise             → cmux, with the existing cmux→headless degrade chain,
 #                              unchanged — and that chain is where
 #                              HOTLINE_FORCE_HEADLESS acts, via check-cmux.sh.
 #
@@ -535,11 +554,45 @@ fi
 # together with `--transport herdr` is refused outright in the validation block
 # above, because there both asks are explicit and neither is ours to discard.
 #
-# HERDR IS NEVER AUTO-SELECTED. Being inside a herdr pane (HERDR_ENV=1) or having a
-# herdr server up makes herdr *available*, and that is all it does: flipping the
-# default away from cmux on an ambient signal would surprise every interactive local
-# caller, whose whole reason for using hotline is a callee they can watch. So the
-# preflight reads that environment, and only the explicit flag selects from it.
+# HERDR IS SELECTED BY AN OPT-IN, NEVER BY AN AMBIENT SIGNAL. Two things select it:
+# `--transport herdr` per call, and HOTLINE_TRANSPORT_AUTO=1 — a setting somebody
+# turned on deliberately, which is what makes it a decision rather than a surprise.
+# Being inside a herdr pane (HERDR_ENV=1) or having a server up only makes herdr
+# *available*: on its own that flips nothing, because every interactive local
+# caller's reason for using hotline is a callee they can watch, and their
+# environment must not quietly re-host it.
+#
+# So AUTO needs BOTH halves, and all four of these hold before it selects:
+#   HOTLINE_TRANSPORT_AUTO=1  the opt-in, exactly '1' — nothing looser, so a stray
+#                             `HOTLINE_TRANSPORT_AUTO=0` in a profile cannot enable it
+#   no --transport            an explicit flag is the caller's answer, not ours
+#   not headless              --headless / HOTLINE_FORCE_HEADLESS is also explicit
+#   HERDR_ENV=1               the ambient half: the caller is IN a herdr pane, so
+#                             the callee lands next to them rather than in a session
+#                             nobody is looking at
+# and then the preflight has to pass.
+#
+# A FAILED AUTO PREFLIGHT IS A DEGRADE, NOT AN ERROR — the opposite of the explicit
+# branch below it, and for the reason that branch gives: nothing was ASKED for here.
+# AUTO says "prefer herdr when it works", so when it does not, the honest answer is
+# the cmux default with a `.fallbacks` entry saying why — and `.transport` reports
+# what actually ran either way.
+HERDR_AUTO_OK=false
+if [[ "${HOTLINE_TRANSPORT_AUTO:-}" == "1" && -z "$TRANSPORT_REQ" && "${HERDR_ENV:-}" == "1" ]] \
+   && ! $FORCE_HEADLESS; then
+  case "${HOTLINE_FORCE_HEADLESS:-}" in
+    1|true|TRUE|yes|YES) ;;
+    *)
+      HERDR_AUTO_PRE=$(bash "$DIAL_SCRIPTS/check-herdr.sh" 2>/dev/null)
+      if [[ "$(jq -r '.usable // false' <<<"$HERDR_AUTO_PRE" 2>/dev/null)" == "true" ]]; then
+        HERDR_AUTO_OK=true
+      else
+        add_fallback "transport-auto→cmux($(reason_of "$HERDR_AUTO_PRE"))"
+      fi
+      ;;
+  esac
+fi
+
 TRANSPORT="cmux"
 if $FORCE_HEADLESS; then
   TRANSPORT="headless"
@@ -557,6 +610,10 @@ elif [[ "$TRANSPORT_REQ" == "herdr" ]]; then
       "$(jq -r '.reason // "check-herdr.sh produced no usable answer"' <<<"$HERDR_PRE" 2>/dev/null)" \
       "$(jq -r '.recovery // "Run check-herdr.sh directly to see what it reports."' <<<"$HERDR_PRE" 2>/dev/null)"
   fi
+elif $HERDR_AUTO_OK; then
+  # The opt-in fired and the preflight above already passed. No error branch here:
+  # the failure case degraded to cmux before this chain started.
+  TRANSPORT="herdr"
 elif ! bash "$DIAL_SCRIPTS/check-cmux.sh" >/dev/null 2>&1; then
   TRANSPORT="headless"
   add_fallback "cmux-unavailable→headless"
@@ -1032,9 +1089,10 @@ fire_cmux() {
 
 # herdr's launcher BLOCKS until the callee's REPL is interactive-ready (that is what
 # `herdr agent start` does), so --boot-timeout has to reach it here — for cmux the
-# same budget is spent later, inside wait-for-session.sh. No placement args: herdr
-# is detached-only and the validation above has already refused everything else, so
-# there is nothing left to say about placement.
+# same budget is spent later, inside wait-for-session.sh. No placement args: side and
+# detached are the same split under herdr and window is refused above, so there is
+# nothing left for the launcher to decide. Focus is the one thing a placement could
+# still change, and it is not one: only conference focuses, after delivery (step 6b).
 #
 # $EFFECTIVE_RESUME IS DELIBERATELY NOT PASSED. Reaching this function on a
 # follow-up means the reuse step above refused (dead or blocked agent), and herdr
@@ -1086,11 +1144,19 @@ if [[ "$TRANSPORT" == "cmux" && "$PLACEMENT" == "side" \
   PLACEMENT_EFFECTIVE="detached"
 fi
 [[ "$TRANSPORT" == "headless" ]] && PLACEMENT_EFFECTIVE="none"
-# herdr hosts the callee in its own persistent pane. That IS the detached placement
-# as far as the caller is concerned (nothing lands in their window), and it is the
-# only one herdr Phase 1 accepts, so it is reported as such rather than inventing a
-# fourth placement word for the emitted contract.
-[[ "$TRANSPORT" == "herdr" ]] && PLACEMENT_EFFECTIVE="detached"
+# herdr hosts the callee in a pane split off the caller's own, and that is the SAME
+# launch whether the caller said side or detached — the words describe what they are
+# claiming about the callee (adjacency, persistence) and herdr gives both. So
+# `.placement` echoes the word they used, and says detached when they used none:
+# every herdr dial that works today passes --detached and keeps reporting exactly
+# that, and no fourth placement word enters the emitted contract.
+if [[ "$TRANSPORT" == "herdr" ]]; then
+  if $PLACEMENT_EXPLICIT; then
+    PLACEMENT_EFFECTIVE="$PLACEMENT"
+  else
+    PLACEMENT_EFFECTIVE="detached"
+  fi
+fi
 # The launcher records a preset-vs-observed session-id disagreement in the call dir.
 # It belongs in the emitted JSON too: it is the single most diagnostic signal when a
 # herdr dial later goes quiet, and a fact that only exists in a temp dir is a fact
@@ -1248,6 +1314,33 @@ if [[ "$TRANSPORT" == "herdr" && -s "$CALL_DIR/pending_paste.md" ]]; then
       "{\"sent\": $DELIVERY_SENT}"
   fi
   rm -f "$CALL_DIR/pending_paste.md"
+
+  # --- Conference: hand the pane to the user. --------------------------------
+  # THE ONLY PLACE HOTLINE EVER TAKES FOCUS. Every other dial splits --no-focus,
+  # because a work order is background work and moving the user's cursor into a
+  # pane they did not ask for is how their next keystrokes end up in a callee's
+  # REPL. A conference call is the opposite ask: the visible session IS the
+  # deliverable, so the pane it lives in is where the user needs to be.
+  #
+  # AFTER DELIVERY, deliberately. Focusing at split time (`pane split --focus`)
+  # would put the user in the pane while claude is still booting and while the
+  # delivery's own `pane send-text` is typing into it — the same collision cmux
+  # learned to avoid (claude-plugins-r465.4). By here the prompt is confirmed in
+  # the callee's transcript, so what the user is handed is a session already
+  # working on their request.
+  #
+  # A FAILED FOCUS IS A FALLBACK, NOT AN ERROR: the callee is live and has the
+  # prompt, so the call succeeded — the user just has to walk to the pane
+  # themselves, and the entry tells them which one.
+  if [[ "$MODE_TAG" == "conference_call" ]]; then
+    # Sourced here rather than at the top of the file: this is the only herdr call
+    # dial.sh makes itself, and every other one lives in a sub-script.
+    # shellcheck source=../../../scripts/herdr-state.sh
+    source "$PLUGIN_SCRIPTS/herdr-state.sh"
+    if ! herdr_cli agent focus "$HERDR_AGENT_REF"; then
+      add_fallback "herdr-conference-focus-failed($HERDR_AGENT_REF: ${HERDR_CLI_ERR:-no diagnostic}; the callee is live with the prompt — \`herdr agent attach $HERDR_AGENT_REF\`)"
+    fi
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -1274,6 +1367,15 @@ if { ! $FIRST_CONTACT || $FRESH; } && [[ "$TRANSPORT" == "cmux" && -n "$PREV_SUR
   else
     add_fallback "surface-cleanup-skipped($(reason_of "$CLEANUP"))"
   fi
+fi
+
+# A conference call is handed to the USER, so there is no response for the caller to
+# wait on — the same early-return the cmux conference path takes in step 5b, reached
+# here instead because herdr's conference IS the ordinary launch plus a focus. (A
+# conference FOLLOW-UP does not reach either place: it returns from the reuse step
+# with awaiting_response true, on both transports.)
+if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "herdr" ]]; then
+  emit_connected false
 fi
 
 emit_connected true
