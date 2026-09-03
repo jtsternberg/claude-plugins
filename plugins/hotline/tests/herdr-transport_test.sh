@@ -1711,9 +1711,12 @@ out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" --transp
 check "the --transport list no longer calls herdr local-only" $? \
   "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
 
-# The placements herdr cannot host are refused for a remote dial too — via herdr's
-# own validation, not a second copy of it, which is why --remote resolves the
-# transport BEFORE that block runs.
+# Side placement is the one refusal --remote owns. Locally, side and detached are
+# the same herdr launch, so herdr accepts both; a pane on another box is beside
+# nothing here, and reporting `side` for it would be a lie. Every OTHER placement
+# herdr cannot host (`window`) is still refused by herdr's own validation rather
+# than a second copy of it, which is why --remote resolves the transport BEFORE
+# that block runs.
 t=$(new_env)
 out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
         --remote box.local --placement side)
