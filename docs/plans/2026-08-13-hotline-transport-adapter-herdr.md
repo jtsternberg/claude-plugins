@@ -98,7 +98,7 @@ The single sentence that captures herdr's shape: **it collapses cmux's open-surf
 
 1. `--headless` / `HOTLINE_FORCE_HEADLESS=1` → **headless**. (unchanged)
 2. `--transport herdr` (explicit) → **herdr**; if herdr preflight fails, degrade to **headless** with a `.fallbacks` entry (never silently to cmux — the caller asked for herdr for a reason, usually persistence).
-3. `--remote <ssh-target>` present → **herdr** (cmux cannot host remotely; headless cannot either). Preflight failure here is an **error**, not a degrade — there is no local substitute for "run this on that box." **Phase 3 scope, gated on O5 — not shipped in Phases 0–2.** `dial.sh` parses `--remote` and refuses it outright, naming Phase 3 and, for `--transport herdr --remote`, the reason: herdr could host the callee, but its transcript would live on the remote filesystem, out of reach of the local reader every hotline answer comes from. The refusal is the point — a call that connects and can never be read is worse than one that never starts.
+3. `--remote <ssh-target>` present → **herdr** (cmux cannot host remotely; headless cannot either). Preflight failure here is an **error**, not a degrade — there is no local substitute for "run this on that box." **SHIPPED in Phase 3b** (O5 resolved, §9.1). `--remote` selects herdr on its own, and an explicit non-herdr `--transport` alongside it is an args error rather than a silent win for either flag. The selection is resolved *before* the herdr validation block, so a bare `--remote` inherits every herdr refusal instead of a second copy of them; it also defaults placement to detached, because nothing on another box can appear in the caller's window — unless the caller typed a placement, in which case the ordinary refusal applies rather than an override.
 4. `HOTLINE_TRANSPORT=herdr` env + herdr preflight passes → **herdr**.
 5. Otherwise → **cmux**, with the existing cmux→headless degrade chain unchanged.
 
@@ -164,7 +164,7 @@ It is not a blocker, for two independent reasons, and the spec leans on both:
 1. **Use the agent layer, not raw `pane read`.** herdr's `agent read` / `agent get` are purpose-built for driving agents like claude and use screen/lifecycle *detection* rather than raw scrollback. They are the right primitive for a claude REPL; `pane read` is for shell panes. The adapter must never call raw `pane read` against a claude agent pane.
 2. **The response channel is the transcript file, not the screen — and it always was.** hotline already prefers `transcript-extract.sh` reading the JSONL on disk; screen-scraping is the *fallback* for when the transcript path can't be derived. For a **local** herdr callee the transcript file is on the same filesystem, so `transcript-extract.sh` works **unchanged** and the alt-screen caveat never bites. herdr's "write reply to a temp .md" fallback is redundant for us — claude already writes a structured transcript we know how to read.
 
-The caveat *does* bite in one place: **remote herdr (`--remote <ssh>`).** The callee's transcript then lives on the remote box, out of reach of a local `transcript-path.sh`. Options for Phase 3 remote support: (a) `ssh <target> cat <remote-transcript>` behind a remote-transcript reader; (b) fall back to herdr's own `agent read` over the wire; (c) the temp-.md convention as a last resort. Flag this as the one place the caveat has real teeth (open question O5).
+The caveat *does* bite in one place: **remote herdr (`--remote <ssh>`).** The callee's transcript then lives on the remote box, out of reach of a local `transcript-path.sh`. Three options were open for Phase 3: (a) `ssh <target> cat <remote-transcript>` behind a remote-transcript reader; (b) fall back to herdr's own `agent read` over the wire; (c) the temp-.md convention as a last resort. **Phase 3b shipped (a)** — see O5 in §9.1. (b) was never viable for the reason this section gives: `agent read` sees no more of an alternate-screen TUI from across the wire than it does locally. (c) was never needed, because (a) works and keeps the extractor unchanged.
 
 ---
 
@@ -178,9 +178,9 @@ This is also why the answer to "does herdr let us drop the nonce scraping?" is *
 
 ## 9. Research findings and open questions
 
-Eight of the nine questions this spec opened are answered by the shipped stack;
-the one that is not is a Phase 3 input and is kept under its own heading below so
-it stays findable. Question IDs are stable — O5 is still O5.
+All nine questions this spec opened are answered by the shipped stack; the
+heading they used to sit under is kept below so a reader looking for an open one
+finds the answer instead of nothing. Question IDs are stable — O5 is still O5.
 
 ### 9.1 Resolved (verified against the shipped stack)
 
@@ -190,15 +190,19 @@ it stays findable. Question IDs are stable — O5 is still O5.
 - **O2 — readiness vs our session. RESOLVED, in the negative (verified live on CC 2.1.251 / herdr 0.8.0).** `agent start`'s readiness claim does **not** guarantee a usable input box. Against a fresh `git init` directory it returned `interactive_ready:true, agent_status:"idle"` with Claude Code's startup **trust dialog** on screen — a dialog that takes keystrokes, so a payload submitted into it answers the dialog's default option (`No, exit`) and kills the callee, leaving no turn and no transcript. Readiness is therefore treated as a claim to re-establish, not a fact: first contact settles, re-polls `agent get` until herdr reports interactive-ready and not `blocked`, then reads the screen once and refuses on the trust dialog's signature. Every such refusal is `sent:false`, so the caller is free to re-dial. This is the herdr analogue of the cmux path's `--wait-box`, for the same reason — a launch-time signal is not a submit-time one.
 - **O3 — `agent prompt --wait --until` mapping. RESOLVED, and it splits in two.** `agent wait <name> --until idle --until done --until blocked` is the shipped when-to-read gate, called in bounded slices (30s default) so a callee that emits its terminal STATUS mid-turn is noticed before it settles. It stays a **gate, not a verdict** — the transcript is read first on every iteration, because herdr's states cannot express hotline's `AWAITING_REVIEW`. Whether it settles *reliably* is therefore untested by construction: the gate branches on neither outcome, since a slice that times out means "still working," which is exactly what the next transcript read confirms or refutes. An unreliable settle would degrade the wait into a 30s poll rather than break it. The one state read off the reply is `blocked`, and that is re-probed before it ends a call. Separately, `agent_prompt_stalled` **does** fire on a callee merely thinking (~5s with no observed state change), which is why the submit deliberately runs *without* `--wait`: conflating "did the payload arrive" with "has the callee answered" would fail dials that worked.
 - **O4 — resume / re-target semantics. RESOLVED for re-target (verified live on herdr 0.8.0).** A follow-up is just another `agent prompt` to the same live name: context continues and both exchanges land in one session and one transcript ("remember 42" → later "what number?" → "42"). A finished, unfocused agent reports `status: done` rather than `idle` and still re-accepts a prompt, so `done` is not a closed door. `claude --resume` is not merely unnecessary but incompatible — a resume cannot carry the `--session-id` preset the transcript path is derived from, so the herdr launcher refuses `--resume`/`--fork-session` and points at cmux for adopting an unrelated session id. Liveness comes from `agent get`: herdr clears a name when its agent exits, so an unresolvable name *is* the death report. The detach/lid/SSH-drop half rests on herdr's documented persistence rather than a live probe of those events — which is precisely why the follow-up path probes liveness every turn instead of trusting it, since "survives a detach" is not "survives forever".
+- **O5 — remote transcript access. RESOLVED (verified live on herdr 0.8.2 against a Linux tailnet host).** Option (a) shipped: `ssh <target> cat <remote-transcript>` into a local mirror, then the **unchanged** `transcript-extract.sh`. Four findings shaped it, and each is a rule the code now keeps:
+  1. **herdr's own `--remote` is not a way in.** It attaches the interactive TUI and rejects every subcommand ("--remote can only be used with the default launch command"), so a remote callee is driven by running the ORDINARY herdr CLI on that box over ssh, against that box's own local server. That dispatch lives in exactly one function (`herdr_cli`), which is why the launcher, the delivery, the reuse path and the waiter needed no remote fork.
+  2. **The transcript path's two halves both belong to the far side.** The remote `$HOME` and the remote `realpath` of the callee's cwd are asked over ssh, never derived from here (claude-plugins-7wze.10) — a local realpath would resolve local symlinks against a filesystem the callee never saw, and the local `$HOME` is right only by coincidence. Both cwd spellings are still tried, as locally.
+  3. **The payload must not ride the ssh command line.** `agent prompt` takes its text positionally (O8), so the remote hop runs a FIXED command that reads stdin — `herdr agent prompt <name> "$(cat)"` with the file on ssh's stdin. Substituting the text into the ssh argv would move O8's accepted sub-second `ps` window off the box running the work order and onto the machine the caller shares with other local users, which is strictly worse. Verified byte-identical across the wire, including quotes, backticks, `$VAR` and globs, with trailing newlines stripped exactly as the local `$(cat file)` strips them.
+  4. **The hop itself is a failure mode with a face.** `BatchMode=yes` plus a `timeout` around every hop, and one `ControlMaster` connection shared by all of a dial's processes so authentication happens once. Tailscale SSH may run in CHECK MODE: it prints a `login.tailscale.com` URL ahead of the real output — filtered out of every read, so nothing downstream parses it as data — and once the check period lapses it blocks a non-interactive hop on a browser it cannot open. Unbounded that is a silent half-hour mid-work-order; bounded, it is an error naming the URL. Preflight also gains one check with no local counterpart, `claude` on that box's NON-LOGIN PATH, since `ssh host cmd` does not get the PATH a human sees after logging in.
 - **O6 — `--dangerously-skip-permissions` under herdr. RESOLVED, with one carve-out that cost a live failure.** The flag rides the same `--` passthrough as O1, opt-in via `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS`. With it off, herdr *does* report a permission gate honestly as `blocked`, and both halves act on that: delivery refuses (a work order submitted into a gate answers the gate instead of starting a turn), and the response wait reports it as "a human must look" rather than a timeout. The carve-out: **the startup trust dialog is not reported as `blocked`** (see O2) — herdr says `interactive_ready:true, idle` — and `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS` does not cover it either, because directory trust is not a permission mode. That gate needs the screen probe; `blocked` alone would have missed the exact case its refusal names.
 - **O7 — model / tools passthrough. RESOLVED.** Both ride O1's verified `--` passthrough: `HOTLINE_CLAUDE_MODEL` → `--model`, and the allowed-tools list → `--allowedTools=<list>` kept in its `=`-joined one-word form (some recorders treat `--allowedTools` as arity-0 and drop a space-separated value, resurrecting the callee later with an empty list). One flag is deliberately *not* passed: `-n <session-name>`, whose herdr passthrough is unverified — the herdr agent name carries the call's identity in `agent list` instead.
 - **O8 — payload privacy. RESOLVED: yes it does, and the exposure is accepted for Phase 1.** `herdr agent prompt <target> <text>` takes its text positionally and herdr 0.8.0 offers no file or stdin form (`herdr api` is read-only metadata), so the work order is on argv — readable by any local user through `ps` — for the lifetime of one short-lived process. Everything upstream of that hop stays on a file (`--payload-file`), which narrows the window cmux eliminated from "the whole callee session" to sub-second. Documented rather than hidden; revisit if herdr grows a file-based prompt form.
 
 ### 9.2 Open questions (verify before/while building)
 
-One left, and it has no shipped code to cite yet.
-
-- **O5 — remote transcript access.** For `--remote`, where does the callee transcript live and how do we read it locally (§7)? Phase 1 shipped local-detached only and `dial.sh` refuses `--remote` on this question's account (§4 step 3), so it now gates Phase 3's remote support outright.
+None remain: Phase 3a answered O9 and Phase 3b answered O5, both under
+§9.1 with the shipped code that settles them.
 ---
 
 ## 10. Phased rollout
@@ -215,7 +219,7 @@ The minimal viable backend: `--transport herdr` accepted **only** for `--placeme
 Generalize `session-cache.sh`'s `surface_ref` to hold the herdr agent name (§6). Implement the herdr `follow_up` verb (`agent prompt <name>`, fresh nonce, liveness probe via `agent get`). Wire `blocked`/`done`-without-STATUS into the caller's reporting so a herdr callee at a review checkpoint (exit 4 / `AWAITING_REVIEW`) and a permission-gated callee (`blocked`) are distinguished from a timeout. Keep the `cleanup` verb a documented near-no-op for herdr.
 
 **Phase 3 — remote transcript, conference, and (guarded) auto-detect.**
-Land the remote-transcript reader from O5 so `--remote` gets full structured response extraction. Add conference via `herdr session attach` (§O9). Optionally add `HOTLINE_TRANSPORT_AUTO=1` (explicit opt-in only) so `HERDR_ENV=1` can *select* herdr, never as an ambient default. Revisit whether any of the cmux surface-cleanup complexity can be retired now that a persistent-host model exists alongside it.
+Phase **3b** landed the remote-transcript reader from O5, so `--remote` gets full structured response extraction (§9.1 O5, §12). Add conference via `herdr session attach` (§O9). Optionally add `HOTLINE_TRANSPORT_AUTO=1` (explicit opt-in only) so `HERDR_ENV=1` can *select* herdr, never as an ambient default. Revisit whether any of the cmux surface-cleanup complexity can be retired now that a persistent-host model exists alongside it.
 
 ---
 
@@ -230,7 +234,7 @@ Land the remote-transcript reader from O5 so `--remote` gets full structured res
 
 ## 12. Deviations (as shipped)
 
-Six places where the shipped code reads differently from the sections above.
+Eight places where the shipped code reads differently from the sections above.
 
 **Transport scripts are flat, not nested (§10, Phase 0).** As of Phase 1
 (PR #20), `skills/dial/scripts/` holds `cmux-*`, `herdr-*` and `headless-*` side
@@ -298,3 +302,36 @@ is deliberately the OPPOSITE of the explicit flag's above: an explicit
 AUTO says only "prefer herdr when it works" — so a failed preflight degrades to the
 cmux default with a `transport-auto→cmux(<preflight reason>)` entry in `.fallbacks`.
 `.transport` reports what actually ran in both cases.
+
+**`--remote` selects the transport *and* the placement (§4 step 3).** §4 says only
+that `--remote` present selects herdr. Two things it does not say, both shipped:
+an explicit non-herdr `--transport` alongside it is an **args error** rather than a
+silent win for either flag (both were typed on purpose, and remote hosting is
+herdr-only), and `--remote` **defaults placement to detached** when the caller typed
+none. The second is not an override: an explicit `--placement side` alongside
+`--remote` still gets herdr's ordinary detached-only refusal. Refusing a *bare*
+`--remote` for a placement it could never have had teaches the caller nothing, since
+nothing on another box can appear in this window.
+
+The selection is resolved **before** the herdr validation block rather than inside
+it, which is what makes a bare `--remote` inherit every herdr refusal — conference,
+`--resume`, `--headless` — instead of a second copy of them that drifts.
+
+**The remote target travels as an environment variable, not a flag (§2.2).** Nine
+scripts have to agree about which box the callee lives on: preflight, the launcher,
+delivery, the reuse path and both waiters. `HOTLINE_HERDR_REMOTE` is exported once by
+`dial.sh` and read by `herdr-state.sh`, which routes every herdr verb over ssh — so
+the seam is one variable and one dispatch rather than nine argument parsers and nine
+chances to forget it. The call dir records it as `remote_target.txt` because
+`wait-for-response.sh` runs as a separate process that inherits nothing, and asking
+the LOCAL herdr about a remote agent gets "no such agent" — which that waiter would
+otherwise print as "the callee exited before answering".
+
+`session-cache.sh` gained two optional fields for the same reason, `transport` and
+`remote` (claude-plugins-7wze.11). `surface_ref` is opaque by design, so a herdr
+agent name on box A is indistinguishable from one on box B and from a cmux surface
+handle; without them a plain re-dial of a workspace that was dialed `--remote` would
+hand the local herdr a foreign name, be told "no such agent", and fall back to a
+fresh callee — stranding the real conversation on the other box with nothing pointing
+at it. Absent means local, which is what every entry written before Phase 3b is, so
+nothing is migrated and no entry is invalidated.

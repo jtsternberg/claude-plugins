@@ -1,7 +1,7 @@
 ---
 name: hotline-dial
 description: "Call another Claude Code workspace — quick calls, work orders, conference calls. 'Call/dial/message/delegate to <workspace or project>'."
-argument-hint: "[--headless] [--herdr] [--detached] [--window <name|ref>] [workspace] [task/question...]"
+argument-hint: "[--headless] [--herdr] [--remote <ssh-target>] [--detached] [--window <name|ref>] [workspace] [task/question...]"
 allowed-tools: Bash, ListAgents, SendMessage
 ---
 
@@ -21,7 +21,8 @@ status it returns.
 - **`--headless`**: force the headless transport (`claude -p`) for this dial even when cmux is up. Debugging the headless path, A/B-ing transports, or wanting `claude -p`'s structured output. Costs programmatic-usage credit; the cmux default doesn't. → `--headless`
 - **`--detached`** / **`--new-workspace`**: spawn the callee in a disconnected new workspace tab instead of a side-by-side surface. The tab auto-closes once the response is captured, so nothing is left to watch or clean up. → `--placement detached`
 - **`--window <name|ref>`**: land the callee as a surface in a specific cmux window (find-or-create), for grouping workers by project. A `window:<n>` ref targets that window; a bare name reuses the window holding a workspace titled `<name>`. Wins over `--detached` if both are given. → `--window <name|ref>`
-- **`--herdr`**: host the callee as a **herdr agent** instead of a cmux surface — a persistent pane owned by the herdr server, so the callee **survives a detach, a closed lid, or a dropped SSH session**. That is the reason to ask for it: a long work order you do not want tied to the life of a window. Requires herdr running. Takes any mode, including `conference`, and either the side or detached placement (herdr splits a pane off yours for both). → `--transport herdr`
+- **`--herdr`**: host the callee as a **herdr agent** instead of a cmux surface — a persistent pane owned by the herdr server, so the callee **survives a detach, a closed lid, or a dropped SSH session**. That is the reason to ask for it: a long work order you do not want tied to the life of a window. Requires herdr running, here or — with `--remote` below — on another box. Takes any mode, including `conference`, and either the side or detached placement (herdr splits a pane off yours for both). → `--transport herdr`
+- **`--remote <ssh-target>`**: run the callee **on another box** — herdr splits a pane and starts claude *there*, and hotline reads its answer back over ssh. For work that belongs on that machine: its checkout, its GPU, its network. It **selects herdr on its own** (nothing else can host anywhere but here) and is detached by nature, so `--remote <target>` alone is the whole invocation. Needs a non-interactive ssh hop plus herdr *and* claude on that box; if any of that is missing the dial is an **error**, never a quiet local call. → `--remote <ssh-target>`
 
 ```
 /hotline:hotline-dial dotfiles what branch are you on?
@@ -31,6 +32,7 @@ status it returns.
 /hotline:hotline-dial --detached dotfiles run the full test suite
 /hotline:hotline-dial --window lindris backend tests, please
 /hotline:hotline-dial --herdr dotfiles run the 40-minute migration
+/hotline:hotline-dial --remote jt@buildbox lindris run the integration suite
 ```
 
 Strip those flags out of the args before reading `$0` and `$1+`, and pass the
@@ -89,7 +91,8 @@ escaping, or `jq` hazards, however long or gnarly it is.
 
 Flags: `--mode quick|work_order|conference` (required),
 `--prompt-file <path>` (or `--prompt <text>` for a one-liner),
-`--headless`, `--transport cmux|herdr|headless`, `--placement side|detached`,
+`--headless`, `--transport cmux|herdr|headless`, `--remote <ssh-target>`,
+`--placement side|detached`,
 `--window <name|ref>`, `--resume <session-id>` `[--no-fork]`,
 `--refresh-identity`,
 `--fresh` (ignore the cached session for this target and start a new one —
@@ -134,7 +137,7 @@ installed, or no herdr server answered. **It is never a degradation**: an explic
 handing back a cmux surface instead would be a lie the user only discovers hours later. Pass
 `.detail` and `.recovery` through as-is; both name the fix.
 
-## The herdr transport (opt-in, local)
+## The herdr transport (opt-in, local or remote)
 
 `--transport herdr` hosts the callee as a **named herdr agent** in a persistent
 pane, split off the caller's own pane. What you get for it is durability: the herdr
@@ -147,7 +150,8 @@ conference mode both work here.
 | `--transport herdr`, any mode, `--placement side` or `--detached` | supported — first contact and follow-ups |
 | `--placement window` / `--window <ref>` | refused — hotline creates no herdr workspaces or tabs, so there is no window to place a callee in. Not a phase gate; a feature nobody has built |
 | `--resume <someone-else's-session-id>` | refused — herdr hosts a callee it *starts*, with a session id hotline presets so the transcript is readable; `claude --resume` cannot take that preset. Continuing a session **you** dialed needs no flag (see below) |
-| `--remote <target>` | refused — herdr *can* host remotely, but the callee's transcript would live on that box and every hotline answer is read from the local `~/.claude/projects` tree (Phase 3) |
+| `--remote <ssh-target>` | supported — see below. Implies `--transport herdr` and, unless a placement was typed, `--detached` |
+| `--remote` with `--transport cmux`/`headless` | refused — remote hosting is herdr-only; a cmux surface lives in this machine's window server and `claude -p` is a local process |
 
 **Follow-ups need no flag and no surface machinery.** Re-dial the same target with
 `--transport herdr --detached` and the cached agent is re-targeted by name
@@ -197,7 +201,51 @@ Two consequences worth telling the user about:
   `herdr agent attach <name>` to watch it.
 - **The pane is left open after the response.** Outliving the call is the point, so
   hotline does not close it the way it closes a detached cmux tab. When the user is
-  done: `herdr pane close $(cat <call_dir>/herdr_pane.txt)`.
+  done: `herdr pane close $(cat <call_dir>/herdr_pane.txt)` — or, for a remote call,
+  `ssh <.remote_target> herdr pane close <.remote_pane>`, both of which the emitted
+  JSON carries for exactly this reason.
+
+### `--remote <ssh-target>` — the callee on another box
+
+Same transport, one ssh hop. herdr's own `--remote` only attaches its TUI and
+rejects every subcommand, so hotline drives the **ordinary herdr CLI on that box**
+over ssh — `ssh <target> herdr pane split …`, `agent start`, `agent prompt`,
+`agent wait` — against that box's own local server. Every verb, every refusal and
+every proof tier is the local arm's; what changes is which machine answers.
+
+What the dial needs, and what it says when it is missing (all `stage: transport`,
+all errors rather than degradations — there is no local substitute for "run this
+over there"):
+
+| Missing | The error names |
+|---|---|
+| the ssh hop | that the target could not be reached **non-interactively**, and that hotline never answers a password or a browser check |
+| herdr on that box | the target, not the caller's own install |
+| a herdr server there | that nothing answered *there* — being inside a herdr pane yourself proves nothing about it |
+| a pane to split there | `HOTLINE_HERDR_REMOTE_PANE`, the remote-only override |
+| `claude` on that box's **non-login** PATH | `ssh <target> command -v claude`, because a claude under `~/.local/bin` may resolve for a human and not for an ssh command |
+
+Three things worth telling the user:
+
+- **The answer is read from the remote transcript.** `~/.claude/projects/<encoded
+  realpath>/<session>.jsonl` on *that* box — both halves asked of it, never assumed
+  from here — fetched over the same hop and parsed by the unchanged extractor. So
+  `.response`, `AWAITING_REVIEW`, preemption and the exit codes are identical to a
+  local call.
+- **The work order never rides the ssh command line.** It is submitted through a
+  fixed remote command that reads stdin, so it stays out of the local `ps` and its
+  only argv exposure is the sub-second one on the box actually running it.
+- **Tailscale SSH may want a browser check.** Its notice is filtered out of every
+  read, but when the check period has lapsed a non-interactive hop cannot complete
+  and the dial fails naming the `login.tailscale.com` URL. The fix is for the user
+  to run `ssh <target> true` themselves once.
+
+Follow-ups work exactly as the local ones do — re-dial the same target with the same
+`--remote`, and the cached agent on that box is re-targeted by name. **Re-dialing
+that workspace WITHOUT `--remote` starts a fresh callee** rather than talking to the
+remote one, reported in `.fallbacks` as a host mismatch: the cache records which box
+a handle belongs to, and an agent name from another machine cannot be re-addressed
+from here.
 
 `.fallbacks` lists what the wrapper worked around on its way. All of them are
 already handled; mention them only if the user is debugging or the degradation
@@ -336,7 +384,8 @@ Exit codes that are not failures:
 - **Exit 5 — the callee is waiting on a human** (herdr calls only). herdr reported
   its lifecycle as `blocked` with no STATUS for your nonce: it is sitting on a
   permission gate or asking a question, so more time cannot help. `error.txt` says
-  what to look at; `herdr agent attach <name>` shows the actual prompt. Tell the user
+  what to look at; `herdr agent attach <name>` shows the actual prompt (prefixed with
+  `ssh <target>` for a `--remote` call, which the message itself does). Tell the user
   what is needed, and once it is cleared re-run the wait on the same `CALL_DIR` — it
   resumes with a fresh budget and reads the answer. (Unattended callees avoid the
   permission case by dialing with `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` — a real
@@ -452,6 +501,26 @@ above still does that:
 - **`HOTLINE_HERDR_KEEP_FAILED_PANE=1`** — keep the pane after a failed launch. Off
   by default (a failed dial should leak nothing); on, the pane's scrollback is the
   only evidence of a launch that died before the agent was detected.
+
+These four apply to a **`--remote`** dial only:
+
+- **`HOTLINE_HERDR_REMOTE_PANE=<pane-id>`** — the pane on the REMOTE box that
+  hotline splits, defaulting to the first pane that box's herdr reports. Named
+  separately from `HOTLINE_HERDR_PANE` on purpose: a pane id means nothing on
+  another machine, so a habitual local override must never be applied to one.
+  `$HERDR_PANE_ID` (the caller's own pane) is ignored for a remote dial.
+- **`HOTLINE_REMOTE_SSH_TIMEOUT=<seconds>`** — the floor on each ssh hop's budget
+  (default 60). A hop carrying a blocking herdr verb gets the herdr `--timeout` plus
+  30s instead, so `agent start` is not killed out from under a working launch.
+  Every hop is time-boxed: a Tailscale check period that has lapsed would otherwise
+  block a `BatchMode` hop indefinitely.
+- **`HOTLINE_REMOTE_SSH_PERSIST=<seconds>`** — how long the shared ssh connection
+  outlives the last hop (default 300). One `ControlMaster` connection is shared by
+  every process of one dial, so the tailnet check and any key handshake happen once;
+  this has to outlast the gap between the dial returning and the response wait
+  starting.
+- **`HOTLINE_REMOTE_SSH_CONNECT_TIMEOUT=<seconds>`** — ssh's own connect budget
+  (default 10).
 
 If the `/cmux-cli:using-cmux-cli` skill is available and a cmux-routed call
 misbehaves, invoke it — it documents the workspace/surface/tty semantics this
