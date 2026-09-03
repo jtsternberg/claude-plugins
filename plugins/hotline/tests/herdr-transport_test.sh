@@ -353,6 +353,12 @@ while [[ $i -lt ${#ARGS[@]} ]]; do
   esac
 done
 printf '%s :: %s\n' "$TARGET" "$CMD" >> "${SSH_LOG:?SSH_LOG not set}"
+# THE FULL ARGV TOO, one line per invocation, in a second log beside the first.
+# The parse above throws every option away, which means no assertion on that log
+# can witness one: delete `-o BatchMode=yes` (a hop that can then sit on a password
+# prompt) or `-n` (a hop that eats its caller's stdin) from herdr-remote.sh and the
+# whole suite still passes. This log is what pins them.
+printf '%s\n' "$*" >> "${SSH_LOG}.argv"
 if [[ "${SSH_STUB_FAIL:-}" == "1" ]]; then
   echo "ssh: Could not resolve hostname ${TARGET#*@}: nodename nor servname provided" >&2
   exit 255
@@ -2675,6 +2681,32 @@ check "…submitted through a FIXED remote command that reads stdin" $? \
 ! grep -q 'and more' "$t/ssh.log"
 check "…so the work order never appears in the LOCAL ssh process's argv (86ka)" $? \
   "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
+
+# --- The hop's own OPTIONS, pinned ------------------------------------------
+# Read off the argv log, because the parsed log above cannot see them. Each of
+# these is load-bearing and each fails silently when dropped: BatchMode is what
+# keeps a hop from sitting on a password prompt, ConnectTimeout what keeps it from
+# sitting on an unreachable box, and the shared ControlPath is the whole reason a
+# dial authenticates to a tailnet once instead of a dozen times.
+ARGV="$t/ssh.log.argv"
+HOPS=$(grep -c '' "$ARGV" 2>/dev/null || echo 0)
+[[ $HOPS -ge 2 ]] \
+  && [[ "$(grep -cF -- '-o BatchMode=yes' "$ARGV")" -eq "$HOPS" ]] \
+  && [[ "$(grep -cF -- '-o ConnectTimeout=' "$ARGV")" -eq "$HOPS" ]] \
+  && [[ "$(grep -cF -- '-o ControlMaster=auto' "$ARGV")" -eq "$HOPS" ]] \
+  && [[ "$(grep -cF -- '-o ControlPath=' "$ARGV")" -eq "$HOPS" ]]
+check "every ssh hop carries BatchMode, a ConnectTimeout and the shared ControlPath" $? \
+  "$HOPS hops: $(cat "$ARGV" 2>/dev/null)"
+# `-n` ON EVERY HOP THAT CARRIES NO PAYLOAD: without it ssh reads the calling
+# script's stdin, so one hop inside a `while read` loop swallows the rest of that
+# loop's input. And NOT on the delivery hop, whose stdin IS the payload — `-n`
+# there would submit an empty prompt and confirm nothing.
+NO_N=$(grep -v '^-n ' "$ARGV" 2>/dev/null || true)
+[[ -n "$NO_N" ]] \
+  && [[ "$(grep -c '' <<<"$NO_N")" -eq "$(grep -cF -- '"$(cat)"' <<<"$NO_N")" ]] \
+  && [[ "$(grep -c '^-n ' "$ARGV")" -ge 1 ]]
+check "…with -n on every hop but the payload one, whose stdin is the work order" $? \
+  "hops without -n: $NO_N · hops with: $(grep -c '^-n ' "$ARGV")"
 
 # The bytes have to survive the hop intact, not merely arrive. The stub writes what
 # the callee received; compare it to what `$(cat)` of the payload would be locally,
