@@ -225,7 +225,17 @@ over there"):
 | a pane to split there | `HOTLINE_HERDR_REMOTE_PANE`, the remote-only override |
 | `claude` on that box's **non-login** PATH | `ssh <target> command -v claude`, because a claude under `~/.local/bin` may resolve for a human and not for an ssh command |
 
-Three things worth telling the user:
+**The target is an absolute path on THAT box.** Fuzzy names, dirmap ids and
+session-id lookups all resolve against this machine, so a remote dial takes the path
+as it exists there and resolves it over the hop — which is also why a missing path
+(`stage: resolve`) and an unreachable box (`stage: transport`) are reported
+separately: they need opposite fixes. Two consequences to relay rather than debug:
+`identity_stale` reads **true** for every remote target (the identity cache is
+written by a pickup that ran *in* that directory, which never happened here — it
+means unknown, not stale), and `--refresh-identity` is refused for a remote target
+because it would run a local `claude` against a path that is not local.
+
+Three more things worth telling the user:
 
 - **The answer is read from the remote transcript.** `~/.claude/projects/<encoded
   realpath>/<session>.jsonl` on *that* box — both halves asked of it, never assumed

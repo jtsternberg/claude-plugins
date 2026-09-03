@@ -572,9 +572,19 @@ if [[ -n "$REMOTE_TARGET" ]]; then
       "Fuzzy names, dirmap ids and session-id lookups all resolve against THIS machine, and the callee is going to run on $REMOTE_TARGET. Pass the absolute path as it exists there — \`ssh $REMOTE_TARGET pwd\` or \`ssh $REMOTE_TARGET ls\` if you need to check."
   fi
   if ! hotline_remote_realpath_dir "$TARGET_REF"; then
-    emit_error resolve \
-      "$TARGET_REF is not a directory on $REMOTE_TARGET (or could not be resolved there): ${HOTLINE_REMOTE_ERR:-no diagnostic}" \
-      "Check it on that box: \`ssh $REMOTE_TARGET ls -d $TARGET_REF\`. If the hop itself is failing, \`ssh -o BatchMode=yes $REMOTE_TARGET true\` has to work non-interactively first."
+    # TWO FAILURES WEAR ONE EXIT STATUS HERE, and they need opposite fixes: a path
+    # that is not there, and a box that is not reachable. The remote command exits 3
+    # for the first (see hotline_remote_realpath_dir); anything else — 255 from ssh,
+    # 124 from the hop's own timeout — is the second. Leading with "not a directory"
+    # for an unreachable box sends the reader to check a path that is probably fine.
+    if [[ "${HOTLINE_REMOTE_RC:-0}" == "3" ]]; then
+      emit_error resolve \
+        "$TARGET_REF is not a directory on $REMOTE_TARGET" \
+        "Check it on that box: \`ssh $REMOTE_TARGET ls -d $TARGET_REF\`. The path has to be absolute and exist THERE — it is never resolved against this machine."
+    fi
+    emit_error transport \
+      "the remote box $REMOTE_TARGET could not be reached over ssh: ${HOTLINE_REMOTE_ERR:-no diagnostic}" \
+      "Prove the hop by hand first: \`ssh -o BatchMode=yes $REMOTE_TARGET true\`. It has to work NON-INTERACTIVELY — hotline never answers a password or a browser check. Check the host name (a tailnet MagicDNS name is not the same host as its .local mDNS name), the user (the tailnet's SSH policy may not permit the one you asked for), and whether an agent/key is available. Or drop --remote to dial locally."
   fi
   TARGET_PATH="$HOTLINE_REMOTE_REALCWD"
 fi

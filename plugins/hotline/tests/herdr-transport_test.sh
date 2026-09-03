@@ -2798,6 +2798,18 @@ grep -q 'realpath' "$t/ssh.log"
 check "…having asked over the hop, so resolution never consulted the local tree" $? \
   "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
 
+# TWO FAILURES, ONE EXIT STATUS, OPPOSITE FIXES. A path that is not there and a box
+# that is not reachable both come back from the same hop, and leading with "not a
+# directory" for an unreachable box sends the reader to check a path that is fine.
+t=$(remote_env)
+out=$(remote_dial "$t" "SSH_STUB_FAIL=1" -- --target "/some/where" --mode work_order \
+        --prompt "hi" --remote "$RTARGET")
+[[ "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "transport" ]] \
+  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"could not be reached over ssh"* ]] \
+  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" != *"not a directory"* ]]
+check "an UNREACHABLE box during resolve is reported as the hop, not as a bad path" $? \
+  "out=$out"
+
 # --refresh-identity would run a headless claude HERE against a path that is not
 # here. Refused up front rather than attempted and degraded: it is an explicit ask
 # for an expensive action that cannot work.
