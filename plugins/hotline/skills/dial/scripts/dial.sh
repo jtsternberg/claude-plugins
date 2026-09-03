@@ -779,6 +779,59 @@ else
   fi
 fi
 
+# --- Naming the callee a box mismatch would abandon --------------------------
+# Four readings of the same cache entry, used by the refusal in step 4 and by the
+# --fresh entry that overrides it. Functions rather than variables because both
+# sites want them interpolated into prose, and only one of the two sites runs.
+#
+# EVERY ONE OF THEM IS TRANSPORT-AWARE. A cached `remote` implies herdr (nothing
+# else can host off-box), but a LOCAL cached handle can be a cmux surface, and
+# telling a caller to `herdr pane close` a cmux surface is worse than telling them
+# nothing: it fails, and they conclude the callee is already gone.
+mismatch_who() {
+  if [[ -n "$PREV_REMOTE" || "$PREV_TRANSPORT" == "herdr" ]]; then
+    printf 'herdr agent %s' "${PREV_SURFACE_REF:-<unnamed; the cache kept no handle>}"
+  elif [[ -n "$PREV_SURFACE_REF" ]]; then
+    printf '%s surface %s' "${PREV_TRANSPORT:-cmux}" "$PREV_SURFACE_REF"
+  else
+    printf 'callee session %s' "${PREV_SESSION_ID:-unknown}"
+  fi
+}
+mismatch_box() { printf '%s' "${PREV_REMOTE:-this box}"; }
+mismatch_continue() {
+  if [[ -n "$PREV_REMOTE" ]]; then printf -- '--remote %s' "$PREV_REMOTE"
+  else printf -- 'no --remote (that callee is on this box)'; fi
+}
+# The pane is the only handle that closes a herdr callee, and the cache does not
+# keep it — it is written to the CALL DIR. So it is looked up there, by the nonce
+# the cache does keep, and the advice degrades to `agent list` when /tmp has since
+# been swept. Best-effort by design: a missing pane must not cost the refusal.
+mismatch_pane() {
+  local d
+  [[ -z "$PREV_CALL_ID" ]] && return 0
+  for d in "${HOTLINE_CALL_HOME:-/tmp}"/hotline-call-*; do
+    [[ -s "$d/call_id.txt" && -s "$d/herdr_pane.txt" ]] || continue
+    [[ "$(tr -d '[:space:]' < "$d/call_id.txt")" == "$PREV_CALL_ID" ]] || continue
+    tr -d '[:space:]' < "$d/herdr_pane.txt"
+    return 0
+  done
+  return 0
+}
+mismatch_close_cmd() {
+  local ssh_pfx="" pane
+  [[ -n "$PREV_REMOTE" ]] && ssh_pfx="ssh $PREV_REMOTE "
+  if [[ -n "$PREV_REMOTE" || "$PREV_TRANSPORT" == "herdr" ]]; then
+    pane=$(mismatch_pane)
+    if [[ -n "$pane" ]]; then printf '`%sherdr pane close %s`' "$ssh_pfx" "$pane"
+    else printf '`%sherdr agent list`' "$ssh_pfx"; fi
+  else
+    # No command invented for this one: a cmux surface is a rectangle in this
+    # machine's own window server, so it is on the user's screen already.
+    printf 'no command — %s is a surface in your own cmux window; close it there' \
+      "${PREV_SURFACE_REF:-that surface}"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Step 4 — Existing session? (our own cache only — a user-supplied --resume is
 # somebody else's session, which is the fork path, not a follow-up)
@@ -827,19 +880,43 @@ if [[ -z "$RESUME_ARG" ]]; then
     # the other box with nothing pointing at it (claude-plugins-7wze.11). So the
     # mismatch declines the reuse BEFORE it is attempted, with a fallback entry
     # saying which pair disagreed.
+    # WHICH BOX is tested FIRST, and ahead of which backend, because only that half
+    # can put the cached callee out of reach: a box mismatch is refused outright
+    # below, and a refusal has to be reached on the strength of the box alone. A
+    # transport-only mismatch (both handles on THIS machine) stays a decline — the
+    # superseded surface is still in the user's own window.
     HOST_MISMATCH=""
-    if [[ -n "$PREV_TRANSPORT" && "$PREV_TRANSPORT" != "$TRANSPORT" ]]; then
-      HOST_MISMATCH="transport ${PREV_TRANSPORT}→${TRANSPORT}"
-    elif [[ "$PREV_REMOTE" != "$REMOTE_TARGET" ]]; then
+    BOX_MISMATCH=false
+    if [[ "$PREV_REMOTE" != "$REMOTE_TARGET" ]]; then
+      BOX_MISMATCH=true
       HOST_MISMATCH="host ${PREV_REMOTE:-local}→${REMOTE_TARGET:-local}"
+    elif [[ -n "$PREV_TRANSPORT" && "$PREV_TRANSPORT" != "$TRANSPORT" ]]; then
+      HOST_MISMATCH="transport ${PREV_TRANSPORT}→${TRANSPORT}"
     fi
 
     if $FRESH; then
       add_fallback "session-cache→fresh(${PREV_SESSION_ID:-unknown})"
+      # --fresh is the caller SAYING to abandon it, so this proceeds — but the thing
+      # abandoned is a live callee on a box this dial is not talking to, and no local
+      # cleanup will ever reach it (step 7 closes cmux surfaces only). So the entry
+      # names it and its box: that string is the only record the caller gets of a
+      # process they now have to close by hand.
+      $BOX_MISMATCH && add_fallback "abandoned-callee($(mismatch_who) on $(mismatch_box); --fresh started a new callee $([[ -n "$REMOTE_TARGET" ]] && echo "on $REMOTE_TARGET" || echo "here") and left that one RUNNING — close it with $(mismatch_close_cmd))"
+    elif $BOX_MISMATCH; then
+      # REFUSED, not fallen back from (claude-plugins-7wze.11 is the fallback's own
+      # bug report). The cached callee is on a box this dial is not addressing, so a
+      # fresh one here does not replace it — it leaves it running with nothing
+      # pointing at it, because register-call.sh's `session-cache.sh set` REPLACES
+      # the entry that named it. Re-dialing the same way then mismatches again and
+      # starts a third. Same verdict, and same reason, as the BLOCKED-agent refusal
+      # in step 5a: the fallback is only honest when the thing worked around is gone.
+      emit_error transport \
+        "this target's callee is $(mismatch_who) on $(mismatch_box), and this dial names $([[ -n "$REMOTE_TARGET" ]] && echo "$REMOTE_TARGET" || echo "no --remote box")" \
+        "Two moves, and hotline will not pick for you: (1) re-dial with $(mismatch_continue) to CONTINUE that conversation — its context is intact and the cached handle is re-addressed by name; or (2) add --fresh to ABANDON it and start a new callee $([[ -n "$REMOTE_TARGET" ]] && echo "on $REMOTE_TARGET" || echo "here"), which leaves the old one running for you to close with $(mismatch_close_cmd). Nothing was started and the cache still points at the old callee. See references/error-recovery.md § herdr Failures."
     elif [[ -n "$HOST_MISMATCH" ]]; then
       # PREV_SURFACE_REF is left in place for step 7, which is a no-op here anyway:
-      # it only closes cmux surfaces, and a handle on another box or another backend
-      # is not this dial's to close.
+      # it only closes cmux surfaces, and a handle on another backend is not this
+      # dial's to close.
       add_fallback "session-cache→fresh($HOST_MISMATCH; the cached host handle belongs to a different host, so it cannot be re-addressed and the new callee starts WITHOUT the prior context)"
     else
       FIRST_CONTACT=false
