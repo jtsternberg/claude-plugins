@@ -2503,8 +2503,9 @@ check "SKILL.md's ssh connect-timeout default matches herdr-remote.sh" $? \
 
 # A herdr error hint must point at the section that actually covers herdr, not at
 # the cmux one — an error hint naming the wrong section is worse than none.
-grep -q '## herdr Failures' "$HOTLINE_DIR/skills/dial/references/error-recovery.md"
-check "error-recovery.md has the § herdr Failures section the hints name" $? \
+grep -q '## herdr Failures' "$HOTLINE_DIR/skills/dial/references/error-recovery.md" \
+  && grep -q '## Remote herdr Failures' "$HOTLINE_DIR/skills/dial/references/error-recovery.md"
+check "error-recovery.md has both § herdr Failures sections the hints name" $? \
   "sections: $(grep -c '^## ' "$HOTLINE_DIR/skills/dial/references/error-recovery.md")"
 
 # ===========================================================================
