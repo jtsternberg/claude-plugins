@@ -113,6 +113,16 @@ hotline_remote_mux_init() {
     HOTLINE_REMOTE_MUX_NOTE="control path under $base would exceed the ${HOTLINE_REMOTE_CONTROL_PATH_MAX}-byte unix-socket limit"
     return 0
   fi
+  # A SYMLINK HERE IS NOT A DIRECTORY WE MAY USE, even one pointing at a real
+  # directory. `-d` follows it, so a pre-planted link passes the test below, skips
+  # the mkdir, and relocates the control socket to wherever it points — and the
+  # ownership test then answers for the TARGET, not the link. A ControlPath is a
+  # filesystem rendezvous point for an authenticated connection; the rule is that
+  # this path is a real directory this user owns, or multiplexing is given up.
+  if [[ -h "$dir" ]]; then
+    HOTLINE_REMOTE_MUX_NOTE="$dir is a symlink, not a directory, so it will not be used as a control path"
+    return 0
+  fi
   # 0700 at creation, not after: a world-readable window, however brief, is a
   # window in which somebody else can plant the socket path. A pre-existing
   # directory owned by anyone else fails the ownership test below rather than being

@@ -1682,6 +1682,32 @@ out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
   && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"herdr-only"* ]]
 check "--remote with a non-herdr --transport is an args error, naming both asks" $? "out=$out"
 
+# ssh HAS NO `--`, so a --remote value starting with a dash is parsed as an ssh
+# OPTION wherever it lands — `-oProxyCommand=…` is a command of the caller's
+# choosing on every hop of the dial. Quoting cannot fix it (the remote layer quotes
+# for the REMOTE shell, not for the local ssh's own argv parse), so it is refused
+# where a destination is the only thing the value can be.
+t=$(new_env)
+out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
+        --remote "-oProxyCommand=touch /tmp/hotline-pwned")
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "error" \
+   && "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "args" ]] \
+  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"cannot begin with '-'"* ]]
+check "a --remote value starting with '-' is refused: ssh would read it as an option" $? \
+  "out=$out"
+[[ ! -e "$t/ssh.log" && ! -e /tmp/hotline-pwned ]]
+check "…before any hop, so the option never reaches an ssh argv" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
+
+# The transport list a caller is handed has to describe the transport they get:
+# herdr stopped being local-only when --remote landed.
+t=$(new_env)
+out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" --transport nope)
+[[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"--remote"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" != *"detached, local, opt-in"* ]]
+check "the --transport list no longer calls herdr local-only" $? \
+  "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
+
 # The placements herdr cannot host are refused for a remote dial too — via herdr's
 # own validation, not a second copy of it, which is why --remote resolves the
 # transport BEFORE that block runs.
@@ -2609,6 +2635,45 @@ out=$(rcheck "$t" "HOTLINE_HERDR_REMOTE_PANE=w4:p1" "HERDR_PANE_ID=w9:p9" \
 [[ $rc -eq 0 && "$(jq -r '.pane' <<<"$out" 2>/dev/null)" == "w4:p1" ]]
 check "HOTLINE_HERDR_REMOTE_PANE wins, and the LOCAL pane vars are ignored remotely" $? \
   "rc=$rc out=$out"
+
+# --- The ControlMaster directory: a rendezvous point, never adopted blindly --
+# The socket lives in a private directory because anyone who can write that path can
+# put a socket there and be handed an authenticated connection. Two rules, and `-d`
+# quietly breaks the second: it FOLLOWS a symlink, so a pre-planted link passed the
+# directory test, skipped the mkdir, and relocated the socket to wherever it pointed
+# — with the ownership test then answering for the link's target, not the link.
+mux_state() {  # mux_state <control-home> → socket path on line 1, the note on line 2
+  env HOTLINE_HERDR_REMOTE="$RTARGET" HOTLINE_SSH_CONTROL_HOME="$1" \
+    bash -c 'source "$1/scripts/herdr-remote.sh"; hotline_remote_mux_init
+             printf "%s\n%s\n" "$HOTLINE_REMOTE_CONTROL_PATH" "$HOTLINE_REMOTE_MUX_NOTE"' \
+    _ "$HOTLINE_DIR"
+}
+t=$(remote_env)
+CTRL_HOME="$t/ctrl"; mkdir -p "$CTRL_HOME"
+MUX=$(mux_state "$CTRL_HOME")
+CTRL_PATH=$(sed -n '1p' <<<"$MUX")
+CTRL_DIR=$(dirname "$CTRL_PATH")
+MODE=$(stat -f '%Lp' "$CTRL_DIR" 2>/dev/null || stat -c '%a' "$CTRL_DIR" 2>/dev/null)
+[[ -n "$CTRL_PATH" && -d "$CTRL_DIR" && "$MODE" == "700" ]]
+check "the control directory is created 0700 — no window in which to plant the socket" $? \
+  "mux=$MUX mode=$MODE"
+
+mkdir -p "$t/elsewhere"
+rm -rf "$CTRL_DIR"
+ln -s "$t/elsewhere" "$CTRL_DIR"
+MUX=$(mux_state "$CTRL_HOME")
+[[ -z "$(sed -n '1p' <<<"$MUX")" && "$MUX" == *"symlink"* ]]
+check "a SYMLINKED control dir is refused, not adopted: the -d test follows a link" $? \
+  "mux=$MUX"
+# And the consequence a hop actually sees: multiplexing is GIVEN UP rather than
+# pointed at the link's target. Every hop then re-authenticates, which is a cost —
+# and the right one to pay next to handing a rendezvous socket to a path somebody
+# else chose.
+out=$(rcheck "$t" "HOTLINE_SSH_CONTROL_HOME=$CTRL_HOME" "HERDR_STUB_PANE=w2:p2" \
+        -- "$CHECK_HERDR"); rc=$?
+[[ $rc -eq 0 ]] && ! grep -qF -- '-o ControlPath=' "$t/ssh.log.argv"
+check "…and the hops that follow carry no ControlPath at all, rather than that one" $? \
+  "rc=$rc argv: $(cat "$t/ssh.log.argv" 2>/dev/null)"
 
 # --- Tailscale SSH, which talks ---------------------------------------------
 # Its check-mode notice arrives ahead of the real output on either stream. Parsed as
