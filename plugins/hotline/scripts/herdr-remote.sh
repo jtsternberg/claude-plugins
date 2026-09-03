@@ -143,6 +143,31 @@ hotline_remote_mux_init() {
   return 0
 }
 
+# THE OPTION SET EVERY HOP CARRIES, in ONE place because two functions here build a
+# hop and each of these fails SILENTLY when only one of them has it: BatchMode is
+# what keeps a hop off a password prompt, ConnectTimeout what keeps it off an
+# unreachable box, and the shared ControlPath is the whole reason a dial
+# authenticates to a tailnet once instead of a dozen times. Duplicated, the copy
+# that gets missed is the fetch hop — the one that repeats every poll.
+#
+# Sets an array rather than printing a string: these are argv, and re-splitting a
+# printed ControlPath would undo the quoting a long /var/folders path needs. Call
+# hotline_remote_mux_init first — the ControlPath half is whatever that decided.
+HOTLINE_REMOTE_SSH_OPTS=()
+hotline_remote_ssh_opts() {
+  HOTLINE_REMOTE_SSH_OPTS=(
+    -o BatchMode=yes
+    -o "ConnectTimeout=$HOTLINE_REMOTE_SSH_CONNECT_TIMEOUT"
+    -o StrictHostKeyChecking=accept-new
+  )
+  if [[ -n "$HOTLINE_REMOTE_CONTROL_PATH" ]]; then
+    HOTLINE_REMOTE_SSH_OPTS+=(-o ControlMaster=auto
+                              -o "ControlPersist=$HOTLINE_REMOTE_SSH_PERSIST"
+                              -o "ControlPath=$HOTLINE_REMOTE_CONTROL_PATH")
+  fi
+  return 0
+}
+
 # Tear the shared connection down. Safe to call when none was ever opened.
 #
 # DELIBERATELY NOT WIRED INTO ANY EXIT PATH. The connection is shared across a
@@ -219,16 +244,8 @@ hotline_remote_run() {
   hotline_remote_mux_init
   budget="${HOTLINE_REMOTE_HOP_BUDGET:-$HOTLINE_REMOTE_SSH_TIMEOUT}"
 
-  local -a opts=(
-    -o BatchMode=yes
-    -o "ConnectTimeout=$HOTLINE_REMOTE_SSH_CONNECT_TIMEOUT"
-    -o StrictHostKeyChecking=accept-new
-  )
-  if [[ -n "$HOTLINE_REMOTE_CONTROL_PATH" ]]; then
-    opts+=(-o ControlMaster=auto
-           -o "ControlPersist=$HOTLINE_REMOTE_SSH_PERSIST"
-           -o "ControlPath=$HOTLINE_REMOTE_CONTROL_PATH")
-  fi
+  hotline_remote_ssh_opts
+  local -a opts=("${HOTLINE_REMOTE_SSH_OPTS[@]}")
 
   local out_file err_file
   out_file=$(mktemp); err_file=$(mktemp)
@@ -389,11 +406,8 @@ hotline_remote_fetch_transcript() {  # <local-dest> <remote-path>...
   [[ -z "$target" ]] && { HOTLINE_REMOTE_ERR="no remote target set"; return 1; }
   hotline_remote_mux_init
   budget="${HOTLINE_REMOTE_HOP_BUDGET:-$HOTLINE_REMOTE_SSH_TIMEOUT}"
-  local -a opts=(-o BatchMode=yes -o "ConnectTimeout=$HOTLINE_REMOTE_SSH_CONNECT_TIMEOUT"
-                 -o StrictHostKeyChecking=accept-new)
-  [[ -n "$HOTLINE_REMOTE_CONTROL_PATH" ]] && \
-    opts+=(-o ControlMaster=auto -o "ControlPersist=$HOTLINE_REMOTE_SSH_PERSIST"
-           -o "ControlPath=$HOTLINE_REMOTE_CONTROL_PATH")
+  hotline_remote_ssh_opts
+  local -a opts=("${HOTLINE_REMOTE_SSH_OPTS[@]}")
   local raw_file
   err_file=$(mktemp); raw_file=$(mktemp)
   # Via a temp rather than straight into the mirror, because the notice filter
