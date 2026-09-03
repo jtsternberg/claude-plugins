@@ -931,7 +931,7 @@ if [[ -z "$RESUME_ARG" ]]; then
       # in step 5a: the fallback is only honest when the thing worked around is gone.
       emit_error transport \
         "this target's callee is $(mismatch_who) on $(mismatch_box), and this dial names $([[ -n "$REMOTE_TARGET" ]] && echo "$REMOTE_TARGET" || echo "no --remote box")" \
-        "Two moves, and hotline will not pick for you: (1) re-dial with $(mismatch_continue) to CONTINUE that conversation — its context is intact and the cached handle is re-addressed by name; or (2) add --fresh to ABANDON it and start a new callee $([[ -n "$REMOTE_TARGET" ]] && echo "on $REMOTE_TARGET" || echo "here"), which leaves the old one running for you to close with $(mismatch_close_cmd). Nothing was started and the cache still points at the old callee. See references/error-recovery.md § herdr Failures."
+        "Two moves, and hotline will not pick for you: (1) re-dial with $(mismatch_continue) to CONTINUE that conversation — its context is intact and the cached handle is re-addressed by name; or (2) add --fresh to ABANDON it and start a new callee $([[ -n "$REMOTE_TARGET" ]] && echo "on $REMOTE_TARGET" || echo "here"), which leaves the old one running for you to close with $(mismatch_close_cmd). Nothing was started and the cache still points at the old callee. See references/error-recovery.md § Remote herdr Failures."
     elif [[ -n "$HOST_MISMATCH" ]]; then
       # PREV_SURFACE_REF is left in place for step 7, which is a no-op here anyway:
       # it only closes cmux surfaces, and a handle on another backend is not this
