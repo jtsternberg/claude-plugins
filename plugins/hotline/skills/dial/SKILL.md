@@ -1,6 +1,6 @@
 ---
 name: hotline-dial
-description: "Call another Claude Code workspace — quick calls, work orders, conference calls. 'Call/dial/message/delegate to <workspace or project>'."
+description: "Call another Claude Code workspace — quick calls, work orders, conference calls. 'Call/dial/message/delegate to <workspace or project>'. Also dials a workspace on ANOTHER machine over SSH (--remote <ssh-target>, herdr on that box)."
 argument-hint: "[--headless] [--herdr] [--remote <ssh-target>] [--detached] [--window <name|ref>] [workspace] [task/question...]"
 allowed-tools: Bash, ListAgents, SendMessage
 ---
