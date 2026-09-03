@@ -289,6 +289,15 @@ esac
 # teaches the caller nothing — while overriding an explicit `--placement side` would
 # discard a flag they meant.
 if [[ -n "$REMOTE_TARGET" ]]; then
+  # ssh has no `--` to end its own options, so a leading dash is read as an OPTION
+  # wherever this value lands — and `-oProxyCommand=…` is a command of the caller's
+  # choosing on every hop. There is no quoting fix for that (hotline_remote_shquote
+  # protects the REMOTE shell, not the local ssh's argv parse), so the value is
+  # refused here, where a destination is the only thing it can be.
+  if [[ "$REMOTE_TARGET" == -* ]]; then
+    emit_error args "--remote cannot begin with '-', got '$REMOTE_TARGET'" \
+      "ssh takes no \`--\` terminator, so that value would be parsed as an ssh option rather than a destination. Pass the box as [user@]host."
+  fi
   case "$TRANSPORT_REQ" in
     "")    TRANSPORT_REQ="herdr" ;;
     herdr) ;;
@@ -355,7 +364,7 @@ case "$TRANSPORT_REQ" in
     ;;
   *)
     emit_error args "Unknown --transport '$TRANSPORT_REQ'" \
-      "Valid transports: cmux (default), herdr (detached, local, opt-in), headless." ;;
+      "Valid transports: cmux (default), herdr (detached, here or on another box with --remote, opt-in), headless." ;;
 esac
 
 # --- The ssh hop, armed once, for every script this dial runs ----------------
