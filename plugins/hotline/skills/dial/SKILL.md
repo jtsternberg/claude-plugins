@@ -122,10 +122,9 @@ corrective Enter submitted it — the delivery is good, but a run of them is wor
 reporting.
 
 `transport` means the backend the caller asked for is not usable here — herdr is not
-installed, no herdr server answered, or `--window` was combined with it (the one
-placement herdr cannot host). **It is never a degradation**: an explicit `--transport
-herdr` is an ask for a callee that survives a disconnect, and quietly handing back a
-cmux surface instead would be a lie the user only discovers hours later. Pass
+installed, or no herdr server answered. **It is never a degradation**: an explicit
+`--transport herdr` is an ask for a callee that survives a disconnect, and quietly
+handing back a cmux surface instead would be a lie the user only discovers hours later. Pass
 `.detail` and `.recovery` through as-is; both name the fix.
 
 ## The herdr transport (opt-in, local)
