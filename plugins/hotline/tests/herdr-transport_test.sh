@@ -2653,8 +2653,11 @@ CTRL_HOME="$t/ctrl"; mkdir -p "$CTRL_HOME"
 MUX=$(mux_state "$CTRL_HOME")
 CTRL_PATH=$(sed -n '1p' <<<"$MUX")
 CTRL_DIR=$(dirname "$CTRL_PATH")
-MODE=$(stat -f '%Lp' "$CTRL_DIR" 2>/dev/null || stat -c '%a' "$CTRL_DIR" 2>/dev/null)
-[[ -n "$CTRL_PATH" && -d "$CTRL_DIR" && "$MODE" == "700" ]]
+# `ls -ld`, not `stat`: GNU `stat -f` is `--file-system` and SUCCEEDS on a directory
+# with filesystem info, so a `stat -f … || stat -c …` fallback never reaches the GNU
+# form and this case failed on the ubuntu runner alone.
+MODE=$(ls -ld "$CTRL_DIR" 2>/dev/null | cut -c1-10)
+[[ -n "$CTRL_PATH" && -d "$CTRL_DIR" && "$MODE" == "drwx------" ]]
 check "the control directory is created 0700 — no window in which to plant the socket" $? \
   "mux=$MUX mode=$MODE"
 
