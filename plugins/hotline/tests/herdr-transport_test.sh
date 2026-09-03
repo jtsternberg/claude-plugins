@@ -2992,6 +2992,34 @@ check "a LOCAL herdr dial emits neither remote key — the contract is additive 
 [[ ! -e "$t/ssh.log" ]]
 check "…and makes no ssh hop at all" $? "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
 
+# AN AMBIENT HOTLINE_HERDR_REMOTE DOES NOT HALF-ROUTE A LOCAL DIAL. Nine scripts
+# read that variable, so a value left in the environment by a previous remote dial
+# (or exported as a default) would send preflight, the launch and the delivery over
+# ssh while the target resolved HERE, the JSON carried no remote_target, and the
+# cache entry said local — a state no flag asked for and nothing reports. dial.sh
+# is the seam's sole authority, so the local path unsets it.
+t=$(new_env)
+cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo unknown)
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/\$SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+chmod +x "$t/bin/herdr"
+mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" "HOTLINE_HERDR_REMOTE=$RTARGET" \
+        -- --target "$t/target" --mode work_order --prompt "run it here" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r 'has("remote_target")' <<<"$out" 2>/dev/null)" == "false" ]]
+check "a local dial with an ambient HOTLINE_HERDR_REMOTE still connects locally" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ ! -e "$t/ssh.log" ]]
+check "…making no ssh hop: dial.sh decides the seam in BOTH directions" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
+
 # --- The cache cannot confuse two hosts (claude-plugins-7wze.11) -------------
 # surface_ref is an opaque string, so a herdr agent name on another box looks
 # exactly like a local one. Re-addressing the wrong one is told "no such agent",
