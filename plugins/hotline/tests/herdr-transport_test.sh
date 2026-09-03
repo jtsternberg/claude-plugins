@@ -2449,6 +2449,23 @@ check "SKILL.md's readiness-tries default matches herdr-prompt.sh" $? \
 check "SKILL.md's first-contact confirm budget matches herdr-prompt.sh" $? \
   "script: $(grep -o 'HOTLINE_HERDR_FIRST_CONFIRM_TRIES:-[0-9]*' "$HERDR_PROMPT")"
 
+# The remote knobs' defaults, same rule: a doc that states a number states one the
+# code agrees with, or it is a second source that drifts.
+[[ "$SKILL_FLAT" == *"floor on each ssh hop's budget (default 60)"* ]] \
+  && grep -q 'HOTLINE_REMOTE_SSH_TIMEOUT:-60}' "$HOTLINE_DIR/scripts/herdr-remote.sh"
+check "SKILL.md's ssh-hop budget default matches herdr-remote.sh" $? \
+  "script: $(grep -o 'HOTLINE_REMOTE_SSH_TIMEOUT:-[0-9]*' "$HOTLINE_DIR/scripts/herdr-remote.sh")"
+
+[[ "$SKILL_FLAT" == *"outlives the last hop (default 300)"* ]] \
+  && grep -q 'HOTLINE_REMOTE_SSH_PERSIST:-300}' "$HOTLINE_DIR/scripts/herdr-remote.sh"
+check "SKILL.md's ControlPersist default matches herdr-remote.sh" $? \
+  "script: $(grep -o 'HOTLINE_REMOTE_SSH_PERSIST:-[0-9]*' "$HOTLINE_DIR/scripts/herdr-remote.sh")"
+
+[[ "$SKILL_FLAT" == *"own connect budget (default 10)"* ]] \
+  && grep -q 'HOTLINE_REMOTE_SSH_CONNECT_TIMEOUT:-10}' "$HOTLINE_DIR/scripts/herdr-remote.sh"
+check "SKILL.md's ssh connect-timeout default matches herdr-remote.sh" $? \
+  "script: $(grep -o 'HOTLINE_REMOTE_SSH_CONNECT_TIMEOUT:-[0-9]*' "$HOTLINE_DIR/scripts/herdr-remote.sh")"
+
 # A herdr error hint must point at the section that actually covers herdr, not at
 # the cmux one — an error hint naming the wrong section is worse than none.
 grep -q '## herdr Failures' "$HOTLINE_DIR/skills/dial/references/error-recovery.md"

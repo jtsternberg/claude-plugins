@@ -148,6 +148,15 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   parser drift guard" — this entry adds only the evidence that it keeps happening:
   after both sections existed, nonce injection still grew three copies and a bug fix
   had to land in two of them. (claude-plugins-xick, 279f98e)
+- **A locally-scoped resolver is wrong across a wire in both directions.**
+  `resolve-workspace.sh` validates a path with `realpath`, reverse-looks-up the local
+  session cache and consults the local dirmap — so given a `--remote` target it either
+  refuses a good dial ("Path does not exist") or, when a same-named directory happens
+  to exist here, resolves the LOCAL one and dials a callee into the wrong tree. When a
+  transport gains a remote mode, list every step that reads the filesystem, the
+  environment or a local index, and re-ask each of them on the far side; canonicalize
+  there too, or the cache key stops matching the `cwd.txt` the launcher wrote and every
+  follow-up starts a second callee. (claude-plugins-7wze.8, 2a4cc64)
 - **A wrapped CLI's chatter stays out of every captured JSON.** `gws` prints
   "Using keyring backend" to stderr and hotline hit the same class from stdout, so
   a `2>&1` capture yields a file that looks fine and fails every parse downstream.
@@ -231,6 +240,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   bottom-of-screen gate bug and broke 31 cases the moment a correct fix landed. Prove
   a fixture change is neutral by running the suite at the prior commit with only the
   fixture overlaid, in both orderings (180/180). (claude-plugins-r465, 8c04c1d)
+  The same rule reaches a fixture's AMBIENT state, not only its content: a
+  same-machine stub for a REMOTE transport shares `$HOME`, the filesystem and the
+  caller's environment with the local side, so "ask the remote box for its `$HOME`"
+  and "assume the caller's" are indistinguishable — two mutations that deleted the
+  ssh hop entirely still passed. Give the simulated far side its own value for
+  whatever dimension is under test, and withhold the env var the code is supposed to
+  read from a file. (claude-plugins-7wze.8, 2a4cc64)
 
 ## Process
 
