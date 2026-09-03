@@ -7,8 +7,8 @@
 #
 # Usage:
 #   session-cache.sh get <target-path> --caller-session <id>
-#   session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>]
-#   session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>]
+#   session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>] [--transport <name>] [--remote <ssh-target>]
+#   session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>] [--transport <name>] [--remote <ssh-target>]
 #   session-cache.sh list --caller-session <id>
 #
 # --surface records the opaque HOST HANDLE the callee's session lives in, so a
@@ -43,13 +43,30 @@
 # only safe to close if its scrollback still carries the nonce of the exchange
 # it hosted, which distinguishes "the pane hotline used" from "a pane the user
 # has since repurposed".
+#
+# --transport / --remote say WHICH BACKEND, AND WHICH BOX, the cached host handle
+# belongs to — written as `transport` and `remote`, both OPTIONAL and both ABSENT on
+# a local cmux entry, which is what every entry written before Phase 3b is.
+#
+# They exist because surface_ref is opaque BY DESIGN and a follow-up re-addresses it
+# by name: a cmux surface handle and a herdr agent name are indistinguishable
+# strings, and a herdr agent name on box A is indistinguishable from one on box B.
+# Without these two fields a plain `--transport herdr` dial into a workspace a
+# `--remote` dial had cached would hand the LOCAL herdr a remote agent's name, be
+# told "no such agent", and quietly fall back to a fresh callee — losing the
+# conversation while the real one keeps running, unreachable, on the other box
+# (claude-plugins-7wze.11). dial.sh compares them and declines the reuse instead.
+#
+# READ BACKWARD-COMPATIBLY, ALWAYS. An entry with neither field means what it has
+# always meant — a LOCAL callee on whatever transport the dial is using now — and
+# `get` returns it unchanged. Nothing is migrated and no entry is invalidated.
 # =============================================================================
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: session-cache.sh get <target-path> --caller-session <id>"
-  echo "       session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>]"
-  echo "       session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>]"
+  echo "       session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>] [--transport <name>] [--remote <ssh-target>]"
+  echo "       session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>] [--transport <name>] [--remote <ssh-target>]"
   echo "       session-cache.sh list --caller-session <id>"
   echo ""
   echo "Tracks Agent A's outgoing connections in ~/.agents-hotline/sessions/<caller-session>.json"
@@ -70,6 +87,8 @@ MODE=""
 SURFACE_REF=""
 CALL_ID=""
 CLEAR_SURFACE=false
+TRANSPORT=""
+REMOTE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -78,6 +97,8 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="$2"; shift 2 ;;
     --surface) SURFACE_REF="$2"; shift 2 ;;
     --call-id) CALL_ID="$2"; shift 2 ;;
+    --transport) TRANSPORT="$2"; shift 2 ;;
+    --remote) REMOTE="$2"; shift 2 ;;
     --clear-surface) CLEAR_SURFACE=true; shift ;;
     *) [[ -z "$TARGET" ]] && TARGET="$1"; shift ;;
   esac
@@ -128,18 +149,22 @@ case "$CMD" in
     # cleanly signals "no reusable surface" for headless/detached calls.
     if [[ -f "$CACHE_FILE" ]]; then
       jq --arg t "$TARGET" --arg s "$SESSION_ID" --arg m "$MODE" --arg sf "$SURFACE_REF" \
-         --arg ci "$CALL_ID" --argjson now "$NOW" \
+         --arg ci "$CALL_ID" --arg tr "$TRANSPORT" --arg rm "$REMOTE" --argjson now "$NOW" \
         '.connections[$t] = ({session_id: $s, started: $now, last_contact: $now, mode: $m, exchange_count: 1}
            + (if $sf == "" then {} else {surface_ref: $sf} end)
-           + (if $ci == "" then {} else {last_call_id: $ci} end))' \
+           + (if $ci == "" then {} else {last_call_id: $ci} end)
+           + (if $tr == "" then {} else {transport: $tr} end)
+           + (if $rm == "" then {} else {remote: $rm} end))' \
         "$CACHE_FILE" > "${CACHE_FILE}.tmp" && mv "${CACHE_FILE}.tmp" "$CACHE_FILE"
     else
       jq -n --arg caller "$CALLER_CWD" --arg cs "$CALLER_SESSION" \
         --arg t "$TARGET" --arg s "$SESSION_ID" --arg m "$MODE" --arg sf "$SURFACE_REF" \
-        --arg ci "$CALL_ID" --argjson now "$NOW" \
+        --arg ci "$CALL_ID" --arg tr "$TRANSPORT" --arg rm "$REMOTE" --argjson now "$NOW" \
         '{caller: $caller, caller_session_id: $cs, connections: {($t): ({session_id: $s, started: $now, last_contact: $now, mode: $m, exchange_count: 1}
            + (if $sf == "" then {} else {surface_ref: $sf} end)
-           + (if $ci == "" then {} else {last_call_id: $ci} end))}}' \
+           + (if $ci == "" then {} else {last_call_id: $ci} end)
+           + (if $tr == "" then {} else {transport: $tr} end)
+           + (if $rm == "" then {} else {remote: $rm} end))}}' \
         > "$CACHE_FILE"
     fi
     ;;
@@ -153,13 +178,20 @@ case "$CMD" in
     # the next follow-up reuses it). Omitted → surface_ref is left untouched.
     # --clear-surface removes it outright, for the follow-up that ended up with
     # no surface at all.
+    # --transport/--remote follow the same omitted-means-untouched rule as
+    # --surface. A `--clear-surface` update DELETES them alongside surface_ref: they
+    # describe the host handle, so an entry that no longer has one must not keep
+    # claiming which backend and which box that handle was on.
     jq --arg t "$TARGET" --arg sf "$SURFACE_REF" --arg ci "$CALL_ID" --arg sid "$SESSION_ID" \
+       --arg tr "$TRANSPORT" --arg rm "$REMOTE" \
        --argjson clear "$($CLEAR_SURFACE && echo true || echo false)" --argjson now "$NOW" \
       '.connections[$t].last_contact = $now
        | .connections[$t].exchange_count += 1
        | (if $ci == "" then . else .connections[$t].last_call_id = $ci end)
        | (if $sid == "" then . else .connections[$t].session_id = $sid end)
-       | (if $clear then del(.connections[$t].surface_ref)
+       | (if $tr == "" then . else .connections[$t].transport = $tr end)
+       | (if $rm == "" then . else .connections[$t].remote = $rm end)
+       | (if $clear then del(.connections[$t].surface_ref, .connections[$t].transport, .connections[$t].remote)
           elif $sf == "" then .
           else .connections[$t].surface_ref = $sf end)' \
       "$CACHE_FILE" > "${CACHE_FILE}.tmp" && mv "${CACHE_FILE}.tmp" "$CACHE_FILE"

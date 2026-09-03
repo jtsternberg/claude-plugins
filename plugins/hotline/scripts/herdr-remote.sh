@@ -87,20 +87,44 @@ HOTLINE_REMOTE_MUX_NOTE=""
 # little slack: ssh appends nothing, but a caller-supplied dir might.
 HOTLINE_REMOTE_CONTROL_PATH_MAX=100
 
+# DETERMINISTIC, PER TARGET, SHARED BETWEEN PROCESSES — not per process. One dial
+# is several processes (dial.sh, then wait-for-response.sh, then any follow-up), and
+# a socket named after whichever one created it would make each of them authenticate
+# again. That is the cost this exists to avoid, and on a tailnet in check mode each
+# of those re-authentications is a chance to stall. A per-process path would also
+# litter one directory per invocation.
+#
+# The name is the target, sanitized, plus its checksum. The checksum is not
+# decoration: the sanitized part is TRUNCATED to stay under the socket-address cap,
+# and two targets sharing a prefix would otherwise share a master connection —
+# silently sending one box's herdr commands to another.
 hotline_remote_mux_init() {
   [[ -n "$HOTLINE_REMOTE_CONTROL_PATH" || -n "$HOTLINE_REMOTE_MUX_NOTE" ]] && return 0
-  local base dir
+  local base target slug sum dir
   # /tmp explicitly, NOT $TMPDIR: macOS sets TMPDIR to a ~50-character
   # /var/folders/… path, which alone can push the socket past the 104-byte cap.
   base="${HOTLINE_SSH_CONTROL_HOME:-/tmp}"
-  dir=$(mktemp -d "$base/hotline-ssh-XXXXXX" 2>/dev/null) || {
-    HOTLINE_REMOTE_MUX_NOTE="could not create a control directory under $base"
-    return 0
-  }
-  chmod 700 "$dir" 2>/dev/null || true
+  target=$(hotline_remote_target)
+  slug=$(printf '%s' "$target" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-24)
+  sum=$(printf '%s' "$target" | cksum 2>/dev/null | awk '{print $1}')
+  [[ -z "$sum" ]] && sum=0
+  dir="$base/hotline-ssh-$slug-$sum"
   if [[ ${#dir} -ge $((HOTLINE_REMOTE_CONTROL_PATH_MAX - 2)) ]]; then
-    rmdir "$dir" 2>/dev/null || true
     HOTLINE_REMOTE_MUX_NOTE="control path under $base would exceed the ${HOTLINE_REMOTE_CONTROL_PATH_MAX}-byte unix-socket limit"
+    return 0
+  fi
+  # 0700 at creation, not after: a world-readable window, however brief, is a
+  # window in which somebody else can plant the socket path. A pre-existing
+  # directory owned by anyone else fails the ownership test below rather than being
+  # adopted.
+  if [[ ! -d "$dir" ]]; then
+    mkdir -m 700 "$dir" 2>/dev/null || {
+      HOTLINE_REMOTE_MUX_NOTE="could not create the control directory $dir"
+      return 0
+    }
+  fi
+  if [[ ! -O "$dir" ]]; then
+    HOTLINE_REMOTE_MUX_NOTE="$dir exists but is not owned by this user, so it will not be used as a control path"
     return 0
   fi
   HOTLINE_REMOTE_CONTROL_DIR="$dir"
@@ -109,9 +133,14 @@ hotline_remote_mux_init() {
   return 0
 }
 
-# Tear the shared connection down and remove its socket. Safe to call when none
-# was ever opened. Not registered as a trap here — the scripts that own a call's
-# lifetime decide when the channel is no longer wanted.
+# Tear the shared connection down. Safe to call when none was ever opened.
+#
+# DELIBERATELY NOT WIRED INTO ANY EXIT PATH. The connection is shared across a
+# dial's processes and outliving one of them is the point — closing it when dial.sh
+# returns would make the response wait that follows re-authenticate. ControlPersist
+# retires it on its own. This exists for an explicit teardown (a test suite, or a
+# caller that knows it is done with that box), and it leaves the directory in place
+# because the path is deterministic and meant to be reused.
 hotline_remote_mux_close() {
   [[ -z "$HOTLINE_REMOTE_CONTROL_PATH" ]] && return 0
   local target
@@ -119,7 +148,7 @@ hotline_remote_mux_close() {
   if [[ -n "$target" && -S "$HOTLINE_REMOTE_CONTROL_PATH" ]]; then
     ssh -o ControlPath="$HOTLINE_REMOTE_CONTROL_PATH" -O exit "$target" >/dev/null 2>&1 || true
   fi
-  rm -rf "$HOTLINE_REMOTE_CONTROL_DIR" 2>/dev/null || true
+  rm -f "$HOTLINE_REMOTE_CONTROL_PATH" 2>/dev/null || true
   HOTLINE_REMOTE_CONTROL_PATH=""
   HOTLINE_REMOTE_CONTROL_DIR=""
 }

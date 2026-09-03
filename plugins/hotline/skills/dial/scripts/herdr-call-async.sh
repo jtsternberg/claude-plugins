@@ -22,6 +22,12 @@
 #                           cmux surface. dial.sh reports it as the call's host ref.
 #   herdr_pane.txt        — the pane the agent runs in. Diagnostic, and what the
 #                           failure paths here close so a failed dial leaks nothing.
+#   remote_target.txt     — the ssh target hosting this callee, for a --remote dial;
+#                           ABSENT for a local one. Written with the dir because
+#                           wait-for-response.sh is a separate process that receives
+#                           nothing but the call dir, and asking the LOCAL herdr
+#                           about a remote agent gets "no such agent" — i.e. the
+#                           callee reported dead while it works.
 #   cwd.txt               — the callee's working directory; the transcript path is
 #                           derived from it.
 #   session_id_preset.txt — the UUID passed to `claude --session-id`.
@@ -46,13 +52,22 @@
 # to choose this transport at all, and the follow-up path (herdr-reuse-agent.sh)
 # re-targets this very agent by name. So keep_workspace.txt is 'true' and the agent is left live.
 # The cost is honest and worth stating: a herdr call leaves a pane behind, and the
-# caller (or the user) closes it — `herdr pane close <herdr_pane.txt>`.
+# caller (or the user) closes it — `herdr pane close <herdr_pane.txt>`, or
+# `ssh <remote_target.txt> herdr pane close <herdr_pane.txt>` for a remote call.
+#
+# A REMOTE CALLEE IS THE SAME LAUNCH, ON ANOTHER BOX. `$HOTLINE_HERDR_REMOTE` makes
+# every herdr verb below run over ssh (herdr-state.sh's dispatch), so the split and
+# the `agent start` are unchanged. What DOES change is the cwd: it names a directory
+# on THAT filesystem, so it is resolved and existence-checked over ssh rather than
+# locally — see the canonicalization note below, which is where a local check would
+# do real damage rather than merely be useless.
 #
 # Usage:
 #   herdr-call-async.sh --cwd <path> (--prompt <text> | --prompt-file <path>)
 #                       [--name <session-name>] [--tools <list>]
 #                       [--boot-timeout <seconds>] [--detached]
 #   # → {"call_dir":"…","agent":"hotline-…","pane":"w6:p2","session_id":"…"}
+#   #   plus "remote":"<ssh-target>" when $HOTLINE_HERDR_REMOTE hosted it
 #
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
 # --detached is accepted and ignored, and so is a side placement: a herdr callee is
@@ -105,7 +120,6 @@ die() { jq -nc --arg err "$1" '{error: $err}'; exit 1; }
 # `pane split --cwd` needs a real directory: unlike cmux's launch script, there is
 # no `cd` step to fail later and no ambient cwd to inherit from the caller.
 [[ -z "$CWD" ]] && die "No --cwd provided; herdr splits its pane with an explicit --cwd"
-[[ -d "$CWD" ]] || die "--cwd does not exist or is not a directory: $CWD"
 
 # CANONICALIZED ONCE, HERE, and used for both the split and cwd.txt. Claude Code
 # derives its project directory from the cwd it actually RESOLVED, so a callee
@@ -119,7 +133,21 @@ die() { jq -nc --arg err "$1" '{error: $err}'; exit 1; }
 # reached the agent" while STATUS: WORK_COMPLETE sat in the real transcript.
 # Normalizing here is the half of the fix that makes the two agree by construction;
 # the wait also tries both spellings, so a hand-staged call dir still works.
-CWD=$(cd "$CWD" 2>/dev/null && pwd -P) || die "--cwd could not be resolved to a real path: $CWD"
+#
+# FOR A REMOTE DIAL BOTH HALVES ARE THE REMOTE BOX'S TO ANSWER. `-d` and `pwd -P`
+# here would test a path on the CALLER's filesystem — which either does not exist
+# (so a perfectly good dial is refused) or exists and resolves differently (so
+# cwd.txt records an encoding the remote callee never used, and every later
+# transcript read misses silently). Asked over ssh instead, in one hop, which also
+# proves the directory is there before a pane is split into it.
+if hotline_remote_active; then
+  hotline_remote_realpath_dir "$CWD" \
+    || die "--cwd does not exist as a directory on $(hotline_remote_target), or could not be resolved there: $CWD (${HOTLINE_REMOTE_ERR:-no diagnostic})"
+  CWD="$HOTLINE_REMOTE_REALCWD"
+else
+  [[ -d "$CWD" ]] || die "--cwd does not exist or is not a directory: $CWD"
+  CWD=$(cd "$CWD" 2>/dev/null && pwd -P) || die "--cwd could not be resolved to a real path: $CWD"
+fi
 
 if [[ -n "$PROMPT_FILE" ]]; then
   [[ -f "$PROMPT_FILE" ]] || die "--prompt-file does not exist: $PROMPT_FILE"
@@ -160,6 +188,15 @@ echo herdr > "$CALL_DIR/transport.txt"
 # See WHY NOTHING IS CLOSED in the header.
 echo true > "$CALL_DIR/keep_workspace.txt"
 echo "$CWD" > "$CALL_DIR/cwd.txt"
+# WHICH BOX this call lives on, written with the dir for the same reason
+# transport.txt is: every later reader needs it, and wait-for-response.sh is a
+# SEPARATE PROCESS that gets no arguments but the call dir. Without this the wait
+# would ask the local herdr about an agent that only exists over there, be told
+# "no such agent", and report the callee as dead. Absent = local, which is what
+# every call dir written before this existed means.
+if hotline_remote_active; then
+  hotline_remote_target > "$CALL_DIR/remote_target.txt"
+fi
 # [MODE:]/[CALLER:]/[SESSION:] tags out of the ringing prompt, so register-call.sh
 # can record this call without the dialing agent remembering to. Via the file when
 # we have one, so the payload takes no argv detour.
@@ -339,5 +376,6 @@ fi
 echo "$SESSION_ID" > "$CALL_DIR/session_id.txt"
 
 jq -nc --arg dir "$CALL_DIR" --arg agent "$AGENT_NAME" --arg pane "$NEW_PANE" \
-       --arg sid "$SESSION_ID" \
-  '{call_dir: $dir, agent: $agent, pane: $pane, session_id: $sid}'
+       --arg sid "$SESSION_ID" --arg remote "$(hotline_remote_target)" \
+  '{call_dir: $dir, agent: $agent, pane: $pane, session_id: $sid}
+   + (if $remote == "" then {} else {remote: $remote} end)'
