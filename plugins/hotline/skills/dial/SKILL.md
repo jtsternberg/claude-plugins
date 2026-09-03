@@ -115,8 +115,12 @@ on first contact, mid-conversation on a follow-up. Say so — re-dialling blind 
 double-deliver, because the paste may have arrived just after the confirmation
 window closed. The exception announces itself in `.recovery`: a trust-dialog refusal
 is made before anything is pasted, so its recovery says nothing was delivered and
-re-dialing is safe (references/error-recovery.md, the TRUST DIALOG entry under
-§ CMUX Failures).
+re-dialing is safe — the TRUST DIALOG entries in
+`${CLAUDE_PLUGIN_ROOT}/skills/dial/references/error-recovery.md`, under § CMUX
+Failures for a cmux call and § herdr Failures for a herdr one.
+
+Codex: substitute the installed Hotline plugin directory for the leading path
+segment above.
 
 `.confirmed` names the tier that proved a delivery: `transcript` read the nonce out
 of the callee's JSONL and is definitive; `screen` inferred it from the rendered
