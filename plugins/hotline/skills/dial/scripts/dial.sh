@@ -369,8 +369,18 @@ esac
 # as a SEPARATE process that inherits nothing.
 #
 # It is also the seam the test suite drives, exactly as HOTLINE_HERDR_PANE is.
+#
+# AND UNSET ON THE LOCAL PATH, because dial.sh is the seam's SOLE AUTHORITY: nine
+# scripts read it, so an ambient value inherited from the caller's environment (a
+# previous remote dial's shell, an exported default) would half-route a local dial —
+# preflight, launch and delivery over ssh, the target resolved here, JSON with no
+# remote_target, and a permanent host mismatch against a cache entry that says
+# local. Setting it only when asked leaves that state reachable; deciding it in both
+# directions is what makes the flag the whole answer.
 if [[ -n "$REMOTE_TARGET" ]]; then
   export HOTLINE_HERDR_REMOTE="$REMOTE_TARGET"
+else
+  unset HOTLINE_HERDR_REMOTE
 fi
 
 if [[ -n "$BOOT_TIMEOUT" && ! "$BOOT_TIMEOUT" =~ ^[0-9]+$ ]]; then
