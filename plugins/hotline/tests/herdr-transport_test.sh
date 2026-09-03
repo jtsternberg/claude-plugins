@@ -67,7 +67,7 @@ ROOT="$(mktemp -d /tmp/hotline-herdr-test-XXXXXX)"
 POISON_BIN="$ROOT/poison-bin"
 POISON_LOG="$ROOT/violations"
 mkdir -p "$POISON_BIN"
-for _poison in herdr cmux claude dirmap; do
+for _poison in herdr cmux claude dirmap ssh; do
   cat > "$POISON_BIN/$_poison" <<POISON
 #!/usr/bin/env bash
 echo "$_poison \$*" >> "$POISON_LOG"
@@ -80,6 +80,12 @@ PATH="$POISON_BIN:$PATH"
 
 export HOTLINE_CALL_HOME="$ROOT/calls"
 mkdir -p "$HOTLINE_CALL_HOME"
+# The ssh ControlMaster socket directory. Pointed at this suite's own root for the
+# same reason HOTLINE_CALL_HOME is — and because the real default is /tmp, which the
+# remote layer picks deliberately (a unix socket address caps at 104 bytes) and
+# which a test has no business writing into.
+export HOTLINE_SSH_CONTROL_HOME="$ROOT/ssh"
+mkdir -p "$HOTLINE_SSH_CONTROL_HOME"
 # The whole suite runs with the settle sleep and poll cadence collapsed: the
 # launcher's retry logic and the waiter's loop are exercised for their DECISIONS,
 # not their wall-clock. (The waiter accounts its budget in fixed integer ticks, so
@@ -303,6 +309,64 @@ STUB
   chmod +x "$1/herdr"
 }
 
+# ---------------------------------------------------------------------------
+# The ssh stub. It LOGS the hop and then EVALs the remote command string in this
+# shell, which is a faithful simulation rather than a shortcut: the remote layer
+# single-quotes every argument precisely because ssh hands the joined string to the
+# remote user's SHELL, so a shell evaluating that string is exactly what happens on
+# the far side. It is also what makes every knob of the herdr stub above work
+# unchanged one hop away — `ssh host 'herdr pane list'` runs this file's herdr stub
+# — so a remote case tests the ssh plumbing without a second copy of herdr.
+#
+# The "remote box" is therefore this case's own sandbox: $HOME is $t/home and the
+# callee cwd is $t/target, which is what lets the transcript assertions below check
+# a path the remote layer derived from a $HOME and a realpath it ASKED for.
+#
+#   SSH_LOG               append every hop here as `<target> :: <command>` (required)
+#   SSH_STUB_FAIL=1       ssh itself fails (rc 255), as an unresolvable host does
+#   SSH_STUB_SLEEP=N      sleep before running, so `timeout` kills the hop
+#   SSH_STUB_TAILSCALE=1  print Tailscale's check-mode notice on BOTH streams ahead
+#                         of the real output — the lines nothing may parse as data
+#   SSH_STUB_NO_HERDR=1   run the remote command with a PATH that has no herdr,
+#                         modelling a box where herdr is not installed
+#   SSH_STUB_NO_CLAUDE=1  make `command -v claude` fail on the far side. A knob and
+#                         not a PATH edit, because `command -v` never EXECUTES
+#                         anything: the suite's poison `claude` satisfies it, so an
+#                         absence has to be modelled rather than arranged
+# ---------------------------------------------------------------------------
+make_ssh_stub() {  # <bin-dir>
+  mkdir -p "$1"
+  cat > "$1/ssh" <<'STUB'
+#!/usr/bin/env bash
+ARGS=("$@"); CMD=""; TARGET=""; i=0
+while [[ $i -lt ${#ARGS[@]} ]]; do
+  a="${ARGS[$i]}"
+  case "$a" in
+    -o|-O)  i=$((i+2)); continue ;;
+    -*)     i=$((i+1)); continue ;;
+    *) if [[ -z "$TARGET" ]]; then TARGET="$a"; else CMD="$a"; fi; i=$((i+1)) ;;
+  esac
+done
+printf '%s :: %s\n' "$TARGET" "$CMD" >> "${SSH_LOG:?SSH_LOG not set}"
+if [[ "${SSH_STUB_FAIL:-}" == "1" ]]; then
+  echo "ssh: Could not resolve hostname ${TARGET#*@}: nodename nor servname provided" >&2
+  exit 255
+fi
+if [[ "${SSH_STUB_TAILSCALE:-}" == "1" ]]; then
+  echo "# Tailscale SSH requires an additional check. To authenticate, visit https://login.tailscale.com/a/f00dcafe"
+  echo "To authenticate, visit https://login.tailscale.com/a/f00dcafe" >&2
+fi
+[[ -n "${SSH_STUB_SLEEP:-}" ]] && sleep "$SSH_STUB_SLEEP"
+[[ -z "$CMD" ]] && exit 0
+[[ "${SSH_STUB_NO_HERDR:-}" == "1" ]] && PATH="/usr/bin:/bin"
+if [[ "${SSH_STUB_NO_CLAUDE:-}" == "1" ]]; then
+  command() { if [[ "${2:-}" == "claude" ]]; then return 1; fi; builtin command "$@"; }
+fi
+eval "$CMD"
+STUB
+  chmod +x "$1/ssh"
+}
+
 # A cmux stub that FAILS every ping, so a case which accidentally reaches the cmux
 # selection chain lands on headless rather than on the developer's live cmux.
 make_cmux_stub() {  # <bin-dir>
@@ -342,6 +406,7 @@ new_env() {
   mkdir -p "$t/bin" "$t/home" "$t/target" "$t/state" "$t/pending"
   make_herdr_stub "$t/bin"
   make_cmux_stub "$t/bin"
+  make_ssh_stub "$t/bin"
   # resolve-workspace.sh consults dirmap for fuzzy references. Every --target here
   # is an absolute path, so this should never be reached — a stub that finds
   # nothing keeps that true instead of trusting it.
@@ -1490,7 +1555,7 @@ dial() {  # dial <scratch> <extra-env...> -- <dial args...>
   while [[ "$1" != "--" ]]; do envs+=("$1"); shift; done
   shift
   env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
-      HERDR_STATE="$t/state" CMUX_LOG="$t/cmux.log" \
+      HERDR_STATE="$t/state" CMUX_LOG="$t/cmux.log" SSH_LOG="$t/ssh.log" \
       HOTLINE_CALLER_SESSION_ID="caller-dial-1" \
       HOTLINE_PENDING_DIR="$t/pending" \
       ${envs[@]+"${envs[@]}"} bash "$DIAL" "$@" 2>"$t/err.txt"
@@ -1594,19 +1659,29 @@ out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_FOCUS_FAIL=1" \
 check "a conference whose focus fails still CONNECTS, with the failure in .fallbacks" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
+# --remote is a TRANSPORT CHOICE, not an option on one: only herdr can host a callee
+# anywhere but here. Naming an incompatible transport alongside it is two explicit
+# asks, so it is refused rather than resolved in either flag's favour.
 t=$(new_env)
 out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
-        --transport herdr --detached --remote box.local)
+        --transport cmux --remote box.local)
 [[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "error" ]] \
-  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"Phase 3"* ]] \
-  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"transcript"* ]]
-check "--transport herdr --remote is refused, and the reason is the REMOTE TRANSCRIPT" $? "out=$out"
+  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"cannot host one"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"herdr-only"* ]]
+check "--remote with a non-herdr --transport is an args error, naming both asks" $? "out=$out"
 
+# The placements herdr cannot host are refused for a remote dial too — via herdr's
+# own validation, not a second copy of it, which is why --remote resolves the
+# transport BEFORE that block runs.
 t=$(new_env)
-out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" --remote box.local)
+out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
+        --remote box.local --placement side)
 [[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "error" ]] \
-  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"not supported by any hotline transport"* ]]
-check "--remote alone is refused too (no backend hosts remotely yet)" $? "out=$out"
+  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"detached only"* ]]
+check "--remote with an EXPLICIT --placement side is refused, not silently overridden" $? "out=$out"
+[[ ! -s "$t/ssh.log" ]] 2>/dev/null || [[ ! -e "$t/ssh.log" ]]
+check "…before any ssh hop is made: an args error costs no network" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
 
 t=$(new_env)
 out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
@@ -2373,6 +2448,411 @@ check "SKILL.md's first-contact confirm budget matches herdr-prompt.sh" $? \
 grep -q '## herdr Failures' "$HOTLINE_DIR/skills/dial/references/error-recovery.md"
 check "error-recovery.md has the § herdr Failures section the hints name" $? \
   "sections: $(grep -c '^## ' "$HOTLINE_DIR/skills/dial/references/error-recovery.md")"
+
+# ===========================================================================
+echo ""
+echo "9. Remote callees (--remote) — the same verbs, one ssh hop away:"
+# ===========================================================================
+# Phase 3b's whole claim is that a remote callee needs no second implementation:
+# `HOTLINE_HERDR_REMOTE` makes herdr_cli run `ssh <target> herdr …` and everything
+# downstream is the local arm. These cases pin the four places that CANNOT come
+# along for free, because each one is a fact about the other box:
+#
+#   1. PREFLIGHT ASKS THAT BOX, not this one — and gains a check with no local
+#      counterpart (`claude` on a non-login remote PATH). HERDR_ENV=1 is
+#      deliberately NOT accepted as proof of a server there.
+#   2. THE PAYLOAD RIDES STDIN. A work order substituted into the ssh command line
+#      would move the `ps` window from the box running it onto the caller's own
+#      machine, which is where claude-plugins-86ka's threat actually lives.
+#   3. THE TRANSCRIPT IS REMOTE. Both halves of its path — $HOME and the realpath
+#      of the cwd — belong to the far side and are asked for, never assumed
+#      (claude-plugins-7wze.10); the file is then fetched into a local mirror and
+#      read by an UNCHANGED transcript-extract.sh.
+#   4. TAILSCALE SSH CAN TALK. Its check-mode notice must never be parsed as data,
+#      and when the check period lapses the resulting stall must surface as an
+#      error naming the URL rather than as silence.
+
+remote_env() {  # remote_env — a scratch env plus the ssh target every case uses
+  local t
+  t=$(new_env)
+  # The "remote" claude, so preflight's last check passes. Its content is
+  # irrelevant: nothing here ever runs it, `command -v` is the whole question.
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$t/bin/claude"
+  chmod +x "$t/bin/claude"
+  printf '%s' "$t"
+}
+
+# Every remote case runs with the same env shape; RTARGET is the target string, and
+# it is deliberately one that would NEVER resolve if a stub were missing.
+RTARGET="tester@no-such-box.invalid"
+
+rcheck() {  # rcheck <scratch> <extra-env...> -- <script> <args...>
+  local t="$1"; shift
+  local envs=()
+  while [[ "$1" != "--" ]]; do envs+=("$1"); shift; done
+  shift
+  env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" SSH_LOG="$t/ssh.log" \
+      HOTLINE_HERDR_REMOTE="$RTARGET" \
+      ${envs[@]+"${envs[@]}"} bash "$@" 2>"$t/err.txt"
+}
+
+# --- Preflight, asked of the far side ---------------------------------------
+
+t=$(remote_env)
+out=$(rcheck "$t" "SSH_STUB_FAIL=1" -- "$CHECK_HERDR"); rc=$?
+[[ $rc -ne 0 && "$(jq -r '.usable' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"could not be reached over ssh"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"NON-INTERACTIVELY"* ]]
+check "an unreachable target fails preflight on the HOP, before anything about herdr" $? \
+  "rc=$rc out=$out"
+[[ ! -s "$t/herdr.log" ]]
+check "…and no herdr question is asked of a box we could not reach" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+t=$(remote_env)
+out=$(rcheck "$t" "SSH_STUB_NO_HERDR=1" -- "$CHECK_HERDR"); rc=$?
+[[ $rc -ne 0 && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"not on PATH on $RTARGET"* ]]
+check "herdr missing on the TARGET names the target, not the caller's own install" $? \
+  "rc=$rc out=$out"
+
+t=$(remote_env)
+out=$(rcheck "$t" "HERDR_STUB_SESSION_RC=1" -- "$CHECK_HERDR"); rc=$?
+[[ $rc -ne 0 && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"no server answered"* ]] \
+  && [[ "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"$RTARGET"* ]]
+check "no herdr server THERE is reported as that, and names which box" $? "rc=$rc out=$out"
+
+# The carve-out that matters: being inside a herdr pane proves a server is hosting
+# THIS process, which says nothing about the box the callee will live on. Accepting
+# it would skip the only check that catches a stopped remote server.
+t=$(remote_env)
+out=$(rcheck "$t" "HERDR_STUB_SESSION_RC=1" "HERDR_ENV=1" "HERDR_PANE_ID=w9:p1" \
+        -- "$CHECK_HERDR"); rc=$?
+[[ $rc -ne 0 && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"no server answered"* ]]
+check "HERDR_ENV=1 is NOT proof of a server on the remote box" $? "rc=$rc out=$out"
+
+t=$(remote_env)
+out=$(rcheck "$t" "HERDR_STUB_NO_PANES=1" -- "$CHECK_HERDR"); rc=$?
+[[ $rc -ne 0 && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"no pane could be resolved"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"HOTLINE_HERDR_REMOTE_PANE"* ]]
+check "no remote pane points at HOTLINE_HERDR_REMOTE_PANE, not the local override" $? \
+  "rc=$rc out=$out"
+
+# The one check with no local counterpart. A non-login `ssh host cmd` gets that
+# box's own PATH, so a claude under ~/.local/bin may simply not resolve there.
+t=$(remote_env)
+out=$(rcheck "$t" "SSH_STUB_NO_CLAUDE=1" -- "$CHECK_HERDR"); rc=$?
+[[ $rc -ne 0 && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"claude is not on the PATH"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"command -v claude"* ]]
+check "claude missing from the REMOTE non-login PATH is its own failure, with its own fix" $? \
+  "rc=$rc out=$out"
+
+t=$(remote_env)
+out=$(rcheck "$t" "HERDR_STUB_PANE=w7:p2" -- "$CHECK_HERDR"); rc=$?
+[[ $rc -eq 0 && "$(jq -r '.usable' <<<"$out" 2>/dev/null)" == "true" \
+   && "$(jq -r '.pane' <<<"$out" 2>/dev/null)" == "w7:p2" \
+   && "$(jq -r '.remote' <<<"$out" 2>/dev/null)" == "$RTARGET" ]]
+check "a healthy remote reports usable:true with the REMOTE pane and .remote" $? \
+  "rc=$rc out=$out"
+
+# HOTLINE_HERDR_REMOTE_PANE overrides; $HERDR_PANE_ID (the CALLER's own pane, on
+# this machine) must never be applied to another box's layout.
+t=$(remote_env)
+out=$(rcheck "$t" "HOTLINE_HERDR_REMOTE_PANE=w4:p1" "HERDR_PANE_ID=w9:p9" \
+        "HOTLINE_HERDR_PANE=w8:p8" -- "$CHECK_HERDR"); rc=$?
+[[ $rc -eq 0 && "$(jq -r '.pane' <<<"$out" 2>/dev/null)" == "w4:p1" ]]
+check "HOTLINE_HERDR_REMOTE_PANE wins, and the LOCAL pane vars are ignored remotely" $? \
+  "rc=$rc out=$out"
+
+# --- Tailscale SSH, which talks ---------------------------------------------
+# Its check-mode notice arrives ahead of the real output on either stream. Parsed as
+# data it would break every JSON read; the layer filters it out of both.
+t=$(remote_env)
+out=$(rcheck "$t" "SSH_STUB_TAILSCALE=1" "HERDR_STUB_PANE=w2:p2" -- "$CHECK_HERDR"); rc=$?
+[[ $rc -eq 0 && "$(jq -r '.pane' <<<"$out" 2>/dev/null)" == "w2:p2" ]]
+check "Tailscale's check-mode notice is filtered, not parsed — preflight still reads the pane" $? \
+  "rc=$rc out=$out"
+[[ "$out" != *"login.tailscale.com"* ]]
+check "…and it does not leak into the emitted JSON" $? "out=$out"
+
+# And when the check period has lapsed, the BatchMode hop blocks on an
+# authentication it cannot perform. Bounded, that is an error naming the URL; the
+# alternative is a silent half-hour in the middle of a work order.
+t=$(remote_env)
+out=$(rcheck "$t" "SSH_STUB_SLEEP=3" "SSH_STUB_TAILSCALE=1" "HOTLINE_REMOTE_SSH_TIMEOUT=1" \
+        -- "$CHECK_HERDR"); rc=$?
+[[ $rc -ne 0 && "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"timed out"* ]] \
+  && [[ "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"login.tailscale.com/a/f00dcafe"* ]]
+check "a stalled hop times out and the error NAMES the tailnet check URL" $? "rc=$rc out=$out"
+
+# --- Delivery: the payload rides stdin --------------------------------------
+
+# One remote first-contact delivery, end to end through herdr-prompt.sh, against a
+# transcript the stub writes exactly as a callee would.
+remote_delivery_env() {  # remote_delivery_env <payload-file-content-writer>
+  local t
+  t=$(remote_env)
+  # The stub cannot precompute the transcript path (it learns the session id from
+  # `agent start`), so a thin wrapper fills it in — the callee recording the turn
+  # it actually received, which is the only tier a delivery is confirmed by.
+  cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/remote-sess-1.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+  chmod +x "$t/bin/herdr"
+  mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+  printf '%s' "$t"
+}
+
+t=$(remote_delivery_env)
+# A payload with every character that shell quoting gets wrong: single quotes,
+# double quotes, `$VAR`, backticks, a glob, and a newline.
+printf '%s\n' "[CALL_ID: rmt-nonce-1] it's \"quoted\" \$VAR \`tick\` * and more" > "$t/payload.md"
+out=$(rcheck "$t" "HERDR_STUB_AGENT_ANY=1" "HERDR_STUB_OBSERVED_SID=remote-sess-1" \
+        -- "$HERDR_PROMPT" --agent p3b-agent --payload-file "$t/payload.md" \
+           --call-id rmt-nonce-1 --cwd "$t/target" --session remote-sess-1)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "true" \
+   && "$(jq -r '.confirmed' <<<"$out" 2>/dev/null)" == "transcript" ]]
+check "a remote delivery is confirmed by the nonce in the REMOTE transcript" $? \
+  "out=$out stderr=$(cat "$t/err.txt") ssh=$(cat "$t/ssh.log" 2>/dev/null)"
+
+grep -q "'agent' 'prompt' .*\"\$(cat)\"" "$t/ssh.log"
+check "…submitted through a FIXED remote command that reads stdin" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
+! grep -q "it's" "$t/ssh.log"
+check "…so the work order never appears in the LOCAL ssh process's argv (86ka)" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
+
+# The bytes have to survive the hop intact, not merely arrive. The stub writes what
+# the callee received; compare it to what `$(cat)` of the payload would be locally,
+# which is the same trailing-newline-stripped form the local arm delivers.
+GOT=$(jq -r 'select(.type=="user") | .message.content' \
+        "$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/remote-sess-1.jsonl" 2>/dev/null | tail -1)
+[[ "$GOT" == "$(cat "$t/payload.md")" ]]
+check "…and the payload arrives byte-identical through the quoting and the wire" $? \
+  "got: $GOT"
+
+# The remote transcript's path is derived from the REMOTE \$HOME and the REMOTE
+# realpath of the cwd (claude-plugins-7wze.10). Proof: the confirmation found it at
+# the REALPATH encoding while the cwd it was handed was the /tmp spelling.
+grep -qF -- "$(encode_cwd "$(cd "$t/target" && pwd -P)")" "$t/ssh.log"
+check "…at a path derived from the remote \$HOME and the remote realpath, asked over ssh" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null | tail -3)"
+
+# THE TRUST DIALOG, one hop away. The screen probe runs over ssh and refuses with
+# sent:false naming the remote directory — exactly as it does locally, because
+# `agent read` sees just as little of an alternate-screen TUI from either side.
+t=$(remote_delivery_env)
+printf 'Do you trust the files in this folder?\n\n%s\n\n1. Yes, proceed\n2. No, exit\n' "$t/target" \
+  > "$t/screen.txt"
+printf '/hotline:hotline-ringing [MODE: work_order]\n[CALL_ID: rmt-nonce-2] go\n' > "$t/payload2.md"
+out=$(rcheck "$t" "HERDR_STUB_AGENT_ANY=1" "HERDR_STUB_SCREEN=$t/screen.txt" \
+        -- "$HERDR_PROMPT" --agent p3b-agent --payload-file "$t/payload2.md" \
+           --call-id rmt-nonce-2 --cwd "$t/target" --session remote-sess-1 --first-contact)
+[[ "$(jq -r '.delivered' <<<"$out" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$out" 2>/dev/null)" == "false" ]] \
+  && [[ "$(jq -r '.reason' <<<"$out" 2>/dev/null)" == *"$t/target"* ]]
+check "a remote TRUST DIALOG refuses with sent:false, naming the remote directory" $? \
+  "out=$out"
+! grep -q 'agent prompt' "$t/ssh.log"
+check "…and nothing was submitted, so re-dialing that box is safe" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
+
+# --- The response wait: fetch, then the UNCHANGED extractor ------------------
+
+t=$(remote_env)
+cd_path=$(mktemp -d "$HOTLINE_CALL_HOME/hotline-call-XXXXX")
+echo herdr             > "$cd_path/transport.txt"
+echo p3b-remote-agent  > "$cd_path/herdr_agent.txt"
+echo "$RTARGET"        > "$cd_path/remote_target.txt"
+echo "$t/target"       > "$cd_path/cwd.txt"
+echo remote-sess-2     > "$cd_path/session_id.txt"
+echo rmt-nonce-3       > "$cd_path/call_id.txt"
+transcript_with \
+  "$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/remote-sess-2.jsonl" \
+  rmt-nonce-3 WORK_COMPLETE "the remote callee answered"
+out=$(rcheck "$t" "HERDR_STUB_AGENT_ANY=1" "HOTLINE_POLL_SLEEP=0" \
+        -- "$WAIT_RESPONSE" "$cd_path" --timeout 20); rc=$?
+[[ $rc -eq 0 && "$(jq -r '.response' <<<"$out" 2>/dev/null)" == *"the remote callee answered"* \
+   && "$(jq -r '.session_id' <<<"$out" 2>/dev/null)" == "herdr-sess" ]]
+check "the wait reads a REMOTE transcript and extracts it with the unchanged extractor" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+[[ -s "$cd_path/remote_transcript.jsonl" ]]
+check "…via a local mirror in the call dir, so what it read is inspectable" $? \
+  "call dir: $(ls "$cd_path" | tr '\n' ' ')"
+grep -q 'cat "\$p"' "$t/ssh.log"
+check "…fetched with one \`cat\` over the already-authenticated hop" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null | tail -2)"
+
+# remote_target.txt is the ONLY thing that tells this separate process the agent
+# lives elsewhere. Without it the LOCAL herdr is asked, answers "no such agent",
+# and the waiter reports a working callee as dead — so its absence must not be
+# silently survivable, and its presence must be what routes the probe.
+t=$(remote_env)
+cd_path=$(mktemp -d "$HOTLINE_CALL_HOME/hotline-call-XXXXX")
+echo herdr            > "$cd_path/transport.txt"
+echo p3b-gone-agent   > "$cd_path/herdr_agent.txt"
+echo "$RTARGET"       > "$cd_path/remote_target.txt"
+echo "$t/target"      > "$cd_path/cwd.txt"
+echo remote-sess-3    > "$cd_path/session_id.txt"
+echo rmt-nonce-4      > "$cd_path/call_id.txt"
+# --timeout has to outlast the waiter's own file-absence grace (10s), or the budget
+# expires first and the honest "no transcript anywhere" report never runs.
+out=$(rcheck "$t" "HERDR_STUB_AGENT_ANY=1" "HOTLINE_POLL_SLEEP=0" \
+        -- "$WAIT_RESPONSE" "$cd_path" --timeout 30 2>&1); rc=$?
+ERRTXT=$(cat "$t/err.txt")
+[[ $rc -ne 0 && "$ERRTXT" == *"No transcript"* ]] \
+  && [[ "$ERRTXT" == *"$t/home/.claude/projects/"* ]]
+check "a missing remote transcript names the REMOTE candidate paths it looked at" $? \
+  "rc=$rc err=$ERRTXT"
+# The liveness probe went over the wire — which is the fact remote_target.txt
+# exists to establish. (It cannot be checked by HERDR_LOG's absence: the ssh stub
+# evals the remote command in this shell, so a remote `herdr` reaches the same stub
+# and logs there too. The hop log is the only witness that distinguishes them.)
+grep -q "herdr 'agent' 'get'" "$t/ssh.log"
+check "…having asked the REMOTE herdr about the agent, over the hop" $? \
+  "ssh hops: $(cat "$t/ssh.log" 2>/dev/null | tail -2)"
+
+# --- dial.sh: --remote picks the transport and the placement -----------------
+
+remote_dial() {  # remote_dial <scratch> <extra-env...> -- <dial args...>
+  local t="$1"; shift
+  local envs=()
+  while [[ "$1" != "--" ]]; do envs+=("$1"); shift; done
+  shift
+  env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" CMUX_LOG="$t/cmux.log" SSH_LOG="$t/ssh.log" \
+      HOTLINE_CALLER_SESSION_ID="caller-remote-1" \
+      HOTLINE_PENDING_DIR="$t/pending" \
+      ${envs[@]+"${envs[@]}"} bash "$DIAL" "$@" 2>"$t/err.txt"
+}
+
+# A remote dial, end to end. The stub wrapper supplies the transcript, as the
+# local end-to-end case above does.
+t=$(remote_env)
+cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo unknown)
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/\$SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+chmod +x "$t/bin/herdr"
+mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+out=$(remote_dial "$t" "HERDR_STUB_NEW_PANE=w4:p9" \
+        -- --target "$t/target" --mode work_order --prompt "run it over there" \
+           --remote "$RTARGET" --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.transport' <<<"$out" 2>/dev/null)" == "herdr" \
+   && "$(jq -r '.placement' <<<"$out" 2>/dev/null)" == "detached" ]]
+check "--remote alone selects herdr and defaults placement to detached" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -r '.remote_target' <<<"$out" 2>/dev/null)" == "$RTARGET" \
+   && "$(jq -r '.remote_pane' <<<"$out" 2>/dev/null)" == "w4:p9" ]]
+check "…and the emitted JSON carries .remote_target and .remote_pane for the teardown" $? \
+  "out=$out"
+[[ "$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)" == hotline-* \
+   && -n "$(jq -r '.remote_session_id // empty' <<<"$out" 2>/dev/null)" \
+   && -n "$(jq -r '.call_id // empty' <<<"$out" 2>/dev/null)" ]]
+check "…with the contract's own keys unchanged in shape (host ref, session, nonce)" $? "out=$out"
+[[ ! -s "$t/cmux.log" ]]
+check "…and no cmux call: a remote dial never consults the local multiplexer" $? \
+  "cmux calls: $(cat "$t/cmux.log" 2>/dev/null)"
+CACHED=$(jq -r --arg t "$(cd "$t/target" && pwd -P)" '.connections[$t]' \
+           "$t/home/.agents-hotline/sessions/caller-remote-1.json" 2>/dev/null)
+[[ "$(jq -r '.transport' <<<"$CACHED" 2>/dev/null)" == "herdr" \
+   && "$(jq -r '.remote' <<<"$CACHED" 2>/dev/null)" == "$RTARGET" ]]
+check "…and the cache records WHICH backend and WHICH box the host handle belongs to" $? \
+  "cached=$CACHED"
+
+# A LOCAL dial's emitted contract is untouched: neither new key appears, so a
+# consumer cannot tell a Phase-3b hotline from the one before it.
+t=$(new_env)
+cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo unknown)
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/\$SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+chmod +x "$t/bin/herdr"
+mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode work_order --prompt "run it here" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" ]] \
+  && [[ "$(jq -r 'has("remote_target")' <<<"$out" 2>/dev/null)" == "false" \
+     && "$(jq -r 'has("remote_pane")' <<<"$out" 2>/dev/null)" == "false" ]]
+check "a LOCAL herdr dial emits neither remote key — the contract is additive only" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ ! -e "$t/ssh.log" ]]
+check "…and makes no ssh hop at all" $? "ssh hops: $(cat "$t/ssh.log" 2>/dev/null)"
+
+# --- The cache cannot confuse two hosts (claude-plugins-7wze.11) -------------
+# surface_ref is an opaque string, so a herdr agent name on another box looks
+# exactly like a local one. Re-addressing the wrong one is told "no such agent",
+# falls back to a fresh callee and re-keys the cache to it — stranding the real
+# conversation on the other box with nothing pointing at it.
+t=$(new_env)
+mkdir -p "$t/home/.agents-hotline/sessions"
+TGT_REAL=$(cd "$t/target" && pwd -P)
+jq -n --arg t "$TGT_REAL" \
+  '{caller:"/caller", caller_session_id:"caller-remote-1",
+    connections: {($t): {session_id:"remote-sess-9", started:1, last_contact:1,
+      mode:"work_order", exchange_count:1, surface_ref:"hotline-elsewhere-abc",
+      last_call_id:"old-nonce", transport:"herdr", remote:"tester@other-box.invalid"}}}' \
+  > "$t/home/.agents-hotline/sessions/caller-remote-1.json"
+cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo unknown)
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$TGT_REAL")/\$SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+chmod +x "$t/bin/herdr"
+mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode work_order --prompt "follow up" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"host tester@other-box.invalid→local"* ]]
+check "a cached handle from ANOTHER BOX is not re-addressed; the mismatch is reported" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+! grep -q 'hotline-elsewhere-abc' <(tr -d '\\' < "$t/herdr.log")
+check "…and that foreign agent name is never handed to the local herdr" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# The transport half of the same rule: a cmux surface handle is not a herdr agent.
+t=$(new_env)
+mkdir -p "$t/home/.agents-hotline/sessions"
+TGT_REAL=$(cd "$t/target" && pwd -P)
+jq -n --arg t "$TGT_REAL" \
+  '{caller:"/caller", caller_session_id:"caller-remote-1",
+    connections: {($t): {session_id:"cmux-sess-9", started:1, last_contact:1,
+      mode:"work_order", exchange_count:1, surface_ref:"surface-uuid-1234",
+      transport:"cmux"}}}' \
+  > "$t/home/.agents-hotline/sessions/caller-remote-1.json"
+cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo unknown)
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$TGT_REAL")/\$SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+chmod +x "$t/bin/herdr"
+mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode work_order --prompt "follow up" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"transport cmux→herdr"* ]]
+check "a cached CMUX surface handle is not re-addressed as a herdr agent either" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
 
 # ---------------------------------------------------------------------------
 echo ""

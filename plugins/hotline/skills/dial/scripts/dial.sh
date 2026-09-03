@@ -27,18 +27,27 @@
 #   dial.sh --target <reference> --mode quick|work_order|conference
 #           (--prompt-file <path> | --prompt <text>)
 #           [--placement side|detached|window] [--window <name|ref>]
-#           [--transport cmux|herdr|headless] [--headless] [--tools <list>]
+#           [--transport cmux|herdr|headless] [--remote <ssh-target>]
+#           [--headless] [--tools <list>]
 #           [--resume <session-id> [--no-fork]] [--fresh]
 #           [--caller-session <id>] [--refresh-identity]
 #           [--boot-timeout <seconds>]
 #
 # --transport picks the multiplexer that HOSTS the callee. cmux is the default and
-# nothing about it changes; `herdr` is opt-in and LOCAL only — it takes side and
-# detached placements and every mode, including conference (see the validation
-# block below for what it still refuses, and why). A requested herdr that fails
-# preflight is an ERROR, never a silent fall-back to cmux: a caller who asked for
-# herdr asked for a callee that survives disconnects, and quietly giving them one
-# that does not is worse than saying no.
+# nothing about it changes; `herdr` is opt-in, and it hosts the callee HERE unless
+# --remote names another box. Locally it takes side and detached placements and
+# every mode, including conference (see the validation block below for what it
+# still refuses, and why). A requested herdr that fails preflight is an ERROR,
+# never a silent fall-back to cmux: a caller who asked for herdr asked for a
+# callee that survives disconnects, and quietly giving them one that does not is
+# worse than saying no.
+#
+# --remote <ssh-target> hosts the callee on ANOTHER BOX and reads its answer back
+# over ssh. It SELECTS herdr on its own — no other backend can host anywhere but
+# here — and defaults placement to detached, since nothing on another machine can
+# appear in this window. The same refusal rule applies, harder: there is no local
+# substitute for "run this over there", so a failed preflight is an error with the
+# hop's own diagnostic and never a quiet local call.
 #
 # HOTLINE_TRANSPORT_AUTO=1 is the one way herdr is chosen WITHOUT --transport: it
 # is an opt-in setting, and even then only inside a herdr pane and only when the
@@ -190,6 +199,11 @@ VALUE_FLAGS=" --target --mode --prompt-file --prompt --placement --window --tran
 # --window is applied AFTER parsing (below) so it wins over --placement
 # regardless of the order the two were given in.
 WINDOW_REQUESTED=false
+# Whether the caller TYPED a placement, as distinct from what PLACEMENT holds — it
+# holds `side` either way. Only --remote needs the distinction: it cannot be placed
+# in the caller's window at all, so it defaults placement to detached, and an
+# explicit `--placement side` alongside it has to be refused rather than overridden.
+PLACEMENT_REQUESTED=false
 
 while [[ $# -gt 0 ]]; do
   if [[ "$VALUE_FLAGS" == *" $1 "* && $# -lt 2 ]]; then
@@ -201,13 +215,13 @@ while [[ $# -gt 0 ]]; do
     --mode)            MODE_IN="$2";               shift 2 ;;
     --prompt-file)     PROMPT_FILE="$2";           HAVE_PROMPT=true; shift 2 ;;
     --prompt)          PROMPT_INLINE="$2";         HAVE_PROMPT=true; shift 2 ;;
-    --placement)       PLACEMENT="$2";             shift 2 ;;
+    --placement)       PLACEMENT_REQUESTED=true; PLACEMENT="$2"; shift 2 ;;
     --window)          WINDOW_REQUESTED=true; WINDOW_REF="$2"; shift 2 ;;
     --detached|--new-workspace) PLACEMENT="detached";   shift ;;
     --transport)       TRANSPORT_REQ="$2";         shift 2 ;;
-    # Accepted so the refusal below can EXPLAIN itself. Left out of the parser it
-    # would land in the unrecognized-argument catch-all, which tells a caller their
-    # flag was a typo when in fact it names an unimplemented phase.
+    # An ssh target, and the ONE flag that picks a transport without naming one:
+    # herdr is the only backend that can host a callee anywhere but here. See the
+    # validation block.
     --remote)          REMOTE_TARGET="$2";         shift 2 ;;
     --headless)        FORCE_HEADLESS=true;        shift ;;
     --tools)           TOOLS="$2";                 shift 2 ;;
@@ -249,6 +263,38 @@ case "$PLACEMENT" in
   *) emit_error args "Unknown --placement '$PLACEMENT'" \
        "Valid placements: side (default), detached, window." ;;
 esac
+
+# --- --remote picks the backend, before the backend is validated --------------
+# `--remote <ssh-target>` means "host the callee on THAT box", and herdr is the only
+# backend that can: a cmux surface is a rectangle in this machine's window server,
+# and `claude -p` is a local process. So --remote SELECTS herdr rather than being an
+# option on it (§4 step 3), and resolving that HERE — ahead of the case below — is
+# what makes a bare `--remote` inherit every herdr validation instead of a separate,
+# drifting copy of them.
+#
+# An explicit non-herdr --transport alongside it is an ARGS ERROR, not a silent
+# win for either flag: both were typed on purpose and they ask for incompatible
+# things. (The design doc's §4 step 3 says only that --remote selects herdr; it does
+# not say what happens when a transport is also named, so this is recorded as a
+# shipped deviation rather than read into it.)
+#
+# PLACEMENT DEFAULTS TO DETACHED for a remote dial, and only when the caller did not
+# type one. Nothing about a callee on another box can appear side-by-side in this
+# window, so refusing a bare `--remote` for a placement it could never have had
+# teaches the caller nothing — while overriding an explicit `--placement side` would
+# discard a flag they meant.
+if [[ -n "$REMOTE_TARGET" ]]; then
+  case "$TRANSPORT_REQ" in
+    "")    TRANSPORT_REQ="herdr" ;;
+    herdr) ;;
+    *) emit_error args \
+         "--remote names a box to host the callee, and --transport $TRANSPORT_REQ cannot host one" \
+         "Remote hosting is herdr-only: a cmux surface lives in this machine's window server and \`claude -p\` is a local process. Drop --transport (--remote selects herdr on its own), or drop --remote to dial $TRANSPORT_REQ locally." ;;
+  esac
+  if ! $PLACEMENT_REQUESTED && ! $WINDOW_REQUESTED; then
+    PLACEMENT="detached"
+  fi
+fi
 
 # --- Transport request, validated BEFORE anything has a side effect ----------
 # Every refusal here is a REFUSAL, not a downgrade. `--transport herdr` is an
@@ -307,21 +353,19 @@ case "$TRANSPORT_REQ" in
       "Valid transports: cmux (default), herdr (detached, local, opt-in), headless." ;;
 esac
 
-# --remote names a box hotline cannot yet reach. herdr is the only backend that
-# COULD host remotely at all (cmux and `claude -p` are local by construction), and
-# even for herdr the blocker is not the launch — it is the response: the callee's
-# transcript would live on the remote filesystem, out of reach of the local
-# transcript reader that every answer in hotline comes from. Refusing is the honest
-# move; the alternative is a call that connects and can never be read.
+# --- The ssh hop, armed once, for every script this dial runs ----------------
+# EXPORTED rather than passed as a flag, and that is deliberate. Nine scripts have
+# to agree about which box the callee lives on — preflight, the launcher, delivery,
+# the reuse path, the waiters — and threading a `--remote` through all of them would
+# be nine argument parsers, nine chances to forget it, and a diff across every
+# selection and delivery site in this file. herdr-state.sh reads this variable and
+# routes every herdr verb over ssh, so the seam is one variable and one dispatch.
+# The call dir records it too (remote_target.txt), because wait-for-response.sh runs
+# as a SEPARATE process that inherits nothing.
+#
+# It is also the seam the test suite drives, exactly as HOTLINE_HERDR_PANE is.
 if [[ -n "$REMOTE_TARGET" ]]; then
-  if [[ "$TRANSPORT_REQ" == "herdr" ]]; then
-    emit_error args \
-      "--transport herdr --remote is not implemented (Phase 3)" \
-      "herdr can host a callee on a remote box, but its transcript lives THERE and hotline reads answers from the local ~/.claude/projects tree — remote transcript access is the open question Phase 3 resolves. Dial the remote workspace locally, or run hotline on that box."
-  fi
-  emit_error args \
-    "--remote is not supported by any hotline transport" \
-    "cmux surfaces and \`claude -p\` are local by construction; remote hosting is herdr-only and unimplemented (Phase 3). Drop --remote."
+  export HOTLINE_HERDR_REMOTE="$REMOTE_TARGET"
 fi
 
 if [[ -n "$BOOT_TIMEOUT" && ! "$BOOT_TIMEOUT" =~ ^[0-9]+$ ]]; then
@@ -708,8 +752,34 @@ if [[ -z "$RESUME_ARG" ]]; then
     PREV_SURFACE_REF=$(jq -r '.surface_ref // empty' <<<"$CACHED")
     PREV_CALL_ID=$(jq -r '.last_call_id // empty' <<<"$CACHED")
     PREV_SESSION_ID=$(jq -r '.session_id // empty' <<<"$CACHED")
+    # WHICH BACKEND AND WHICH BOX that host handle belongs to. Absent means what it
+    # has always meant — a local callee — because that is the shape of every entry
+    # written before these fields existed.
+    PREV_TRANSPORT=$(jq -r '.transport // empty' <<<"$CACHED")
+    PREV_REMOTE=$(jq -r '.remote // empty' <<<"$CACHED")
+
+    # A HANDLE FROM A DIFFERENT HOST IS NOT REUSABLE, and it is worse than useless:
+    # surface_ref is an opaque string, so a herdr agent name from box A is
+    # indistinguishable from one on box B and from a cmux surface handle. Re-address
+    # the wrong one and the reuse path is told "no such agent", falls back to a fresh
+    # callee, and re-keys the cache to it — leaving the real conversation running on
+    # the other box with nothing pointing at it (claude-plugins-7wze.11). So the
+    # mismatch declines the reuse BEFORE it is attempted, with a fallback entry
+    # saying which pair disagreed.
+    HOST_MISMATCH=""
+    if [[ -n "$PREV_TRANSPORT" && "$PREV_TRANSPORT" != "$TRANSPORT" ]]; then
+      HOST_MISMATCH="transport ${PREV_TRANSPORT}→${TRANSPORT}"
+    elif [[ "$PREV_REMOTE" != "$REMOTE_TARGET" ]]; then
+      HOST_MISMATCH="host ${PREV_REMOTE:-local}→${REMOTE_TARGET:-local}"
+    fi
+
     if $FRESH; then
       add_fallback "session-cache→fresh(${PREV_SESSION_ID:-unknown})"
+    elif [[ -n "$HOST_MISMATCH" ]]; then
+      # PREV_SURFACE_REF is left in place for step 7, which is a no-op here anyway:
+      # it only closes cmux surfaces, and a handle on another box or another backend
+      # is not this dial's to close.
+      add_fallback "session-cache→fresh($HOST_MISMATCH; the cached host handle belongs to a different host, so it cannot be re-addressed and the new callee starts WITHOUT the prior context)"
     else
       FIRST_CONTACT=false
       REMOTE_SESSION_ID="$PREV_SESSION_ID"
@@ -804,6 +874,8 @@ emit_connected() {  # emit_connected <awaiting_response:true|false>
     --arg call_dir "$CALL_DIR" \
     --arg surface "$SURFACE_REF" \
     --arg call_id "$CALL_ID_OUT" \
+    --arg remote_target "$REMOTE_TARGET" \
+    --arg remote_pane "$REMOTE_PANE_OUT" \
     --arg confirmed "$DELIVERY_CONFIRMED" \
     --arg retried "$DELIVERY_RETRIED" \
     --argjson first_contact "$FIRST_CONTACT" \
@@ -819,10 +891,18 @@ emit_connected() {  # emit_connected <awaiting_response:true|false>
      + (if $surface  == "" then {} else {surface_ref:$surface} end)
      + (if $call_id  == "" then {} else {call_id:$call_id} end)
      + (if $confirmed == "" then {} else {confirmed:$confirmed} end)
-     + (if $retried   == "" then {} else {retried_enter:($retried == "true")} end)'
+     + (if $retried   == "" then {} else {retried_enter:($retried == "true")} end)
+     + (if $remote_target == "" then {} else {remote_target:$remote_target} end)
+     + (if $remote_pane   == "" then {} else {remote_pane:$remote_pane} end)'
   exit 0
 }
 CALL_ID_OUT=""
+# The pane the remote herdr split for this callee, and the ONLY handle a human has
+# for closing it: herdr never closes anything after a call (that is the point of the
+# transport), and a pane on another box is not visible in anything local. Emitted
+# for a remote call and OMITTED otherwise, so a local dial's JSON keeps exactly the
+# keys it has always had — `ssh <remote_target> herdr pane close <remote_pane>`.
+REMOTE_PANE_OUT=""
 # How much the delivery had to work to land. Present only where cmux-paste.sh actually
 # reported them — the surface-reuse path — and OMITTED elsewhere, like every other
 # optional field above: a headless call has no screen to confirm against, so a `false`
@@ -1168,6 +1248,12 @@ if [[ -s "$CALL_DIR/session_id_mismatch.txt" ]]; then
   add_fallback "herdr-session-id-mismatch($(sed -n '1p' "$CALL_DIR/session_id_mismatch.txt"))"
 fi
 [[ -s "$CALL_DIR/call_id.txt" ]] && CALL_ID_OUT=$(cat "$CALL_DIR/call_id.txt")
+# Only for a remote call: locally the pane is in the user's own herdr, findable in
+# `herdr agent list` beside the agent name .surface_ref already reports. On another
+# box neither is visible from here, so the id is carried out in the JSON.
+if [[ -n "$REMOTE_TARGET" && -s "$CALL_DIR/herdr_pane.txt" ]]; then
+  REMOTE_PANE_OUT=$(tr -d '[:space:]' < "$CALL_DIR/herdr_pane.txt")
+fi
 
 # ---------------------------------------------------------------------------
 # Step 6 — Wait for the callee's REPL to boot (registration happens inside)
