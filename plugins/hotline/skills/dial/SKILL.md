@@ -113,7 +113,10 @@ Exactly one JSON object on stdout, always. Read `.status`:
 up and this message was never proven to land in it, so there is an open pane — empty
 on first contact, mid-conversation on a follow-up. Say so — re-dialling blind can
 double-deliver, because the paste may have arrived just after the confirmation
-window closed.
+window closed. The exception announces itself in `.recovery`: a trust-dialog refusal
+is made before anything is pasted, so its recovery says nothing was delivered and
+re-dialing is safe (references/error-recovery.md, the TRUST DIALOG entry under
+§ CMUX Failures).
 
 `.confirmed` names the tier that proved a delivery: `transcript` read the nonce out
 of the callee's JSONL and is definitive; `screen` inferred it from the rendered
