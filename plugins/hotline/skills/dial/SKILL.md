@@ -219,9 +219,9 @@ A follow-up that opens a second surface **always** records why. If you see a new
 tab with `fallbacks:[]`, that is a bug — report it rather than explaining it
 away.
 
-`.awaiting_response` is `false` for a conference call on either transport — that
-session is handed to the user in a visible surface (cmux) or a focused pane
-(herdr), so there is nothing to poll. Report it and stop.
+`.awaiting_response` is `false` for a conference call **on first contact**, on either
+transport — that session is handed to the user in a visible surface (cmux) or a
+focused pane (herdr), so there is nothing to poll. Report it and stop.
 
 ## Your judgment calls
 

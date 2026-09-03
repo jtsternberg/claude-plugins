@@ -149,6 +149,14 @@ emit_error() {  # emit_error <stage> <detail> <recovery> [<extra-json-object>]
   exit 1
 }
 
+# The ONE recovery for a trust-dialog refusal, wherever it surfaces. Two gates catch
+# that dialog — the boot wait for every ordinary cmux dial, cmux-paste.sh's box wait
+# for a conference — and the generic recovery at BOTH those stages says "Do NOT
+# silently re-dial". That is right for every other failure there and exactly wrong
+# here: the refusal is made BEFORE anything is pasted, so the detail it wraps says
+# re-dialing is safe, and a caller who reads both learns nothing it can act on.
+TRUST_RECOVERY="Trust the callee's directory — run \`claude\` in it once and answer 'Yes, I trust this folder' — then re-dial. RE-DIALING IS SAFE: nothing was delivered, so it cannot double-run. A fresh \`git init\` directory gets its own trust boundary even under a trusted parent, and HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover this. See references/error-recovery.md — the TRUST DIALOG entry under § CMUX Failures."
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -1006,8 +1014,9 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
   elif [[ "$CONF_UNDELIVERED" == "true" ]]; then
     # The surface is open and its REPL is live, but it was never told anything —
     # the same situation as a failed first-contact paste, so the same stage.
-    emit_error deliver "$CONF_ERROR" \
-      "The conference pane is live and empty; $(jq -r '.prompt_file // "the prompt file"' <<<"$CONF" 2>/dev/null) still holds the prompt (call dir $(jq -r '.call_dir // "n/a"' <<<"$CONF" 2>/dev/null)). See references/error-recovery.md § Delivery — NOT § CMUX Failures. Do NOT silently re-dial — the callee may have received it after the confirmation window."
+    CONF_RECOVERY="The conference pane is live and empty; $(jq -r '.prompt_file // "the prompt file"' <<<"$CONF" 2>/dev/null) still holds the prompt (call dir $(jq -r '.call_dir // "n/a"' <<<"$CONF" 2>/dev/null)). See references/error-recovery.md § Delivery — NOT § CMUX Failures. Do NOT silently re-dial — the callee may have received it after the confirmation window."
+    [[ "$CONF_ERROR" == *"TRUST DIALOG"* ]] && CONF_RECOVERY="$TRUST_RECOVERY"
+    emit_error deliver "$CONF_ERROR" "$CONF_RECOVERY"
   elif [[ -n "$CONF_ERROR" ]]; then
     emit_error fire "$CONF_ERROR" \
       "See references/error-recovery.md § CMUX Failures. Retry with --placement detached, or force headless with --headless."
@@ -1166,8 +1175,10 @@ fi
 WAIT_ARGS=("$CALL_DIR")
 [[ -n "$BOOT_TIMEOUT" ]] && WAIT_ARGS+=(--timeout "$BOOT_TIMEOUT")
 if ! REMOTE_SESSION_ID=$(bash "$DIAL_SCRIPTS/wait-for-session.sh" "${WAIT_ARGS[@]}" 2>"$ERR_FILE"); then
-  emit_error boot "$(cat "$ERR_FILE")" \
-    "The callee's claude REPL never came up. Read \$call_dir/error.txt and surface_err.txt; see references/error-recovery.md § CMUX Failures. Do NOT silently re-dial."
+  BOOT_ERR=$(cat "$ERR_FILE")
+  BOOT_RECOVERY="The callee's claude REPL never came up. Read \$call_dir/error.txt and surface_err.txt; see references/error-recovery.md § CMUX Failures. Do NOT silently re-dial."
+  [[ "$BOOT_ERR" == *"TRUST DIALOG"* ]] && BOOT_RECOVERY="$TRUST_RECOVERY"
+  emit_error boot "$BOOT_ERR" "$BOOT_RECOVERY"
 fi
 
 [[ -s "$CALL_DIR/surface_ref.txt" ]] && SURFACE_REF=$(cat "$CALL_DIR/surface_ref.txt")
