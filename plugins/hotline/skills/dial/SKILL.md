@@ -21,7 +21,7 @@ status it returns.
 - **`--headless`**: force the headless transport (`claude -p`) for this dial even when cmux is up. Debugging the headless path, A/B-ing transports, or wanting `claude -p`'s structured output. Costs programmatic-usage credit; the cmux default doesn't. → `--headless`
 - **`--detached`** / **`--new-workspace`**: spawn the callee in a disconnected new workspace tab instead of a side-by-side surface. The tab auto-closes once the response is captured, so nothing is left to watch or clean up. → `--placement detached`
 - **`--window <name|ref>`**: land the callee as a surface in a specific cmux window (find-or-create), for grouping workers by project. A `window:<n>` ref targets that window; a bare name reuses the window holding a workspace titled `<name>`. Wins over `--detached` if both are given. → `--window <name|ref>`
-- **`--herdr`**: host the callee as a **herdr agent** instead of a cmux surface — a persistent pane owned by the herdr server, so the callee **survives a detach, a closed lid, or a dropped SSH session**. That is the reason to ask for it: a long work order you do not want tied to the life of a window. Requires herdr running, and is **detached-only** — pass it with `--detached`. → `--transport herdr --detached`
+- **`--herdr`**: host the callee as a **herdr agent** instead of a cmux surface — a persistent pane owned by the herdr server, so the callee **survives a detach, a closed lid, or a dropped SSH session**. That is the reason to ask for it: a long work order you do not want tied to the life of a window. Requires herdr running. Takes any mode, including `conference`, and either the side or detached placement (herdr splits a pane off yours for both). → `--transport herdr`
 
 ```
 /hotline:hotline-dial dotfiles what branch are you on?
@@ -89,7 +89,7 @@ escaping, or `jq` hazards, however long or gnarly it is.
 
 Flags: `--mode quick|work_order|conference` (required),
 `--prompt-file <path>` (or `--prompt <text>` for a one-liner),
-`--headless`, `--transport cmux|herdr|headless`, `--placement detached`,
+`--headless`, `--transport cmux|herdr|headless`, `--placement side|detached`,
 `--window <name|ref>`, `--resume <session-id>` `[--no-fork]`,
 `--refresh-identity`,
 `--fresh` (ignore the cached session for this target and start a new one —
@@ -122,28 +122,24 @@ corrective Enter submitted it — the delivery is good, but a run of them is wor
 reporting.
 
 `transport` means the backend the caller asked for is not usable here — herdr is not
-installed, no herdr server answered, or the placement/mode they combined with it is
-not one herdr can host. **It is never a degradation**: an explicit `--transport
+installed, no herdr server answered, or `--window` was combined with it (the one
+placement herdr cannot host). **It is never a degradation**: an explicit `--transport
 herdr` is an ask for a callee that survives a disconnect, and quietly handing back a
 cmux surface instead would be a lie the user only discovers hours later. Pass
 `.detail` and `.recovery` through as-is; both name the fix.
 
-## The herdr transport (opt-in, detached, local)
+## The herdr transport (opt-in, local)
 
 `--transport herdr` hosts the callee as a **named herdr agent** in a persistent
-pane. What you get for it is durability: the herdr server owns the PTY, so the
-callee outlives a detach, a closed lid and a dropped SSH session. What you give up
-is visibility-in-place — herdr's "watch it" story is `herdr agent attach <name>`,
-not a pane beside yours.
-
-Today it accepts exactly one shape, and refuses everything else up front with the
-phase that will lift the restriction:
+pane, split off the caller's own pane. What you get for it is durability: the herdr
+server owns the PTY, so the callee outlives a detach, a closed lid and a dropped
+SSH session — and it is still a pane next to yours, which is why side placement and
+conference mode both work here.
 
 | Combination | Answer |
 |---|---|
-| `--transport herdr --detached`, `--mode quick`/`work_order` | supported — first contact and follow-ups |
-| any other placement (side, `--window`) | refused — herdr has no in-your-window placement (Phase 3 = attach) |
-| `--mode conference` | refused — same reason |
+| `--transport herdr`, any mode, `--placement side` or `--detached` | supported — first contact and follow-ups |
+| `--placement window` / `--window <ref>` | refused — hotline creates no herdr workspaces or tabs, so there is no window to place a callee in. Not a phase gate; a feature nobody has built |
 | `--resume <someone-else's-session-id>` | refused — herdr hosts a callee it *starts*, with a session id hotline presets so the transcript is readable; `claude --resume` cannot take that preset. Continuing a session **you** dialed needs no flag (see below) |
 | `--remote <target>` | refused — herdr *can* host remotely, but the callee's transcript would live on that box and every hotline answer is read from the local `~/.claude/projects` tree (Phase 3) |
 
@@ -167,8 +163,21 @@ submitted and nothing is started: tell the user to clear it (`herdr agent attach
 <name>` shows what it is asking), then re-dial exactly as before and the same agent
 is re-targeted with its context intact.
 
-cmux stays the default and nothing selects herdr on its own. Being inside a herdr
-pane (`HERDR_ENV=1`) only makes the option *available*; the flag is what picks it.
+**`--mode conference` hands the pane to the user.** The callee is started beside
+the caller exactly as a work order is, the prompt is delivered the same way, and
+then — only then, and only for a conference — hotline **focuses** the callee's pane
+(`herdr agent focus <name>`). `.awaiting_response` comes back `false`: the session
+is the user's to talk to, so there is nothing to poll. Report the pane and stop.
+Every other herdr dial splits with `--no-focus` and never moves the user.
+
+(`herdr session attach <name>` is a different thing and not the conference story:
+it attaches a *detached* herdr session from another terminal.)
+
+cmux stays the default, and an ambient signal never selects herdr: being inside a
+herdr pane (`HERDR_ENV=1`) only makes the option *available*. Two things select it
+— `--transport herdr` per call, and the opt-in `HOTLINE_TRANSPORT_AUTO=1` (see the
+environment section), which lets `HERDR_ENV=1` decide for a dial that names no
+transport.
 
 `--headless` and `--transport herdr` together are refused — two explicit,
 incompatible asks, and dropping either one silently would discard a flag the user
@@ -202,6 +211,8 @@ expected, say).
 | `surface-reuse-skipped(no-cached-surface)` | A follow-up had no surface to reuse — first contact was headless or detached, or a previous degraded follow-up cleared a stale ref. |
 | `surface-cleanup→closed(<handle>)` | A follow-up opened a new surface, so the old one held a REPL nobody would speak to again. It was proven idle and proven to be the superseded exchange, then closed. |
 | `surface-cleanup-skipped(<reason>)` | The old surface was left alone. Common reasons: it is mid-turn; `parked-input` (real unsent text in its box, which closing would discard — Claude Code's own placeholder does not count once it is proven to be one, though anything unproven still reads as text and spares the surface); its identity couldn't be proven from the prior nonce; `positional-ref-unsafe` (the cached handle is a `surface:N` ref, which can name a different surface than it did — closing requires a UUID); it was already gone; or cmux refused (it will not close the last surface in a workspace). `HOTLINE_CLOSE_SUPERSEDED=0` reports `disabled`. |
+| `transport-auto→cmux(<reason>)` | `HOTLINE_TRANSPORT_AUTO=1` was set inside a herdr pane, but the herdr preflight failed — so the dial went to the cmux default instead. A degrade, not an error: nothing explicit was asked for. `<reason>` is the preflight's own (no server, no splittable pane, herdr not installed). |
+| `herdr-conference-focus-failed(<agent>: <reason>)` | A herdr conference connected and the callee has the prompt, but `herdr agent focus` refused — so the user's focus did not move. Tell them which pane to go to (`herdr agent attach <agent>`). |
 | `identity→refreshed` / `identity→refresh-failed(...)` | `--refresh-identity` ran (or tried to). |
 | `session-cache→fresh(<session-id>)` | `--fresh` found a cached session for this target and deliberately did not resume it; `<session-id>` is the one abandoned. The call reports `first_contact: true`, and the cache now points at the new session. |
 
@@ -209,9 +220,9 @@ A follow-up that opens a second surface **always** records why. If you see a new
 tab with `fallbacks:[]`, that is a bug — report it rather than explaining it
 away.
 
-`.awaiting_response` is `false` for a cmux conference call — that session is
-handed to the user in a visible surface, so there is nothing to poll. Report the
-surface and stop.
+`.awaiting_response` is `false` for a conference call on either transport — that
+session is handed to the user in a visible surface (cmux) or a focused pane
+(herdr), so there is nothing to poll. Report it and stop.
 
 ## Your judgment calls
 
@@ -394,8 +405,18 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   valid in `~/.agents-hotline/pending/` (default 600). A round-trip takes
   seconds; anything older is treated as a leftover and discarded.
 
-herdr-only, and none of them select the transport — `--transport herdr` still does
-that:
+One selects the transport, and it is the only variable that does:
+
+- **`HOTLINE_TRANSPORT_AUTO=1`** — opt in to herdr being chosen without
+  `--transport`. It selects herdr only when **all** of these hold: the value is
+  exactly `1`; the dial named no `--transport`; it is not headless (`--headless` /
+  `HOTLINE_FORCE_HEADLESS`); the caller is inside a herdr pane (`HERDR_ENV=1`); and
+  the herdr preflight passes. A failed preflight is a **degrade** to the cmux
+  default with a `transport-auto→cmux(...)` entry in `.fallbacks`, not an error —
+  nothing explicit was asked for. `.transport` always reports what actually ran.
+
+The rest are herdr-only and select nothing — `--transport herdr` or the opt-in
+above still does that:
 
 - **`HOTLINE_HERDR_PANE=<pane-id>`** — the pane hotline splits to host the callee.
   Defaults to the caller's own `$HERDR_PANE_ID`, then to the first pane herdr

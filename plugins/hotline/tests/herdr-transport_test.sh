@@ -158,6 +158,8 @@ trap cleanup EXIT
 #                             split delivery is only confirmable if both halves
 #                             arrived, which is the point
 #   HERDR_STUB_WAIT_RC        exit code for `agent wait` (default 0)
+#   HERDR_STUB_FOCUS_FAIL=1   `agent focus` returns a server error — a conference
+#                             whose pane could not be focused is still a live call
 # ---------------------------------------------------------------------------
 make_herdr_stub() {  # <bin-dir>
   mkdir -p "$1"
@@ -284,6 +286,12 @@ case "$1 ${2:-}" in
     echo '{"id":"cli:agent:prompt","result":{"submitted":true}}'
     exit 0 ;;
 
+  "agent focus")
+    # The ONE call that moves the user's focus, and only a conference makes it.
+    [[ "${HERDR_STUB_FOCUS_FAIL:-}" == "1" ]] && err agent_focus_failed "agent target $3 not found"
+    echo '{"id":"cli:agent:focus","result":{"focused":true}}'
+    exit 0 ;;
+
   "agent wait")
     jq -nc --arg s "${HERDR_STUB_WAIT_STATUS:-${HERDR_STUB_STATUS:-done}}" \
       '{id:"cli:agent:wait",result:{agent:{agent_status:$s}}}'
@@ -343,6 +351,34 @@ exit 1
 STUB
   chmod +x "$t/bin/dirmap"
   printf '%s' "$t"
+}
+
+# Wrap the stub so `agent prompt` records the payload in the callee's transcript —
+# the tier a delivery is confirmed by. The session id is whatever `agent start`
+# last reported, falling back to the id passed here (a reuse launches nothing, so
+# the stub's state file does not exist).
+wrap_herdr_transcript() {  # wrap_herdr_transcript <scratch> <fallback-session-id>
+  local t="$1" fallback="$2"
+  mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+  cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo "$fallback")
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/\$SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+  chmod +x "$t/bin/herdr"
+}
+
+# A `claude -p` stub, for the cases whose dial is expected to land on headless.
+stub_headless_claude() {  # <scratch>
+  cat > "$1/bin/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '{"type":"system","session_id":"headless-sess"}\n'
+printf '{"type":"result","session_id":"headless-sess","result":"ok","num_turns":1}\n'
+EOF
+  chmod +x "$1/bin/claude"
 }
 
 # ===========================================================================
@@ -1460,28 +1496,100 @@ dial() {  # dial <scratch> <extra-env...> -- <dial args...>
       ${envs[@]+"${envs[@]}"} bash "$DIAL" "$@" 2>"$t/err.txt"
 }
 
+# SIDE IS ACCEPTED, because it is what herdr already does: every callee is hosted
+# in a pane split off the caller's own. The word only changes what `.placement`
+# reports — same launch either way (Phase 3a, T2).
 t=$(new_env)
-out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
-        --transport herdr)
-[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "error" ]] \
-  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"--transport herdr --detached"* ]]
-check "--transport herdr with the DEFAULT side placement is refused, with the fix in the recovery" $? \
-  "out=$out"
+wrap_herdr_transcript "$t" unused
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" -- --target "$t/target" --mode work_order \
+        --prompt "hi" --transport herdr --placement side --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.transport' <<<"$out" 2>/dev/null)" == "herdr" \
+   && "$(jq -r '.placement' <<<"$out" 2>/dev/null)" == "side" ]]
+check "--transport herdr --placement side CONNECTS, reporting placement=side" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
 
+# …and a herdr dial that names NO placement still reports detached — what every
+# herdr dial emitted before side was accepted, unchanged (T1).
+t=$(new_env)
+wrap_herdr_transcript "$t" unused
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" -- --target "$t/target" --mode work_order \
+        --prompt "hi" --transport herdr --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.placement' <<<"$out" 2>/dev/null)" == "detached" ]]
+check "…while a herdr dial naming no placement keeps reporting detached" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
+# WINDOW IS STILL REFUSED, and the refusal names the missing feature (hotline
+# creates no herdr workspaces) rather than a phase — there is no phase pending.
 t=$(new_env)
 out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
         --transport herdr --window lindris)
 [[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "error" ]] \
-  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"detached only"* ]]
-check "--transport herdr --window is refused (herdr has no in-your-window placement)" $? \
+  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"side and detached, not window"* ]] \
+  && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"--placement side"* ]]
+check "--transport herdr --window is refused, naming what herdr does place instead" $? \
   "out=$out"
+[[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" != *"session attach"* ]]
+check "…and no longer points at \`herdr session attach\` as the answer" $? "out=$out"
 
+# --- conference on herdr: the pane IS the deliverable -----------------------
+# Split beside the caller (which is what herdr always does), deliver, then FOCUS —
+# the one call in hotline that moves the user. And no response wait: a conference is
+# handed to the human, so awaiting_response is false exactly as it is on cmux.
 t=$(new_env)
-out=$(dial "$t" -- --target "$t/target" --mode conference --prompt "hi" \
-        --transport herdr --detached)
-[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "error" ]] \
-  && [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"conference"* ]]
-check "--transport herdr --mode conference is refused, pointing at attach (Phase 3)" $? "out=$out"
+wrap_herdr_transcript "$t" unused
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" -- --target "$t/target" --mode conference \
+        --prompt "pair with me on this" --transport herdr --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.mode' <<<"$out" 2>/dev/null)" == "conference_call" \
+   && "$(jq -r '.transport' <<<"$out" 2>/dev/null)" == "herdr" ]]
+check "--mode conference --transport herdr CONNECTS instead of being refused" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -r '.awaiting_response' <<<"$out" 2>/dev/null)" == "false" ]]
+check "…with awaiting_response FALSE: the session is the user's now, not the caller's" $? \
+  "out=$out"
+CONF_AGENT=$(jq -r '.surface_ref // empty' <<<"$out" 2>/dev/null)
+grep -q "agent focus $CONF_AGENT" <(tr -d '\\' < "$t/herdr.log")
+check "…and the callee's pane is FOCUSED, by agent name" $? \
+  "agent=$CONF_AGENT herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+# Ordering matters: focusing before the payload is confirmed would put the user in a
+# pane while the delivery is still typing into it.
+[[ "$(grep -n 'agent focus' <(tr -d '\\' < "$t/herdr.log") | head -1 | cut -d: -f1)" \
+   -gt "$(grep -n 'agent prompt' <(tr -d '\\' < "$t/herdr.log") | head -1 | cut -d: -f1)" ]]
+check "…focused AFTER the prompt was delivered, never before" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+# The cmux conference path records the surface so a follow-up finds it; the herdr
+# path gets the same thing from register-call.sh, and this is what proves it.
+[[ "$(jq -r --arg t "$(cd "$t/target" && pwd -P)" '.connections[$t].surface_ref // empty' \
+      "$t/home/.agents-hotline/sessions/caller-dial-1.json" 2>/dev/null)" == "$CONF_AGENT" ]]
+check "…and the session cache holds the agent, so a conference follow-up re-targets it" $? \
+  "cache=$(cat "$t/home/.agents-hotline/sessions/caller-dial-1.json" 2>/dev/null)"
+
+# A WORK ORDER NEVER FOCUSES. Background work that steals the user's cursor lands
+# their next keystrokes in a callee's REPL, which is why the split is --no-focus.
+t=$(new_env)
+wrap_herdr_transcript "$t" unused
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" -- --target "$t/target" --mode work_order \
+        --prompt "run the suite" --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" ]] \
+  && ! grep -q 'agent focus' <(tr -d '\\' < "$t/herdr.log")
+check "a herdr WORK ORDER never focuses the callee — only a conference does" $? \
+  "out=$out herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+[[ "$(jq -r '.awaiting_response' <<<"$out" 2>/dev/null)" == "true" ]]
+check "…and it still awaits a response, unlike the conference" $? "out=$out"
+
+# A focus that fails is a FALLBACK, not an error: the callee is live and holds the
+# prompt, so the call succeeded — the user just has to walk to the pane.
+t=$(new_env)
+wrap_herdr_transcript "$t" unused
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_FOCUS_FAIL=1" \
+        -- --target "$t/target" --mode conference --prompt "pair with me" \
+           --transport herdr --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" ]] \
+  && [[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"herdr-conference-focus-failed"* ]]
+check "a conference whose focus fails still CONNECTS, with the failure in .fallbacks" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
 
 t=$(new_env)
 out=$(dial "$t" -- --target "$t/target" --mode work_order --prompt "hi" \
@@ -1533,32 +1641,106 @@ check "…and it NEVER silently degrades to cmux or headless" $? \
   "out=$out cmux calls: $(cat "$t/cmux.log" 2>/dev/null)"
 
 # herdr is available AND the caller is sitting inside a herdr pane — and it is still
-# not selected. Auto-detect must only ENABLE the option, never pick it: flipping the
-# default on an ambient signal would surprise every interactive local caller.
+# not selected. The ambient signal only ENABLES the option; selecting takes an
+# opt-in, because flipping the default on the environment alone would surprise
+# every interactive local caller.
 t=$(new_env)
-cat > "$t/bin/claude" <<'EOF'
-#!/usr/bin/env bash
-printf '{"type":"system","session_id":"headless-sess"}\n'
-printf '{"type":"result","session_id":"headless-sess","result":"ok","num_turns":1}\n'
-EOF
-chmod +x "$t/bin/claude"
+stub_headless_claude "$t"
 out=$(dial "$t" "HERDR_ENV=1" "HERDR_PANE_ID=w1:p1" \
         -- --target "$t/target" --mode quick --prompt "hi")
 [[ "$(jq -r '.transport' <<<"$out" 2>/dev/null)" != "herdr" ]]
-check "HERDR_ENV=1 never SELECTS herdr — the default stays cmux's chain" $? \
+check "HERDR_ENV=1 alone never SELECTS herdr — the default stays cmux's chain" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 [[ ! -s "$t/herdr.log" ]]
 check "…and no herdr preflight is even run without the explicit flag" $? \
   "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
 
+# ---------------------------------------------------------------------------
+# HOTLINE_TRANSPORT_AUTO — the opt-in that lets the ambient signal decide.
+#
+# FOUR conditions, all required, and the tests below take one away at a time. The
+# point of the guard is that neither half selects alone: the setting is deliberate
+# but says nothing about where the caller is, and HERDR_ENV says where they are but
+# nobody chose it.
+# ---------------------------------------------------------------------------
+t=$(new_env)
+stub_headless_claude "$t"
+out=$(dial "$t" "HOTLINE_TRANSPORT_AUTO=1" \
+        -- --target "$t/target" --mode quick --prompt "hi")
+[[ "$(jq -r '.transport' <<<"$out" 2>/dev/null)" != "herdr" ]] && [[ ! -s "$t/herdr.log" ]]
+check "AUTO=1 OUTSIDE a herdr pane does not select herdr (no HERDR_ENV, no preflight)" $? \
+  "out=$out herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+t=$(new_env)
+wrap_herdr_transcript "$t" unused
+out=$(dial "$t" "HOTLINE_TRANSPORT_AUTO=1" "HERDR_ENV=1" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode work_order --prompt "run the suite" \
+           --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.transport' <<<"$out" 2>/dev/null)" == "herdr" ]]
+check "AUTO=1 + HERDR_ENV=1 + a usable preflight SELECTS herdr with no --transport" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -r '.placement' <<<"$out" 2>/dev/null)" == "detached" ]] \
+  && [[ ! -s "$t/cmux.log" ]]
+check "…reporting the placement a flagless herdr dial reports, and never touching cmux" $? \
+  "out=$out cmux calls: $(cat "$t/cmux.log" 2>/dev/null)"
+
+# The auto path's failure is a DEGRADE, not an error — the opposite of the explicit
+# flag, because nothing was asked for. It must still be visible: a dial that quietly
+# lands somewhere else is the thing .fallbacks exists for.
+t=$(new_env)
+stub_headless_claude "$t"
+out=$(dial "$t" "HOTLINE_TRANSPORT_AUTO=1" "HERDR_ENV=1" "HERDR_STUB_NO_PANES=1" \
+        -- --target "$t/target" --mode quick --prompt "hi")
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.transport' <<<"$out" 2>/dev/null)" != "herdr" ]]
+check "AUTO=1 with an UNUSABLE herdr degrades to the cmux default instead of erroring" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"transport-auto→cmux("* ]] \
+  && [[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"no pane could be resolved"* ]]
+check "…recording the degrade in .fallbacks, carrying preflight's own reason" $? "out=$out"
+
+# An explicit --transport is the caller's answer; AUTO does not get to overrule it.
+t=$(new_env)
+stub_headless_claude "$t"
+out=$(dial "$t" "HOTLINE_TRANSPORT_AUTO=1" "HERDR_ENV=1" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode quick --prompt "hi" --transport cmux)
+[[ "$(jq -r '.transport' <<<"$out" 2>/dev/null)" != "herdr" ]] && [[ ! -s "$t/herdr.log" ]]
+check "AUTO=1 + an explicit --transport cmux stays on cmux's chain" $? \
+  "out=$out herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+t=$(new_env)
+stub_headless_claude "$t"
+out=$(dial "$t" "HOTLINE_TRANSPORT_AUTO=1" "HERDR_ENV=1" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode quick --prompt "hi" --headless)
+[[ "$(jq -r '.transport' <<<"$out" 2>/dev/null)" == "headless" ]] && [[ ! -s "$t/herdr.log" ]]
+check "AUTO=1 + --headless goes headless, and never preflights herdr" $? \
+  "out=$out herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# HOTLINE_FORCE_HEADLESS is the ambient form of the same instruction. It is read by
+# check-cmux.sh, so without its own clause here the auto path would have selected
+# herdr before that variable was ever consulted.
+t=$(new_env)
+stub_headless_claude "$t"
+out=$(dial "$t" "HOTLINE_TRANSPORT_AUTO=1" "HERDR_ENV=1" "HERDR_PANE_ID=w1:p1" \
+        "HOTLINE_FORCE_HEADLESS=1" -- --target "$t/target" --mode quick --prompt "hi")
+[[ "$(jq -r '.transport' <<<"$out" 2>/dev/null)" == "headless" ]] && [[ ! -s "$t/herdr.log" ]]
+check "AUTO=1 + HOTLINE_FORCE_HEADLESS=1 goes headless too" $? \
+  "out=$out herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+# EXACTLY '1'. A looser test would let a `HOTLINE_TRANSPORT_AUTO=0` left in a
+# profile enable the very thing it was written to turn off.
+t=$(new_env)
+stub_headless_claude "$t"
+out=$(dial "$t" "HOTLINE_TRANSPORT_AUTO=0" "HERDR_ENV=1" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode quick --prompt "hi")
+[[ "$(jq -r '.transport' <<<"$out" 2>/dev/null)" != "herdr" ]] && [[ ! -s "$t/herdr.log" ]]
+check "HOTLINE_TRANSPORT_AUTO=0 does not enable it (the opt-in is exactly '1')" $? \
+  "out=$out herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
 # --transport headless is just another way to say --headless.
 t=$(new_env)
-cat > "$t/bin/claude" <<'EOF'
-#!/usr/bin/env bash
-printf '{"type":"system","session_id":"headless-sess"}\n'
-printf '{"type":"result","session_id":"headless-sess","result":"ok","num_turns":1}\n'
-EOF
-chmod +x "$t/bin/claude"
+stub_headless_claude "$t"
 out=$(dial "$t" -- --target "$t/target" --mode quick --prompt "hi" --transport headless)
 [[ "$(jq -r '.transport' <<<"$out" 2>/dev/null)" == "headless" ]]
 check "--transport headless routes exactly where --headless does" $? \
@@ -1701,24 +1883,6 @@ stage_cache() {  # stage_cache <scratch> <session-id> <host-handle|''>
                            last_call_id:"prior-nonce"}
         + (if $h == "" then {} else {surface_ref:$h} end))}}' \
     > "$t/home/.agents-hotline/sessions/caller-dial-1.json"
-}
-
-# Wrap the stub so `agent prompt` records the payload in the callee's transcript —
-# the tier a delivery is confirmed by. The session id is whatever `agent start`
-# last reported, falling back to the id passed here (a reuse launches nothing, so
-# the stub's state file does not exist).
-wrap_herdr_transcript() {  # wrap_herdr_transcript <scratch> <fallback-session-id>
-  local t="$1" fallback="$2"
-  mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
-  cat > "$t/bin/herdr" <<STUBW
-#!/usr/bin/env bash
-if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
-  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo "$fallback")
-  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/\$SID.jsonl"
-fi
-exec bash "$t/bin/herdr-real" "\$@"
-STUBW
-  chmod +x "$t/bin/herdr"
 }
 
 CACHED_AGENT="hotline-target-a1b2c3"

@@ -104,7 +104,7 @@ The single sentence that captures herdr's shape: **it collapses cmux's open-surf
 
 **Auto-detect (`HERDR_ENV=1` / running server) is deliberately NOT a step above.** Being inside a herdr pane, or having a herdr server up, must not silently flip the default away from cmux — that violates constraint 1 and would surprise every interactive local caller. Auto-detect only *enables the option* (it is what makes preflight in steps 2–4 pass); it never *selects* herdr on its own. If we later want zero-flag herdr, gate it behind an explicit `HOTLINE_TRANSPORT_AUTO=1`, so the default is a deliberate setting, not an ambient one.
 
-Phase 1 (see §10) narrows this further: herdr is offered **only for detached and remote placements.** A `--transport herdr` with side-by-side or conference placement is rejected with guidance until Phase 3, rather than silently downgraded.
+Phase 1 (see §10) narrowed this further: herdr was offered **only for detached and remote placements**, and a `--transport herdr` with side-by-side or conference placement was rejected with guidance rather than silently downgraded. **Phase 3a lifted both** — side placement and conference mode are herdr's own behavior once you see that its callee is already a pane beside the caller (O9 in §9.1), and the same phase shipped `HOTLINE_TRANSPORT_AUTO=1` as the opt-in this section anticipated. §12 records how both differ from the wording here.
 
 ---
 
@@ -178,11 +178,13 @@ This is also why the answer to "does herdr let us drop the nonce scraping?" is *
 
 ## 9. Research findings and open questions
 
-Seven of the nine questions this spec opened are answered by the shipped stack;
-the two that are not are both Phase 3 inputs and are kept under their own
-heading below so they stay findable. Question IDs are stable — O5 is still O5.
+Eight of the nine questions this spec opened are answered by the shipped stack;
+the one that is not is a Phase 3 input and is kept under its own heading below so
+it stays findable. Question IDs are stable — O5 is still O5.
 
 ### 9.1 Resolved (verified against the shipped stack)
+
+- **O9 — conference / attach. RESOLVED, and the question's premise was wrong (verified live on herdr 0.8.2).** `herdr session attach` is not the conference story and never needed to be: herdr has native side-by-side panes (`pane split --direction right|down`, keybinds prefix+v / prefix+-), and hotline's herdr launcher **already** hosts every callee in a pane split off the caller's own. So there was never an attach-in-place-vs-side-by-side trade to make. Phase 3a therefore ships conference as the ordinary herdr launch plus one call: deliver the prompt, then `herdr agent focus <name>`, and report `awaiting_response:false` — the same "handed to the human, nothing to poll" contract the cmux conference has. Focus is taken **after** delivery is confirmed, and only for a conference; every other dial keeps `pane split --no-focus`, because moving the user's cursor into a booting callee lands their next keystrokes in its REPL. `--placement side` is accepted for the same reason (it is what herdr already does), and side vs. detached differ only in what `.placement` reports. `session attach` keeps one much smaller role: attaching a *detached* herdr session from another terminal, which is not what a conference call is asking for. What is still refused is `--placement window`, and not on placement grounds — hotline creates no herdr workspaces or tabs, so there is no window to place a callee in.
 
 - **O1 — session-id passthrough. RESOLVED (verified live on herdr 0.8.0).** `herdr agent start --kind claude … -- --session-id <uuid> --allowedTools=<…> --dangerously-skip-permissions` passes those flags through to the underlying `claude` verbatim, so the transcript-path derivation (§6) gets an id preset before the callee boots. `agent start` additionally reports the session id it observed, and the herdr backend treats that observation as authoritative when it disagrees with the preset — a passthrough regression then lands as a recorded mismatch instead of a transcript path that reads nothing for the whole call.
 - **O2 — readiness vs our session. RESOLVED, in the negative (verified live on CC 2.1.251 / herdr 0.8.0).** `agent start`'s readiness claim does **not** guarantee a usable input box. Against a fresh `git init` directory it returned `interactive_ready:true, agent_status:"idle"` with Claude Code's startup **trust dialog** on screen — a dialog that takes keystrokes, so a payload submitted into it answers the dialog's default option (`No, exit`) and kills the callee, leaving no turn and no transcript. Readiness is therefore treated as a claim to re-establish, not a fact: first contact settles, re-polls `agent get` until herdr reports interactive-ready and not `blocked`, then reads the screen once and refuses on the trust dialog's signature. Every such refusal is `sent:false`, so the caller is free to re-dial. This is the herdr analogue of the cmux path's `--wait-box`, for the same reason — a launch-time signal is not a submit-time one.
@@ -194,10 +196,9 @@ heading below so they stay findable. Question IDs are stable — O5 is still O5.
 
 ### 9.2 Open questions (verify before/while building)
 
-Both gate Phase 3, and neither has shipped code to cite yet.
+One left, and it has no shipped code to cite yet.
 
 - **O5 — remote transcript access.** For `--remote`, where does the callee transcript live and how do we read it locally (§7)? Phase 1 shipped local-detached only and `dial.sh` refuses `--remote` on this question's account (§4 step 3), so it now gates Phase 3's remote support outright.
-- **O9 — conference / attach.** Is `herdr session attach <name>` an acceptable "hand this to the human" story for Phase 3, given it is attach-in-place rather than a side-by-side pane in the caller's existing window?
 ---
 
 ## 10. Phased rollout
@@ -229,7 +230,7 @@ Land the remote-transcript reader from O5 so `--remote` gets full structured res
 
 ## 12. Deviations (as shipped)
 
-Four places where the shipped code reads differently from the sections above.
+Six places where the shipped code reads differently from the sections above.
 
 **Transport scripts are flat, not nested (§10, Phase 0).** As of Phase 1
 (PR #20), `skills/dial/scripts/` holds `cmux-*`, `herdr-*` and `headless-*` side
@@ -275,3 +276,23 @@ the call rather than from the ambient environment — the same reason §4 gives 
 refusing to let `HERDR_ENV=1` select a transport applies to a variable one
 settings file further away. A caller who wants a standing herdr default puts it
 in a wrapper around `dial.sh`, where it is visible to whoever reads the call.
+
+**Conference is a focused pane, not `session attach` (§10, Phase 3).** Phase 3
+proposed "add conference via `herdr session attach`". Shipped (Phase 3a) is the
+ordinary herdr launch plus `herdr agent focus <name>` after delivery — see O9 in
+§9.1 for why the attach framing was wrong: the callee is *already* in a pane beside
+the caller, so nothing needed attaching. `--placement side` is accepted for the same
+reason and reports the word the caller used, `detached` when they named none.
+`--placement window` stays refused, but the refusal now names the missing feature
+(hotline creates no herdr layout beyond its one split) instead of naming a phase,
+because no phase is pending for it.
+
+**`HOTLINE_TRANSPORT_AUTO=1` degrades to cmux, not headless (§4 step 2, §10).**
+Phase 3 offered it as optional; Phase 3a ships it, guarded on all of: the value is
+exactly `1`, the dial named no `--transport`, it is not headless (`--headless` or
+`HOTLINE_FORCE_HEADLESS`), `HERDR_ENV=1`, and the preflight passes. Its failure mode
+is deliberately the OPPOSITE of the explicit flag's above: an explicit
+`--transport herdr` errors, because a specific hosting model was asked for, while
+AUTO says only "prefer herdr when it works" — so a failed preflight degrades to the
+cmux default with a `transport-auto→cmux(<preflight reason>)` entry in `.fallbacks`.
+`.transport` reports what actually ran in both cases.
