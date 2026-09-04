@@ -1570,12 +1570,14 @@ make_cmux "$t/bin"; make_side_opener "$t/side.sh"
 # the file it was handed, so "the payload travels as an owner-only path, never as
 # an argument" is asserted rather than assumed.
 write_python3_shim "$t/bin2" "$t/python-argv.log"
-PROMPTS_BEFORE=$(ls -d /tmp/hotline-prompt-* 2>/dev/null | wc -l | tr -d ' ')
+# The payload carries this run's PID, so the leak check below can tell THIS dial's
+# temp file apart from one any other process left in the same shared directory.
+ARGV_SENTINEL="PROMPT-ON-ARGV-SENTINEL-$$"
 out=$(PATH="$t/bin2:$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
   HOTLINE_CALLER_SESSION_ID="caller-argv" \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
   bash "$DIAL" --target "$t/target" --mode work_order \
-    --prompt "PROMPT-ON-ARGV-SENTINEL" --boot-timeout 5 2>"$t/err.txt")
+    --prompt "$ARGV_SENTINEL" --boot-timeout 5 2>"$t/err.txt")
 call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 [[ -n "$call_dir" ]] && note_leak "$call_dir"
 
@@ -1591,10 +1593,19 @@ grep -q 'PAYLOAD_MODE 600' "$t/python-argv.log" 2>/dev/null
 check "the file the helper reads is owner-only (0600)" $? \
   "$(grep PAYLOAD_MODE "$t/python-argv.log" 2>/dev/null)"
 
-PROMPTS_AFTER=$(ls -d /tmp/hotline-prompt-* 2>/dev/null | wc -l | tr -d ' ')
-[[ "$PROMPTS_AFTER" -le "$PROMPTS_BEFORE" ]]
+# ITS OWN FILE, found by its payload — not a count of the shared namespace.
+# dial.sh mktemps into /tmp, which is MACHINE-global: any other hotline session
+# dialing inside this window pushed the count up and failed this assertion, three
+# times over (claude-plugins-iyau). Nothing but this dial wrote this sentinel, so a
+# survivor bearing it is a real leak and nothing else can be mistaken for one.
+LEAKED=""
+for f in /tmp/hotline-prompt-*; do
+  [[ -f "$f" ]] || continue
+  grep -q "$ARGV_SENTINEL" "$f" 2>/dev/null && LEAKED+="$f "
+done
+[[ -z "$LEAKED" ]]
 check "the dial's own prompt temp file does not outlive the dial" $? \
-  "before=$PROMPTS_BEFORE after=$PROMPTS_AFTER: $(ls -d /tmp/hotline-prompt-* 2>/dev/null)"
+  "surviving files carrying this dial's payload: $LEAKED"
 
 # ===========================================================================
 # AN UNCONFIRMED FOLLOW-UP PASTE MUST NOT BECOME A SECOND DELIVERY.
