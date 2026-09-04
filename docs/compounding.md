@@ -139,7 +139,10 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   and answers "clean" over 291 real files — as does an unquoted `$FILES` list in a
   `for` loop under zsh, which is one word, not a list. Give every scan a positive
   control it must hit before reading a zero as a result; for a symlinked directory
-  that control is the trailing slash, `find /tmp/`. (claude-plugins-qq9f)
+  that control is the trailing slash, `find /tmp/`. Capture any diff you grep with
+  `git --no-color` (or `-c color.ui=never`) and quote every `--include` glob — ANSI
+  escapes in the captured text and zsh's expansion of a bare glob each silence a
+  grep without failing it. (claude-plugins-qq9f, claude-plugins-vagi, 050619c)
 
 ## Code shape
 
