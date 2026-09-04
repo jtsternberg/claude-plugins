@@ -405,8 +405,9 @@ Exit codes that are not failures:
   `ssh <target>` for a `--remote` call, which the message itself does). Tell the user
   what is needed, and once it is cleared re-run the wait on the same `CALL_DIR` — it
   resumes with a fresh budget and reads the answer. (Unattended callees avoid the
-  permission case by dialing with `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` — a real
-  trust decision.)
+  *tool-permission* case by dialing with `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` — a
+  real trust decision, and no help against the startup trust dialog, which no
+  permissions knob bypasses. See § Environment knobs.)
 
 Clean up when the exchange is done: `rm -rf "$CALL_DIR"`.
 
@@ -452,6 +453,14 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   and a real trust decision.** Without it, a call landing in an unattended pane
   stalls at the first permission gate with nobody there to click "Yes". If a call
   hangs at "Combobulating…" with no progress, suspect exactly that.
+  It covers **in-session tool permission gates only.** Nothing bypasses Claude
+  Code's *startup trust dialog* — not this knob, not
+  `claude --dangerously-skip-permissions` itself (`-p`/`--print` is the only
+  documented escape, and a hotline callee is interactive), so an unattended dial
+  into an untrusted directory parks on that dialog regardless. **Trust does not
+  inherit**: a subdirectory of an already-trusted directory gets its own trust
+  boundary. Trust the callee's directory once — run `claude` in it and answer
+  "Yes, I trust this folder" — before dialing into it unattended.
 - **`HOTLINE_FORCE_HEADLESS=1`** — every dial takes the headless transport,
   regardless of cmux. Same destination as the per-call `--headless`.
 - **`HOTLINE_CLAUDE_MODEL=opus`** — model override for the callee.
