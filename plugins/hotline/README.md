@@ -209,6 +209,8 @@ If you want autonomous calls to skip that gate, set:
 
 **Default is off.** This is a real trust decision — bypassing permissions means the receiver can run any tool, including ones you wouldn't approve interactively. Only enable it if you trust the workspaces you're dialing into. Headless (`claude -p`) calls do not need this — non-interactive mode handles permissions without prompting.
 
+**It does not cover Claude Code's startup trust dialog.** That gate is directory trust, not a permission mode: neither this variable nor `claude --dangerously-skip-permissions` bypasses it (only `-p`/`--print` does, and an interactive callee is not that), so a dial into an untrusted directory parks on the dialog whatever the knob says. **Trust does not inherit from a parent directory** either — a subdirectory of a trusted tree, or a fresh `git init`, gets its own boundary. Run `claude` in the callee's directory once and answer *Yes, I trust this folder* before dialing into it unattended.
+
 ### Force headless transport (opt-in)
 
 By default, dial picks `cmux` when it's available (free interactive usage) and falls back to `headless-call.sh` only when cmux isn't running. Two ways to override:
