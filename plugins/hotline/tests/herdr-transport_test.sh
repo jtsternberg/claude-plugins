@@ -3238,10 +3238,13 @@ OTHERBOX="tester@other-box.invalid"
 # remote → local. The callee is on another box and this dial names none.
 t=$(mismatch_env herdr "$OTHERBOX" hotline-elsewhere-abc mm-nonce-1)
 # The pane that closes that callee lives in the CALL DIR, not the cache, so the
-# recovery can only name it if it looks there — by the nonce the cache does keep.
+# recovery can only name it if it looks there — matched on the cached AGENT NAME and
+# the cached box, both of which the launch dir records alongside the pane.
 PANEDIR=$(mktemp -d "$HOTLINE_CALL_HOME/hotline-call-XXXXX")
-echo mm-nonce-1 > "$PANEDIR/call_id.txt"
-echo w4:p7      > "$PANEDIR/herdr_pane.txt"
+echo mm-nonce-1          > "$PANEDIR/call_id.txt"
+echo hotline-elsewhere-abc > "$PANEDIR/herdr_agent.txt"
+echo "$OTHERBOX"         > "$PANEDIR/remote_target.txt"
+echo w4:p7               > "$PANEDIR/herdr_pane.txt"
 out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
         -- --target "$t/target" --mode work_order --prompt "follow up" \
            --transport herdr --detached --boot-timeout 5)
@@ -3257,6 +3260,45 @@ check "…offering exactly two moves: --remote <that box> to continue, --fresh t
 [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"ssh $OTHERBOX herdr pane close w4:p7"* ]]
 check "…and the pane that closes the abandoned one, read out of its call dir" $? \
   "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
+
+# AFTER A FOLLOW-UP, the pane is still named. Every follow-up re-keys the cache's
+# last_call_id to its own reuse call dir, which records the agent and the box and no
+# pane — so a lookup keyed on the nonce found nothing from the second exchange
+# onward, and the hint silently degraded to `agent list` for exactly the caller who
+# had been talking to that callee longest (claude-plugins-cedc).
+t=$(mismatch_env herdr "$OTHERBOX" hotline-elsewhere-fu mm-nonce-fu2)
+LAUNCHDIR=$(mktemp -d "$HOTLINE_CALL_HOME/hotline-call-XXXXX")
+echo mm-nonce-fu1          > "$LAUNCHDIR/call_id.txt"
+echo hotline-elsewhere-fu  > "$LAUNCHDIR/herdr_agent.txt"
+echo "$OTHERBOX"           > "$LAUNCHDIR/remote_target.txt"
+echo w6:p3                 > "$LAUNCHDIR/herdr_pane.txt"
+REUSEDIR=$(mktemp -d "$HOTLINE_CALL_HOME/hotline-call-XXXXX")
+echo mm-nonce-fu2          > "$REUSEDIR/call_id.txt"
+echo hotline-elsewhere-fu  > "$REUSEDIR/herdr_agent.txt"
+echo "$OTHERBOX"           > "$REUSEDIR/remote_target.txt"
+out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode work_order --prompt "follow up again" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"ssh $OTHERBOX herdr pane close w6:p3"* ]]
+check "…and a FOLLOW-UP's mismatch still names the pane, from the launch dir" $? \
+  "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
+
+# A SAME-NAMED AGENT ON ANOTHER BOX IS NOT THAT PANE. herdr names are unique per
+# server, not across servers, so closing the pane a different box happens to have
+# under the same name kills an unrelated callee.
+t=$(mismatch_env herdr "$OTHERBOX" hotline-twoboxes mm-nonce-tb)
+WRONGBOX=$(mktemp -d "$HOTLINE_CALL_HOME/hotline-call-XXXXX")
+echo mm-nonce-tb      > "$WRONGBOX/call_id.txt"
+echo hotline-twoboxes > "$WRONGBOX/herdr_agent.txt"
+echo "$RTARGET"       > "$WRONGBOX/remote_target.txt"
+echo w9:p9            > "$WRONGBOX/herdr_pane.txt"
+out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
+        -- --target "$t/target" --mode work_order --prompt "follow up" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" != *"w9:p9"* \
+   && "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"herdr agent list"* ]]
+check "…and a same-named agent on a DIFFERENT box is not offered as that pane" $? \
+  "recovery=$(jq -r '.recovery' <<<"$out" 2>/dev/null)"
 ! grep -q 'agent start' "$t/herdr.log" 2>/dev/null
 check "…having started NO second callee: nothing to strand and nothing to close" $? \
   "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
@@ -3271,13 +3313,17 @@ check "…and that foreign agent name is never handed to the local herdr" $? \
 # --fresh is the caller saying "abandon it". The dial proceeds — and the entry names
 # the agent and the box, because that string is the only record they get of a
 # process no local cleanup will ever reach.
-t=$(mismatch_env herdr "$OTHERBOX" hotline-elsewhere-abc mm-nonce-2)
+#
+# ITS OWN AGENT NAME, deliberately: the pane lookup is keyed on that name, so reusing
+# the one above would find the call dir staged there and this case is the one where
+# NO dir remembers a pane.
+t=$(mismatch_env herdr "$OTHERBOX" hotline-nopane-abc mm-nonce-2)
 out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
         -- --target "$t/target" --mode work_order --prompt "follow up" \
            --transport herdr --detached --fresh --boot-timeout 5)
 [[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" ]] \
   && [[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" \
-        == *"abandoned-callee(herdr agent hotline-elsewhere-abc on $OTHERBOX"* ]]
+        == *"abandoned-callee(herdr agent hotline-nopane-abc on $OTHERBOX"* ]]
 check "…while --fresh proceeds, naming the abandoned agent AND its box" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 [[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"ssh $OTHERBOX herdr agent list"* ]]
