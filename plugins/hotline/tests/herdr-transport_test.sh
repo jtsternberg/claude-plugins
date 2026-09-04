@@ -2201,6 +2201,44 @@ check "…while the emitted first_contact stays false: the cache entry was real"
 check "…and the new agent is named off the TARGET's cwd slug, not the session name" $? \
   "agent=$NEW_AGENT (expected hotline-$(basename "$t/target")-*)"
 
+# --- a RESHAPED follow-up whose delivery is refused ------------------------
+# The 63om state, reached from the other side. This follow-up's cached agent is
+# gone, so it reshapes as a first contact and launches a fresh callee — and
+# register-call.sh's `set` REPLACES the cache entry with that callee at
+# boot-confirm. When the delivery is then refused, the entry names an agent that
+# never got its opening prompt, exactly as on a first contact; the prior exchange
+# it used to describe is no longer in there to protect. The forget gate read
+# $FIRST_CONTACT alone, which is false here, so the entry survived.
+t=$(new_env)
+stage_cache "$t" "$CACHED_SID" "$CACHED_AGENT"
+wrap_herdr_transcript "$t" "$CACHED_SID"
+trust_dialog_screen "$t/screen.txt" "$(cd "$t/target" && pwd -P)"
+REG="$t/home/.agents-hotline/sessions/caller-dial-1.json"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_AGENT_ANY=1" \
+        "HERDR_STUB_GONE_NAMES=$CACHED_AGENT" "HERDR_STUB_NEW_PANE=w1:p7" \
+        "HERDR_STUB_SCREEN=$t/screen.txt" \
+        -- --target "$t/target" --mode work_order --prompt "and now step 2" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "deliver" ]] \
+  && [[ "$(jq -r '.fallbacks | join(" ")' <<<"$out" 2>/dev/null)" == *"herdr-agent-reuse→fresh"* ]]
+check "a reshaped follow-up refused at delivery fails at stage=deliver" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ -z "$(jq -r --arg tp "$(cd "$t/target" && pwd -P)" '.connections[$tp] // empty' \
+          "$REG" 2>/dev/null)" ]]
+check "…and its cache entry is GONE too, not left naming the fresh callee that was never rung" $? \
+  "cache: $(cat "$REG" 2>/dev/null)"
+
+# THE CONSEQUENCE, same as the first-contact case: the re-dial starts clean instead
+# of arriving as a follow-up into an agent that never existed.
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_NEW_PANE=w1:p9" \
+        -- --target "$t/target" --mode work_order --prompt "and now step 2" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.first_contact' <<<"$out" 2>/dev/null)" == "true" \
+   && "$(jq -c '.fallbacks' <<<"$out" 2>/dev/null)" != *"herdr-agent-reuse"* ]]
+check "…so the re-dial connects as a FIRST CONTACT, with no reuse fallback at all" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
 # --- a follow-up into a BLOCKED cached agent, THROUGH dial.sh ----------------
 # The orphan the direct-script tests above cannot see: dial.sh used to answer a
 # refused reuse by starting a SECOND callee and re-keying the cache to it, leaving
