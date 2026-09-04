@@ -132,12 +132,22 @@ add_fallback() { FALLBACKS+=("$(printf '%s' "$1" | tr '\n\r\t' '   ')"); }
 # about it, in that order — so a cut tight enough to keep an entry to one terminal
 # line keeps only the half the reader cannot act on. 140 severed
 # `herdr agent attach <name>` off the blocked reason, which was the entire point of
-# reporting the state (claude-plugins-7wze.13). A bound is still wanted: these
-# strings end up inside a JSON array a caller reads, and one runaway diagnostic
-# should not be the whole payload.
-reason_of() {  # reason_of <json>
+# reporting the state (claude-plugins-7wze.13). A bound is still wanted HERE: a
+# fallbacks entry is one line of a summary of a call that SUCCEEDED, and one runaway
+# diagnostic should not be the whole payload.
+reason_of() {  # reason_of <json>   — for a fallbacks entry
   jq -r '.reason // "no reason given"' <<<"${1:-}" 2>/dev/null \
     | tr '\n\r\t' '   ' | cut -c1-300 | sed 's/[[:space:]]*$//'
+}
+
+# The same reason WHOLE, for an emit_error detail. No bound, because the bound above
+# is a summary-line budget and a detail string is the error report itself: 300
+# characters still severs the recovery half off the long refusals — the
+# blocked-before-first-contact reason runs ~450 — and the reader of a failed dial has
+# nothing else to act on (claude-plugins-e3xr).
+reason_full() {  # reason_full <json>   — for an emit_error detail
+  jq -r '.reason // "no reason given"' <<<"${1:-}" 2>/dev/null \
+    | tr '\n\r\t' '   ' | sed 's/[[:space:]]*$//'
 }
 
 fb_json() {
@@ -1121,7 +1131,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
     # payload that actually landed would run twice.
     if [[ "$(jq -r '.undelivered // false' <<<"$REUSE" 2>/dev/null)" == "true" ]]; then
       CALL_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
-      emit_error deliver "the follow-up was pasted into surface $SURFACE_REF but could not be confirmed: $(reason_of "$REUSE")" \
+      emit_error deliver "the follow-up was pasted into surface $SURFACE_REF but could not be confirmed: $(reason_full "$REUSE")" \
         "The REPL is live and may ALREADY have the message; $(jq -r '.prompt_file // "the prompt file"' <<<"$REUSE" 2>/dev/null) still holds it. Read the callee's transcript for the call_id before doing anything. See references/error-recovery.md § Delivery. Do NOT re-dial — that would deliver it twice."
     fi
 
@@ -1192,7 +1202,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     # BLOCKED FIRST — before anything that could start a second callee. The agent
     # is live and confirmed waiting on input; nothing was submitted to it.
     if [[ "$(jq -r '.blocked // false' <<<"$REUSE" 2>/dev/null)" == "true" ]]; then
-      emit_error transport "herdr agent $SURFACE_REF is BLOCKED and cannot take a follow-up: $(reason_of "$REUSE")" \
+      emit_error transport "herdr agent $SURFACE_REF is BLOCKED and cannot take a follow-up: $(reason_full "$REUSE")" \
         "A human has to clear it — \`herdr agent attach $SURFACE_REF\` shows what it is asking, and the state was confirmed by a second read, so this is not a blink. Nothing was submitted and nothing was started: once it is unblocked, re-dial exactly as you just did and the same agent is re-targeted with its context intact. hotline will NOT start a second callee for you, because that one would strand this agent and lose the conversation. (Unattended callees avoid the permission case by dialing with HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 — a real trust decision, see the plugin README.) See references/error-recovery.md § herdr Failures."
     fi
 
@@ -1201,7 +1211,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     # call_dir first would read a failed delivery as a successful one.
     if [[ "$(jq -r '.undelivered // false' <<<"$REUSE" 2>/dev/null)" == "true" ]]; then
       CALL_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
-      emit_error deliver "the follow-up was submitted to herdr agent $SURFACE_REF but could not be confirmed: $(reason_of "$REUSE")" \
+      emit_error deliver "the follow-up was submitted to herdr agent $SURFACE_REF but could not be confirmed: $(reason_full "$REUSE")" \
         "The agent is live and may ALREADY have the message; $(jq -r '.prompt_file // "the prompt file"' <<<"$REUSE" 2>/dev/null) still holds it. Read the callee's transcript for the call_id, or \`herdr agent attach $SURFACE_REF\`, before doing anything. See references/error-recovery.md § herdr Failures. Do NOT re-dial — that would deliver it twice."
     fi
 
@@ -1522,7 +1532,7 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
   [[ -n "$DELIVER_WORKSPACE" ]] && DELIVER_ARGS+=(--workspace "$DELIVER_WORKSPACE")
   DELIVERY=$(bash "$DIAL_SCRIPTS/cmux-paste.sh" "${DELIVER_ARGS[@]}" 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then
-    emit_error deliver "the callee's REPL booted but the prompt never landed in it: $(reason_of "$DELIVERY")" \
+    emit_error deliver "the callee's REPL booted but the prompt never landed in it: $(reason_full "$DELIVERY")" \
       "The pane is live and empty; \$call_dir/pending_paste.md still holds the prompt. See references/error-recovery.md § Delivery — NOT § CMUX Failures, which describes the launch. Do NOT silently re-dial — the callee may have received it after the confirmation window."
   fi
   # The callee's transcript is the record now; the vehicle goes.
@@ -1565,7 +1575,7 @@ if [[ "$TRANSPORT" == "herdr" && -s "$CALL_DIR/pending_paste.md" ]]; then
     # unconditional "do NOT re-dial blindly" is what covers that case.
     DELIVERY_SENT=false
     [[ "$(jq -r '.sent // false' <<<"$DELIVERY" 2>/dev/null)" == "true" ]] && DELIVERY_SENT=true
-    emit_error deliver "the herdr callee booted but the prompt never landed in it: $(reason_of "$DELIVERY")" \
+    emit_error deliver "the herdr callee booted but the prompt never landed in it: $(reason_full "$DELIVERY")" \
       "\$call_dir/pending_paste.md still holds the prompt, and the agent is still live — \`herdr agent attach $HERDR_AGENT_REF\` to see its state. This error's own \`sent\` field is $DELIVERY_SENT: when it is true the callee may have received the payload after the confirmation window, so do NOT re-dial blindly — read its transcript for the call_id first. See references/error-recovery.md § herdr Failures, which covers this case (§ Delivery describes the cmux paste)." \
       "{\"sent\": $DELIVERY_SENT}"
   fi
