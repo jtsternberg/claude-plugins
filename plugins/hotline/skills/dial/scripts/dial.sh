@@ -1575,6 +1575,17 @@ if [[ "$TRANSPORT" == "herdr" && -s "$CALL_DIR/pending_paste.md" ]]; then
     # unconditional "do NOT re-dial blindly" is what covers that case.
     DELIVERY_SENT=false
     [[ "$(jq -r '.sent // false' <<<"$DELIVERY" 2>/dev/null)" == "true" ]] && DELIVERY_SENT=true
+    # THE CACHE ENTRY GOES. register-call.sh wrote it at boot-confirm, one step
+    # above this one, so it names a callee that never received the opening prompt —
+    # and a refused delivery is often a callee that has already exited. Left there it
+    # makes the re-dial this error asks for a FOLLOW-UP into that agent: told "no
+    # such agent", falling back to a fresh callee and reporting a conversation lost
+    # that never started (claude-plugins-63om). Only on first contact — a follow-up's
+    # entry describes a real prior exchange, whatever happened to this message.
+    if $FIRST_CONTACT; then
+      bash "$DIAL_SCRIPTS/session-cache.sh" forget "$TARGET_PATH" \
+        --caller-session "$MY_SESSION_ID" >/dev/null 2>&1 || true
+    fi
     emit_error deliver "the herdr callee booted but the prompt never landed in it: $(reason_full "$DELIVERY")" \
       "\$call_dir/pending_paste.md still holds the prompt, and the agent is still live — \`herdr agent attach $HERDR_AGENT_REF\` to see its state. This error's own \`sent\` field is $DELIVERY_SENT: when it is true the callee may have received the payload after the confirmation window, so do NOT re-dial blindly — read its transcript for the call_id first. See references/error-recovery.md § herdr Failures, which covers this case (§ Delivery describes the cmux paste)." \
       "{\"sent\": $DELIVERY_SENT}"

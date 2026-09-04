@@ -1938,6 +1938,50 @@ check "a >300-char refusal reason reaches .detail without a cut" $? \
    && "$DETAIL" == *"directory trust is not a permission mode"* ]]
 check "…including its LAST sentence, the half a cut always took" $? "detail=$DETAIL"
 
+# --- a refused first contact leaves NO cache entry (claude-plugins-63om) -----
+# register-call.sh writes the entry at boot-confirm, one step before delivery. When
+# that delivery is refused the entry names a callee that never received the opening
+# prompt — and a callee whose delivery failed because it died is gone by then — so
+# the re-dial the error asks for used to arrive as a FOLLOW-UP into it: told "no such
+# agent", falling back to a fresh callee, and reporting a lost conversation there
+# never was.
+t=$(new_env)
+cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo unknown)
+  export HERDR_STUB_TRANSCRIPT="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/\$SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+chmod +x "$t/bin/herdr"
+mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+trust_dialog_screen "$t/screen.txt" "$(cd "$t/target" && pwd -P)"
+CACHE_FILE="$t/home/.agents-hotline/sessions/caller-dial-1.json"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_NEW_PANE=w1:p8" \
+        "HERDR_STUB_SCREEN=$t/screen.txt" \
+        -- --target "$t/target" --mode work_order --prompt "first try" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "deliver" ]]
+check "a first contact refused at delivery fails at stage=deliver" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ -z "$(jq -r --arg tp "$(cd "$t/target" && pwd -P)" '.connections[$tp] // empty' \
+          "$CACHE_FILE" 2>/dev/null)" ]]
+check "…and its cache entry is GONE, not left naming a callee that was never rung" $? \
+  "cache: $(cat "$CACHE_FILE" 2>/dev/null)"
+
+# THE CONSEQUENCE, which is the whole point: the re-dial is a clean first contact.
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_NEW_PANE=w1:p8" \
+        -- --target "$t/target" --mode work_order --prompt "second try" \
+           --transport herdr --detached --boot-timeout 5)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" \
+   && "$(jq -r '.first_contact' <<<"$out" 2>/dev/null)" == "true" ]]
+check "…so the re-dial connects as a FIRST CONTACT, not a follow-up" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+[[ "$(jq -c '.fallbacks' <<<"$out" 2>/dev/null)" != *"herdr-agent-reuse→fresh"* ]]
+check "…with no exited-agent fallback reporting a conversation that never started" $? \
+  "fallbacks=$(jq -c '.fallbacks' <<<"$out" 2>/dev/null)"
+
 # --- end to end through dial.sh: the callee DOES record it -------------------
 # The plain stub cannot precompute the transcript path (it does not know the session
 # id until `agent start` hands it one), so a thin wrapper fills that in — modelling

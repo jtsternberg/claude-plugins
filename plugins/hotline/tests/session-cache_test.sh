@@ -205,6 +205,32 @@ got=$(HOME="$T/home4" bash "$CACHE" get "$TARGET" --caller-session caller-4)
    && "$(jq -r '.last_call_id' <<<"$got")" == "nonce-9" ]]
 check "an omitted --transport/--remote leaves both untouched" $? "got=$got"
 
+# --- forget drops the entry, and only that entry -----------------------------
+# The verb exists for one caller: a first contact whose delivery was refused. That
+# dial's entry was written at boot-confirm, one step earlier, and names a callee that
+# never received the opening prompt — so it must go rather than be healed
+# (claude-plugins-63om). Its neighbours in the same cache file must not.
+mkdir -p "$T/other"
+OTHER_REAL=$(cd "$T/other" && pwd -P)
+HOME="$T/home5" bash "$CACHE" set "$TARGET" --caller-session caller-5 \
+  --session sess-doomed --mode work_order --surface hotline-doomed >/dev/null
+HOME="$T/home5" bash "$CACHE" set "$T/other" --caller-session caller-5 \
+  --session sess-keep --mode work_order --surface hotline-keep >/dev/null
+HOME="$T/home5" bash "$CACHE" forget "$TARGET" --caller-session caller-5 >/dev/null
+! HOME="$T/home5" bash "$CACHE" get "$TARGET" --caller-session caller-5 >/dev/null 2>&1
+check "forget drops the entry: a later get reports no cached session" $? \
+  "$(cat "$T/home5/.agents-hotline/sessions/caller-5.json" 2>/dev/null)"
+kept=$(HOME="$T/home5" bash "$CACHE" get "$T/other" --caller-session caller-5 2>/dev/null)
+[[ "$(jq -r '.session_id' <<<"$kept" 2>/dev/null)" == "sess-keep" ]]
+check "…and leaves every OTHER target in that caller's cache alone" $? "kept=$kept"
+
+# Called on a failure path, so it must never fail: the caller is already reporting an
+# error and a missing entry is the state it wanted.
+HOME="$T/home5" bash "$CACHE" forget "$TARGET" --caller-session caller-5 >/dev/null 2>&1
+check "forgetting an entry that is already gone succeeds" $? ""
+HOME="$T/home6" bash "$CACHE" forget "$TARGET" --caller-session caller-6 >/dev/null 2>&1
+check "…as does forgetting one in a cache file that does not exist" $? ""
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
