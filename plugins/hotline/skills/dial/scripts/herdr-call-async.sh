@@ -282,7 +282,7 @@ START_ATTEMPTS="${HOTLINE_HERDR_START_ATTEMPTS:-4}"
 #
 # No `-n <session-name>` here, unlike cmux: that flag's passthrough is unverified
 # under herdr, and the herdr agent NAME already carries the call's identity in
-# `herdr agent list`. $SESSION_NAME is used for the agent-name slug instead.
+# `herdr agent list` — see AGENT_SLUG_TARGET below for what that name is built from.
 CLAUDE_ARGS=(--session-id "$SESSION_ID_PRESET")
 [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && CLAUDE_ARGS+=(--model "$HOTLINE_CLAUDE_MODEL")
 # Opt-in via HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS — see README. A hotline callee
@@ -302,6 +302,20 @@ START_TIMEOUT_MS=$(( BOOT_SECONDS * 1000 ))
 [[ $START_TIMEOUT_MS -gt 300000 ]] && START_TIMEOUT_MS=300000
 [[ $START_TIMEOUT_MS -lt 1000   ]] && START_TIMEOUT_MS=1000
 
+# The slug names the TARGET, never this call's --name. `basename` of a session
+# name ("hotline: a → b (mode)") is the whole string, so slugging it minted every
+# agent as hotline-hotline-* and `herdr agent list` could not say which directory a
+# stuck callee was sitting in. The host joins the slug for a remote dial: two boxes
+# hold the same directory names, and the agent name is the only handle a caller has
+# for either one.
+AGENT_SLUG_TARGET=$(basename "$CWD")
+if hotline_remote_active; then
+  # Login user off the front — it identifies the account, not the box, and the
+  # 14-char cut cannot afford it.
+  AGENT_SLUG_HOST=$(hotline_remote_target)
+  AGENT_SLUG_TARGET="${AGENT_SLUG_HOST##*@}-$AGENT_SLUG_TARGET"
+fi
+
 AGENT_NAME=""
 START_OUT=""
 START_ERR=""
@@ -312,8 +326,8 @@ while [[ $attempt -lt $START_ATTEMPTS ]]; do
 
   # A fresh name per attempt: a start that failed for a reason OTHER than a busy
   # pane may still have consumed the name, and herdr rejects a duplicate outright.
-  AGENT_NAME=$(herdr_mint_agent_name "${SESSION_NAME:-$CWD}")
-  herdr_agent_name_free "$AGENT_NAME" || AGENT_NAME=$(herdr_mint_agent_name "${SESSION_NAME:-$CWD}")
+  AGENT_NAME=$(herdr_mint_agent_name "$AGENT_SLUG_TARGET")
+  herdr_agent_name_free "$AGENT_NAME" || AGENT_NAME=$(herdr_mint_agent_name "$AGENT_SLUG_TARGET")
 
   if herdr_cli agent start "$AGENT_NAME" --kind claude --pane "$NEW_PANE" \
        --timeout "$START_TIMEOUT_MS" -- "${CLAUDE_ARGS[@]}"; then
