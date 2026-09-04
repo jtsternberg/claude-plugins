@@ -64,8 +64,7 @@
 #
 # Usage:
 #   herdr-call-async.sh --cwd <path> (--prompt <text> | --prompt-file <path>)
-#                       [--name <session-name>] [--tools <list>]
-#                       [--boot-timeout <seconds>] [--detached]
+#                       [--tools <list>] [--boot-timeout <seconds>] [--detached]
 #   # → {"call_dir":"…","agent":"hotline-…","pane":"w6:p2","session_id":"…"}
 #   #   plus "remote":"<ssh-target>" when $HOTLINE_HERDR_REMOTE hosted it
 #
@@ -91,7 +90,6 @@ source "$HOTLINE_SCRIPTS/herdr-state.sh"
 CWD=""
 PROMPT=""
 PROMPT_FILE=""
-SESSION_NAME=""
 ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
 BOOT_TIMEOUT=""
 RESUME_ID=""
@@ -102,7 +100,6 @@ while [[ $# -gt 0 ]]; do
     --cwd)          CWD="$2";           shift 2 ;;
     --prompt)       PROMPT="$2";        shift 2 ;;
     --prompt-file)  PROMPT_FILE="$2";   shift 2 ;;
-    --name)         SESSION_NAME="$2";  shift 2 ;;
     --tools)        ALLOWED_TOOLS="$2"; shift 2 ;;
     --boot-timeout) BOOT_TIMEOUT="$2";  shift 2 ;;
     --resume)       RESUME_ID="$2";     shift 2 ;;
@@ -283,6 +280,8 @@ START_ATTEMPTS="${HOTLINE_HERDR_START_ATTEMPTS:-4}"
 # No `-n <session-name>` here, unlike cmux: that flag's passthrough is unverified
 # under herdr, and the herdr agent NAME already carries the call's identity in
 # `herdr agent list` — see AGENT_SLUG_TARGET below for what that name is built from.
+# That is also why this launcher takes no `--name` at all: there was nothing left
+# for a session name to reach.
 CLAUDE_ARGS=(--session-id "$SESSION_ID_PRESET")
 [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && CLAUDE_ARGS+=(--model "$HOTLINE_CLAUDE_MODEL")
 # Opt-in via HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS — see README. A hotline callee
@@ -302,7 +301,7 @@ START_TIMEOUT_MS=$(( BOOT_SECONDS * 1000 ))
 [[ $START_TIMEOUT_MS -gt 300000 ]] && START_TIMEOUT_MS=300000
 [[ $START_TIMEOUT_MS -lt 1000   ]] && START_TIMEOUT_MS=1000
 
-# The slug names the TARGET, never this call's --name. `basename` of a session
+# The slug names the TARGET, never the call's session name. `basename` of a session
 # name ("hotline: a → b (mode)") is the whole string, so slugging it minted every
 # agent as hotline-hotline-* and `herdr agent list` could not say which directory a
 # stuck callee was sitting in. The host joins the slug for a remote dial: two boxes

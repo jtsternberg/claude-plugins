@@ -1033,7 +1033,8 @@ SESSION_NAME="hotline: $(basename "$MY_CWD") → $(basename "$TARGET_PATH") ($MO
 # loaded the skill — but herdr cannot re-host a session at all (see fire_herdr), so
 # its reuse→fresh fallback genuinely opens a new conversation.
 #
-# The PROMPT SHAPE and the --name are what change. FIRST_CONTACT is not flipped: it
+# The PROMPT SHAPE is what changes, and the cache-forget gate reads this flag for
+# the same reason (see THE CACHE ENTRY GOES). FIRST_CONTACT is not flipped: it
 # answers "did this dial have a cached session to work from", and this one did — the
 # cache entry is real, and the emitted contract says so.
 RESHAPED_AS_FIRST_CONTACT=false
@@ -1374,10 +1375,9 @@ fire_cmux() {
 # fallback entry says so rather than letting a caller infer continuity.
 fire_herdr() {
   local ARGS=(--cwd "$TARGET_PATH")
-  # --name on a reuse→fresh launch too: the agent it starts is a new callee like any
-  # other, and without it herdr names the agent off the cwd slug — the one launch
-  # whose name would not say which call opened it.
-  if $FIRST_CONTACT || $RESHAPED_AS_FIRST_CONTACT; then ARGS+=(--name "$SESSION_NAME"); fi
+  # No --name: herdr-call-async.sh takes none. The agent name IS this call's
+  # identity in `herdr agent list`, and it is minted from the callee's cwd — a
+  # session name never reached the callee at all (claude-plugins-hukk).
   [[ -n "$TOOLS" ]] && ARGS+=(--tools "$TOOLS")
   [[ -n "$BOOT_TIMEOUT" ]] && ARGS+=(--boot-timeout "$BOOT_TIMEOUT")
   ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
@@ -1597,8 +1597,7 @@ if [[ "$TRANSPORT" == "herdr" && -s "$CALL_DIR/pending_paste.md" ]]; then
     # reshape_as_first_contact (its cached agent was gone or refused), so
     # register-call.sh's `set` has already REPLACED the entry with this fresh
     # callee — the prior exchange it used to describe is not in there any more, and
-    # what is left names an agent that never got its opening prompt. Same pair
-    # fire_herdr gates --name on, for the same reason.
+    # what is left names an agent that never got its opening prompt.
     if $FIRST_CONTACT || $RESHAPED_AS_FIRST_CONTACT; then
       bash "$DIAL_SCRIPTS/session-cache.sh" forget "$TARGET_PATH" \
         --caller-session "$MY_SESSION_ID" >/dev/null 2>&1 || true

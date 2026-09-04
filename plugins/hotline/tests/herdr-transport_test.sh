@@ -524,7 +524,7 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
       HERDR_STATE="$t/state" HERDR_STUB_NEW_PANE="w1:p4" HERDR_PANE_ID="w1:p1" \
       HOTLINE_HERDR_PANE_SETTLE=0 \
       bash "$HERDR_ASYNC" --cwd "$t/target" --prompt-file "$t/prompt.md" \
-        --name "hotline: a → b (work_order)" --detached 2>"$t/err.txt")
+        --detached 2>"$t/err.txt")
 cd_path=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 [[ -n "$cd_path" && -d "$cd_path" ]]
 check "returns a call_dir" $? "out=$out stderr=$(cat "$t/err.txt")"
@@ -2190,13 +2190,14 @@ grep -q 'and now step 2' "$FRESH_DELIVERED" 2>/dev/null \
 check "…with the follow-up message and the protocol tags beneath it" $? \
   "delivered: $(head -c 400 "$FRESH_DELIVERED" 2>/dev/null)"
 # .first_contact still answers "did this dial have a cached session to work from",
-# and this one did. Only the prompt shape and the --name changed.
+# and this one did. Only the prompt shape changed.
 [[ "$(jq -r '.first_contact' <<<"$out" 2>/dev/null)" == "false" ]]
 check "…while the emitted first_contact stays false: the cache entry was real" $? "out=$out"
 # The agent name names the TARGET, on this fallback launch as on a first contact.
-# It used to be slugged from --name, whose value ("hotline: a → b (mode)") basenames
-# to itself, so every agent in `herdr agent list` read hotline-hotline-* and none of
-# them said which directory its callee was sitting in (claude-plugins-hukk).
+# It used to be slugged from the session name ("hotline: a → b (mode)"), which
+# basenames to itself, so every agent in `herdr agent list` read hotline-hotline-*
+# and none of them said which directory its callee was sitting in
+# (claude-plugins-hukk).
 [[ "$NEW_AGENT" == "hotline-$(basename "$t/target")-"* ]]
 check "…and the new agent is named off the TARGET's cwd slug, not the session name" $? \
   "agent=$NEW_AGENT (expected hotline-$(basename "$t/target")-*)"
