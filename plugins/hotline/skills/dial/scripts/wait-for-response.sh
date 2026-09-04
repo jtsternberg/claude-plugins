@@ -284,7 +284,7 @@ if $HERDR_MODE; then
   # thing that can tell it the agent lives elsewhere — and getting it wrong is not a
   # degraded read but a false verdict: the local herdr answers "no such agent" for a
   # remote one, which this branch reports as "the callee exited before answering".
-  # Absent = local, which is what every call dir written before Phase 3b means.
+  # Absent = local, which is what every call dir written before hotline 0.31.0 means.
   if [[ -s "$CALL_DIR/remote_target.txt" ]]; then
     HOTLINE_HERDR_REMOTE=$(tr -d '[:space:]' < "$CALL_DIR/remote_target.txt")
     export HOTLINE_HERDR_REMOTE
