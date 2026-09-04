@@ -238,6 +238,16 @@ if [[ "$WAIT_BOX" != "0" ]]; then
     # answered in this surface earlier — still sitting in the same tail window — can
     # never refuse a delivery that was safe. Nothing has been pasted at this point,
     # which is what lets the refusal promise that and report sent:false.
+    #
+    # THAT ORDERING IS SAFE ONLY BECAUSE --wait-box IS A FRESH-SURFACE FLAG. It holds
+    # as an invariant of the CALLERS, not of this script: every caller that passes
+    # --wait-box has just opened the surface (cmux-call.sh, and dial.sh's step 6
+    # after cmux-call-async.sh), and the reuse path passes none. On a REUSED surface
+    # a stale box render and a live 5-line trust dialog both fit the 12-row tail at
+    # once, box-first wins, and the payload goes into the dialog — which answers it
+    # `No, exit`. Do not pass --wait-box from a reuse path; if one ever must, this
+    # gate has to check the dialog FIRST for it. Held by
+    # tests/cmux-paste-wait-box-callers_test.sh (claude-plugins-fr46).
     if [[ -n "$BOX_WINDOW" ]] && repl_trust_dialog_present "$BOX_WINDOW"; then
       undelivered "$(repl_trust_dialog_refusal --surface "$SURFACE_REF" "$CWD")" false
     fi
