@@ -841,15 +841,27 @@ mismatch_continue() {
   else printf -- 'no --remote (that callee is on this box)'; fi
 }
 # The pane is the only handle that closes a herdr callee, and the cache does not
-# keep it — it is written to the CALL DIR. So it is looked up there, by the nonce
-# the cache does keep, and the advice degrades to `agent list` when /tmp has since
-# been swept. Best-effort by design: a missing pane must not cost the refusal.
+# keep it — it is written to the CALL DIR. So it is looked up there, and the advice
+# degrades to `agent list` when /tmp has since been swept. Best-effort by design: a
+# missing pane must not cost the refusal.
+#
+# MATCHED ON THE CACHED AGENT NAME, not on the cached nonce. Only the LAUNCH call
+# dir records herdr_pane.txt, and every follow-up re-keys last_call_id to its own
+# reuse dir — which has the agent name and no pane — so a nonce lookup found nothing
+# after the first follow-up and every mismatch after one degraded to `agent list`
+# (claude-plugins-cedc). The agent name is stable for the callee's whole life and is
+# written by both paths, so it reaches the launch dir from any point in the call.
+# The box is compared alongside it: agent names are unique per herdr server, not
+# across boxes, and the pane of a same-named agent elsewhere is the wrong pane.
 mismatch_pane() {
   local d
-  [[ -z "$PREV_CALL_ID" ]] && return 0
+  [[ -z "$PREV_SURFACE_REF" ]] && return 0
   for d in "${HOTLINE_CALL_HOME:-/tmp}"/hotline-call-*; do
-    [[ -s "$d/call_id.txt" && -s "$d/herdr_pane.txt" ]] || continue
-    [[ "$(tr -d '[:space:]' < "$d/call_id.txt")" == "$PREV_CALL_ID" ]] || continue
+    [[ -s "$d/herdr_agent.txt" && -s "$d/herdr_pane.txt" ]] || continue
+    [[ "$(tr -d '[:space:]' < "$d/herdr_agent.txt")" == "$PREV_SURFACE_REF" ]] || continue
+    # Absent remote_target.txt means a local callee, the same reading the cache's
+    # absent `remote` gets.
+    [[ "$(cat "$d/remote_target.txt" 2>/dev/null | tr -d '[:space:]')" == "$PREV_REMOTE" ]] || continue
     tr -d '[:space:]' < "$d/herdr_pane.txt"
     return 0
   done
