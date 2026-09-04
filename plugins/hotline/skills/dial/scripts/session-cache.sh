@@ -9,6 +9,7 @@
 #   session-cache.sh get <target-path> --caller-session <id>
 #   session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>] [--transport <name>] [--remote <ssh-target>]
 #   session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>] [--transport <name>] [--remote <ssh-target>]
+#   session-cache.sh forget <target-path> --caller-session <id>
 #   session-cache.sh list --caller-session <id>
 #
 # --surface records the opaque HOST HANDLE the callee's session lives in, so a
@@ -67,6 +68,7 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: session-cache.sh get <target-path> --caller-session <id>"
   echo "       session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>] [--transport <name>] [--remote <ssh-target>]"
   echo "       session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>] [--transport <name>] [--remote <ssh-target>]"
+  echo "       session-cache.sh forget <target-path> --caller-session <id>"
   echo "       session-cache.sh list --caller-session <id>"
   echo ""
   echo "Tracks Agent A's outgoing connections in ~/.agents-hotline/sessions/<caller-session>.json"
@@ -196,6 +198,23 @@ case "$CMD" in
           else .connections[$t].surface_ref = $sf end)' \
       "$CACHE_FILE" > "${CACHE_FILE}.tmp" && mv "${CACHE_FILE}.tmp" "$CACHE_FILE"
     ;;
+  forget)
+    # DROP the entry, for the one caller that knows there is nothing to continue: a
+    # first contact whose delivery was refused. The callee was registered at
+    # boot-confirm, before delivery, so the entry names a callee that never received
+    # the opening prompt — and often one that has since exited. Healing it is wrong
+    # in both directions: the next dial would either send a raw follow-up to a callee
+    # with no protocol to answer it, or take the exited-agent→fresh fallback and
+    # report a lost conversation there never was (claude-plugins-63om).
+    #
+    # Exit 0 with nothing to delete: the caller is already reporting a failure and a
+    # missing entry is the state it wanted.
+    if [[ -z "$TARGET" || ! -f "$CACHE_FILE" ]]; then
+      exit 0
+    fi
+    jq --arg t "$TARGET" 'del(.connections[$t])' \
+      "$CACHE_FILE" > "${CACHE_FILE}.tmp" && mv "${CACHE_FILE}.tmp" "$CACHE_FILE"
+    ;;
   list)
     if [[ -f "$CACHE_FILE" ]]; then
       cat "$CACHE_FILE"
@@ -204,7 +223,7 @@ case "$CMD" in
     fi
     ;;
   *)
-    echo "Usage: session-cache.sh <get|set|update|list> [target] --caller-session <id>" >&2
+    echo "Usage: session-cache.sh <get|set|update|forget|list> [target] --caller-session <id>" >&2
     exit 1
     ;;
 esac
