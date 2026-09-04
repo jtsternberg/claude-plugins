@@ -46,7 +46,7 @@
 #
 # --transport / --remote say WHICH BACKEND, AND WHICH BOX, the cached host handle
 # belongs to — written as `transport` and `remote`, both OPTIONAL and both ABSENT on
-# a local cmux entry, which is what every entry written before Phase 3b is.
+# a local cmux entry, which is what every entry written before hotline 0.31.0 is.
 #
 # They exist because surface_ref is opaque BY DESIGN and a follow-up re-addresses it
 # by name: a cmux surface handle and a herdr agent name are indistinguishable
