@@ -1079,12 +1079,13 @@ check "…naming the dialog and the cwd Claude Code has not trusted" $? "reason=
    && "$reason" == *"HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover"* ]]
 check "…what a submit would have answered, how to look, and that the skip flag is no fix" $? \
   "reason=$reason"
-# dial.sh forwards this through reason_of, which truncates at 300 chars — so the FIX
-# has to be inside that window or the caller never reads it (live-caught: the first
-# wording put the diagnosis first and lost every instruction).
+# REMEDY BEFORE DIAGNOSIS, as a convention: dial.sh no longer cuts a detail string
+# (claude-plugins-e3xr, and a dial-level test below holds that), but the reader of a
+# failed dial scans the front of it, and the first wording of this reason put the
+# diagnosis there and buried every instruction (live-caught, claude-plugins-59ry).
 [[ "${reason:0:300}" == *"$t/target"* && "${reason:0:300}" == *"trust that directory"* \
    && "${reason:0:300}" == *"re-dial"* ]]
-check "…with the cwd and the remedy inside reason_of's first 300 characters" $? \
+check "…with the cwd and the remedy in the reason's first 300 characters, ahead of the diagnosis" $? \
   "first 300: ${reason:0:300}"
 ! grep -qE 'agent prompt|pane send-text' "$t/herdr.log" 2>/dev/null
 check "…and writing nothing into the dialog" $? "herdr calls: $(tr -d '\\' < "$t/herdr.log")"
@@ -1917,6 +1918,26 @@ out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_NEW_PANE=w1:p8" "HERDR_STUB_GE
 check "a pre-submit refusal reports sent:FALSE on the same error field" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
+# THE WHOLE REASON REACHES .detail. A refusal states the remedy and the diagnosis,
+# and dial.sh used to forward both through reason_of's 300-character cut — which is
+# a summary-line budget, right for a fallbacks entry and wrong for the error report
+# itself. The trust-dialog refusal runs past 590 characters and lost its closing
+# "trust is not a permission mode" every time (claude-plugins-e3xr).
+t=$(new_env)
+trust_dialog_screen "$t/screen.txt" "$(cd "$t/target" && pwd -P)"
+out=$(dial "$t" "HERDR_PANE_ID=w1:p1" "HERDR_STUB_NEW_PANE=w1:p8" \
+        "HERDR_STUB_SCREEN=$t/screen.txt" \
+        -- --target "$t/target" --mode work_order --prompt "run the suite" \
+           --transport herdr --detached --boot-timeout 5)
+DETAIL=$(jq -r '.detail // empty' <<<"$out" 2>/dev/null)
+[[ "$(jq -r '.stage' <<<"$out" 2>/dev/null)" == "deliver" && ${#DETAIL} -gt 300 ]]
+check "a >300-char refusal reason reaches .detail without a cut" $? \
+  "len=${#DETAIL} out=$out stderr=$(cat "$t/err.txt")"
+[[ "$DETAIL" == *"trust that directory"* \
+   && "$DETAIL" == *"HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover this gate"* \
+   && "$DETAIL" == *"directory trust is not a permission mode"* ]]
+check "…including its LAST sentence, the half a cut always took" $? "detail=$DETAIL"
+
 # --- end to end through dial.sh: the callee DOES record it -------------------
 # The plain stub cannot precompute the transcript path (it does not know the session
 # id until `agent start` hands it one), so a thin wrapper fills that in — modelling
@@ -2162,11 +2183,11 @@ REG="$t/home/.agents-hotline/sessions/caller-dial-1.json"
 check "…leaving the cache pointed at the blocked agent, NOT re-keyed to a new one" $? \
   "registry: $(cat "$REG" 2>/dev/null)"
 
-# The actionable half of the reason has to SURVIVE. reason_of used to cut at 140,
-# which severed `herdr agent attach <name>` off the end — the one thing a reader of
-# this error can act on.
+# The actionable half of the reason has to SURVIVE. dial.sh's forwarding used to cut
+# at 140, which severed `herdr agent attach <name>` off the end — the one thing a
+# reader of this error can act on.
 [[ "$(jq -r '.detail' <<<"$out" 2>/dev/null)" == *"herdr agent attach $CACHED_AGENT"* ]]
-check "…with the attach hint intact in .detail (reason_of no longer severs it)" $? \
+check "…with the attach hint intact in .detail (nothing severs it now)" $? \
   "detail=$(jq -r '.detail' <<<"$out" 2>/dev/null)"
 [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"re-dial exactly as you just did"* ]] \
   && [[ "$(jq -r '.recovery' <<<"$out" 2>/dev/null)" == *"context intact"* ]]

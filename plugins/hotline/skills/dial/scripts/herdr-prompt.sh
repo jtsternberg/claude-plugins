@@ -243,9 +243,10 @@ if $FIRST_CONTACT; then
   # of unproven the day `agent read` changes shape.
   herdr_agent_screen "$AGENT"
   if repl_trust_dialog_present "$HERDR_AGENT_SCREEN"; then
-    # THE FIX GOES FIRST in this string, deliberately: dial.sh forwards a reason
-    # through reason_of, which cuts it at 300 characters, so anything after that is
-    # not advice the caller ever sees. Diagnosis after remedy.
+    # THE FIX GOES FIRST in this string, deliberately. dial.sh forwards a detail
+    # whole now (claude-plugins-e3xr), but the reader of a failed dial scans the
+    # front of it, and this reason's first wording led with the diagnosis and buried
+    # every instruction behind it. Diagnosis after remedy.
     undelivered "Claude Code's startup TRUST DIALOG is on screen for ${CWD:-the callee cwd} — trust that directory (run \`claude\` in it once and answer 'Yes, I trust this folder'), then re-dial. NOTHING WAS SUBMITTED: the dialog's default option is 'No, exit', so a work order would have answered it and killed the callee. herdr reported agent $AGENT interactive_ready and not blocked because the dialog does take keystrokes; \`${HERDR_HOP}herdr agent attach $AGENT\` shows it. HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS does not cover this gate — directory trust is not a permission mode." false
   fi
 
