@@ -310,10 +310,21 @@ START_TIMEOUT_MS=$(( BOOT_SECONDS * 1000 ))
 # for either one.
 AGENT_SLUG_TARGET=$(basename "$CWD")
 if hotline_remote_active; then
-  # Login user off the front — it identifies the account, not the box, and the
-  # 14-char cut cannot afford it.
+  # DIRECTORY FIRST, AND EACH HALF ON ITS OWN BUDGET. Joined as `<host>-<dir>` and
+  # left to herdr_mint_agent_name's single 14-char cut, any host name of 13
+  # characters or more consumed the whole budget and the directory — the one thing
+  # this slug exists to say — was cut off entirely. A tailnet FQDN always is:
+  # jt@jt-mbp14.taile1234.ts.net + lindris-frontend minted hotline-jt-mbp14-taile-*,
+  # which names neither the box usefully nor the directory at all.
+  #
+  # Login user off the front (it identifies the account, not the box) and the domain
+  # off the back (every box in one tailnet shares it), then 8 for the directory and
+  # 5 for the host — 8 + 1 + 5 = the same 14 the mint would allow, so the cut there
+  # is a no-op and the random tail is untouched.
   AGENT_SLUG_HOST=$(hotline_remote_target)
-  AGENT_SLUG_TARGET="${AGENT_SLUG_HOST##*@}-$AGENT_SLUG_TARGET"
+  AGENT_SLUG_HOST="${AGENT_SLUG_HOST##*@}"
+  AGENT_SLUG_HOST="${AGENT_SLUG_HOST%%.*}"
+  AGENT_SLUG_TARGET="$(printf '%s' "$AGENT_SLUG_TARGET" | cut -c1-8)-$(printf '%s' "$AGENT_SLUG_HOST" | cut -c1-5)"
 fi
 
 AGENT_NAME=""

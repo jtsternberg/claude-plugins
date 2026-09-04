@@ -284,8 +284,8 @@ herdr_resolve_split_pane() {
 # the random tail is what keeps two dials into the same directory from colliding.
 # 8 + 14 + 1 + 6 = 29 characters at most. Pure — no CLI, safe in a substitution.
 #
-# The argument must name the TARGET — the callee's cwd, or `<host>-<cwd basename>`
-# for a remote dial. Anything else (a session name, say) buys a slug that is the
+# The argument must name the TARGET — the callee's cwd, or `<cwd basename>-<host>`
+# already budgeted to 14 characters for a remote dial (see herdr-call-async.sh). Anything else (a session name, say) buys a slug that is the
 # same for every call, which is the one thing this name exists not to be.
 herdr_mint_agent_name() {  # <callee-cwd-or-target-label>
   local slug tail

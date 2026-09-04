@@ -3157,11 +3157,11 @@ check "…and the emitted JSON carries .remote_target and .remote_pane for the t
 check "…with the contract's own keys unchanged in shape (host ref, session, nonce)" $? "out=$out"
 # A REMOTE callee's slug carries the BOX as well as the directory: two machines hold
 # the same directory names, and the agent name is the only handle either callee has.
-# "tester@no-such-box.invalid" + "target" → the login user dropped, non-alphanumerics
-# collapsed to dashes, cut to the 14 characters herdr's name budget allows.
-[[ "$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)" == "hotline-no-such-box-in-"* ]]
-check "…and a remote agent's slug names the HOST plus the directory, minus the login user" $? \
-  "surface_ref=$(jq -r '.surface_ref' <<<"$out" 2>/dev/null) (expected hotline-no-such-box-in-*)"
+# "tester@no-such-box.invalid" + "target" → DIRECTORY FIRST, then the host with the
+# login user dropped and the domain trimmed, 8 + 1 + 5 inside herdr's 14.
+[[ "$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)" == "hotline-target-no-su-"* ]]
+check "…and a remote agent's slug names the DIRECTORY plus the host, minus the login user" $? \
+  "surface_ref=$(jq -r '.surface_ref' <<<"$out" 2>/dev/null) (expected hotline-target-no-su-*)"
 [[ ! -s "$t/cmux.log" ]]
 check "…and no cmux call: a remote dial never consults the local multiplexer" $? \
   "cmux calls: $(cat "$t/cmux.log" 2>/dev/null)"
@@ -3178,6 +3178,38 @@ CACHED=$(jq -r --arg t "$(cd "$t/target" && pwd -P)" '.connections[$t]' \
    && "$(jq -r '.remote' <<<"$CACHED" 2>/dev/null)" == "$RTARGET" ]]
 check "…and the cache records WHICH backend and WHICH box the host handle belongs to" $? \
   "cached=$CACHED"
+
+# A LONG HOST MUST NOT EAT THE DIRECTORY. Joined as `<host>-<dir>` under one 14-char
+# cut, every host of 13 characters or more — which a tailnet FQDN always is — left a
+# host-only name: jt@jt-mbp14.taile1234.ts.net + lindris-frontend minted
+# hotline-jt-mbp14-taile-*, and the directory the slug exists to name was gone.
+t=$(remote_env)
+mkdir -p "$t/lindris-frontend" "$t/remote-home"
+LONG_RTARGET="jt@jt-mbp14.taile1234.ts.net"
+cat > "$t/bin/herdr" <<STUBW
+#!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "agent prompt" ]]; then
+  SID=\$(cat "\$HERDR_STATE/session_id" 2>/dev/null || echo unknown)
+  export HERDR_STUB_TRANSCRIPT="$t/remote-home/.claude/projects/$(encode_cwd "$(cd "$t/lindris-frontend" && pwd -P)")/\$SID.jsonl"
+fi
+exec bash "$t/bin/herdr-real" "\$@"
+STUBW
+chmod +x "$t/bin/herdr"
+mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
+out=$(remote_dial "$t" "HERDR_STUB_NEW_PANE=w4:p9" "SSH_STUB_HOME=$t/remote-home" \
+        -- --target "$t/lindris-frontend" --mode work_order --prompt "run it over there" \
+           --remote "$LONG_RTARGET" --boot-timeout 5)
+LONG_REF=$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)
+[[ "$(jq -r '.status' <<<"$out" 2>/dev/null)" == "connected" && "$LONG_REF" == *"lindris"* ]]
+check "a 28-char remote host still leaves the DIRECTORY in the agent name" $? \
+  "surface_ref=$LONG_REF stderr=$(cat "$t/err.txt")"
+[[ "$LONG_REF" == "hotline-lindris-jt-mb-"* ]]
+check "…with the host beside it, short-hostname only (8 for the dir, 5 for the box)" $? \
+  "surface_ref=$LONG_REF (expected hotline-lindris-jt-mb-*)"
+# herdr's own constraint: [a-z][a-z0-9_-]{0,31}. The per-half budget must not have
+# bought legibility by overrunning it.
+[[ ${#LONG_REF} -le 32 && "$LONG_REF" =~ ^[a-z][a-z0-9_-]*$ ]]
+check "…and still inside herdr's 32-char name shape" $? "surface_ref=$LONG_REF len=${#LONG_REF}"
 
 # A LOCAL dial's emitted contract is untouched: neither new key appears, so a
 # consumer cannot tell a Phase-3b hotline from the one before it.
