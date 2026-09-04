@@ -1948,6 +1948,12 @@ check "a confirmed herdr delivery reports status=connected" $? \
 check "…with transport=herdr and placement=detached" $? "out=$out"
 [[ "$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)" == hotline-* ]]
 check "…and the herdr AGENT NAME in the stable host-ref field (.surface_ref)" $? "out=$out"
+# The name SAYS WHERE THE CALLEE IS. It is the only handle `herdr agent list` gives
+# a human looking for a stuck callee, and slugging the session name instead made
+# every one of them hotline-hotline-* (claude-plugins-hukk).
+[[ "$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)" == "hotline-$(basename "$t/target")-"* ]]
+check "…slugged from the TARGET's directory, not from the session name" $? \
+  "surface_ref=$(jq -r '.surface_ref' <<<"$out" 2>/dev/null) (expected hotline-$(basename "$t/target")-*)"
 [[ -n "$(jq -r '.remote_session_id // empty' <<<"$out" 2>/dev/null)" \
    && -n "$(jq -r '.call_id // empty' <<<"$out" 2>/dev/null)" ]]
 check "…and the contract's .remote_session_id / .call_id unchanged in shape" $? "out=$out"
@@ -2122,13 +2128,13 @@ check "…with the follow-up message and the protocol tags beneath it" $? \
 # and this one did. Only the prompt shape and the --name changed.
 [[ "$(jq -r '.first_contact' <<<"$out" 2>/dev/null)" == "false" ]]
 check "…while the emitted first_contact stays false: the cache entry was real" $? "out=$out"
-# --name reaches this launch too. herdr-call-async.sh mints the agent name from the
-# session name when it has one and from the callee's CWD when it does not, so a
-# fallback launch without it produces a bare cwd-slug name — the one agent in
-# `herdr agent list` that does not say which call opened it.
-[[ "$NEW_AGENT" != "hotline-$(basename "$t/target")-"* ]]
-check "…and the launch passes --name, so the new agent is not named off the cwd slug" $? \
-  "agent=$NEW_AGENT (cwd slug would be hotline-$(basename "$t/target")-*)"
+# The agent name names the TARGET, on this fallback launch as on a first contact.
+# It used to be slugged from --name, whose value ("hotline: a → b (mode)") basenames
+# to itself, so every agent in `herdr agent list` read hotline-hotline-* and none of
+# them said which directory its callee was sitting in (claude-plugins-hukk).
+[[ "$NEW_AGENT" == "hotline-$(basename "$t/target")-"* ]]
+check "…and the new agent is named off the TARGET's cwd slug, not the session name" $? \
+  "agent=$NEW_AGENT (expected hotline-$(basename "$t/target")-*)"
 
 # --- a follow-up into a BLOCKED cached agent, THROUGH dial.sh ----------------
 # The orphan the direct-script tests above cannot see: dial.sh used to answer a
@@ -3046,6 +3052,13 @@ check "…and the emitted JSON carries .remote_target and .remote_pane for the t
    && -n "$(jq -r '.remote_session_id // empty' <<<"$out" 2>/dev/null)" \
    && -n "$(jq -r '.call_id // empty' <<<"$out" 2>/dev/null)" ]]
 check "…with the contract's own keys unchanged in shape (host ref, session, nonce)" $? "out=$out"
+# A REMOTE callee's slug carries the BOX as well as the directory: two machines hold
+# the same directory names, and the agent name is the only handle either callee has.
+# "tester@no-such-box.invalid" + "target" → the login user dropped, non-alphanumerics
+# collapsed to dashes, cut to the 14 characters herdr's name budget allows.
+[[ "$(jq -r '.surface_ref' <<<"$out" 2>/dev/null)" == "hotline-no-such-box-in-"* ]]
+check "…and a remote agent's slug names the HOST plus the directory, minus the login user" $? \
+  "surface_ref=$(jq -r '.surface_ref' <<<"$out" 2>/dev/null) (expected hotline-no-such-box-in-*)"
 [[ ! -s "$t/cmux.log" ]]
 check "…and no cmux call: a remote dial never consults the local multiplexer" $? \
   "cmux calls: $(cat "$t/cmux.log" 2>/dev/null)"

@@ -280,10 +280,14 @@ herdr_resolve_split_pane() {
 #
 # Shape is a herdr constraint, not a preference: [a-z][a-z0-9_-]{0,31}, unique among
 # live agents. `hotline-` prefixes every one so an agent left behind by a call is
-# attributable at a glance in `herdr agent list`; the slug says which call it was;
+# attributable at a glance in `herdr agent list`; the slug says WHERE the callee is;
 # the random tail is what keeps two dials into the same directory from colliding.
 # 8 + 14 + 1 + 6 = 29 characters at most. Pure — no CLI, safe in a substitution.
-herdr_mint_agent_name() {  # <callee-cwd-or-label>
+#
+# The argument must name the TARGET — the callee's cwd, or `<host>-<cwd basename>`
+# for a remote dial. Anything else (a session name, say) buys a slug that is the
+# same for every call, which is the one thing this name exists not to be.
+herdr_mint_agent_name() {  # <callee-cwd-or-target-label>
   local slug tail
   slug=$(printf '%s' "$(basename "${1:-call}")" \
          | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' \
