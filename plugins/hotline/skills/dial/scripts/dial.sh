@@ -1592,9 +1592,14 @@ if [[ "$TRANSPORT" == "herdr" && -s "$CALL_DIR/pending_paste.md" ]]; then
     # and a refused delivery is often a callee that has already exited. Left there it
     # makes the re-dial this error asks for a FOLLOW-UP into that agent: told "no
     # such agent", falling back to a fresh callee and reporting a conversation lost
-    # that never started (claude-plugins-63om). Only on first contact — a follow-up's
-    # entry describes a real prior exchange, whatever happened to this message.
-    if $FIRST_CONTACT; then
+    # that never started (claude-plugins-63om). A RESHAPED FOLLOW-UP COUNTS AS ONE:
+    # every follow-up that reaches this block got here through
+    # reshape_as_first_contact (its cached agent was gone or refused), so
+    # register-call.sh's `set` has already REPLACED the entry with this fresh
+    # callee — the prior exchange it used to describe is not in there any more, and
+    # what is left names an agent that never got its opening prompt. Same pair
+    # fire_herdr gates --name on, for the same reason.
+    if $FIRST_CONTACT || $RESHAPED_AS_FIRST_CONTACT; then
       bash "$DIAL_SCRIPTS/session-cache.sh" forget "$TARGET_PATH" \
         --caller-session "$MY_SESSION_ID" >/dev/null 2>&1 || true
     fi
