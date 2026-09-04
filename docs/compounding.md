@@ -142,7 +142,9 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   that control is the trailing slash, `find /tmp/`. Capture any diff you grep with
   `git --no-color` (or `-c color.ui=never`) and quote every `--include` glob — ANSI
   escapes in the captured text and zsh's expansion of a bare glob each silence a
-  grep without failing it. (claude-plugins-qq9f, claude-plugins-vagi, 050619c)
+  grep without failing it — and a `grep` that is really `ugrep` ignores `--include`
+  quoted or not, warning and then searching the whole tree.
+  (claude-plugins-qq9f, claude-plugins-vagi, 050619c)
 
 ## Code shape
 
@@ -192,10 +194,24 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   box-wait "default 60" documented in two files was hardcoded 20 at both call
   sites. Where a doc must state a fact, a string canary asserts agreement — see
   `newline-submit-docs_test.sh`. (claude-plugins-xick, round 2 #6)
-- **Record state before the step that can fail.** An undelivered conference left a
-  live REPL no cache knew about, so the next dial opened a second one. If a record's
-  inputs exist before the risky step, write the record first.
-  (claude-plugins-xick, round 2 #4)
+- **A summary-line budget is not a detail budget.** `reason_of`'s 300-character cut
+  belongs to a `fallbacks` line summarizing a call that SUCCEEDED, and reusing it for
+  the `emit_error` detail severs the recovery half off refusals that run ~450
+  characters, leaving the reader of a failed dial nothing to act on. `cmux-call.sh`
+  had already split the two by hand (160 for the send-failure summary, 500 for the
+  delivery detail) without sharing the split, which is how dial.sh's detail reader
+  inherited the summary's bound. Give each reader its own bound, sized from the
+  longest string its producer can emit — `reason_full` is dial.sh's unbounded one.
+  (claude-plugins-e3xr, 07ca971)
+- **Record state before the step that can fail — and unwind it on the failure
+  path.** An undelivered conference left a live REPL no cache knew about, so the next
+  dial opened a second one; the same record, written at boot-confirm and left in
+  place through a refused delivery, names a callee that never received the opening
+  prompt, so the re-dial the error asks for arrives as a follow-up into a dead agent.
+  If a record's inputs exist before the risky step, write the record first, then give
+  every failure path below it an explicit unwind (`session-cache.sh forget`) and
+  check that a reshaped retry reaches it too.
+  (claude-plugins-xick round 2 #4, claude-plugins-63om, 07ca971)
 - **Every Drive v3 file call carries `supportsAllDrives=true`; `files.export` and
   the Docs API do not.** The gws rung of the gws skills omitted it on
   `files.create/get/update`, so shared-drive folders and docs 404'd as "File not
@@ -230,6 +246,15 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   file, and the 60-skill guard in `measure-skill-descriptions.sh` suppressed the
   report it was protecting. Derive the count, or drop the guard and let the report
   state the number. (claude-plugins-nwtk, -lvj0)
+- **A leak check matches its own artifact, not a count of a shared namespace.**
+  `dial_wrapper_test.sh` compared `ls /tmp/hotline-prompt-* | wc -l` before and after
+  a dial, and `/tmp` is machine-global, so any other hotline session dialing inside
+  that window pushed the count up and failed the assertion — three times over. Stamp
+  the artifact with something only this run can produce (`$$` in the payload) and
+  grep for that, so a survivor bearing it is a real leak and nothing else can be
+  mistaken for one. This is the count guard above one layer out: a count standing in
+  for the thing you actually mean. (claude-plugins-iyau, claude-plugins-nwtk,
+  07ca971)
 - **A suite is not green until it is green on Linux.** The ubuntu runner is the
   only Linux check, and a macOS-green suite hid a red CI for the entire
   terminal.paste rework — portability bugs (BSD-only `stat`, `getppid` reparenting
