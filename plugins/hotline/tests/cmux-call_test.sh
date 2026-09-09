@@ -392,11 +392,11 @@ fi
 # Scoped to THIS run: the old code left these behind on every failure, so a bare
 # glob would report other runs' litter rather than this one's behavior. (There were
 # four of them on this machine when the check was written — the finding was real.)
-CONF_ORPHANS=$(find /tmp -maxdepth 1 -name 'hotline-conf-prompt-*' -newer "$SOCKROOT" 2>/dev/null)
+	CONF_ORPHANS=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'hotline-conf-prompt-*' -newer "$SOCKROOT" 2>/dev/null)
 if [[ -z "$CONF_ORPHANS" ]]; then
-  pass "no bare /tmp/hotline-conf-prompt-* orphan is created"
+	pass "no bare TMPDIR/hotline-conf-prompt-* orphan is created"
 else
-  fail "no bare /tmp/hotline-conf-prompt-* orphan is created" "$CONF_ORPHANS"
+	fail "no bare TMPDIR/hotline-conf-prompt-* orphan is created" "$CONF_ORPHANS"
 fi
 launch_script=$(grep -oE '/tmp/hotline-cmux-launch-[A-Za-z0-9]+' "$tmp/send_args" 2>/dev/null | head -1)
 [[ -n "$launch_script" ]] && LAUNCH_SCRIPTS+=("$launch_script")
