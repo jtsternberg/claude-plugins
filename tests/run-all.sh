@@ -4,8 +4,10 @@
 #
 # Usage: bash tests/run-all.sh
 #        RUN_ALL_JOBS=1 bash tests/run-all.sh  # serial execution
-# Suites run four at a time by default. Their isolated output is replayed in
-# discovery order after each batch, so failures remain readable and repeatable.
+# Every suite goes into one global work queue that keeps up to RUN_ALL_JOBS
+# slots busy: the moment a slot frees, the next suite starts. Output is
+# buffered per suite and replayed in discovery order, so failures remain
+# readable and repeatable no matter what order the suites finished in.
 # Exit 0 only when every suite that could run passed.
 #
 # The suites are scattered by plugin and written in three languages (node --test,
@@ -20,6 +22,8 @@ set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO" || exit 1
+
+RUN_STARTED=$(date +%s)
 
 # Hotline's call scripts create scratch dirs under ${HOTLINE_CALL_HOME:-/tmp}.
 # Point them at a run-scoped dir we own and wipe on exit, so a full suite run
@@ -49,7 +53,28 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-RUN_ALL_JOBS="${RUN_ALL_JOBS:-4}"
+# One job per core, because a hardcoded 4 was wrong in both directions: it
+# oversubscribes CI's 2-core runners 2x (and the suites that assert on short
+# timeouts are the first to notice), while leaving a 12-core laptop idle.
+default_jobs() {
+	local n=""
+	case "$(uname -s 2>/dev/null || true)" in
+		Darwin) n="$(sysctl -n hw.ncpu 2>/dev/null || true)" ;;
+		*)      n="$(nproc 2>/dev/null || true)" ;;
+	esac
+	case "$n" in ''|*[!0-9]*|0) n=4 ;; esac
+	# Clamped to 2..4, measured rather than guessed. Below 2 a single-core box
+	# would serialize an 8-minute run. Above 4 buys nothing: at 4 jobs every
+	# suite still takes the same wall time it takes alone, while an 8-job run on
+	# a 12-core laptop came out slower overall and flaked surface-placement's
+	# readiness-retry assertion. These suites spend their time waiting on real
+	# timeouts, not on CPU, so widening past a handful only perturbs them.
+	[[ $n -lt 2 ]] && n=2
+	[[ $n -gt 4 ]] && n=4
+	printf '%s\n' "$n"
+}
+
+RUN_ALL_JOBS="${RUN_ALL_JOBS:-$(default_jobs)}"
 case "$RUN_ALL_JOBS" in
 	''|*[!0-9]*|0|0[0-9]*)
 		printf 'RUN_ALL_JOBS must be a positive whole number, got %s\n' "$RUN_ALL_JOBS" >&2
@@ -58,6 +83,7 @@ case "$RUN_ALL_JOBS" in
 esac
 
 PASS=0; FAIL=0; SKIP=0
+SUITE_SECONDS=0
 FAILED=()
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -79,10 +105,56 @@ skip() {
 	report "$1" 77 "$2"
 }
 
-# Run one batch concurrently, then replay its output in argument order. Batches
-# avoid Bash 4-only job-control helpers (`wait -n`, associative arrays), so the
-# same runner works under macOS's Bash 3 and Linux. Each suite gets a private log;
-# a noisy failure can never interleave with another suite's diagnostics.
+# ---- the work queue ---------------------------------------------------------
+# Suites are collected first and run last, from a single queue that spans all
+# three languages: the 2s worth of node suites have to be free to fill the gaps
+# left by the multi-minute bash ones. Each suite gets a private log, so a noisy
+# failure can never interleave with another suite's diagnostics, and the logs
+# are replayed in discovery order rather than completion order.
+
+TASK_LABEL=(); TASK_KIND=(); TASK_PATH=()
+TASK_STATUS=(); TASK_START=(); TASK_LOG=(); TASK_END=()
+TASK_COUNT=0; TASK_SERIAL=0
+
+enqueue() {      # enqueue <label> <kind> <path>
+	TASK_LABEL+=("$1"); TASK_KIND+=("$2"); TASK_PATH+=("$3")
+	TASK_STATUS+=(""); TASK_START+=(""); TASK_LOG+=(""); TASK_END+=("")
+	TASK_COUNT=$((TASK_COUNT + 1))
+}
+
+# Longest-first is a packing optimization *only* — the queue is correct in any
+# order. Starting the handful of suites that dominate the run first keeps the
+# tail from being one multi-minute suite finishing alone while every slot sits
+# idle. Refresh this list from the `completed in Ns` lines the runner already
+# prints; it is deliberately not a persisted timing cache.
+SLOW_FIRST="herdr-transport dial_wrapper cmux-reuse-surface wait-for-cmux"
+
+build_run_order() {
+	local i slow queued
+	RUN_ORDER=()
+	# With one slot the packing hint is all cost and no benefit: the run takes the
+	# same total either way, but discovery order lets each suite's output land as
+	# it finishes instead of holding five minutes of it behind the slow four.
+	if [[ $RUN_ALL_JOBS -le 1 ]]; then
+		for ((i = 0; i < TASK_COUNT; i++)); do RUN_ORDER+=("$i"); done
+		return 0
+	fi
+	for slow in $SLOW_FIRST; do
+		for ((i = 0; i < TASK_COUNT; i++)); do
+			case "${TASK_LABEL[$i]}" in
+				*": $slow") RUN_ORDER+=("$i") ;;
+			esac
+		done
+	done
+	for ((i = 0; i < TASK_COUNT; i++)); do
+		queued=0
+		for slow in ${RUN_ORDER[@]+"${RUN_ORDER[@]}"}; do
+			[[ $slow -eq $i ]] && queued=1
+		done
+		[[ $queued -eq 1 ]] || RUN_ORDER+=("$i")
+	done
+}
+
 run_task() {     # run_task <kind> <path> <log> <end-file> <tmp-dir>
 	local kind="$1" path="$2" log="$3" end_file="$4" job_tmp="$5" status
 	export TMPDIR="$job_tmp" HOTLINE_CALL_HOME="$job_tmp/calls"
@@ -96,82 +168,107 @@ run_task() {     # run_task <kind> <path> <log> <end-file> <tmp-dir>
 	return "$status"
 }
 
-run_batch() {    # run_batch <label> <kind> <path> [triples...]
-	local labels=() logs=() ends=() pids=() statuses=() starts=()
-	local label kind path log end_file job_tmp pid status i ended
+launch_task() {  # launch_task <task-index>; sets LAUNCHED_PID
+	local i="$1" job_tmp
+	TASK_SERIAL=$((TASK_SERIAL + 1))
+	TASK_LOG[$i]="$RUN_OUTPUT_HOME/$TASK_SERIAL.log"
+	TASK_END[$i]="$RUN_OUTPUT_HOME/$TASK_SERIAL.end"
+	job_tmp="$RUN_TMP_HOME/t$TASK_SERIAL"
+	mkdir -p "$job_tmp/calls"
+	TASK_START[$i]="$(date +%s)"
+	( run_task "${TASK_KIND[$i]}" "${TASK_PATH[$i]}" "${TASK_LOG[$i]}" "${TASK_END[$i]}" "$job_tmp" ) &
+	LAUNCHED_PID=$!
+	ACTIVE_PIDS+=("$LAUNCHED_PID")
+}
+
+replay_task() {  # replay_task <task-index>
+	local i="$1" status ended
+	printf '\n\033[1m=== %s ===\033[0m\n' "${TASK_LABEL[$i]}"
+	cat "${TASK_LOG[$i]}"
+	# report prints a heading itself; update the counters inline after the
+	# already-rendered suite heading so each label appears only once.
+	status="${TASK_STATUS[$i]}"
+	if [[ $status -eq 0 ]]; then
+		PASS=$((PASS + 1)); printf '\033[32m✓ %s\033[0m\n' "${TASK_LABEL[$i]}"
+	elif [[ $status -eq 77 ]]; then
+		SKIP=$((SKIP + 1)); printf '\033[33m− SKIP %s (suite opted out)\033[0m\n' "${TASK_LABEL[$i]}"
+	else
+		FAIL=$((FAIL + 1)); FAILED+=("${TASK_LABEL[$i]}"); printf '\033[31m✗ %s\033[0m\n' "${TASK_LABEL[$i]}"
+	fi
+	# A suite whose whole process group is killed never writes its .end stamp,
+	# and the subtraction below then printed a nonsense negative elapsed time.
+	ended=""
+	[[ ! -f "${TASK_END[$i]}" ]] || ended="$(cat "${TASK_END[$i]}")"
+	case "$ended" in
+		''|*[!0-9]*)
+			printf '  did not finish (no completion time recorded)\n'
+			;;
+		*)
+			printf '  completed in %ss\n' "$((ended - ${TASK_START[$i]}))"
+			SUITE_SECONDS=$((SUITE_SECONDS + ended - ${TASK_START[$i]}))
+			;;
+	esac
+}
+
+run_queue() {
+	local slot_pid=() slot_task=() j i pid next replay busy reaped
+	[[ $TASK_COUNT -gt 0 ]] || return 0
+	build_run_order
+	printf '\nRunning %d suite(s) with up to %d jobs...\n' "$TASK_COUNT" "$RUN_ALL_JOBS"
+	for ((j = 0; j < RUN_ALL_JOBS; j++)); do slot_pid[$j]=""; slot_task[$j]=-1; done
 	# Monitor mode gives every async suite its own process group, including the
 	# servers it starts. The signal cleanup above can therefore stop the whole
 	# suite tree without `setsid`, which macOS does not provide by default.
 	set -m
-	while [[ $# -gt 0 ]]; do
-		label="$1"; kind="$2"; path="$3"; shift 3
-		TASK_SERIAL=$((TASK_SERIAL + 1))
-		log="$RUN_OUTPUT_HOME/$TASK_SERIAL.log"
-		end_file="$RUN_OUTPUT_HOME/$TASK_SERIAL.end"
-		job_tmp="$RUN_TMP_HOME/t$TASK_SERIAL"
-		mkdir -p "$job_tmp/calls"
-		labels+=("$label"); logs+=("$log"); ends+=("$end_file")
-		starts+=("$(date +%s)")
-		( run_task "$kind" "$path" "$log" "$end_file" "$job_tmp" ) &
-		pids+=("$!")
-		ACTIVE_PIDS+=("$!")
-	done
-	printf '\nRunning %d suite(s) with up to %d jobs...\n' "${#labels[@]}" "$RUN_ALL_JOBS"
-
-	for pid in "${pids[@]}"; do
-		wait "$pid"; statuses+=("$?")
+	next=0; replay=0
+	while [[ $replay -lt $TASK_COUNT ]]; do
+		busy=0
+		for ((j = 0; j < RUN_ALL_JOBS; j++)); do
+			if [[ -z "${slot_pid[$j]}" ]] && [[ $next -lt $TASK_COUNT ]]; then
+				i="${RUN_ORDER[$next]}"; next=$((next + 1))
+				launch_task "$i"
+				slot_pid[$j]="$LAUNCHED_PID"; slot_task[$j]="$i"
+			fi
+			[[ -z "${slot_pid[$j]}" ]] || busy=$((busy + 1))
+		done
+		# Bash 3 has no `wait -n`, so ask the live slots whether they are still
+		# there with `kill -0` on a 0.1s tick — under 1% overhead across a run
+		# this long. When only one suite is left in flight there is nothing to
+		# poll *for*, so block on it instead; that also makes RUN_ALL_JOBS=1 a
+		# plain serial `wait` with no ticking at all.
+		reaped=0
+		for ((j = 0; j < RUN_ALL_JOBS; j++)); do
+			pid="${slot_pid[$j]}"
+			[[ -n "$pid" ]] || continue
+			if [[ $busy -gt 1 ]]; then
+				kill -0 "$pid" 2>/dev/null && continue
+			fi
+			wait "$pid"; TASK_STATUS[${slot_task[$j]}]=$?
+			slot_pid[$j]=""; slot_task[$j]=-1; reaped=1
+		done
+		[[ $reaped -eq 1 ]] || sleep 0.1
+		while [[ $replay -lt $TASK_COUNT ]] && [[ -n "${TASK_STATUS[$replay]}" ]]; do
+			replay_task "$replay"; replay=$((replay + 1))
+		done
 	done
 	set +m
-	for ((i = 0; i < ${#labels[@]}; i++)); do
-		printf '\n\033[1m=== %s ===\033[0m\n' "${labels[$i]}"
-		cat "${logs[$i]}"
-		# report prints a heading itself; update the counters inline after the
-		# already-rendered suite heading so each label appears only once.
-		status="${statuses[$i]}"
-		ended=$(cat "${ends[$i]}")
-		if [[ $status -eq 0 ]]; then
-			PASS=$((PASS + 1)); printf '\033[32m✓ %s\033[0m\n' "${labels[$i]}"
-		elif [[ $status -eq 77 ]]; then
-			SKIP=$((SKIP + 1)); printf '\033[33m− SKIP %s (suite opted out)\033[0m\n' "${labels[$i]}"
-		else
-			FAIL=$((FAIL + 1)); FAILED+=("${labels[$i]}"); printf '\033[31m✗ %s\033[0m\n' "${labels[$i]}"
-		fi
-		printf '  completed in %ss\n' "$((ended - starts[$i]))"
-	done
 	ACTIVE_PIDS=()
 }
-
-enqueue() {      # enqueue <label> <command> <path>
-	BATCH+=("$1" "$2" "$3")
-	BATCH_COUNT=$((BATCH_COUNT + 1))
-	if [[ $BATCH_COUNT -ge $RUN_ALL_JOBS ]]; then
-		run_batch "${BATCH[@]}"
-		BATCH=(); BATCH_COUNT=0
-	fi
-}
-
-flush() {
-	[[ $BATCH_COUNT -eq 0 ]] || run_batch "${BATCH[@]}"
-	BATCH=(); BATCH_COUNT=0
-}
-
-BATCH=(); BATCH_COUNT=0; TASK_SERIAL=0
 
 # ---- node suites ------------------------------------------------------------
 
 if have node; then
-	enqueue "parser drift (transcript.mjs ↔ switchboard)" node tests/parser-drift.test.mjs
-	enqueue "codex catalog drift (native ↔ legacy + policy)" node tests/codex-catalog-drift.test.mjs
-	[[ ! -f tests/run-all-runner.test.mjs ]] || enqueue "run-all runner behavior" node tests/run-all-runner.test.mjs
 	# Discovered, not listed: a hardcoded list silently omits new suites. The handoff
 	# bash suite shipped with 14 passing tests that CI never ran, because the globs
-	# below used to name one plugin each.
-	for t in plugins/*/skills/*/tests/*.test.mjs plugins/*/tests/*.test.mjs \
+	# below used to name one plugin each. The repo's own tests/ suites are globbed
+	# for that same reason: named one by one, a rename there takes the runner's
+	# own tests out of the run without a word.
+	for t in tests/*.test.mjs \
+	         plugins/*/skills/*/tests/*.test.mjs plugins/*/tests/*.test.mjs \
 	         plugins/*/*/skills/*/tests/*.test.mjs plugins/*/*/tests/*.test.mjs; do
 		[[ -f "$t" ]] || continue
 		enqueue "node: ${t#plugins/}" node "$t"
 	done
-	flush
 else
 	skip "node suites" "node not installed"
 fi
@@ -192,7 +289,6 @@ if have bash; then
 		fi
 		enqueue "$name" bash "$t"
 	done
-	flush
 fi
 
 # ---- python suites ----------------------------------------------------------
@@ -229,15 +325,17 @@ if [[ -n "$PY" ]]; then
 
 		enqueue "$label" python "$d"
 	done
-	flush
 else
 	skip "python suites" "python3 not installed"
 fi
+
+run_queue
 
 # ---- summary ----------------------------------------------------------------
 
 printf '\n\033[1m──────── summary ────────\033[0m\n'
 printf 'passed  %d\nfailed  %d\nskipped %d\n' "$PASS" "$FAIL" "$SKIP"
+printf 'TOTAL   %ss of suite work in %ss wall clock\n' "$SUITE_SECONDS" "$(($(date +%s) - RUN_STARTED))"
 if [[ $FAIL -gt 0 ]]; then
 	printf '\n\033[31mFailed suites:\033[0m\n'
 	printf '  %s\n' "${FAILED[@]}"
