@@ -142,6 +142,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   burned its full budget and proceeded blind on every call. When flipping a flag
   changes what attaches a resource, re-derive the wait's signal instead of keeping it.
   (claude-plugins-r465.4, -r465.2)
+- **A probe answers only about the one thing it varied.** Two trust-dialog verdicts
+  came from probes that differed from the claim in a second way: a `git init` dir
+  under a trusted parent read as "trust does not inherit from a *directory*", and a
+  worktree of an already-trusted repo read as "`--dangerously-skip-permissions`
+  bypasses the trust dialog". Run the negative arm — prove the environment can still
+  produce the gate — before a "no gate" reading becomes a rule.
+  (claude-plugins-2w55, -yzr6)
 - **A sweep that reports zero matches is only clean once it is proved able to
   match.** On macOS `/tmp` is a symlink, so `find /tmp -maxdepth 1` descends nothing
   and answers "clean" over 291 real files — as does an unquoted `$FILES` list in a
