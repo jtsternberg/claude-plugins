@@ -32,20 +32,31 @@ RUN_STARTED=$(date +%s)
 RUN_TMP_HOME="$(mktemp -d /tmp/run-all-XXXXXX)" || exit 1
 RUN_OUTPUT_HOME="$RUN_TMP_HOME/output"
 mkdir -p "$RUN_OUTPUT_HOME"
+# Slot-indexed and holding *only* pids still in flight — a freed slot is emptied
+# the moment its suite is reaped. cleanup below signals process *groups* by
+# number, and a reaped pid's number is free for the kernel to reissue: this box
+# churns ~500 pids/s against a 99,999 ceiling, so an every-pid-ever list would,
+# on a Ctrl-C two minutes into a run, aim SIGKILL at ~50 numbers that now belong
+# to somebody else's shell, editor, or agent session — and take their whole group
+# with them. Every suite gets a group whose pgid equals its own pid (`set -m`
+# below), so live pids are all the bookkeeping this needs.
 ACTIVE_PIDS=()
 cleanup() {
-	local pid attempt any_live
-	for pid in ${ACTIVE_PIDS[@]+"${ACTIVE_PIDS[@]}"}; do kill -TERM -- "-$pid" 2>/dev/null || true; done
+	local pid attempt any_live live=()
+	for pid in ${ACTIVE_PIDS[@]+"${ACTIVE_PIDS[@]}"}; do
+		[[ -z "$pid" ]] || live+=("$pid")
+	done
+	for pid in ${live[@]+"${live[@]}"}; do kill -TERM -- "-$pid" 2>/dev/null || true; done
 	for attempt in 1 2 3 4 5 6 7 8 9 10; do
 		any_live=0
-		for pid in ${ACTIVE_PIDS[@]+"${ACTIVE_PIDS[@]}"}; do
+		for pid in ${live[@]+"${live[@]}"}; do
 			kill -0 "$pid" 2>/dev/null && any_live=1
 		done
 		[[ $any_live -eq 0 ]] && break
 		sleep 0.1
 	done
-	for pid in ${ACTIVE_PIDS[@]+"${ACTIVE_PIDS[@]}"}; do kill -KILL -- "-$pid" 2>/dev/null || true; done
-	for pid in ${ACTIVE_PIDS[@]+"${ACTIVE_PIDS[@]}"}; do wait "$pid" 2>/dev/null || true; done
+	for pid in ${live[@]+"${live[@]}"}; do kill -KILL -- "-$pid" 2>/dev/null || true; done
+	for pid in ${live[@]+"${live[@]}"}; do wait "$pid" 2>/dev/null || true; done
 	rm -rf "$RUN_TMP_HOME"
 }
 trap cleanup EXIT
@@ -64,11 +75,11 @@ default_jobs() {
 	esac
 	case "$n" in ''|*[!0-9]*|0) n=4 ;; esac
 	# Clamped to 2..4, measured rather than guessed. Below 2 a single-core box
-	# would serialize an 8-minute run. Above 4 buys nothing: at 4 jobs every
-	# suite still takes the same wall time it takes alone, while an 8-job run on
-	# a 12-core laptop came out slower overall and flaked surface-placement's
-	# readiness-retry assertion. These suites spend their time waiting on real
-	# timeouts, not on CPU, so widening past a handful only perturbs them.
+	# would serialize an 8-minute run. The 4 ceiling is not a property of the
+	# suites: an 8-job run on a 12-core laptop came out slower overall and
+	# failed surface-placement, whose assertion has a fixed wall-clock budget
+	# that expires once the box is loaded enough — tracked as
+	# claude-plugins-fjuh. Fix that test and this ceiling may well lift.
 	[[ $n -lt 2 ]] && n=2
 	[[ $n -gt 4 ]] && n=4
 	printf '%s\n' "$n"
@@ -129,8 +140,16 @@ enqueue() {      # enqueue <label> <kind> <path>
 # prints; it is deliberately not a persisted timing cache.
 SLOW_FIRST="herdr-transport dial_wrapper cmux-reuse-surface wait-for-cmux"
 
+already_queued() {  # already_queued <task-index>
+	local candidate="$1" queued
+	for queued in ${RUN_ORDER[@]+"${RUN_ORDER[@]}"}; do
+		[[ $queued -eq $candidate ]] && return 0
+	done
+	return 1
+}
+
 build_run_order() {
-	local i slow queued
+	local i slow
 	RUN_ORDER=()
 	# With one slot the packing hint is all cost and no benefit: the run takes the
 	# same total either way, but discovery order lets each suite's output land as
@@ -142,17 +161,25 @@ build_run_order() {
 	for slow in $SLOW_FIRST; do
 		for ((i = 0; i < TASK_COUNT; i++)); do
 			case "${TASK_LABEL[$i]}" in
-				*": $slow") RUN_ORDER+=("$i") ;;
+				*": $slow") already_queued "$i" || RUN_ORDER+=("$i") ;;
 			esac
 		done
 	done
 	for ((i = 0; i < TASK_COUNT; i++)); do
-		queued=0
-		for slow in ${RUN_ORDER[@]+"${RUN_ORDER[@]}"}; do
-			[[ $slow -eq $i ]] && queued=1
-		done
-		[[ $queued -eq 1 ]] || RUN_ORDER+=("$i")
+		already_queued "$i" || RUN_ORDER+=("$i")
 	done
+	# RUN_ORDER is the launch loop's only source of task indices and that loop
+	# stops at TASK_COUNT, so an order longer than the queue silently drops its
+	# tail: the dropped task never launches, its status stays empty, and the
+	# replay loop then waits on it forever with nothing in flight and nothing
+	# printed. Naming one suite twice in SLOW_FIRST was enough to do it, and
+	# the comment above that list invites hand-editing. Fail here instead: in
+	# CI the alternative is a job that burns its whole timeout in silence.
+	if [[ ${#RUN_ORDER[@]} -ne $TASK_COUNT ]]; then
+		printf 'run order holds %d entries for %d suite(s) — check SLOW_FIRST for duplicates\n' \
+			"${#RUN_ORDER[@]}" "$TASK_COUNT" >&2
+		exit 2
+	fi
 }
 
 run_task() {     # run_task <kind> <path> <log> <end-file> <tmp-dir>
@@ -178,7 +205,6 @@ launch_task() {  # launch_task <task-index>; sets LAUNCHED_PID
 	TASK_START[$i]="$(date +%s)"
 	( run_task "${TASK_KIND[$i]}" "${TASK_PATH[$i]}" "${TASK_LOG[$i]}" "${TASK_END[$i]}" "$job_tmp" ) &
 	LAUNCHED_PID=$!
-	ACTIVE_PIDS+=("$LAUNCHED_PID")
 }
 
 replay_task() {  # replay_task <task-index>
@@ -211,25 +237,25 @@ replay_task() {  # replay_task <task-index>
 }
 
 run_queue() {
-	local slot_pid=() slot_task=() j i pid next replay busy reaped
+	local slot_task=() j i pid next replay busy reaped finished
 	[[ $TASK_COUNT -gt 0 ]] || return 0
 	build_run_order
 	printf '\nRunning %d suite(s) with up to %d jobs...\n' "$TASK_COUNT" "$RUN_ALL_JOBS"
-	for ((j = 0; j < RUN_ALL_JOBS; j++)); do slot_pid[$j]=""; slot_task[$j]=-1; done
+	for ((j = 0; j < RUN_ALL_JOBS; j++)); do ACTIVE_PIDS[$j]=""; slot_task[$j]=-1; done
 	# Monitor mode gives every async suite its own process group, including the
 	# servers it starts. The signal cleanup above can therefore stop the whole
 	# suite tree without `setsid`, which macOS does not provide by default.
 	set -m
-	next=0; replay=0
+	next=0; replay=0; finished=0
 	while [[ $replay -lt $TASK_COUNT ]]; do
 		busy=0
 		for ((j = 0; j < RUN_ALL_JOBS; j++)); do
-			if [[ -z "${slot_pid[$j]}" ]] && [[ $next -lt $TASK_COUNT ]]; then
+			if [[ -z "${ACTIVE_PIDS[$j]}" ]] && [[ $next -lt $TASK_COUNT ]]; then
 				i="${RUN_ORDER[$next]}"; next=$((next + 1))
 				launch_task "$i"
-				slot_pid[$j]="$LAUNCHED_PID"; slot_task[$j]="$i"
+				ACTIVE_PIDS[$j]="$LAUNCHED_PID"; slot_task[$j]="$i"
 			fi
-			[[ -z "${slot_pid[$j]}" ]] || busy=$((busy + 1))
+			[[ -z "${ACTIVE_PIDS[$j]}" ]] || busy=$((busy + 1))
 		done
 		# Bash 3 has no `wait -n`, so ask the live slots whether they are still
 		# there with `kill -0` on a 0.1s tick — under 1% overhead across a run
@@ -238,13 +264,20 @@ run_queue() {
 		# plain serial `wait` with no ticking at all.
 		reaped=0
 		for ((j = 0; j < RUN_ALL_JOBS; j++)); do
-			pid="${slot_pid[$j]}"
+			pid="${ACTIVE_PIDS[$j]}"
 			[[ -n "$pid" ]] || continue
 			if [[ $busy -gt 1 ]]; then
 				kill -0 "$pid" 2>/dev/null && continue
 			fi
 			wait "$pid"; TASK_STATUS[${slot_task[$j]}]=$?
-			slot_pid[$j]=""; slot_task[$j]=-1; reaped=1
+			finished=$((finished + 1))
+			# Replay is strictly discovery-ordered, so nothing at all prints until
+			# the suite at position 0 finishes — 54s of a 145s run, and a run whose
+			# position-0 suite hangs prints nothing for its entire lifetime. This
+			# line is the only evidence a CI log gets that the other 57 suites ran.
+			printf '  ⋯ launched %d/%d · finished %d — %s\n' \
+				"$next" "$TASK_COUNT" "$finished" "${TASK_LABEL[${slot_task[$j]}]}"
+			ACTIVE_PIDS[$j]=""; slot_task[$j]=-1; reaped=1
 		done
 		[[ $reaped -eq 1 ]] || sleep 0.1
 		while [[ $replay -lt $TASK_COUNT ]] && [[ -n "${TASK_STATUS[$replay]}" ]]; do

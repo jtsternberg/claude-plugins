@@ -12,14 +12,55 @@ function writeExecutable(path, contents) {
 	chmodSync(path, 0o755);
 }
 
-function createFixture() {
+function createFixture({ logKills = false } = {}) {
 	const root = mkdtempSync(join(tmpdir(), 'run-all-runner-test-'));
 	mkdirSync(join(root, 'tests'), { recursive: true });
 	mkdirSync(join(root, 'plugins', 'fixture', 'tests'), { recursive: true });
-	cpSync(sourceRunner, join(root, 'tests', 'run-all.sh'));
+	if (logKills) {
+		// `kill` is a bash builtin, so PATH cannot intercept it — but a shell
+		// function outranks a builtin. Sourcing the runner from a wrapper that
+		// defines one records every process-group signal cleanup sends, which is
+		// the only way to observe *which* groups an interrupt aims at without
+		// waiting for the kernel to recycle a pid onto an innocent bystander.
+		cpSync(sourceRunner, join(root, 'tests', 'real-run-all.sh'));
+		writeExecutable(join(root, 'tests', 'run-all.sh'), `#!/usr/bin/env bash
+kill() {
+	case "$*" in
+		*" -- -"*) printf '%s\\n' "$*" >> "$RUNNER_TEST_STATE/group-signals" ;;
+	esac
+	builtin kill "$@"
+}
+source "$(dirname "\${BASH_SOURCE[0]}")/real-run-all.sh"
+`);
+	} else {
+		cpSync(sourceRunner, join(root, 'tests', 'run-all.sh'));
+	}
 	writeFileSync(join(root, 'tests', 'parser-drift.test.mjs'), "// fixture\n");
 	writeFileSync(join(root, 'tests', 'codex-catalog-drift.test.mjs'), "// fixture\n");
 	return root;
+}
+
+// Rewrite the fixture's copy of the runner. Used to plant the malformed
+// SLOW_FIRST the runner has to survive, and to knock out its dedup so the
+// backstop guard behind it can be exercised on its own.
+function patchRunner(root, replacements) {
+	const path = join(root, 'tests', 'run-all.sh');
+	let text = readFileSync(path, 'utf8');
+	for (const [from, to] of replacements) {
+		assert.ok(text.includes(from), `runner no longer contains ${JSON.stringify(from)}`);
+		text = text.replace(from, to);
+	}
+	writeFileSync(path, text);
+}
+
+// A suite that records the pid of the runner subshell that launched it (its own
+// parent), so a test can name the process group that subshell owns.
+function addPidReportingSuite(root, name, body) {
+	writeExecutable(join(root, 'plugins', 'fixture', 'tests', `${name}_test.sh`), `#!/usr/bin/env bash
+set -u
+ps -o ppid= -p $$ | tr -d ' ' > "$RUNNER_TEST_STATE/pid-${name}"
+${body}
+`);
 }
 
 function addTrackedSuite(root, name, delay, exitCode = 0) {
@@ -67,7 +108,7 @@ printf 'output-${name}\\n'
 `);
 }
 
-function runFixture(root, jobs) {
+function runFixture(root, jobs, { timeout } = {}) {
 	const state = join(root, 'state');
 	mkdirSync(state, { recursive: true });
 	// Strip an inherited RUN_ALL_JOBS when the fixture wants the default: these
@@ -77,7 +118,7 @@ function runFixture(root, jobs) {
 	const env = { ...process.env, RUNNER_TEST_STATE: state };
 	if (jobs === undefined) delete env.RUN_ALL_JOBS;
 	else env.RUN_ALL_JOBS = String(jobs);
-	return spawnSync('bash', ['tests/run-all.sh'], { cwd: root, env, encoding: 'utf8' });
+	return spawnSync('bash', ['tests/run-all.sh'], { cwd: root, env, encoding: 'utf8', timeout });
 }
 
 test('limits concurrent suites and replays their output in discovery order', (t) => {
@@ -232,4 +273,82 @@ sleep 5
 	assert.doesNotMatch(result.stdout, /refusing to kill the shared process group/);
 	assert.match(result.stdout, /did not finish \(no completion time recorded\)/);
 	assert.doesNotMatch(result.stdout, /completed in -/);
+});
+
+test('a duplicated SLOW_FIRST entry does not strand a suite or hang the run', (t) => {
+	const root = createFixture();
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	// Naming one suite twice used to append its index twice, making RUN_ORDER
+	// longer than the queue. The launch loop stops at TASK_COUNT, so the tail
+	// index never launched, its status stayed empty, and the replay loop then
+	// slept forever waiting on a suite that was never going to run. The list's
+	// own comment invites hand-editing, so a stray duplicate is a maintenance
+	// typo away — and in CI it burned the whole job timeout printing nothing.
+	patchRunner(root, [['SLOW_FIRST="', 'SLOW_FIRST="b b ']]);
+	addTrackedSuite(root, 'a', 0.02);
+	addTrackedSuite(root, 'b', 0.02);
+	addTrackedSuite(root, 'c', 0.02);
+
+	const result = runFixture(root, 2, { timeout: 30_000 });
+
+	assert.ok(!result.error, `runner hung and had to be killed: ${result.error?.code}`);
+	assert.equal(result.status, 0, result.stderr || result.stdout);
+	for (const name of ['a', 'b', 'c']) {
+		assert.match(result.stdout, new RegExp(`output-${name}`));
+	}
+});
+
+test('refuses to run when the run order and the queue disagree', (t) => {
+	const root = createFixture();
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	// Dedup knocked out, so the duplicate reaches RUN_ORDER: the guard behind it
+	// has to turn what used to be a silent forever-sleep into an exit code.
+	patchRunner(root, [
+		['SLOW_FIRST="', 'SLOW_FIRST="b b '],
+		['*": $slow") already_queued "$i" || RUN_ORDER+=("$i")', '*": $slow") RUN_ORDER+=("$i")'],
+	]);
+	addTrackedSuite(root, 'a', 0.02);
+	addTrackedSuite(root, 'b', 0.02);
+	addTrackedSuite(root, 'c', 0.02);
+
+	const result = runFixture(root, 2, { timeout: 30_000 });
+
+	assert.ok(!result.error, `runner hung and had to be killed: ${result.error?.code}`);
+	assert.equal(result.status, 2, result.stdout);
+	assert.match(result.stderr, /run order holds 6 entries for 5 suite\(s\)/);
+});
+
+test('interrupt signals only the process groups still in flight', async (t) => {
+	const root = createFixture({ logKills: true });
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	// Serial, so a_done is reaped and its slot freed before b_hang ever starts.
+	addPidReportingSuite(root, 'a_done', 'exit 0');
+	addPidReportingSuite(root, 'b_hang', ': > "$RUNNER_TEST_STATE/hanging"\nsleep 30');
+	const state = join(root, 'state');
+	mkdirSync(state, { recursive: true });
+
+	const proc = spawn('/bin/bash', ['tests/run-all.sh'], {
+		cwd: root,
+		env: { ...process.env, RUN_ALL_JOBS: '1', RUNNER_TEST_STATE: state },
+		stdio: 'ignore',
+	});
+	for (let i = 0; i < 250 && !existsSync(join(state, 'hanging')); i++) {
+		await new Promise(resolve => setTimeout(resolve, 20));
+	}
+	assert.ok(existsSync(join(state, 'hanging')), 'hanging fixture suite never started');
+	proc.kill('SIGTERM');
+	await new Promise(resolve => proc.once('close', resolve));
+
+	const donePid = readFileSync(join(state, 'pid-a_done'), 'utf8').trim();
+	const hangPid = readFileSync(join(state, 'pid-b_hang'), 'utf8').trim();
+	const signalled = new Set(
+		readFileSync(join(state, 'group-signals'), 'utf8')
+			.split('\n')
+			.filter(Boolean)
+			.map(line => line.replace(/^.* -- -/, '')),
+	);
+	// The pid of a reaped suite is a number the kernel is free to reissue —
+	// ~500 pids/s of churn here against a 99,999 ceiling — so signalling its
+	// group after the fact aims SIGKILL at whatever now holds that number.
+	assert.deepEqual([...signalled].sort(), [hangPid], `also signalled the reaped suite's group (${donePid})`);
 });
