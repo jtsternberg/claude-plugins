@@ -67,7 +67,7 @@ Options:
   -h, --help             Show this help.
 
 The script decides between `cmux new-pane --direction right` (when the
-subject's workspace has only one pane) and `cmux new-surface --pane <adj>`
+subject's workspace has only one pane) and `cmux new-surface --pane <adj-uuid>`
 (when there's already an adjacent pane to reuse).
 
 Output (text):
@@ -245,8 +245,8 @@ else
   # exactly what a hotline callee dialing onward hits. Refs also renumber as
   # surfaces open and close, so the ref read out of the snapshot above can
   # denote a different pane by the time this runs. A UUID is globally unique
-  # and needs no context. (The new-pane branch above passes an explicit
-  # --workspace for the same reason; this branch used to pass nothing.)
+  # and needs no context. (The new-pane branch above pins an explicit
+  # --workspace for the same reason: never let cmux infer the container.)
   if [[ -n "$adjacent_pane_id" ]]; then
     args=(new-surface --pane "$adjacent_pane_id" --type "$SURFACE_TYPE")
   else
