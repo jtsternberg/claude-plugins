@@ -112,6 +112,14 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   (`cmux_handle_ok` in `plugins/hotline/scripts/repl-state.sh`), send snake_case
   params only, and compare `result.surface_id` against what you asked for — a wrong
   answer arrives as a successful one. (claude-plugins-r465.7, -r465.9)
+- **Address a cmux pane/surface by UUID, never by the positional `pane:N` you just
+  read out of a tree.** `cmux` resolves a positional ref *inside* a workspace context
+  that defaults to the caller's inherited `$CMUX_WORKSPACE_ID`, so a ref that is valid
+  in the tree fails as `not_found: Workspace not found` whenever the caller is itself
+  an agent-spawned surface living elsewhere — and refs renumber between the snapshot
+  and the call. Enumerate with `--id-format both` (without it every `.id` is null, so
+  you *cannot* target correctly), and if only a ref is available pin `--workspace`/
+  `--window` with it. (claude-plugins-xysx)
 - **Read a cmux screen with `--scrollback --lines N`; a bare read may only measure
   the pane** (`cmux_screen_rows`), never feed a content decision — bare reads follow
   the user's scroll. Guards enforce this in `plugins/hotline/tests/`

@@ -5,15 +5,20 @@
 #
 # Algorithm:
 #   1. `cmux identify --json` → subject's pane_ref + workspace_ref.
-#   2. `cmux tree --all --json` → enumerate panes in that workspace.
+#   2. `cmux tree --all --json --id-format both` → enumerate panes in that
+#      workspace, WITH their UUIDs (see step 3 for why the UUIDs matter).
 #   3. If subject's workspace has only ONE pane:
 #        → `cmux new-pane --direction right --type <t> --workspace <ws> [--url]`
 #          (new-pane is used instead of new-split because it supports both
 #           terminal and browser types.)
 #      Else pick the adjacent pane (subject's index + 1, or -1 if rightmost):
-#        → `cmux new-surface --pane <adjacent> --type <t> [--url]`
+#        → `cmux new-surface --pane <adjacent-UUID> --type <t> [--url]`
 #          (reuses the real estate the user has already allocated instead of
 #           creating a third pane column.)
+#          Targeted by UUID, not by `pane:N`: new-surface resolves a positional
+#          ref inside a workspace context defaulting to $CMUX_WORKSPACE_ID, so a
+#          bare ref fails as "not_found: Workspace not found" whenever the caller
+#          lives in a different workspace than the pane it wants a sibling of.
 #   4. Parse `OK surface:<n> pane:<p> workspace:<w>` from cmux's output, then
 #      resolve UUIDs + human-readable names from a fresh `--id-format both` tree.
 #   5. Apply `--title` via `cmux rename-tab` so the tab is findable in the UI,
@@ -169,8 +174,11 @@ if [[ -z "$subject_pane" || -z "$subject_ws" ]]; then
 fi
 
 # --- Enumerate panes in subject's workspace (ordered, with indexes) ---
-# TSV: pane_ref \t index
-panes_tsv=$(cmux tree --all --json | jq -r \
+# TSV: pane_ref \t index \t pane_id
+# --id-format both is what puts `.id` (the pane UUID) in this snapshot; without
+# it every `.id` comes back null and the only thing we can hand `new-surface`
+# is a positional ref, which is not safe to target by (see the branch below).
+panes_tsv=$(cmux tree --all --json --id-format both | jq -r \
   --arg win "$subject_win" --arg ws "$subject_ws" '
     .windows[]
     | select(.ref == $win)
@@ -179,7 +187,7 @@ panes_tsv=$(cmux tree --all --json | jq -r \
     | .panes
     | sort_by(.index)
     | .[]
-    | [.ref, (.index | tostring)]
+    | [.ref, (.index | tostring), (.id // "")]
     | @tsv
   ')
 
@@ -191,9 +199,11 @@ fi
 # Read into parallel arrays (bash 3 compatible — no readarray/mapfile).
 pane_refs=()
 pane_indexes=()
-while IFS=$'\t' read -r p_ref p_idx; do
+pane_ids=()
+while IFS=$'\t' read -r p_ref p_idx p_id; do
   pane_refs+=("$p_ref")
   pane_indexes+=("$p_idx")
+  pane_ids+=("$p_id")
 done <<< "$panes_tsv"
 
 pane_count=${#pane_refs[@]}
@@ -225,8 +235,27 @@ else
     adj_pos=$((my_pos - 1))
   fi
   adjacent_pane="${pane_refs[$adj_pos]}"
+  adjacent_pane_id="${pane_ids[$adj_pos]}"
   mode="new-surface"
-  args=(new-surface --pane "$adjacent_pane" --type "$SURFACE_TYPE")
+  # Target the adjacent pane by UUID, not by its positional ref. `cmux
+  # new-surface` resolves a bare `pane:N` *inside* a workspace context that
+  # defaults to $CMUX_WORKSPACE_ID (see `new-surface --help`), so a positional
+  # ref fails with `not_found: Workspace not found` whenever the caller's
+  # inherited workspace id is not the workspace that pane lives in — which is
+  # exactly what a hotline callee dialing onward hits. Refs also renumber as
+  # surfaces open and close, so the ref read out of the snapshot above can
+  # denote a different pane by the time this runs. A UUID is globally unique
+  # and needs no context. (The new-pane branch above passes an explicit
+  # --workspace for the same reason; this branch used to pass nothing.)
+  if [[ -n "$adjacent_pane_id" ]]; then
+    args=(new-surface --pane "$adjacent_pane_id" --type "$SURFACE_TYPE")
+  else
+    # No UUID available: keep the positional ref but pin the context it is
+    # resolved against, rather than letting it fall through to a possibly
+    # unrelated $CMUX_WORKSPACE_ID.
+    args=(new-surface --pane "$adjacent_pane" --type "$SURFACE_TYPE" \
+          --workspace "$subject_ws" --window "$subject_win")
+  fi
   [[ "$SURFACE_TYPE" == "browser" && -n "$URL" ]] && args+=(--url "$URL")
 fi
 
@@ -234,6 +263,20 @@ fi
 if ! out=$(cmux "${args[@]}" 2>&1); then
   echo "open-side-surface: cmux ${args[*]} failed:" >&2
   printf '%s\n' "$out" >&2
+  # cmux reports a context-resolution miss as a bare `not_found`, which reads as
+  # if the target were gone when the real cause is usually that we could not
+  # address it unambiguously. Say which, so the caller is not left guessing.
+  if [[ "$out" == *"not_found"* ]]; then
+    {
+      echo "  This is a targeting failure, not a missing pane: $subject_pane resolved"
+      echo "  in $subject_ws, but cmux could not resolve the target we handed it"
+      echo "  (${adjacent_pane_id:-$adjacent_pane})."
+      echo "  Usual cause: the caller's inherited CMUX_WORKSPACE_ID names a different"
+      echo "  workspace than the one its pane now lives in — common when the caller is"
+      echo "  itself an agent-spawned surface (e.g. a hotline callee dialing onward)."
+      echo "  Side-by-side needs that context; a detached workspace does not."
+    } >&2
+  fi
   exit 1
 fi
 

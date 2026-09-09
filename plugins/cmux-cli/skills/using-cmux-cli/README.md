@@ -35,7 +35,7 @@ The skill activates on anything cmux-adjacent:
 
 - `SKILL.md` — the agent-facing playbook.
 - `scripts/find-surface.sh` — locate a surface by workspace / title / content; JSON output for chaining.
-- `scripts/open-side-surface.sh` — decide between `new-surface --pane <adjacent>` and `new-pane --direction right`, based on current layout.
+- `scripts/open-side-surface.sh` — decide between `new-surface --pane <adjacent-UUID>` and `new-pane --direction right`, based on current layout.
 - `references/browser.md` — full embedded-browser automation reference (loaded on demand).
 - `references/ssh.md` — `cmux ssh` remote workspace reference — relay daemon, browser routing, drag-drop, reconnect semantics (loaded on demand).
 - `references/progress-loops.md` — sidebar progress-loop recipe — two-loop pattern (updater + `pgrep` exit detector), clear/notify pairing (loaded on demand).

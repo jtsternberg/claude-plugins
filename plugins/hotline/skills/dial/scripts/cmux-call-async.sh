@@ -437,14 +437,23 @@ else
       SURF_ERR="$(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
       if [[ "$rc" -eq 3 ]]; then
         fail_async "side-by-side surface PTY never became ready (see surface_err.txt)"
-      elif [[ "$rc" -eq 2 && "$SURF_ERR" == *"could not resolve"*"from identify"* ]]; then
-        # The caller's own surface context couldn't be resolved (open-side-surface
-        # already retried `cmux identify` 5×). This happens when the caller pane was
-        # freshly spawned or moved between workspaces and cmux hasn't re-registered
-        # it. Side-by-side needs that context; detached does not (it opens its own
+      elif [[ "$rc" -eq 2 && "$SURF_ERR" == *"could not resolve"*"from identify"* ]] \
+        || [[ "$rc" -eq 1 && "$SURF_ERR" == *"not_found"* ]]; then
+        # The caller's own surface context is unusable for side-by-side placement.
+        # Two shapes of the same problem:
+        #   rc=2 — `cmux identify` never resolved the caller's pane/workspace
+        #     (retried 5×); the caller pane was freshly spawned or moved and cmux
+        #     hasn't re-registered it.
+        #   rc=1 + not_found — the context resolved, but cmux then refused the
+        #     target: the caller's inherited CMUX_WORKSPACE_ID names a different
+        #     workspace than the one hosting the pane we tried to open beside.
+        #     A callee dialing onward hits this.
+        # Side-by-side needs that context; detached does not (it opens its own
         # new workspace). Rather than fail the whole call, degrade to detached so the
         # dial still completes — the callee just lands in its own tab instead of a
-        # sibling pane. surface_err.txt is preserved for diagnosis.
+        # sibling pane. surface_err.txt is preserved for diagnosis. dial.sh detects
+        # this degrade structurally (workspace_ref.txt without surface_ref.txt) and
+        # records the `surface-context→detached` fallback, so nothing is silent.
         PLACEMENT="detached"
         do_detached
       else

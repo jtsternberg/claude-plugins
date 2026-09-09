@@ -129,6 +129,7 @@ segment above.
 **`open-side-surface failed` / `open-window-surface failed` in error.txt (opener resolved but errored)**
 - The opener ran but couldn't create the surface — usually `cmux identify` failed (socket unreachable) or `cmux tree` returned no panes.
 - Recovery: the error.txt carries the opener's stderr. If cmux itself is fine, retry with `--detached` (new-workspace placement, no `cmux identify` dependency). If `cmux identify` consistently fails, force headless with `--headless`.
+- **Not this error any more:** the two cases where the caller's own surface context is the problem — `could not resolve … from identify` (rc 2) and a `not_found` from cmux (rc 1) — auto-degrade to a detached workspace instead of failing the dial, and say so as `surface-context→detached` in `.fallbacks`. Side-by-side is the only placement that needs the caller's context; detached opens its own workspace. So a side dial that lands `.placement: "detached"` with that fallback did not fail — check `.fallbacks` before re-dialing anything by hand.
 
 **`surface <ref> PTY never became ready`**
 - The new surface was created but its shell never echoed the readiness probe within the timeout (`surface-ready.sh` exited 3). Common causes: a very slow shell rc, a non-shell program in the surface, or the PTY backend never attaching.

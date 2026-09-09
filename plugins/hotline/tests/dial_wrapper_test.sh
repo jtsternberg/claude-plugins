@@ -857,6 +857,37 @@ check "side placement degrades to detached and says so" $? \
 check "a degraded-to-detached follow-up CLEARS the stale surface_ref" $? \
   "$(cat "$cache_6d" 2>/dev/null)"
 
+# The OTHER shape of the same failure: the caller's context resolved fine, but
+# cmux then refused the target with `not_found` — open-side-surface exits 1, not
+# 2. A callee dialing onward hits this, because its inherited CMUX_WORKSPACE_ID
+# names a different workspace than the one hosting its pane. This used to
+# hard-error at stage `boot` and make the user re-dial with --placement detached
+# by hand, even though detached opens its own workspace and so never needed the
+# caller's context at all.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_claude "$t/bin"
+printf 'Request interrupted by user\nWhat should Claude do instead?\nClaude Code v2.1.221\n\xe2\x9d\xaf\xc2\xa0\n' \
+  > "$t/screen.txt"
+cat > "$t/side-notfound.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "open-side-surface: cmux new-surface --pane pane:7 --type terminal failed:" >&2
+echo "Error: not_found: Workspace not found" >&2
+exit 1
+EOF
+chmod +x "$t/side-notfound.sh"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-6d2" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side-notfound.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order \
+    --prompt "not_found should degrade too" --boot-timeout 8 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+
+[[ "$(jq -r .placement <<<"$out")" == "detached" ]] \
+  && jq -e '.fallbacks | index("surface-context→detached")' <<<"$out" >/dev/null 2>&1
+check "a not_found from open-side-surface degrades to detached, not a boot error" $? \
+  "out=$out stderr=$(cat "$t/err.txt")"
+
 # ===========================================================================
 # 6e. A follow-up that opens a NEW surface closes the one it superseded
 #     (claude-plugins-n7xo).

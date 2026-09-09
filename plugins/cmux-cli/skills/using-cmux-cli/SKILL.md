@@ -501,10 +501,12 @@ On success it prints the new surface's ref + pane + workspace, its `title:` and 
 Keep this as a mental model — you can still hand-roll a variant when the user's request is non-standard (e.g., split left instead of right).
 
 1. Read the subject's `pane_ref` + `workspace_ref` from `cmux identify --json`.
-2. Enumerate panes in that workspace (via `cmux tree --all --json`, sorted by index).
+2. Enumerate panes in that workspace (via `cmux tree --all --json --id-format both`, sorted by index). `--id-format both` is not optional: without it every pane `.id` comes back `null`, leaving you nothing but a positional ref to target by.
 3. Branch:
    - **Only one pane** → `cmux new-pane --direction right --type <t> [--url <u>] --workspace <ws>`. (Uses `new-pane` rather than `new-split` because only `new-pane` supports `--type browser`.)
-   - **Multiple panes** → pick your-pane-index **+ 1** (fall back to **− 1** if you're rightmost), then `cmux new-surface --pane <adjacent> --type <t> [--url <u>]`. The new surface becomes a tab in that existing pane column and auto-selects.
+   - **Multiple panes** → pick your-pane-index **+ 1** (fall back to **− 1** if you're rightmost), then `cmux new-surface --pane <adjacent-pane-UUID> --type <t> [--url <u>]`. The new surface becomes a tab in that existing pane column and auto-selects.
+
+   **Target the adjacent pane by its UUID, not by `pane:N`.** `new-surface` resolves a positional ref inside a workspace context that defaults to `$CMUX_WORKSPACE_ID` (see `cmux new-surface --help`), so a ref that is perfectly valid in the tree fails with `not_found: Workspace not found` whenever you are running somewhere other than the workspace hosting that pane — the usual case for an agent-spawned surface. Refs also renumber as surfaces open and close, so the one you read in step 2 can denote a different pane by step 3. If you only have a ref, pass `--workspace <ws> --window <win>` with it to pin what it resolves against.
 
 ### Why not always `new-split` / `new-pane`?
 
