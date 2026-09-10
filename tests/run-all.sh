@@ -362,6 +362,11 @@ else
 	skip "python suites" "python3 not installed"
 fi
 
+if [[ $TASK_COUNT -eq 0 ]] && [[ $SKIP -eq 0 ]]; then
+	printf '\n\033[31m✗ no test suites discovered\033[0m\n'
+	FAIL=$((FAIL + 1)); FAILED+=("no test suites discovered")
+fi
+
 run_queue
 
 # ---- summary ----------------------------------------------------------------
