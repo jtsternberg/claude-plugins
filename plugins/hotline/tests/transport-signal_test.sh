@@ -38,7 +38,10 @@
 # directory this suite owns and wipes.
 # =============================================================================
 set -u
-
+# Keep standalone runs under the system temp directory while honoring the runner.
+TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT=${TMP_ROOT%/}
+export TMP_ROOT
 PASS=0
 FAIL=0
 SKIP=0
@@ -76,7 +79,7 @@ REAL_PYTHON3="$(command -v python3)"
 # same guard because a missing stub really did launch a `claude --resume` pane on
 # every run of that suite.)
 # ---------------------------------------------------------------------------
-ROOT="$(mktemp -d /tmp/hotline-transport-test-XXXXXX)"
+ROOT="$(mktemp -d "$TMP_ROOT"/hotline-transport-test-XXXXXX)"
 POISON_BIN="$ROOT/poison-bin"
 POISON_LOG="$ROOT/violations"
 mkdir -p "$POISON_BIN"

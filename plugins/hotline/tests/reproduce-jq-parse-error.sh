@@ -13,13 +13,16 @@
 # Usage: bash plugins/hotline/tests/reproduce-jq-parse-error.sh
 # =============================================================================
 set -u
-
+# Keep standalone runs under the system temp directory while honoring the runner.
+TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT=${TMP_ROOT%/}
+export TMP_ROOT
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURE_DIR="$SCRIPT_DIR/fixtures/jq-parse-error-zsh-echo"
 DIAL_SCRIPTS="$SCRIPT_DIR/../skills/dial/scripts"
 
 # Stage a call_dir that mimics a completed headless call
-CALL_DIR=$(mktemp -d "/tmp/hotline-repro-XXXXX")
+CALL_DIR=$(mktemp -d "$TMP_ROOT/hotline-repro-XXXXX")
 cp "$FIXTURE_DIR/stream.jsonl" "$CALL_DIR/stream.jsonl"
 cp "$FIXTURE_DIR/response.json" "$CALL_DIR/response.json"
 touch "$CALL_DIR/done"

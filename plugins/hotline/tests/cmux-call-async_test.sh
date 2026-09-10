@@ -4,7 +4,10 @@
 # launching cmux or Claude.
 # =============================================================================
 set -u
-
+# Keep standalone runs under the system temp directory while honoring the runner.
+TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT=${TMP_ROOT%/}
+export TMP_ROOT
 PASS=0
 FAIL=0
 FAILED_CASES=()
@@ -262,7 +265,7 @@ else
        "got: $status"
 fi
 
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -286,7 +289,7 @@ fi
 assert_async_error_contract "new-workspace failure" "$tmp"
 rm -rf "$tmp"
 
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -355,7 +358,7 @@ EOF
   chmod +x "$1/cmux"
 }
 
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/cwd"
 : > "$tmp/screen.txt"
 make_min_surface_cmux "$tmp/bin"
@@ -478,7 +481,7 @@ rm -rf "$tmp" "$call_dir"
 # line — the shape the ringing skill parses. claude only recognises a slash
 # command at the very start of the input, so a leading header line would turn the
 # whole ringing invocation into plain text.
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/cwd"
 : > "$tmp/screen.txt"
 make_min_surface_cmux "$tmp/bin"
@@ -504,7 +507,7 @@ fi
 rm -rf "$tmp" "$call_dir"
 
 # --prompt-file is the argv-free entry point dial.sh uses.
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/cwd"
 : > "$tmp/screen.txt"
 make_min_surface_cmux "$tmp/bin"
@@ -533,7 +536,7 @@ fi
 # Headless FALLBACK: cmux present but cmux-cli's opener not resolvable. The
 # launcher must signal {"fallback":"headless"} (so the dial skill re-routes to
 # the headless transport) and must NOT create a call_dir or any cmux surface.
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd" "$tmp/empty"
 # A cmux that records ANY invocation, so we can prove no side effects happened.
 cat > "$tmp/bin/cmux" <<'EOF'
@@ -566,7 +569,7 @@ rm -rf "$tmp"
 
 # --detached does NOT need the opener: even with NO opener resolvable, it must
 # proceed on cmux (new-workspace), never signal headless fallback.
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd" "$tmp/empty"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -602,7 +605,7 @@ rm -rf "$tmp" "$call_dir"
 # Surface readiness TIMEOUT: cmux-cli's opener exits 3 (no JSON) with the surface
 # ref in its stderr. The launcher must close that orphan and write the async
 # error contract — never leave a wedged surface behind.
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/cwd"
 : > "$tmp/screen.txt"
 make_min_surface_cmux "$tmp/bin"
@@ -639,7 +642,7 @@ rm -rf "$tmp" "$call_dir"
 # resolve the CALLER's own pane/workspace from `cmux identify` (freshly moved or
 # spawned caller surface, not yet re-registered). The launcher must NOT fail the
 # whole call — it degrades to detached placement so the dial still completes.
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/cwd"
 # Fake cmux that supports the detached path (new-workspace + read-screen + send).
 mkdir -p "$tmp/bin"
@@ -791,7 +794,7 @@ UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 RESUME_TARGET="11111111-2222-3333-4444-555555555555"
 
 # --- Fork: fresh preset + --session-id in the launch script -----------------
-tmp=$(mktemp -d /tmp/hotline-fork-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-fork-test-XXXXXX)
 call_dir=$(run_detached_launch "$tmp" --resume "$RESUME_TARGET" --fork-session)
 if [[ -n "$call_dir" && -d "$call_dir" ]]; then
   preset=$(cat "$call_dir/session_id_preset.txt" 2>/dev/null || echo "")
@@ -835,7 +838,7 @@ fi
 rm -rf "$tmp" "$call_dir"
 
 # --- Plain resume: preset IS the resume target, NO --session-id -------------
-tmp=$(mktemp -d /tmp/hotline-fork-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-fork-test-XXXXXX)
 call_dir=$(run_detached_launch "$tmp" --resume "$RESUME_TARGET")
 if [[ -n "$call_dir" && -d "$call_dir" ]]; then
   preset=$(cat "$call_dir/session_id_preset.txt" 2>/dev/null || echo "")
@@ -864,7 +867,7 @@ rm -rf "$tmp" "$call_dir"
 # The callee system-prompt override is baked into the launch script from the
 # caller's env, as a FILE path (never the raw string, which would put a
 # multi-line prompt on an argv `ps` can read), and only when the var is set.
-tmp=$(mktemp -d /tmp/hotline-sysprompt-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-sysprompt-test-XXXXXX)
 printf 'be terse.' > "$tmp/sysprompt.txt"
 
 export HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE="$tmp/sysprompt.txt"
@@ -884,7 +887,7 @@ fi
 rm -rf "$tmp" "$call_dir"
 
 # Absent when the var is unset — no stray flag on the default path.
-tmp=$(mktemp -d /tmp/hotline-sysprompt-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-sysprompt-test-XXXXXX)
 call_dir=$(run_detached_launch "$tmp")
 if [[ -n "$call_dir" && -d "$call_dir" ]]; then
   launch=$(cat "$(cat "$call_dir/launch_script.txt" 2>/dev/null)" 2>/dev/null || echo "")
@@ -907,7 +910,7 @@ rm -rf "$tmp" "$call_dir"
 echo ""
 echo "Stale launch-script sweep:"
 
-tmp=$(mktemp -d /tmp/hotline-cmux-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
 mkdir -p "$tmp/cwd" "$tmp/sweep"
 : > "$tmp/screen.txt"
 make_min_surface_cmux "$tmp/bin"

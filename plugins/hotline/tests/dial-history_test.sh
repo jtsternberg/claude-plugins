@@ -12,7 +12,10 @@
 # ~/.agents-hotline/identities.
 # =============================================================================
 set -u
-
+# Keep standalone runs under the system temp directory while honoring the runner.
+TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT=${TMP_ROOT%/}
+export TMP_ROOT
 PASS=0
 FAIL=0
 FAILED_CASES=()
@@ -25,7 +28,7 @@ fail() {
 }
 
 # Each case gets a throwaway HOME so the history lands in a temp tree.
-new_home() { mktemp -d /tmp/hotline-dh-test-XXXXXX; }
+new_home() { mktemp -d "$TMP_ROOT"/hotline-dh-test-XXXXXX; }
 
 history_file() {
   # $1 = fake HOME, $2 = receiver cwd

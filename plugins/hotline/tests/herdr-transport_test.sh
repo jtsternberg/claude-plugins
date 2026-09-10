@@ -33,7 +33,10 @@
 # HOTLINE_CALL_HOME points every call dir at a directory this suite owns and wipes.
 # =============================================================================
 set -u
-
+# Keep standalone runs under the system temp directory while honoring the runner.
+TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT=${TMP_ROOT%/}
+export TMP_ROOT
 PASS=0
 FAIL=0
 FAILED_CASES=()
@@ -63,7 +66,7 @@ check() {  # check <label> <rc> <diagnostic>
 # stub fails loudly here instead of reaching the developer's real herdr and
 # splitting a live pane (or worse, starting a real claude in it).
 # ---------------------------------------------------------------------------
-ROOT="$(mktemp -d /tmp/hotline-herdr-test-XXXXXX)"
+ROOT="$(mktemp -d "$TMP_ROOT"/hotline-herdr-test-XXXXXX)"
 POISON_BIN="$ROOT/poison-bin"
 POISON_LOG="$ROOT/violations"
 mkdir -p "$POISON_BIN"
@@ -84,8 +87,8 @@ mkdir -p "$HOTLINE_CALL_HOME"
 # same reason HOTLINE_CALL_HOME is — and because the real default is /tmp, which the
 # remote layer picks deliberately (a unix socket address caps at 104 bytes) and
 # which a test has no business writing into.
-export HOTLINE_SSH_CONTROL_HOME="$ROOT/ssh"
-mkdir -p "$HOTLINE_SSH_CONTROL_HOME"
+HOTLINE_SSH_CONTROL_HOME=$(mktemp -d /tmp/hh-XXXXXX)
+export HOTLINE_SSH_CONTROL_HOME
 # The whole suite runs with the settle sleep and poll cadence collapsed: the
 # launcher's retry logic and the waiter's loop are exercised for their DECISIONS,
 # not their wall-clock. (The waiter accounts its budget in fixed integer ticks, so
@@ -107,7 +110,7 @@ unset HERDR_ENV HERDR_PANE_ID HERDR_WORKSPACE_ID HERDR_TAB_ID \
       HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS HOTLINE_CLAUDE_MODEL \
       HOTLINE_HERDR_PANE HOTLINE_HERDR_SPLIT_DIRECTION 2>/dev/null || true
 
-cleanup() { rm -rf "$ROOT"; }
+cleanup() { rm -rf "$ROOT" "$HOTLINE_SSH_CONTROL_HOME"; }
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
@@ -2768,21 +2771,29 @@ mux_state() {  # mux_state <control-home> → socket path on line 1, the note on
     _ "$HOTLINE_DIR"
 }
 t=$(remote_env)
-CTRL_HOME="$t/ctrl"; mkdir -p "$CTRL_HOME"
+CTRL_HOME="$HOTLINE_SSH_CONTROL_HOME/test-ctrl"; mkdir -p "$CTRL_HOME"
 MUX=$(mux_state "$CTRL_HOME")
 CTRL_PATH=$(sed -n '1p' <<<"$MUX")
-CTRL_DIR=$(dirname "$CTRL_PATH")
+CTRL_DIR=""
+if [[ -n "$CTRL_PATH" ]]; then
+  CTRL_DIR=$(dirname "$CTRL_PATH")
+fi
 # `ls -ld`, not `stat`: GNU `stat -f` is `--file-system` and SUCCEEDS on a directory
 # with filesystem info, so a `stat -f … || stat -c …` fallback never reaches the GNU
 # form and this case failed on the ubuntu runner alone.
-MODE=$(ls -ld "$CTRL_DIR" 2>/dev/null | cut -c1-10)
+MODE=""
+if [[ -n "$CTRL_DIR" ]]; then
+  MODE=$(ls -ld "$CTRL_DIR" 2>/dev/null | cut -c1-10)
+fi
 [[ -n "$CTRL_PATH" && -d "$CTRL_DIR" && "$MODE" == "drwx------" ]]
 check "the control directory is created 0700 — no window in which to plant the socket" $? \
   "mux=$MUX mode=$MODE"
 
 mkdir -p "$t/elsewhere"
-rm -rf "$CTRL_DIR"
-ln -s "$t/elsewhere" "$CTRL_DIR"
+if [[ -n "$CTRL_DIR" ]]; then
+  rm -rf "$CTRL_DIR"
+  ln -s "$t/elsewhere" "$CTRL_DIR"
+fi
 MUX=$(mux_state "$CTRL_HOME")
 [[ -z "$(sed -n '1p' <<<"$MUX")" && "$MUX" == *"symlink"* ]]
 check "a SYMLINKED control dir is refused, not adopted: the -d test follows a link" $? \

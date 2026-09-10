@@ -22,7 +22,10 @@
 # the OS maximum and the file is cleaned up on exit.
 # =============================================================================
 set -u
-
+# Keep standalone runs under the system temp directory while honoring the runner.
+TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT=${TMP_ROOT%/}
+export TMP_ROOT
 PASS=0
 FAIL=0
 FAILED_CASES=()
@@ -116,7 +119,7 @@ EOF
 
 new_env() {   # echoes a fresh scratch root with bin/, home/, work/
   local t
-  t=$(mktemp -d /tmp/hotline-session-init-test-XXXXXX)
+  t=$(mktemp -d "$TMP_ROOT"/hotline-session-init-test-XXXXXX)
   mkdir -p "$t/bin" "$t/home" "$t/work"
   echo "$t"
 }
