@@ -139,12 +139,13 @@ assert_async_error_contract() {
 echo "cmux-call-async regression:"
 
 script=$(build_launch_script "" "11111111-1111-4111-8111-111111111111" false "hotline test" "Bash(git *) Edit")
-if printf '%s' "$script" | bash -n 2> /tmp/hotline-cmux-test.err; then
+ERR_FILE="${TMPDIR:-/tmp}/hotline-cmux-test.err"
+if printf '%s' "$script" | bash -n 2> "$ERR_FILE"; then
   pass "launch script quotes complex --tools specs"
 else
-  fail "launch script quotes complex --tools specs" "$(cat /tmp/hotline-cmux-test.err)"
+  fail "launch script quotes complex --tools specs" "$(cat "$ERR_FILE")"
 fi
-rm -f /tmp/hotline-cmux-test.err
+rm -f "$ERR_FILE"
 
 script=$(build_launch_script "" "22222222-2222-4222-8222-222222222222" false "name" "Bash Read")
 

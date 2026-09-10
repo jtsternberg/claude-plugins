@@ -224,6 +224,17 @@ CI (`.github/workflows/tests.yml`) runs exactly that script on pushes to `main`,
 pull requests, and on manual dispatch. It runs on **ubuntu-latest** on purpose: these
 suites also have to keep working on the Linux box.
 
+**Suites run in parallel, and the width is machine-dependent.** The runner keeps up to
+one job per core busy, clamped to 2..4 — so CI's 2-core runner gets 2 while a laptop
+gets 4, and a suite that only passes when it has the box to itself will pass in one
+place and fail in the other. `RUN_ALL_JOBS=<n>` overrides the default; `RUN_ALL_JOBS=1`
+is the serial debugging path, and the one that gives each suite's output in discovery
+order as it finishes:
+
+```bash
+RUN_ALL_JOBS=1 bash tests/run-all.sh
+```
+
 A green run reports **`skipped 1`** — `codex: live-plugin`. That suite installs the
 plugin into a scratch `CODEX_HOME` and calls the real API, so it is opt-in: it runs
 only with `CODEX_LIVE=1` plus the `codex` CLI and `OPENAI_API_KEY`, and skips

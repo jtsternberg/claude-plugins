@@ -79,7 +79,9 @@ function sandbox() {
 
 /** Boot switchboard's server and read the fixture back through its own parser. */
 async function viaSwitchboard(sb) {
-	const port = 42000 + Number(process.hrtime.bigint() % 2000n);
+	// Keep this disjoint from switchboard_test.sh's 42000-44001 range (its base
+	// port can also use +1/+2): both suites run concurrently under run-all.sh.
+	const port = 46000 + Number(process.hrtime.bigint() % 2000n);
 	const proc = spawn('node', [SERVER, `--port=${port}`], {
 		env: { ...process.env, HOTLINE_SESSIONS_DIR: sb.sessionsDir, HOTLINE_PROJECTS_ROOT: sb.projectsRoot },
 		stdio: 'ignore',
