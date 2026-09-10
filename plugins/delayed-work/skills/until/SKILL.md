@@ -1,22 +1,36 @@
 ---
 name: until
-description: "Wake THIS session at a wall-clock time or after a delay and run the queued work here, with the context this session already has, spending zero tokens while waiting. For 'at 9pm run X', 'in 30 minutes do X', 'queue this for later', 'run this review tonight', 'wake me at 6am and ...', 'delayed work', and for queueing several jobs at set times. Not cron and not durable — the watcher dies with the session; not a headless or cloud run in a fresh context; not timed delivery into another cmux surface, which is cmux-cli's send-at."
+description: "Stop for now and pick this back up when a session limit resets, in THIS session: 'I hit my 5-hour session limit, stop for now and resume this at 9pm when my session resets', 'I'm rate limited, come back at the reset and keep going', 'resume at 9pm where we left off', 'pause on quota and pick this back up at 6am'. Wakes this session at a wall-clock time or after a delay and runs the queued work here, with the context it already has, spending zero tokens while waiting. Also the plain timed case: 'at 9pm run X', 'in 30 minutes do X', 'queue this for later', 'run this review tonight', 'wake me at 6am and ...', 'delayed work', and queueing several jobs at set times. Not cron and not durable — the watcher dies with the session; not a headless or cloud run in a fresh context; not timed delivery into another cmux surface, which is cmux-cli's send-at."
 when_to_use: |
-  Use when work should happen at a specific time or after a delay but must run in THIS
-  session, with the context it already has, and the wait should cost nothing: "review
-  this PR at 9:05pm", "in 20 minutes run the suite and report", "queue these three
-  reviews for tonight, spaced out". Also when a payload needs a human in the loop at
-  fire time, which a headless or cloud run cannot give it. NOT for schedules that must
-  survive this session closing — nothing here does. NOT for repeating schedules (cron,
-  the `schedule` skill). NOT for delivering a prompt into a different cmux surface,
-  which is cmux-cli's `send-at`.
+  Use first when a session limit, quota, or rate limit forces a pause and the work
+  should resume at the reset: "I hit my 5-hour limit — stop for now and resume this at
+  9pm when my session resets", "I'm rate limited, pick this back up at the reset",
+  "come back at 6am and continue where we left off". The work resumes in THIS session,
+  so the context it already has is still loaded and nothing needs re-reading.
+  Also for any plain timed or delayed work that must run here and should cost nothing
+  while it waits: "review this PR at 9:05pm", "in 20 minutes run the suite and report",
+  "queue these three reviews for tonight, spaced out". Also when a payload needs a
+  human in the loop at fire time, which a headless or cloud run cannot give it.
+  NOT for schedules that must survive this session closing — nothing here does. NOT for
+  repeating schedules (cron, the `schedule` skill). NOT for delivering a prompt into a
+  different cmux surface, which is cmux-cli's `send-at`.
 argument-hint: "<when> <what to run>"
 allowed-tools:
   - "Bash(date *)"
   - "Monitor"
 ---
 
-# until — fire at a wall-clock time, in this session
+# until — stop for now, pick it back up in this session
+
+The case this exists for: a 5-hour session limit lands mid-task. The usual options are
+both bad — babysit the clock and come back to type "continue" at the reset, or let the
+agent poll "is it time yet?" and spend what quota is left on the polling. Instead, stop
+for now and arm a shell-side clock watcher that costs zero tokens while it waits, then
+wakes **this same session** at the reset time with a self-contained "go" line. The
+context is still loaded, so the work just continues.
+
+It covers the plain timed case too: run X at 9pm, run X in 30 minutes, or queue a few
+jobs across tonight spaced apart.
 
 `$ARGUMENTS` carries the *when* and the *what*: a time or delay, plus the work to run
 when it arrives.
@@ -82,18 +96,21 @@ Five things there are deliberate:
 
 ## Parsing `<when>`
 
-Resolve to an epoch-seconds target before arming anything.
+Resolve to an epoch-seconds target before arming anything. Run one of these, read the
+epoch off stdout, and paste that literal number into the watcher — each is written to
+start with `date` so the `Bash(date *)` grant actually covers what gets executed.
 
 ```bash
 # absolute, same day: "9:05pm" / "21:05"
-target=$(date -j -f "%Y-%m-%d %H:%M:%S" "$(date +%Y-%m-%d) 21:05:00" +%s)
+date -j -f "%Y-%m-%d %H:%M:%S" "$(date +%Y-%m-%d) 21:05:00" +%s
 # absolute with an explicit date: "2026-09-10 09:00"
-target=$(date -j -f "%Y-%m-%d %H:%M:%S" "2026-09-10 09:00:00" +%s)
+date -j -f "%Y-%m-%d %H:%M:%S" "2026-09-10 09:00:00" +%s
 # relative: "in 20 minutes" / "in 2h"
-target=$(( $(date +%s) + 20*60 ))
+date -v+20M +%s
 ```
 
-An absolute time already past today rolls to tomorrow (`target=$(( target + 86400 ))`).
+An absolute time already past today rolls to tomorrow — re-resolve it with tomorrow's
+date, or add 86400 to the epoch.
 Say so when you do it, and say the horizon out loud: an overnight target means the
 session, the machine, and the machine's wakefulness all have to survive until then. If
 the human wants overnight, that is the moment to tell them this can't guarantee it.
@@ -138,6 +155,22 @@ ROWS
 Space heavy payloads apart. A multi-agent review is a heavy job and two firing on top of
 each other interleave badly; 20 minutes is a reasonable gap for review runs, not a
 universal number. Size the gap to how long one payload actually occupies the session.
+
+## Worked example — resuming after a session limit resets
+
+A budget watcher (or the harness) reports the 5-hour session limit is close and names
+the reset time. The work in flight is a multi-step review that is not finished.
+
+1. **Pause at the warning, not at exhaustion.** Finish the step in flight and stop
+   there. Once a request is actually rate limited there is no turn left to arm anything,
+   so the whole play depends on arming while quota remains.
+2. Resolve the reset time to an epoch target and arm one `Monitor` whose emitted line
+   names the resumption point, not just "continue":
+   `FIRE — quota refilled, resume the review of https://github.com/OWNER/REPO/pull/701 at the security pass (step 3 of 5) now`.
+3. Report the task ID, the exact reset time, and that the watcher dies with the session.
+4. On the notification, keep going. **No resume note is needed** — this is the same
+   session and its context is still loaded. A resume note is for a pause that ends in a
+   *fresh* session, which is what a context-window pause needs and this is not.
 
 ## Worked example — a queue of PR reviews
 

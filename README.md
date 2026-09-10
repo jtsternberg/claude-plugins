@@ -158,7 +158,7 @@ Orchestration stance for a main agent overseeing delegated work. Ships `conduct`
 **Install:** `claude plugin install maestro@jtsternberg`
 
 #### ⏰ [delayed-work](plugins/delayed-work)
-Defer work to a wall-clock time (or a delay) and have *this* session run it then — with the context it already has, and zero tokens spent waiting. Ships `until`: a `Monitor` polling the clock, so the notification wakes the current session, which runs the payload itself instead of handing it to a context-free headless or cloud run. Covers absolute times, relative delays, and queueing several spaced-out jobs. Not a durable scheduler — the watcher dies with the session, and the skill says so when it arms one. Rung 2 of [maestro](#-maestro)'s `patient-waiting` ladder with the clock as the watched condition.
+Hit the 5-hour session limit mid-task? Stop for now and have *this* session pick the work back up at the reset — context still loaded, zero tokens spent waiting, no resume note needed. Ships `until`: a `Monitor` polling the clock, so the notification wakes the current session, which runs the payload itself instead of handing it to a context-free headless or cloud run. Pairs with a budget watcher that reports a reset time — arm it at the warning, not at exhaustion, since a rate-limited request has no turn left to arm anything. Also covers the plain timed case: absolute times, relative delays, and queueing several spaced-out jobs. Not a durable scheduler — the watcher dies with the session, and the skill says so when it arms one. Rung 2 of [maestro](#-maestro)'s `patient-waiting` ladder with the clock as the watched condition.
 
 **Install:** `claude plugin install delayed-work@jtsternberg`
 
