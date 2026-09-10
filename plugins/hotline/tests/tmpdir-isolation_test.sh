@@ -17,7 +17,7 @@ CHANGED_TESTS=(
 )
 unquoted=0
 for suite in "${CHANGED_TESTS[@]}"; do
-  if rg -n 'mktemp[[:space:]]+-d[[:space:]]+\$TMP_ROOT' "$TEST_DIR/$suite" >/dev/null; then
+  if rg -n 'mktemp[[:space:]]+-d[[:space:]]+\$TMP_ROOT/|mktemp[[:space:]]+-d[[:space:]]+\$\{TMP_ROOT\}/' "$TEST_DIR/$suite" >/dev/null; then
     unquoted=1
     break
   fi
