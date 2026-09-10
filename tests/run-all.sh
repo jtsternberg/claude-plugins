@@ -287,26 +287,28 @@ run_queue() {
 
 # ---- node suites ------------------------------------------------------------
 
-NODE_SUITES_FOUND=0
+# Discovered, not listed: a hardcoded list silently omits new suites. The handoff
+# bash suite shipped with 14 passing tests that CI never ran, because the globs
+# below used to name one plugin each. The repo's own tests/ suites are globbed
+# for that same reason: named one by one, a rename there takes the runner's
+# own tests out of the run without a word.
+#
+# Discovery runs BEFORE the runtime check, and once — the same list cannot be
+# written twice, or the "are there suites at all" answer and the "which suites"
+# answer drift apart. An absent runtime is only worth a skip line when there was
+# something to skip.
+NODE_SUITES=()
 for t in tests/*.test.mjs \
 	         plugins/*/skills/*/tests/*.test.mjs plugins/*/tests/*.test.mjs \
 	         plugins/*/*/skills/*/tests/*.test.mjs plugins/*/*/tests/*.test.mjs; do
-	[[ -f "$t" ]] && { NODE_SUITES_FOUND=1; break; }
+	[[ -f "$t" ]] || continue
+	NODE_SUITES+=("$t")
 done
 if have node; then
-	# Discovered, not listed: a hardcoded list silently omits new suites. The handoff
-	# bash suite shipped with 14 passing tests that CI never ran, because the globs
-	# below used to name one plugin each. The repo's own tests/ suites are globbed
-	# for that same reason: named one by one, a rename there takes the runner's
-	# own tests out of the run without a word.
-	for t in tests/*.test.mjs \
-	         plugins/*/skills/*/tests/*.test.mjs plugins/*/tests/*.test.mjs \
-	         plugins/*/*/skills/*/tests/*.test.mjs plugins/*/*/tests/*.test.mjs; do
-		[[ -f "$t" ]] || continue
-		NODE_SUITES_FOUND=1
+	for t in ${NODE_SUITES[@]+"${NODE_SUITES[@]}"}; do
 		enqueue "node: ${t#plugins/}" node "$t"
 	done
-elif [[ $NODE_SUITES_FOUND -eq 1 ]]; then
+elif [[ ${#NODE_SUITES[@]} -gt 0 ]]; then
 	skip "node suites" "node not installed"
 fi
 
@@ -332,10 +334,13 @@ fi
 
 PY="$HOME/.venvs/genai/bin/python3"
 [[ -x "$PY" ]] || PY="$(command -v python3 || true)"
-PYTHON_SUITES_FOUND=0
+# Same single-source rule as the node section above.
+PYTHON_SUITES=()
 for d in plugins/*/skills/*/tests plugins/*/tests \
 	     plugins/*/*/skills/*/tests plugins/*/*/tests; do
-	[[ -d "$d" ]] && compgen -G "$d/test_*.py" >/dev/null && { PYTHON_SUITES_FOUND=1; break; }
+	[[ -d "$d" ]] || continue
+	compgen -G "$d/test_*.py" >/dev/null || continue
+	PYTHON_SUITES+=("$d")
 done
 
 # Every python suite here is stdlib unittest, so a bare python3 runs all of them.
@@ -345,12 +350,7 @@ done
 # hardcoded-list failure the node section warns about, one language over.
 # Glob by path, never by plugin name.
 if [[ -n "$PY" ]]; then
-	for d in plugins/*/skills/*/tests plugins/*/tests \
-	         plugins/*/*/skills/*/tests plugins/*/*/tests; do
-		[[ -d "$d" ]] || continue
-		compgen -G "$d/test_*.py" >/dev/null || continue
-		PYTHON_SUITES_FOUND=1
-
+	for d in ${PYTHON_SUITES[@]+"${PYTHON_SUITES[@]}"}; do
 		plugin="${d#plugins/}"; plugin="${plugin%%/skills/*}"; plugin="${plugin%/tests}"
 		sub="$(basename "$(dirname "$d")")"
 		label="python: $plugin"
@@ -368,7 +368,7 @@ if [[ -n "$PY" ]]; then
 
 		enqueue "$label" python "$d"
 	done
-elif [[ $PYTHON_SUITES_FOUND -eq 1 ]]; then
+elif [[ ${#PYTHON_SUITES[@]} -gt 0 ]]; then
 	skip "python suites" "python3 not installed"
 fi
 
