@@ -33,7 +33,10 @@
 # HOTLINE_CALL_HOME points every call dir at a directory this suite owns and wipes.
 # =============================================================================
 set -u
-
+# Keep standalone runs under the system temp directory while honoring the runner.
+TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT=${TMP_ROOT%/}
+export TMP_ROOT
 PASS=0
 FAIL=0
 FAILED_CASES=()
@@ -63,7 +66,7 @@ check() {  # check <label> <rc> <diagnostic>
 # stub fails loudly here instead of reaching the developer's real herdr and
 # splitting a live pane (or worse, starting a real claude in it).
 # ---------------------------------------------------------------------------
-ROOT="$(mktemp -d /tmp/hotline-herdr-test-XXXXXX)"
+ROOT="$(mktemp -d $TMP_ROOT/hotline-herdr-test-XXXXXX)"
 POISON_BIN="$ROOT/poison-bin"
 POISON_LOG="$ROOT/violations"
 mkdir -p "$POISON_BIN"

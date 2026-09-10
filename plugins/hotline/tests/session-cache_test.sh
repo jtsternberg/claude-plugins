@@ -28,7 +28,10 @@
 # ~/.agents-hotline. No external binaries are involved at all.
 # =============================================================================
 set -u
-
+# Keep standalone runs under the system temp directory while honoring the runner.
+TMP_ROOT="${TMPDIR:-/tmp}"
+TMP_ROOT=${TMP_ROOT%/}
+export TMP_ROOT
 PASS=0
 FAIL=0
 FAILED_CASES=()
@@ -44,7 +47,7 @@ fail() {
 }
 check() { if [[ "$2" -eq 0 ]]; then pass "$1"; else fail "$1" "${3:-}"; fi; }
 
-T=$(mktemp -d /tmp/hotline-session-cache-test-XXXXXX)
+T=$(mktemp -d $TMP_ROOT/hotline-session-cache-test-XXXXXX)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/home" "$T/target"
 TARGET="$T/target"
