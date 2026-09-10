@@ -16,7 +16,7 @@ installing.
 
 ### Claude Code
 
-Add the marketplace and install any of its 33 listed plugins:
+Add the marketplace and install any of its 35 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
@@ -50,7 +50,7 @@ installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
 
 To install one self-contained repository skill instead of a whole plugin, see
 [standalone Codex skills](docs/codex/standalone-skills.md). For commands,
-updates, catalog scope, and all 34 plugin names, see the
+updates, catalog scope, and all 36 plugin names, see the
 [compatibility guide](docs/compatibility.md).
 
 ---
@@ -59,7 +59,7 @@ updates, catalog scope, and all 34 plugin names, see the
 
 These are selected plugins and workflows. The
 [support matrix](docs/compatibility.md#plugin-support-matrix) is the complete
-34-name inventory and the authority for harness availability.
+36-name inventory and the authority for harness availability.
 
 ### Skills
 
@@ -156,6 +156,11 @@ Give an agent its own email address — send, receive, reply, forward, and draft
 Orchestration stance for a main agent overseeing delegated work. Ships `conduct` — boss-not-doer discipline for an implement → review → address pipeline: a fresh agent per phase (dispatched with `--fresh` so the session-routing cache can't hand back the implementer as the "reviewer"), work orders that carry every environment trap a predecessor hit, verify-before-relay, and a `Next for you:` contract with the human. Binds to `hotline` and `cmux-cli` when installed; falls back to subagents and headless sessions. And `patient-waiting` — the zero-token waiting ladder (background `until` loop → `Monitor` → stop and ask), which never machine-polls a human.
 
 **Install:** `claude plugin install maestro@jtsternberg`
+
+#### ⏰ [delayed-work](plugins/delayed-work)
+Defer work to a wall-clock time (or a delay) and have *this* session run it then — with the context it already has, and zero tokens spent waiting. Ships `until`: a `Monitor` polling the clock, so the notification wakes the current session, which runs the payload itself instead of handing it to a context-free headless or cloud run. Covers absolute times, relative delays, and queueing several spaced-out jobs. Not a durable scheduler — the watcher dies with the session, and the skill says so when it arms one. Rung 2 of [maestro](#-maestro)'s `patient-waiting` ladder with the clock as the watched condition.
+
+**Install:** `claude plugin install delayed-work@jtsternberg`
 
 ### Workflow skills
 

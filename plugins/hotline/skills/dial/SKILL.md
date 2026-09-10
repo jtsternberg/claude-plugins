@@ -453,14 +453,17 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   and a real trust decision.** Without it, a call landing in an unattended pane
   stalls at the first permission gate with nobody there to click "Yes". If a call
   hangs at "Combobulating…" with no progress, suspect exactly that.
-  It covers **in-session tool permission gates only.** Nothing bypasses Claude
-  Code's *startup trust dialog* — not this knob, not
-  `claude --dangerously-skip-permissions` itself (`-p`/`--print` is the only
-  documented escape, and a hotline callee is interactive), so an unattended dial
-  into an untrusted directory parks on that dialog regardless. **Trust does not
-  inherit**: a subdirectory of an already-trusted directory gets its own trust
-  boundary. Trust the callee's directory once — run `claude` in it and answer
-  "Yes, I trust this folder" — before dialing into it unattended.
+  It covers **in-session tool permission gates only.** No permissions setting
+  bypasses Claude Code's *startup trust dialog* — not this knob, not
+  `claude --dangerously-skip-permissions` itself, not `bypassPermissions` as the
+  settings default (`-p`/`--print` is the only escape, and a hotline callee is
+  interactive), so an unattended dial into an untrusted repo parks on that dialog
+  regardless. **Trust attaches to the git repository, not the directory**: a
+  worktree or subdirectory of an already-trusted repo dials clean and never gets
+  a trust record of its own, while a fresh `git init` is a new repo with its own
+  boundary, and a directory that is not a git repo is not gated at all. So only a
+  repo Claude Code has not trusted needs the one human action — run `claude` in it
+  and answer "Yes, I trust this folder" — before dialing into it unattended.
 - **`HOTLINE_FORCE_HEADLESS=1`** — every dial takes the headless transport,
   regardless of cmux. Same destination as the per-call `--headless`.
 - **`HOTLINE_CLAUDE_MODEL=opus`** — model override for the callee.

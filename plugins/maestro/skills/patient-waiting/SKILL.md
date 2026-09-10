@@ -63,6 +63,7 @@ had changed. Every rule below exists because of that.
 | Waiting on | Mechanism |
 |---|---|
 | Local file/status flag to flip once | Background bash `until` loop |
+| Wall-clock time / "run X at 9pm" | The `until` skill (`delayed-work` plugin) — this ladder's rung 2 with the clock as the condition |
 | Recurring events (log errors, PR comments) | `Monitor` (persistent) |
 | Human action (submit, approve, "when I'm ready") | Watcher from above — or just tell them to nudge you. Never scheduled wakes. |
 | CI/deploy the harness can't see | `ScheduleWakeup`, interval matched to the job, max 3 quiet polls |

@@ -286,6 +286,14 @@
       "category": "Coding"
     },
     {
+      "name": "delayed-work",
+      "source": {
+        "source": "local",
+        "path": "./plugins/delayed-work"
+      },
+      "category": "Coding"
+    },
+    {
       "name": "codex",
       "source": {
         "source": "local",

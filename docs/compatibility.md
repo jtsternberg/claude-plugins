@@ -10,7 +10,7 @@ catalogs, so install from the column that matches the client you are using.
 
 The clean probes confirmed that Claude Code and Codex resolve separate catalogs
 and that Codex offers only a subset. The matrix below is the current inventory —
-33 entries in the Claude Code catalog, 34 names across both. Recheck this guide
+35 entries in the Claude Code catalog, 36 names across both. Recheck this guide
 after a client upgrade or a catalog change.
 
 ## Install and invoke
@@ -127,6 +127,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | [cmux-cli](../plugins/cmux-cli) | Available | Not offered | macOS only; requires cmux.app and its `cmux` executable. |
 | [codex](../plugins/codex) | Not offered | Available | Codex-native model-stance and delegation skills. |
 | [collab-tools](../plugins/collab-tools) | Available | Not offered | No extra platform requirement documented. |
+| [delayed-work](../plugins/delayed-work) | Available | Available | Zero-token waiting uses Claude Code's `Monitor`; Codex's only in-session wait blocks the turn, so it is honest there for short horizons only. Nothing here survives the session closing. |
 | [export-presentation](../plugins/export-presentation) | Available | Not offered | Requires browser automation dependencies. |
 | [fable](../plugins/fable) | Available | Not offered | Claude Code plugin; the Codex-native `codex` plugin carries its separate A/B skills. |
 | [generating-blog-images](../plugins/generating-blog-images) | Available | Not offered | Produces prompts; use of an image provider is a separate choice. |
@@ -138,6 +139,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | [hotline](../plugins/hotline) | Available | Available | Codex can place calls; the current launch transport starts Claude Code receivers. `cmux` is optional/preferred on macOS; calls need reachable local workspaces and a working Claude launcher. |
 | [localwp-shell](../plugins/localwp-shell) | Available | Not offered | macOS only; requires LocalWP and its local shell tooling. |
 | [mac-caffeinate](../plugins/mac-caffeinate) | Available | Not offered | macOS only; uses the system `caffeinate` utility. |
+| [maestro](../plugins/maestro) | Available | Not offered | Orchestration and waiting stances; binds to `hotline` and `cmux-cli` when installed, otherwise falls back to subagents. |
 | [obsidian-cli](../plugins/obsidian-cli) | Available | Not offered | Requires Obsidian CLI v1.12+ and a local vault. |
 | [paperclip](../plugins/paperclip) | Available | Not offered | Requires a locally running Paperclip instance and CLI. |
 | [address-pr-comments](../plugins/pr-workflow/address-pr-comments) | Available | Available | Requires an open PR and GitHub CLI authentication. |
