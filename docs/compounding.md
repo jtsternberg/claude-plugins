@@ -253,6 +253,26 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   `plugins/delayed-work/tests/skills-layout.test.mjs`, which pins that loop in `until`'s
   SKILL.md. (claude-plugins-erak, 0005347)
 
+- **A list of live OS handles must shrink as they die, or cleanup broadcasts to bystanders.**
+  `tests/run-all.sh`'s `ACTIVE_PIDS` only ever appended; its sole reset ran after the
+  whole queue drained, so an interrupt sent `kill -TERM/-KILL -- "-$pid"` — process
+  *groups*, by number — for every suite the run had ever launched. pids recycle inside
+  one run: ~502/s measured here, ~70,000 over a 145s run against a 99,999 ceiling, with
+  wrap observed directly, so a late Ctrl-C can kill a group now owned by a shell, an
+  editor, or another agent session (proven against a `setsid`'d decoy, `rc=-15`). A
+  batch scheduler hid this by holding <=4 pids at a time; a work queue holds every pid
+  it ever launched. Track liveness per slot and drop the entry on reap.
+  (claude-plugins-929u, 903b9fd)
+- **A hand-maintained ordering hint can outgrow the queue it reorders, and the consumer
+  hangs instead of complaining.** `build_run_order` appended one index per `SLOW_FIRST`
+  match with no duplicate guard, so one duplicated word made the order longer than the
+  task count; the launch loop stopped at `next < TASK_COUNT`, the tail index never
+  launched, replay blocked on its missing status, and the runner `sleep 0.1`'d forever
+  with no diagnostic — exit 124 in CI, a job burning its whole timeout after four lines
+  of output. The comment above that list invites hand-editing it. When a producer builds
+  an index list a consumer treats as a permutation, assert the lengths agree and fail
+  loudly; a silent hang is the worst failure available. (claude-plugins-929u, 903b9fd)
+
 ## Testing
 
 - **Read a file's mode with GNU `stat -c` before BSD `stat -f`.** On Linux
@@ -306,6 +326,16 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   Give the simulated far side its own value for every dimension under test, and
   withhold from the environment whatever the code is meant to read from a file.
   (claude-plugins-7wze.8, 2a4cc64)
+
+- **SIGINT to a backgrounded process is a no-op, so "test the Ctrl-C path" needs job
+  control and a group signal.** A background job of a shell without job control inherits
+  SIGINT *ignored*, and a later `trap ... INT` cannot reclaim it — a probe that
+  `kill -INT`'d a runner started with `&` left it and both grandchildren alive for
+  minutes, reading as "interrupt cleanup is broken". A terminal Ctrl-C signals the
+  foreground process *group* of a shell where job control is in effect, so reproduce it
+  with `set -m` (or `os.setsid`) plus `kill -INT -$pgid`. The pre-existing termination
+  test used SIGTERM to sidestep exactly this, which is why nothing caught the real
+  interrupt defect. (claude-plugins-929u, 903b9fd)
 
 ## Process
 
