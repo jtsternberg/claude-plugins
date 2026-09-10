@@ -110,7 +110,7 @@ printf 'output-${name}\\n'
 `);
 }
 
-function runFixture(root, jobs, { timeout } = {}) {
+function runFixture(root, jobs, { timeout, path } = {}) {
 	const state = join(root, 'state');
 	mkdirSync(state, { recursive: true });
 	// Strip an inherited RUN_ALL_JOBS when the fixture wants the default: these
@@ -118,9 +118,10 @@ function runFixture(root, jobs, { timeout } = {}) {
 	// tests/run-all.sh` used to leak its 1 into the fixture and fail the
 	// default-job-count assertion.
 	const env = { ...process.env, RUNNER_TEST_STATE: state };
+	if (path) env.PATH = path;
 	if (jobs === undefined) delete env.RUN_ALL_JOBS;
 	else env.RUN_ALL_JOBS = String(jobs);
-	return spawnSync('bash', ['tests/run-all.sh'], { cwd: root, env, encoding: 'utf8', timeout });
+	return spawnSync('/bin/bash', ['tests/run-all.sh'], { cwd: root, env, encoding: 'utf8', timeout });
 }
 
 test('limits concurrent suites and replays their output in discovery order', (t) => {
@@ -230,6 +231,19 @@ test('fails when discovery finds no suites', (t) => {
 	t.after(() => rmSync(root, { recursive: true, force: true }));
 
 	const result = runFixture(root, 1);
+
+	assert.equal(result.status, 1, result.stderr || result.stdout);
+	assert.match(result.stdout, /no test suites discovered/);
+	assert.match(result.stdout, /passed\s+0\nfailed\s+1\nskipped\s+0/);
+});
+
+test('fails when no suites are discovered even if runtimes are absent', (t) => {
+	const root = createFixture({ empty: true });
+	t.after(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	const result = runFixture(root, 1, { path: '/usr/bin:/bin' });
 
 	assert.equal(result.status, 1, result.stderr || result.stdout);
 	assert.match(result.stdout, /no test suites discovered/);

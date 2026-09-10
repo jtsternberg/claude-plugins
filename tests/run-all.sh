@@ -290,6 +290,12 @@ run_queue() {
 
 # ---- node suites ------------------------------------------------------------
 
+NODE_SUITES_FOUND=0
+for t in tests/*.test.mjs \
+	         plugins/*/skills/*/tests/*.test.mjs plugins/*/tests/*.test.mjs \
+	         plugins/*/*/skills/*/tests/*.test.mjs plugins/*/*/tests/*.test.mjs; do
+	[[ -f "$t" ]] && { NODE_SUITES_FOUND=1; break; }
+done
 if have node; then
 	# Discovered, not listed: a hardcoded list silently omits new suites. The handoff
 	# bash suite shipped with 14 passing tests that CI never ran, because the globs
@@ -300,9 +306,10 @@ if have node; then
 	         plugins/*/skills/*/tests/*.test.mjs plugins/*/tests/*.test.mjs \
 	         plugins/*/*/skills/*/tests/*.test.mjs plugins/*/*/tests/*.test.mjs; do
 		[[ -f "$t" ]] || continue
+		NODE_SUITES_FOUND=1
 		enqueue "node: ${t#plugins/}" node "$t"
 	done
-else
+elif [[ $NODE_SUITES_FOUND -eq 1 ]]; then
 	skip "node suites" "node not installed"
 fi
 
@@ -328,6 +335,11 @@ fi
 
 PY="$HOME/.venvs/genai/bin/python3"
 [[ -x "$PY" ]] || PY="$(command -v python3 || true)"
+PYTHON_SUITES_FOUND=0
+for d in plugins/*/skills/*/tests plugins/*/tests \
+	     plugins/*/*/skills/*/tests plugins/*/*/tests; do
+	[[ -d "$d" ]] && compgen -G "$d/test_*.py" >/dev/null && { PYTHON_SUITES_FOUND=1; break; }
+done
 
 # Every python suite here is stdlib unittest, so a bare python3 runs all of them.
 # This used to be a hardcoded session-tools case plus a gws loop gated on
@@ -340,6 +352,7 @@ if [[ -n "$PY" ]]; then
 	         plugins/*/*/skills/*/tests plugins/*/*/tests; do
 		[[ -d "$d" ]] || continue
 		compgen -G "$d/test_*.py" >/dev/null || continue
+		PYTHON_SUITES_FOUND=1
 
 		plugin="${d#plugins/}"; plugin="${plugin%%/skills/*}"; plugin="${plugin%/tests}"
 		sub="$(basename "$(dirname "$d")")"
@@ -358,7 +371,7 @@ if [[ -n "$PY" ]]; then
 
 		enqueue "$label" python "$d"
 	done
-else
+elif [[ $PYTHON_SUITES_FOUND -eq 1 ]]; then
 	skip "python suites" "python3 not installed"
 fi
 
