@@ -64,11 +64,9 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# One job per core, because a hardcoded number is wrong on some box: too wide
-# oversubscribes a small runner or container, and the suites that assert on
-# short wall-clock timeouts are the first to notice; too narrow leaves a
-# 12-core laptop idle. ubuntu-latest reports 4 cores for a public repo, so CI
-# and a laptop both land on the 4 ceiling; the 2 floor is for anything smaller.
+# One job per core, because any fixed width is wrong on some box: too wide
+# oversubscribes a small runner, and the suites that assert on short wall-clock
+# timeouts are the first to notice; too narrow leaves a big machine idle.
 default_jobs() {
 	local n=""
 	case "$(uname -s 2>/dev/null || true)" in
@@ -76,11 +74,11 @@ default_jobs() {
 		*)      n="$(nproc 2>/dev/null || true)" ;;
 	esac
 	case "$n" in ''|*[!0-9]*|0) n=4 ;; esac
-	# Clamped to 2..4, measured rather than guessed. Below 2 a single-core box
-	# would serialize an 8-minute run. The 4 ceiling is not a property of the
-	# suites: an 8-job run on a 12-core laptop came out slower overall and
-	# failed surface-placement, whose assertion has a fixed wall-clock budget
-	# that expires once the box is loaded enough — tracked as
+	# Clamped to 2..4, measured rather than guessed. The floor keeps a
+	# single-core box from serializing an 8-minute run. The ceiling is not a
+	# property of the hardware: past 4 jobs a full run came out slower overall
+	# AND failed surface-placement, whose assertion has a fixed wall-clock
+	# budget that expires once the box is loaded enough — tracked as
 	# claude-plugins-fjuh. Fix that test and this ceiling may well lift.
 	[[ $n -lt 2 ]] && n=2
 	[[ $n -gt 4 ]] && n=4
