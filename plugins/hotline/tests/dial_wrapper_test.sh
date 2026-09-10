@@ -301,7 +301,7 @@ EOF
 
 new_env() {   # echoes a fresh scratch root with bin/, home/, target/, work/
   local t
-  t=$(mktemp -d $TMP_ROOT/hotline-dial-test-XXXXXX)
+  t=$(mktemp -d "$TMP_ROOT"/hotline-dial-test-XXXXXX)
   mkdir -p "$t/bin" "$t/home" "$t/target" "$t/work" "$t/pending" "$t/empty"
   # A booted REPL: the banner (wait-for-session's signal A) AND a drawn input box
   # (signal C, and what cmux-paste.sh waits for before pasting — a paste into a
@@ -1914,7 +1914,7 @@ check "a pre-existing transcript does NOT count as a booted REPL on resume" $? \
 WFS="$HOTLINE_DIR/skills/dial/scripts/wait-for-session.sh"
 signal_b_case() {   # signal_b_case <name> <pre-existing-bytes|""> <grow:yes|no>
   local name="$1" pre="$2" grow="$3"
-  local d; d=$(mktemp -d $TMP_ROOT/hotline-sigb-XXXXXX); note_leak "$d"
+  local d; d=$(mktemp -d "$TMP_ROOT"/hotline-sigb-XXXXXX); note_leak "$d"
   mkdir -p "$d/bin" "$d/home" "$d/call"
   # A screen with NO banner and NO input box: signal B is the only one that can fire.
   cat > "$d/bin/cmux" <<'EOF'

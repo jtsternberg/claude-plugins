@@ -54,7 +54,7 @@ echo "surface-ready.sh:"
 # became `rkebash /tmp/…` (2026-08-26). `cmux send` attaches the PTY on its own,
 # verified live on cmux 0.64.22, so a focus call here is pure cost
 # (claude-plugins-r465.4).
-tmp=$(mktemp -d $TMP_ROOT/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
 : > "$tmp/screen.txt"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -116,7 +116,7 @@ rm -rf "$tmp"
 # something: under --focus false that NEVER succeeds, because there is no tty until
 # the first send. This same probe, addressed by --workspace, is what those paths
 # call (claude-plugins-r465.4).
-tmp=$(mktemp -d $TMP_ROOT/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
 : > "$tmp/screen.txt"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -147,7 +147,7 @@ rm -rf "$tmp"
 # `cmux send --surface ""` does not fail; it delivers to the FOCUSED surface, which
 # on 2026-08-26 put probe keystrokes into an unrelated live claude session twice
 # (claude-plugins-r465.7).
-tmp=$(mktemp -d $TMP_ROOT/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "${CMUX_FAKE_STATE:?}/calls"
@@ -177,7 +177,7 @@ rm -rf "$tmp"
 # Case R2 (fresh-PTY race): the first probe's \n is swallowed (no marker echoed);
 # readiness must RE-SEND and succeed on the later attempt. The fake only echoes
 # the marker on the 2nd+ send.
-tmp=$(mktemp -d $TMP_ROOT/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
 : > "$tmp/screen.txt"; echo 0 > "$tmp/sendcount"
 # Counts PROBE sends only. Each probe is now preceded by a Ctrl-U on the same
 # handle, so counting every send would make the first probe look like the second.
@@ -218,7 +218,7 @@ fi
 rm -rf "$tmp"
 
 # Case R3: PTY never echoes → timeout exit 3 (surface exists but not ready).
-tmp=$(mktemp -d $TMP_ROOT/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-ready-XXXXXX); mkdir -p "$tmp/bin"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
@@ -242,7 +242,7 @@ echo "open-window-surface.sh find-or-create:"
 
 # Case W1: window ref form → land a surface in that window's first workspace,
 # created --focus false (nothing needs focus; the first send attaches the PTY).
-tmp=$(mktemp -d $TMP_ROOT/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 ST="${CMUX_FAKE_STATE:?}"
@@ -276,7 +276,7 @@ fi
 rm -rf "$tmp"
 
 # Case W2: name form, a workspace titled <name> already exists → reuse its window.
-tmp=$(mktemp -d $TMP_ROOT/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 ST="${CMUX_FAKE_STATE:?}"
@@ -313,7 +313,7 @@ rm -rf "$tmp"
 # AND THE REF IS NOT THE INDEX. The new window is index 1 in list-windows and
 # `window:4` in the tree, so a fix that maps the printed index to `window:<index>`
 # targets window:1 — the user's existing window — and this case fails.
-tmp=$(mktemp -d $TMP_ROOT/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
 echo 0 > "$tmp/made_window"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -366,7 +366,7 @@ rm -rf "$tmp"
 # the live failure the title-key bug produced — two calls for one name opened
 # window:4 and window:5, each with its own correctly-titled workspace — and no
 # single-call case can catch it, because each call was individually correct.
-tmp=$(mktemp -d $TMP_ROOT/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
 : > "$tmp/made_ws"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -412,7 +412,7 @@ rm -rf "$tmp"
 # Case W4: the id diff comes back empty (a tree read that misses the new window),
 # so the ref has to come from the UUID `cmux current-window` prints. new-window
 # focuses what it creates, which is what makes that fallback sound.
-tmp=$(mktemp -d $TMP_ROOT/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 ST="${CMUX_FAKE_STATE:?}"
@@ -442,7 +442,7 @@ rm -rf "$tmp"
 # Case W5: nothing resolves the ref → HARD ERROR. Continuing with an empty
 # --window would let cmux resolve the missing target to the FOCUSED window and
 # land the callee in whatever the user is looking at.
-tmp=$(mktemp -d $TMP_ROOT/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-win-XXXXXX); mkdir -p "$tmp/bin"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 ST="${CMUX_FAKE_STATE:?}"

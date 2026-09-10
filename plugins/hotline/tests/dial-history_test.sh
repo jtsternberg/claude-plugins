@@ -28,7 +28,7 @@ fail() {
 }
 
 # Each case gets a throwaway HOME so the history lands in a temp tree.
-new_home() { mktemp -d $TMP_ROOT/hotline-dh-test-XXXXXX; }
+new_home() { mktemp -d "$TMP_ROOT"/hotline-dh-test-XXXXXX; }
 
 history_file() {
   # $1 = fake HOME, $2 = receiver cwd

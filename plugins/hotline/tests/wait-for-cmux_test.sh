@@ -69,7 +69,7 @@ stage_call_dir() {
 echo "wait-for-session cmux mode:"
 
 # Case 1: REPL banner visible → session_id.txt promoted from preset.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
 Last login: Thu May 14 16:00:00 on ttys001
@@ -95,7 +95,7 @@ fi
 rm -rf "$tmp"
 
 # Case 2: no banner → times out with actionable error.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
 Last login: Thu May 14 16:00:00 on ttys001
@@ -126,7 +126,7 @@ rm -rf "$tmp"
 
 # Case 3: launcher already wrote done+error.txt → wait-for-session exits 1
 # with the launcher's error on stderr (early-fail propagation).
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 echo "" > "$tmp/screen.txt"
 cd="$tmp/call"
@@ -154,7 +154,7 @@ rm -rf "$tmp"
 # is every plain resume, where the transcript predates the dial — and a bare
 # existence check fired on the first poll, reporting a booted REPL in the same
 # millisecond the launch command was sent (Case 3b2 below pins that).
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
 Last login: Thu May 14 16:00:00 on ttys001
@@ -189,7 +189,7 @@ rm -rf "$tmp"
 
 # Case 3b2: a transcript that was ALREADY there and never changes — the shape of
 # every plain resume. It must NOT count as a booted REPL.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
 Last login: Thu May 14 16:00:00 on ttys001
@@ -217,7 +217,7 @@ rm -rf "$tmp"
 
 # Case 3c: no banner AND no transcript file → timeout, error message
 # enumerates which signals were missing (actionable diagnostic).
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 echo "no banner here" > "$tmp/screen.txt"
 cd="$tmp/call"
@@ -239,7 +239,7 @@ rm -rf "$tmp"
 
 # Case 3d: empty transcript file (claude created it but hasn't written yet)
 # is NOT enough — we require -s (non-empty). Banner remains the only signal.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 echo "no banner" > "$tmp/screen.txt"
 cd="$tmp/call"
@@ -266,7 +266,7 @@ rm -rf "$tmp"
 # input box — so every signal above stays silent and the wait used to spend its whole
 # budget and then blame --allowedTools or a lost tty (claude-plugins-6y0s). It must
 # fail FAST, name the cwd and the fix, and say that nothing was delivered.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
 ╭──────────────────────────────────────────────╮
@@ -317,7 +317,7 @@ rm -rf "$tmp"
 # Case 3f: the same dialog text, but in SCROLLBACK — a dialog somebody answered in
 # this surface minutes ago, with a live REPL below it. Matching that would refuse a
 # boot that is going fine, which is why the check reads the live tail only.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 {
   echo "Quick safety check: Is this a project you created or one you trust?"
@@ -413,7 +413,7 @@ seq_screen_tool_result() {
 
 run_seq_case() {  # <name> <preset> <timeout> <screen-fn>...
   local name="$1" preset="$2" timeout="$3"; shift 3
-  SEQ_TMP=$(mktemp -d $TMP_ROOT/hotline-wait-seq-XXXXXX)
+  SEQ_TMP=$(mktemp -d "$TMP_ROOT"/hotline-wait-seq-XXXXXX)
   make_seq_cmux "$SEQ_TMP/bin"
   stage_screens "$SEQ_TMP/screens" "$@"
   SEQ_CD="$SEQ_TMP/call"
@@ -509,7 +509,7 @@ echo ""
 echo "wait-for-response cmux mode:"
 
 # Case 4: STATUS: DONE on screen → response.json + done written, JSON emitted.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
 bash /tmp/hotline-launch-XYZ
@@ -551,7 +551,7 @@ fi
 rm -rf "$tmp"
 
 # Case 5: WORK_IN_PROGRESS only, no terminal status → timeout, error written.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
 bash /tmp/hotline-launch-XYZ
@@ -579,7 +579,7 @@ fi
 rm -rf "$tmp"
 
 # Case 6: keep_workspace=true → cmux close-workspace is NOT called.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 mkdir -p "$tmp/bin"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -611,7 +611,7 @@ fi
 rm -rf "$tmp"
 
 # Case 7: keep_workspace=false (default) → cmux close-workspace IS called.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 mkdir -p "$tmp/bin"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -644,7 +644,7 @@ rm -rf "$tmp"
 
 # Case 8: headless mode (no workspace_ref.txt) — original file-watch path
 # still works. wait-for-response.sh should poll done + emit response.json.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 cd="$tmp/call"
 mkdir -p "$cd"
 echo "preset-uuid-8" > "$cd/session_id.txt"
@@ -695,7 +695,7 @@ EOF
 }
 
 # Case S1: wait-for-session promotes session_id via the surface read-screen path.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_surface_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
  ▐▛███▜▌   Claude Code v2.1.141
@@ -736,7 +736,7 @@ rm -rf "$tmp"
 
 # Case S2: wait-for-response extracts STATUS via the surface and, with keep=true
 # (the surface-mode default), does NOT close the surface or any workspace.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_surface_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
  ▐▛███▜▌   Claude Code v2.1.141
@@ -767,7 +767,7 @@ rm -rf "$tmp"
 
 # Case S3: with keep=false, surface mode closes the SURFACE (close-surface),
 # never close-workspace (which would nuke the caller's own window).
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_surface_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
  ▐▛███▜▌   Claude Code v2.1.141
@@ -797,7 +797,7 @@ rm -rf "$tmp"
 # nonce (e.g. --resume scrollback) must be ignored; only the fresh STATUS that
 # carries call_id=<nonce> terminates the call. Mirrors the workspace-mode
 # guarantee but proves it holds when polling a surface.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_surface_fake_cmux "$tmp/bin"
 # Realistic scrollback: a prior call's transcript was replayed (un-nonced
 # STATUS lines), then THIS call's fresh turn runs — beginning, per the ringing
@@ -831,7 +831,7 @@ echo "Launch-script lifecycle (claude-plugins-qq9f):"
 # Case L1: boot confirmed → the launch script leaves /tmp for the call dir, and
 # launch_script.txt is repointed so wait-for-response.sh's existing `rm -f` still
 # reaches it. ~270 had accumulated in /tmp because nothing on this path moved one.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
  ▐▛███▜▌   Claude Code v2.1.141
@@ -883,7 +883,7 @@ rm -rf "$tmp"
 # Case L2: an EMPTY launch_script.txt must not abort the boot wait. The cleanup
 # used to be a `[[ -n … ]] && rm` one-liner, which under `set -e` exits on a
 # failed test — one line before the session id is printed.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
  ▐▛███▜▌   Claude Code v2.1.141
@@ -906,7 +906,7 @@ rm -rf "$tmp"
 # Case L3: the boot TIMED OUT → the script is KEPT. The timeout diagnostic tells
 # the user to re-send `bash <launch script>` by hand, and a surface stuck on a
 # refused launch line is a forensics target. Only the success path deletes.
-tmp=$(mktemp -d $TMP_ROOT/hotline-wait-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
 Last login: Thu May 14 16:00:00 on ttys001

@@ -47,7 +47,7 @@ fail() {
 }
 check() { if [[ "$2" -eq 0 ]]; then pass "$1"; else fail "$1" "${3:-}"; fi; }
 
-T=$(mktemp -d $TMP_ROOT/hotline-session-cache-test-XXXXXX)
+T=$(mktemp -d "$TMP_ROOT"/hotline-session-cache-test-XXXXXX)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/home" "$T/target"
 TARGET="$T/target"

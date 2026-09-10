@@ -119,7 +119,7 @@ EOF
 
 new_env() {   # echoes a fresh scratch root with bin/, home/, work/
   local t
-  t=$(mktemp -d $TMP_ROOT/hotline-session-init-test-XXXXXX)
+  t=$(mktemp -d "$TMP_ROOT"/hotline-session-init-test-XXXXXX)
   mkdir -p "$t/bin" "$t/home" "$t/work"
   echo "$t"
 }

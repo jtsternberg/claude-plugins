@@ -79,7 +79,7 @@ REAL_PYTHON3="$(command -v python3)"
 # same guard because a missing stub really did launch a `claude --resume` pane on
 # every run of that suite.)
 # ---------------------------------------------------------------------------
-ROOT="$(mktemp -d $TMP_ROOT/hotline-transport-test-XXXXXX)"
+ROOT="$(mktemp -d "$TMP_ROOT"/hotline-transport-test-XXXXXX)"
 POISON_BIN="$ROOT/poison-bin"
 POISON_LOG="$ROOT/violations"
 mkdir -p "$POISON_BIN"

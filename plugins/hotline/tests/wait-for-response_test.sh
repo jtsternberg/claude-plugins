@@ -103,7 +103,7 @@ run_case() {
   local expected_substring="$3"
 
   local call_dir
-  call_dir=$(mktemp -d $TMP_ROOT/hotline-test-XXXXX)
+  call_dir=$(mktemp -d "$TMP_ROOT"/hotline-test-XXXXX)
   printf '%s' "$stream_body" > "$call_dir/stream.jsonl"
   synthesize_response "$call_dir"
 
@@ -219,7 +219,7 @@ run_caller_case() {
 
   # Build a call_dir from the committed fixture
   local call_dir
-  call_dir=$(mktemp -d $TMP_ROOT/hotline-caller-XXXXX)
+  call_dir=$(mktemp -d "$TMP_ROOT"/hotline-caller-XXXXX)
   cp "$FIXTURE_DIR/response.json" "$call_dir/response.json"
   touch "$call_dir/done"
 
@@ -264,7 +264,7 @@ if [[ $have_zsh -eq 1 ]]; then
   # shell-meta interpolation at bash-parse time) and survives paths with
   # spaces, quotes, or other shell-special characters.
   out=$(FIXTURE_DIR="$FIXTURE_DIR" DIAL_SCRIPTS="$DIAL_SCRIPTS" zsh -c '
-    FIX_DIR=$(mktemp -d $TMP_ROOT/hotline-unsafe-XXXXX)
+    FIX_DIR=$(mktemp -d "$TMP_ROOT"/hotline-unsafe-XXXXX)
     cp "$FIXTURE_DIR/response.json" "$FIX_DIR/response.json"
     touch "$FIX_DIR/done"
     RESPONSE_JSON=$(bash "$DIAL_SCRIPTS/wait-for-response.sh" "$FIX_DIR")
@@ -292,7 +292,7 @@ TNONCE="testnonce0pwc01"
 setup_transcript_call() {  # $1 = transcript body (JSONL); echoes "HOME|CALL_DIR|STUBDIR"
   local body="$1"
   local h cd sd cwd enc
-  h=$(mktemp -d); cd=$(mktemp -d $TMP_ROOT/hotline-tcm-XXXXX); sd=$(mktemp -d)
+  h=$(mktemp -d); cd=$(mktemp -d "$TMP_ROOT"/hotline-tcm-XXXXX); sd=$(mktemp -d)
   cwd="/fake/callee/ws"
   enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
   mkdir -p "$h/.claude/projects/$enc"
@@ -612,7 +612,7 @@ echo "Submit discrimination:"
 setup_discrim_call() {  # $1=transcript body  $2=screen text  $3=with_surface(true/false)
   local body="$1" screen="$2" with_surface="${3:-true}"
   local h cd sd cwd enc
-  h=$(mktemp -d); cd=$(mktemp -d $TMP_ROOT/hotline-disc-XXXXX); sd=$(mktemp -d)
+  h=$(mktemp -d); cd=$(mktemp -d "$TMP_ROOT"/hotline-disc-XXXXX); sd=$(mktemp -d)
   cwd="/fake/callee/ws"
   enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
   mkdir -p "$h/.claude/projects/$enc"
@@ -643,7 +643,7 @@ setup_discrim_call() {  # $1=transcript body  $2=screen text  $3=with_surface(tr
 # Same, but `cmux read-screen` fails outright (surface gone).
 setup_discrim_call_broken_screen() {  # $1=transcript body
   local body="$1" h cd sd cwd enc
-  h=$(mktemp -d); cd=$(mktemp -d $TMP_ROOT/hotline-disc-XXXXX); sd=$(mktemp -d)
+  h=$(mktemp -d); cd=$(mktemp -d "$TMP_ROOT"/hotline-disc-XXXXX); sd=$(mktemp -d)
   cwd="/fake/callee/ws"
   enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
   mkdir -p "$h/.claude/projects/$enc"
@@ -879,7 +879,7 @@ echo "AWAITING_REVIEW checkpoint:"
 # logs every invocation, so we can prove the live surface was left alone.
 setup_await_call() {  # $1 = transcript body → echoes "HOME|CALL_DIR|STUBDIR|LOG"
   local body="$1" h cd sd cwd enc log
-  h=$(mktemp -d); cd=$(mktemp -d $TMP_ROOT/hotline-await-XXXXX); sd=$(mktemp -d)
+  h=$(mktemp -d); cd=$(mktemp -d "$TMP_ROOT"/hotline-await-XXXXX); sd=$(mktemp -d)
   log="$sd/cmux.log"
   cwd="/fake/callee/ws"
   enc=$(printf '%s' "$cwd" | sed 's|[^a-zA-Z0-9]|-|g')
@@ -1024,7 +1024,7 @@ rm -rf "$HB" "$CDB" "$SDB"
 # A real remote failure — done + error.txt and NO marker — must still short-circuit
 # instantly and stay terminal. That fast path is what the marker exists to keep
 # intact while making a mere timeout resumable.
-TF=$(mktemp -d $TMP_ROOT/hotline-term-XXXXX)
+TF=$(mktemp -d "$TMP_ROOT"/hotline-term-XXXXX)
 echo "w1:s1"            > "$TF/surface_ref.txt"
 echo "true"             > "$TF/keep_workspace.txt"
 echo "launcher blew up" > "$TF/error.txt"
@@ -1043,7 +1043,7 @@ fi
 rm -rf "$TF"
 
 # A stale marker must never discard a call that actually produced a response.
-TG=$(mktemp -d $TMP_ROOT/hotline-guard-XXXXX)
+TG=$(mktemp -d "$TMP_ROOT"/hotline-guard-XXXXX)
 echo '{"session_id":"s-guard","response":"already answered"}' > "$TG/response.json"
 printf 'budget=6s mode=transcript' > "$TG/waiter_timeout.txt"
 touch "$TG/done"

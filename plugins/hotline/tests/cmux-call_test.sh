@@ -107,7 +107,7 @@ assert_contains() {
 
 echo "cmux-call regression:"
 
-tmp=$(mktemp -d $TMP_ROOT/hotline-cmux-call-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-call-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -307,7 +307,7 @@ rm -rf "$tmp"
 # registration sat after the delivery gate, so the next dial to that workspace found
 # no cached session, called it first contact, and opened a SECOND surface beside the
 # abandoned one. Everything registration needs is known once the launch went out.
-tmp=$(mktemp -d $TMP_ROOT/hotline-cmux-call-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-call-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd" "$tmp/home"
 # A socket that accepts nothing: delivery cannot be confirmed, so the script exits 1.
 NODELIVER_SOCK="$(socket_stub_start "$SOCKROOT/nodeliver" "$SOCKROOT/responses/reject.json")"
@@ -413,7 +413,7 @@ rm -rf "$tmp" "$UNDEL_DIR"
 # the display ref exactly as SEND_TARGET does; cmux-paste.sh resolves a ref through
 # the tree. The other stubs in this file all emit a surface_id, which is why this
 # needs its own.
-tmp=$(mktemp -d $TMP_ROOT/hotline-cmux-call-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-call-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd"
 cat > "$tmp/open-side.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -471,7 +471,7 @@ rm -rf "$tmp"
 # With no --detached, cmux-call.sh RESOLVES and calls cmux-cli's canonical
 # open-side-surface.sh (injected here via a stub), then sends the launch script
 # to that SURFACE, not a new workspace.
-tmp=$(mktemp -d $TMP_ROOT/hotline-cmux-call-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-call-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd"
 cat > "$tmp/open-side.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -542,7 +542,7 @@ rm -f "$ls" 2>/dev/null || true
 rm -rf "$tmp"
 
 # --- Headless fallback: cmux present, cmux-cli opener absent -----------------
-tmp=$(mktemp -d $TMP_ROOT/hotline-cmux-call-test-XXXXXX)
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-call-test-XXXXXX)
 mkdir -p "$tmp/bin" "$tmp/cwd" "$tmp/empty"
 cat > "$tmp/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
@@ -580,7 +580,7 @@ fi
 # Live-verified CLI rule: "--session-id can only be used with --continue or
 # --resume if --fork-session is also specified."
 # ---------------------------------------------------------------------------
-tmpf=$(mktemp -d $TMP_ROOT/hotline-cmux-fork-XXXXXX)
+tmpf=$(mktemp -d "$TMP_ROOT"/hotline-cmux-fork-XXXXXX)
 mkdir -p "$tmpf/bin" "$tmpf/cwd"
 cat > "$tmpf/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
