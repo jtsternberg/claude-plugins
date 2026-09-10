@@ -7,7 +7,9 @@ when_to_use: |
   … to surface <uuid>", "in 20 minutes paste this into that tab", "wake up later and send X
   into the cmux surface I'm pointing at". NOT for cross-workspace agent calls with delivery
   verification (that is hotline's dial), and NOT for durable scheduling that must survive the
-  session closing (impossible here — see the reliability envelope below).
+  session closing (impossible here — see the reliability envelope below). And NOT for
+  running the work in THIS session at a later time — that is the `until` skill in the
+  `delayed-work` plugin, which targets self and needs no cmux.
 argument-hint: "<when> <surface-uuid> <prompt>"
 allowed-tools:
   - "Bash(cmux *)"

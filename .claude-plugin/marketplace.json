@@ -39,6 +39,7 @@
     { "name": "slack", "source": "./plugins/slack" },
     { "name": "fable", "source": "./plugins/fable" },
     { "name": "agentmail", "source": "./plugins/agentmail" },
-    { "name": "maestro", "source": "./plugins/maestro" }
+    { "name": "maestro", "source": "./plugins/maestro" },
+    { "name": "delayed-work", "source": "./plugins/delayed-work" }
   ]
 }
