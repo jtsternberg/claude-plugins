@@ -208,7 +208,9 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
 - **Each constant has one source; docs point at it rather than restating it.** A
   box-wait "default 60" documented in two files was hardcoded 20 at both call
   sites. Where a doc must state a fact, a string canary asserts agreement — see
-  `newline-submit-docs_test.sh`. (claude-plugins-xick, round 2 #6)
+  `newline-submit-docs_test.sh`, and `tests/inventory-counts.test.mjs` for the plugin
+  counts README and the compatibility guide quote from the catalogs.
+  (claude-plugins-xick, round 2 #6, f4c353e)
 - **A summary-line budget is not a detail budget.** `reason_of`'s 300-character cut
   belongs to a `fallbacks` line summarizing a call that SUCCEEDED, and reusing it for
   the `emit_error` detail severs the recovery half off refusals that run ~450
@@ -238,9 +240,18 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   an external process.** cmux's default `cmuxOnly` mode refuses any process without
   cmux ancestry, so a `launchd`/`cron`/`at` job or a cloud routine fires but cannot
   drive cmux — the launchctl-into-cmux attempt died exactly here. Schedule the
-  delivery from the agent's own in-session wait (Claude: a backgrounded until-clock
-  loop that re-invokes the same session; Codex: a blocking `functions.wait` exec
-  cell) so the send runs from a descendant of cmux. (claude-plugins-o4us)
+  delivery from the agent's own in-session wait so the send runs from a descendant of
+  cmux; the `until` skill (`delayed-work`) owns that wait — a persistent `Monitor`
+  polling the clock on Claude, a blocking `functions.wait` exec cell on Codex — and a
+  plain backgrounded loop is rung 1, reaped on session handoff.
+  (claude-plugins-o4us, 0005347)
+- **A wall-clock wait polls the clock; one long `sleep` fires late by however long the
+  machine slept.** `sleep 11280` does not advance while the lid is shut, and it is the
+  form an agent reaches for first — a baseline agent asked to fire at 9:05pm proposed
+  `sleep $((target - now))` unprompted. Compare `date +%s` against a fixed epoch target
+  in a loop; the guard is the string canary in
+  `plugins/delayed-work/tests/skills-layout.test.mjs`, which pins that loop in `until`'s
+  SKILL.md. (claude-plugins-erak, 0005347)
 
 ## Testing
 

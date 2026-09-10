@@ -54,6 +54,7 @@ skip() {
 if have node; then
 	run "parser drift (transcript.mjs ↔ switchboard)" node --test tests/parser-drift.test.mjs
 	run "codex catalog drift (native ↔ legacy + policy)" node --test tests/codex-catalog-drift.test.mjs
+	run "inventory counts (docs ↔ catalogs)" node --test tests/inventory-counts.test.mjs
 	# Discovered, not listed: a hardcoded list silently omits new suites. The handoff
 	# bash suite shipped with 14 passing tests that CI never ran, because the globs
 	# below used to name one plugin each.
