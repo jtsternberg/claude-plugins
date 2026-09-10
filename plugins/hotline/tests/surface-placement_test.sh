@@ -195,6 +195,14 @@ case "$1" in
 esac
 EOF
 chmod +x "$tmp/bin/cmux"
+# This case proves retry control flow, not the wall-clock interval. Avoid letting
+# a loaded test runner consume its whole budget before the fifth poll reaches the
+# second probe; the production script retains its real 0.2s sleeps.
+cat > "$tmp/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmp/bin/sleep"
 PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
   bash "$READY" --surface surface:777 --pane pane:55 --timeout 6 2>"$tmp/err.txt"
 rc=$?

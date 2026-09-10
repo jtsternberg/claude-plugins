@@ -75,11 +75,8 @@ default_jobs() {
 	esac
 	case "$n" in ''|*[!0-9]*|0) n=4 ;; esac
 	# Clamped to 2..4, measured rather than guessed. The floor keeps a
-	# single-core box from serializing an 8-minute run. The ceiling is not a
-	# property of the hardware: past 4 jobs a full run came out slower overall
-	# AND failed surface-placement, whose assertion has a fixed wall-clock
-	# budget that expires once the box is loaded enough — tracked as
-	# claude-plugins-fjuh. Fix that test and this ceiling may well lift.
+	# single-core box from serializing an 8-minute run. The ceiling bounds the
+	# load placed on suites that assert on short wall-clock timeouts.
 	[[ $n -lt 2 ]] && n=2
 	[[ $n -gt 4 ]] && n=4
 	printf '%s\n' "$n"
