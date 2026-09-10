@@ -1,7 +1,7 @@
 {
   "name": "delayed-work",
-  "description": "Wake this agent session at a wall-clock time (or after a delay) and run the queued work here, with this session's context, spending zero tokens while waiting.",
-  "version": "0.1.1",
+  "description": "Hit a session limit mid-task? Stop for now and have this same session resume the work at the reset, with the context it already has and zero tokens spent waiting. Also plain timed work: run X at 9pm, or in 30 minutes.",
+  "version": "0.1.2",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"
