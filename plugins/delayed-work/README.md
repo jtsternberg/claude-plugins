@@ -32,13 +32,23 @@ It also covers the plain timed case: `until 9:05pm review https://github.com/OWN
 times.
 
 Pairs with a budget watcher that reports a reset time: the watcher says pause and names
-the reset, `until` turns that reset into the wake-up. Arm it at the warning, not at
-exhaustion — once a request is rate limited there's no turn left to arm anything.
+the reset, `until` turns that reset into the wake-up. Arm at the warning, not at
+exhaustion — once a request is rate limited there's no turn left to arm anything — and
+arm *before* finishing the step in flight, so a limit landing mid-step leaves a watcher
+up rather than nothing.
 
 **Honest limits:**
 
 - The watcher **dies with the session**. If the session is gone at the target time,
   nothing fires and there is no catch-up. Not cron, not a durable scheduler.
+- **A sleeping machine freezes the loop.** No form of this wakes a Mac; a target that
+  passes during system sleep fires on wake instead of on time. The skill holds the
+  machine awake with `caffeinate` for the life of the watcher, which stops idle sleep but
+  cannot beat a closed lid — leave the lid open.
+- It does survive the rate limit itself: a session that was HTTP 429'd kept its watchers
+  running, and the fire at the reset time woke that same session. Events that arrive
+  while the session is rate-limited are queued rather than dropped, and land together in
+  the first successful turn.
 - Zero-token waiting is Claude-Code-specific (`Monitor`). Codex's only in-session wait
   blocks the turn, so it is honest there only for short horizons.
 
