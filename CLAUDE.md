@@ -225,11 +225,13 @@ pull requests, and on manual dispatch. It runs on **ubuntu-latest** on purpose: 
 suites also have to keep working on the Linux box.
 
 **Suites run in parallel, and the width is machine-dependent.** The runner keeps up to
-one job per core busy, clamped to 2..4 — so CI's 2-core runner gets 2 while a laptop
-gets 4, and a suite that only passes when it has the box to itself will pass in one
-place and fail in the other. `RUN_ALL_JOBS=<n>` overrides the default; `RUN_ALL_JOBS=1`
-is the serial debugging path, and the one that gives each suite's output in discovery
-order as it finishes:
+one job per core busy, clamped to 2..4 — 4 on a developer laptop and 4 on CI, since
+`ubuntu-latest` reports 4 cores for a public repo, but 2 on anything smaller. A suite
+that only passes when it has the box to itself will pass in one place and fail in the
+other, and load matters as much as width: the same 60 suites cost 292s of suite work on
+an idle runner and over 900s on a laptop under load. `RUN_ALL_JOBS=<n>` overrides the
+default; `RUN_ALL_JOBS=1` is the serial debugging path, and the one that gives each
+suite's output in discovery order as it finishes:
 
 ```bash
 RUN_ALL_JOBS=1 bash tests/run-all.sh

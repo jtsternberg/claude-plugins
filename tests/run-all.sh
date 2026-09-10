@@ -64,9 +64,11 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# One job per core, because a hardcoded 4 was wrong in both directions: it
-# oversubscribes CI's 2-core runners 2x (and the suites that assert on short
-# timeouts are the first to notice), while leaving a 12-core laptop idle.
+# One job per core, because a hardcoded number is wrong on some box: too wide
+# oversubscribes a small runner or container, and the suites that assert on
+# short wall-clock timeouts are the first to notice; too narrow leaves a
+# 12-core laptop idle. ubuntu-latest reports 4 cores for a public repo, so CI
+# and a laptop both land on the 4 ceiling; the 2 floor is for anything smaller.
 default_jobs() {
 	local n=""
 	case "$(uname -s 2>/dev/null || true)" in

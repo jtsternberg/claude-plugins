@@ -177,7 +177,7 @@ test('defaults to one job per core and gives every suite a fresh temp namespace'
 	const result = runFixture(root);
 	const namespaces = readFileSync(join(root, 'state', 'namespaces'), 'utf8').trim().split('\n');
 	// Mirrors the runner's own clamp: one job per core, never below 2, never
-	// above 4. A hardcoded default oversubscribed CI's 2-core runners 2x.
+	// above 4. Derived, not hardcoded, so this passes on any width of box.
 	const expected = Math.min(4, Math.max(2, availableParallelism?.() ?? cpus().length));
 	assert.equal(result.status, 0, result.stderr || result.stdout);
 	assert.match(result.stdout, new RegExp(`with up to ${expected} jobs`));
