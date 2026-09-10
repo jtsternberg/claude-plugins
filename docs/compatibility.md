@@ -10,7 +10,7 @@ catalogs, so install from the column that matches the client you are using.
 
 The clean probes confirmed that Claude Code and Codex resolve separate catalogs
 and that Codex offers only a subset. The matrix below is the current inventory —
-33 entries in the Claude Code catalog, 34 names across both. Recheck this guide
+34 entries in the Claude Code catalog, 35 names across both. Recheck this guide
 after a client upgrade or a catalog change.
 
 ## Install and invoke
@@ -138,6 +138,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | [hotline](../plugins/hotline) | Available | Available | Codex can place calls; the current launch transport starts Claude Code receivers. `cmux` is optional/preferred on macOS; calls need reachable local workspaces and a working Claude launcher. |
 | [localwp-shell](../plugins/localwp-shell) | Available | Not offered | macOS only; requires LocalWP and its local shell tooling. |
 | [mac-caffeinate](../plugins/mac-caffeinate) | Available | Not offered | macOS only; uses the system `caffeinate` utility. |
+| [maestro](../plugins/maestro) | Available | Not offered | Orchestration and waiting stances; binds to `hotline` and `cmux-cli` when installed, otherwise falls back to subagents. |
 | [obsidian-cli](../plugins/obsidian-cli) | Available | Not offered | Requires Obsidian CLI v1.12+ and a local vault. |
 | [paperclip](../plugins/paperclip) | Available | Not offered | Requires a locally running Paperclip instance and CLI. |
 | [address-pr-comments](../plugins/pr-workflow/address-pr-comments) | Available | Available | Requires an open PR and GitHub CLI authentication. |
