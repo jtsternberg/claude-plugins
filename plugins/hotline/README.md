@@ -16,7 +16,7 @@ claude plugin marketplace add jtsternberg/claude-plugins
 claude plugin install hotline@jtsternberg
 ```
 
-This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`, `hotline-caller-id`, `hotline-wiretap`, `hotline-switchboard`). Invoke them as `/hotline:<skill-name>` in Claude Code—for example, `/hotline:hotline-dial`—or `$hotline:<skill-name>` in Codex. Bare names are prose identifiers only.
+This registers the Hotline skills (`hotline-dial`, `hotline-ringing`, `hotline-pickup`, `hotline-add-contact`, `hotline-whoami`, `hotline-caller-id`, `hotline-wiretap`, `hotline-switchboard`, `hotline-call-status`). Invoke them as `/hotline:<skill-name>` in Claude Code—for example, `/hotline:hotline-dial`—or `$hotline:<skill-name>` in Codex. Bare names are prose identifiers only.
 
 ---
 
@@ -498,6 +498,7 @@ resolve-workspace.sh "<user's words>"
 - **`hotline-whoami`** — Reverse-lookup the current workspace's dirmap slug. Caller ID for the hotline.
 - **`hotline-wiretap`** — Locate the current session's JSONL transcript file, derived from the native session ID (fingerprint discovery on legacy clients).
 - **`hotline-switchboard`** — Live, read-only HTML dashboard of all hotline calls. See below.
+- **`hotline-call-status`** — Print the call registry as JSON lines: which caller session dialed which callee session, into which workspace, on which transport and host handle. Read-only, and shares its registry reader with the switchboard server so the two never disagree. For orchestration views that need to nest callees under their caller.
 
 ### State
 

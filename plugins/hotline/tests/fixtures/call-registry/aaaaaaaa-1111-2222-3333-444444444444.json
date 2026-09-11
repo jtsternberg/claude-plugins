@@ -1,0 +1,25 @@
+{
+  "caller": "/tmp/boss-ws",
+  "caller_session_id": "aaaaaaaa-1111-2222-3333-444444444444",
+  "connections": {
+    "/tmp/callee-one": {
+      "session_id": "bbbbbbbb-5555-6666-7777-888888888888",
+      "started": 1750000000,
+      "last_contact": 1750000300,
+      "mode": "work_order",
+      "exchange_count": 3,
+      "surface_ref": "surface-uuid-one",
+      "transport": "cmux"
+    },
+    "/tmp/callee-two": {
+      "session_id": "cccccccc-9999-aaaa-bbbb-cccccccccccc",
+      "started": 1750000100,
+      "last_contact": 1750000400,
+      "mode": "quick_call",
+      "exchange_count": 1,
+      "surface_ref": "herdr-agent-two",
+      "transport": "herdr",
+      "remote": "linuxbox"
+    }
+  }
+}
