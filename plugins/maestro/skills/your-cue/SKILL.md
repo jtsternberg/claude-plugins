@@ -1,12 +1,13 @@
 ---
 name: your-cue
 description: >
-  Read-only briefing across every live agent session — which agents are
-  working, which are waiting on the user, what finished while they were away —
-  ending in one concrete cue per workstream and a single prioritized
-  "Next for you:". Use when the user asks what their agents are doing, what
-  needs them, what happened overnight, or wants a morning briefing, a catch-up
-  across workspaces, or a status sweep of delegated work.
+  Read-only briefing across every live agent session — who is working, who is
+  waiting on the user, what finished overnight — ending in one cue per
+  workstream and a single prioritized "Next for you:". Use for a morning
+  briefing or a status sweep of delegated work.
+when_to_use: |
+  Also when the user asks what their agents are doing, what needs them, what
+  happened while they were away, or wants a catch-up across workspaces.
 ---
 
 # Your Cue — tell the human what each workstream needs from them
@@ -114,6 +115,10 @@ Read the call registry through `/hotline:hotline-call-status` (Codex:
 `$hotline:hotline-call-status`). Each line gives `caller_session_id`,
 `caller_path`, `target`, `callee_session_id`, `mode`, `last_contact`,
 `host_handle`, `transport`, and `remote`.
+
+maestro does not depend on hotline, so skip this step **when the hotline plugin
+is not installed** — nothing dialed anybody through a registry that does not
+exist, and every step-2 session is a workstream of one.
 
 **Filter to the live inventory first.** The registry is append-only and nothing
 prunes it, so the filter typically discards the overwhelming majority of rows —

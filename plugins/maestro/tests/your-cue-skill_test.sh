@@ -46,12 +46,16 @@ lacks() {
   fi
 }
 
-# has_fm <description> <pattern> — matches inside the frontmatter block only, so
-# a routing term that moves into the body cannot keep the assertion green.
+# has_desc <description> <pattern> — matches inside the `description` scalar only.
+# Codex ignores `when_to_use`, so a routing term that drifts from `description`
+# into it (or into the body) must not keep a Codex assertion green.
 frontmatter() { awk 'NR==1 && /^---$/{f=1;next} f && /^---$/{exit} f' "$SKILL"; }
-has_fm() {
+# Folded to one line the way YAML folds it, so a phrase that straddles a wrap is
+# still matched — grep is line-based, the matcher is not.
+description() { frontmatter | awk '/^description: >/{f=1;next} f && /^[a-z]/{exit} f' | tr '\n' ' ' | tr -s ' '; }
+has_desc() {
   local msg="$1" pat="$2"
-  if frontmatter | grep -qE -- "$pat"; then
+  if description | grep -qE -- "$pat"; then
     pass "$msg"
   else
     fail "$msg"
@@ -69,8 +73,18 @@ fi
 has "frontmatter declares the bare name your-cue" '^name: your-cue$'
 # Codex ignores `when_to_use`, so the routing terms have to live in the
 # description itself — assert the terms, not the presence of the key.
-has_fm "description routes Codex on the morning-briefing term" 'morning briefing'
-has_fm "description routes Codex on the status-sweep term" 'status sweep'
+has_desc "description routes Codex on the morning-briefing term" 'morning briefing'
+has_desc "description routes Codex on the status-sweep term" 'status sweep'
+
+# Codex pools every installed skill's description into one ~8,000-char budget, so
+# an implicitly-invocable description is capped at 270 chars; overflow trigger
+# vocabulary belongs in `when_to_use`, which only Claude Code reads.
+DESC=$(description | sed 's/^ //;s/ $//')
+if [[ ${#DESC} -le 270 ]]; then
+  pass "description stays inside the 270-char Codex budget (${#DESC})"
+else
+  fail "description stays inside the 270-char Codex budget (${#DESC})"
+fi
 
 # Zero-argument: no Claude argument metadata, no interpolation token, and the
 # prose says so, so a future editor does not quietly add a parameter.
@@ -130,6 +144,9 @@ has "session UUIDs and pane ids stay internal, not output" 'pane ids are interna
 
 has "consumes the hotline call-status skill by its invocation form" '/hotline:hotline-call-status'
 has "gives the Codex invocation form for call-status" '\$hotline:hotline-call-status'
+# maestro declares no dependency on hotline, so the registry step has to be
+# optional rather than an instruction to invoke a skill that is not there.
+has "skips the hotline step when the plugin is not installed" 'skip this step \*\*when the hotline plugin'
 has "nests callees beneath their caller" 'nested beneath its caller'
 has "matches on callee_session_id" 'callee_session_id'
 has "matches on host_handle" 'host_handle'
