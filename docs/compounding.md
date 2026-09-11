@@ -160,6 +160,14 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   grep without failing it — and a `grep` that is really `ugrep` ignores `--include`
   quoted or not, warning and then searching the whole tree.
   (claude-plugins-qq9f, claude-plugins-vagi, 050619c)
+- **A fact handed to an implementer carries whether it was verified in the code or
+  only in a doc.** A SKILL.md read as the authority produced "there is no
+  character-limit flag anywhere in session tools" while `--max-chars` sat in
+  `scripts/export-session.mjs` and the plugin README, and the correction then
+  overclaimed that flag's shedding behavior from the same doc-level reading rather
+  than from `format.mjs`. Label each fact with the file that proves it, and read the
+  implementation for any fact an implementer will build a bound or a guarantee on.
+  (fe785d3, fac5f2b, 88461ff)
 
 ## Code shape
 
