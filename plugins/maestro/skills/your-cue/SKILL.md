@@ -132,29 +132,34 @@ liveness authority.
 
 ## 4. Catch up only where needed
 
-Native status plus a recent-output read answers most rows. When they don't —
-the agent is idle mid-task and the screen doesn't say what task — get a bounded
-transcript briefing from `/session-tools:sessions-catch-up <session-id>
---window 8` (Codex: `$session-tools:sessions-catch-up <session-id>
---window 8`).
+Native status plus a recent-output read answers most rows. When they don't — the
+agent is idle mid-task and the screen doesn't say what task — shortlist the row
+for a bounded transcript summary. `sessions-catch-up` is model-invocable, so
+route to it yourself; never pull a raw transcript into your own context instead.
 
-`sessions-catch-up` is explicitly-invoked only, so you may not be able to route
-to it yourself. When you can't, name that row in `Coverage` and cue the human to
-run it — never pull the raw transcript into your own context as a substitute.
+**Dispatch one cheap subagent per unclear row, all of them in one message so
+they run concurrently.** Under Claude Code that is the Agent tool with
+`model: "haiku"` — `model: "sonnet"` when the transcript is tangled. Every work
+order is the same three steps:
+
+> Invoke `/session-tools:sessions-catch-up <session-id> --window 8`. When you run
+> the digest command that skill hands you, pipe it through `head -c 8000` before
+> reading it. Report three sentences: what it was doing, where it stopped, what
+> it needs.
+
+Those three sentences are all that reaches you. You never run the digest and
+never see the transcript.
+
+Under Codex, use its subagent mechanism the same way when one is available. With
+none, invoke `$session-tools:sessions-catch-up <session-id> --window 8` inline,
+apply `head -c 8000` to the digest command it runs, and keep only the
+three-sentence conclusion in your working notes.
 
 Two bounds, and only one of them is a flag:
 
 - **Eight turns** — `--window 8` is real; pass it.
 - **8,000 characters** — there is no character-limit flag anywhere in session
-  tools. Enforce the ceiling yourself by truncating the digest with
-  `head -c 8000` before any of it reaches the summarizing agent.
-
-Hand the truncated digest to a cheaper model, not to your own context. Under
-Claude Code, dispatch it to the Agent tool with `model: "haiku"` (or
-`model: "sonnet"` when the transcript is tangled) and ask for three sentences:
-what it was doing, where it stopped, what it needs. Under Codex, use its
-subagent mechanism when one is available; with none, summarize inline from the
-truncated digest — never read the full transcript into the main context.
+  tools. The ceiling is enforced with `head -c 8000` on the digest command.
 
 **Stop after five summaries.** List the remainder — every still-unclear
 workstream — by its visible locator with `Your cue: clarify`. An exhaustive
@@ -168,9 +173,10 @@ holding one or more workstreams. One cue per workstream, never one cue spanning
 two unrelated sessions.
 
 Render only the sections that have content. Every workstream ends with
-`Your cue:` — a concrete verb (answer, approve, review, resume, clarify, close,
-bury) when the human has a move, or `Your cue: nothing — <reason>` when the
-agent is still working or the result is settled. "Nothing needed" is a
+`Your cue:` — a concrete verb (answer, approve, review, review and close,
+resume, clarify, close, bury) when the human has a move, or
+`Your cue: nothing — <reason>` when the agent is still working or the result is
+settled. "Nothing needed" is a
 conclusion you state, not a line you omit.
 
 ```text

@@ -145,9 +145,16 @@ has "bounds the digest to 8,000 characters" '^- \*\*8,000 characters\*\*'
 has "enforces the character ceiling by truncation" 'head -c 8000'
 has "says no character-limit flag exists" 'no character-limit flag'
 lacks "claims no character-ceiling flag that does not exist" '\-\-(max-chars|chars|limit) '
+has "states that sessions-catch-up is model-invocable" 'is model-invocable'
+has "dispatches one cheap subagent per unclear row" 'one cheap subagent per unclear row'
+# The hedge this section used to carry — sessions-catch-up was explicit-only, so
+# the fallback was cueing the human. The flag is gone (34f84cb); a reintroduced
+# hedge would silently degrade the briefing back to a manual step.
+lacks "no hedge about being unable to route to sessions-catch-up" 'explicitly.invoked only|cue the human to run it'
 has "delegates the summary to a cheaper model under Claude Code" 'model: "(haiku|sonnet)"'
-has "tells Codex to use its subagent mechanism or summarize inline" 'inline'
-has "stops after five summaries" 'five'
+has "tells Codex to invoke it inline when it has no subagent" '\-\-window 8`? inline'
+has "the main agent never reads the full transcript itself" 'never see the transcript'
+has "stops after five summaries" '\*\*Stop after five summaries\.\*\*'
 has "lists the remainder by visible locator" 'the remainder'
 
 # --- rendering contract ------------------------------------------------------
