@@ -46,6 +46,18 @@ lacks() {
   fi
 }
 
+# has_fm <description> <pattern> — matches inside the frontmatter block only, so
+# a routing term that moves into the body cannot keep the assertion green.
+frontmatter() { awk 'NR==1 && /^---$/{f=1;next} f && /^---$/{exit} f' "$SKILL"; }
+has_fm() {
+  local msg="$1" pat="$2"
+  if frontmatter | grep -qE -- "$pat"; then
+    pass "$msg"
+  else
+    fail "$msg"
+  fi
+}
+
 # --- the skill exists where discovery expects it -----------------------------
 
 if [[ -f "$SKILL" ]]; then
@@ -55,7 +67,10 @@ else
 fi
 
 has "frontmatter declares the bare name your-cue" '^name: your-cue$'
-has "description routes Codex on the briefing terms" '^description:'
+# Codex ignores `when_to_use`, so the routing terms have to live in the
+# description itself — assert the terms, not the presence of the key.
+has_fm "description routes Codex on the morning-briefing term" 'morning briefing'
+has_fm "description routes Codex on the status-sweep term" 'status sweep'
 
 # Zero-argument: no Claude argument metadata, no interpolation token, and the
 # prose says so, so a future editor does not quietly add a parameter.
@@ -68,7 +83,11 @@ lacks "model invocation is not disabled" '^disable-model-invocation:'
 
 # --- read-only contract ------------------------------------------------------
 
-has "declares the whole run read-only" '[Rr]ead-only'
+# Anchor to the section itself: a bare `[Rr]ead-only` also matches the
+# description and the anti-pattern table, so it would survive Rule zero's
+# deletion.
+has "Rule zero heads the read-only contract" '^## Rule zero — read only'
+has "Rule zero preserves pane focus and seen state" 'pane focus, seen state'
 has "preserves focus, seen state, notifications, and input" 'focus.*notification|notification.*focus'
 
 # Name the forbidden commands: a fresh agent will not know which cmux/herdr
@@ -83,6 +102,7 @@ has "names herdr rename/start/attach as forbidden" '`rename`, `start`, `attach`'
 # --- inventory: graveyard fast path and portable path ------------------------
 
 has "graveyard fast path command" 'graveyard candidates --json'
+has "inventory is reachable from outside either host" 'works from outside both hosts'
 has "portable path uses herdr agent list" 'herdr agent list'
 has "portable path uses cmux tree" 'cmux tree --all --json'
 has "portable path reads cmux sidebar state" 'cmux sidebar-state'
@@ -119,7 +139,9 @@ has "ignores registry rows absent from the live inventory" '[Ff]ilter to the liv
 
 has "uses the sessions-catch-up skill for unclear workstreams" 'session-tools:sessions-catch-up'
 has "bounds the digest to eight turns with the real flag" '\-\-window 8'
-has "bounds the digest to 8,000 characters" '8,?000'
+# `8,?000` alone is satisfied by the `head -c 8000` line below, so pin the
+# bullet that carries the ceiling.
+has "bounds the digest to 8,000 characters" '^- \*\*8,000 characters\*\*'
 has "enforces the character ceiling by truncation" 'head -c 8000'
 has "says no character-limit flag exists" 'no character-limit flag'
 lacks "claims no character-ceiling flag that does not exist" '\-\-(max-chars|chars|limit) '
@@ -158,6 +180,8 @@ has "plot cue requires every targetable session" 'targetable'
 has "offers bury this session" 'bury this session'
 has "offers bury this plot" 'bury this plot'
 has "burial stays text; execution needs a later explicit request" 'leaves execution to'
+has "an unverified transcript downgrades to review, never to burial" '[Uu]nverified is not failed'
+has "defines one workstream for cue purposes" 'One workstream is one caller session'
 
 # --- dual-harness surface ----------------------------------------------------
 

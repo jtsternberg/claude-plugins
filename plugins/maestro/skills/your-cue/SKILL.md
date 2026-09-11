@@ -28,7 +28,7 @@ Read-only and safe:
 - **cmux** — `cmux tree --all --json`, `cmux sidebar-state`,
   `cmux list-notifications`,
   `cmux read-screen --surface <id> --scrollback --lines <n>`.
-- **herdr** — `herdr agent list`, `herdr agent get|read|explain`,
+- **herdr** — `herdr agent list`, `herdr agent get|read`,
   `herdr workspace list|get`, `herdr tab list|get`, `herdr pane list|get|read`.
 - **graveyard** — `graveyard candidates --json`.
 
@@ -85,6 +85,8 @@ visible name or a status you need:
 - `cmux tree --all --json` and `cmux sidebar-state` supply surface titles,
   busy/idle pills, and unread notifications for cmux rows. The tree nests
   windows → workspaces (`title`) → panes → surfaces (`title`).
+- `cmux list-notifications` names the unread notifications themselves, which is
+  the cheapest `Waiting on you` signal a cmux row gives you.
 
 **Native status outranks graveyard's `busy`.** Graveyard reports
 `busy: false, buryable: true` for agents `herdr agent list` reports as
@@ -113,9 +115,9 @@ Read the call registry through `/hotline:hotline-call-status` (Codex:
 `caller_path`, `target`, `callee_session_id`, `mode`, `last_contact`,
 `host_handle`, and `transport`.
 
-**Filter to the live inventory first.** The registry is append-only and holds
-years of dials; nothing prunes it. A real registry holds 1,572 rows of which 5
-survive this filter — skip it and the briefing is unreadable. Nest a callee only when its
+**Filter to the live inventory first.** The registry is append-only and nothing
+prunes it, so the filter typically discards the overwhelming majority of rows —
+skip it and the briefing is unreadable. Nest a callee only when its
 `callee_session_id` or `host_handle` matches a session or handle in the
 inventory from step 2, *and* its caller is in that inventory too. Every other
 row is stale — ignore it silently, and never mention a caller or callee the
@@ -160,6 +162,11 @@ briefing that arrives late has failed at the one thing it was for.
 
 ## 5. Render the briefing
 
+One workstream is one caller session plus its nested live callees — a callee
+gets its own line only when step 3 says to show it — and a plot is a workspace
+holding one or more workstreams. One cue per workstream, never one cue spanning
+two unrelated sessions.
+
 Render only the sections that have content. Every workstream ends with
 `Your cue:` — a concrete verb (answer, approve, review, resume, clarify, close,
 bury) when the human has a move, or `Your cue: nothing — <reason>` when the
@@ -196,6 +203,12 @@ settled; say it rather than trailing off.
 `Your cue: bury this session` requires both halves: the transcript shows the
 work finished with no substantive follow-up left, **and** graveyard reports
 `buryable: true` for that `session_id`. One half alone is not a burial cue.
+
+**Unverified is not failed.** Step 4 caps transcript reads at five, so for most
+finished rows the transcript half was never checked. When completion is not
+established from the transcript, render `Your cue: review and close` — or
+`Your cue: nothing — <reason>` where that fits — never a burial cue. A burial
+cue is only ever emitted after the transcript check actually happened.
 
 `Your cue: bury this plot` requires every `targetable` session sharing that
 `workspace_title` to be finished and `buryable`. One live sibling downgrades it
