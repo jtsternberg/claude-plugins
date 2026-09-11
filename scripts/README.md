@@ -75,10 +75,16 @@ node scripts/compare-skill-descriptions.mjs --dump-current
 This is a phase/rewrite-plan tool, not the current budget guard. Its proposal
 file covers a 50-skill rewrite set while the live tree has 78 skills, so the
 skills outside that set are reported under "No proposal yet" and left out of
-the budget figures. It exits non-zero only on a per-skill 1,536-cap violation
-or a proposal naming a skill that is not in the tree. Do not turn its exit code
+the budget figures **and out of the cap check**: the 1,536-cap check measures
+only those 50, so an unproposed skill can be over the cap and still let the
+script exit 0. It exits non-zero only when one of the 50 breaches that cap, or
+when a proposal names a skill that is not in the tree. Do not turn its exit code
 into CI policy without updating the proposal inventory and regenerating the
 companion rewrite report.
+
+A proposal carrying a `superseded` note is history, not a target — the live text
+has deliberately diverged. Its row and the cap check measure the live text, and
+the note is echoed under "Superseded proposals".
 
 To refresh that plan, first dump the live frontmatter, add proposals for the
 skills listed under "No proposal yet", then rerun the comparison and inspect

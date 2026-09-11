@@ -10,9 +10,12 @@
 //
 // Usage:
 //   node scripts/compare-skill-descriptions.mjs                # tables + totals for both budgets
-// Skills the proposal snapshot does not cover are listed under "No proposal yet" and left
-// out of the budget figures; only a proposal naming a skill absent from the tree exits 1.
 //   node scripts/compare-skill-descriptions.mjs --dump-current # emit current state as JSON
+//
+// Skills the proposal snapshot does not cover are listed under "No proposal yet" and left out
+// of the budget figures — and out of the 1,536-cap check, which only ever measures proposed
+// texts. Exits 1 on a proposed text over that cap, or on a proposal naming a skill absent
+// from the tree. It is NOT the repo-wide budget guard.
 //
 // Reads:  plugins/*/skills/*/SKILL.md and plugins/*/*/skills/*/SKILL.md — the second
 //         depth covers plugin groups, whose children are the plugins (see plugins/pr-workflow/).
@@ -155,6 +158,15 @@ function proposalFor(key) {
 	return { description: p.description ?? '', when_to_use: p.when_to_use ?? '' };
 }
 
+// A proposal the live tree has deliberately diverged from is history, not a target:
+// measuring against it would report pending work that nobody intends to do. Its row
+// reports the LIVE lengths (delta 0) and carries the reason.
+function supersededReason(key) {
+	const p = proposals[key];
+	return (p && typeof p === 'object' && p.superseded) || '';
+}
+const superseded = Object.keys(proposals).filter(supersededReason);
+
 let capViolations = 0;
 
 function table(rows, label) {
@@ -164,15 +176,18 @@ function table(rows, label) {
 	const t = { descBefore: 0, descAfter: 0, wtuBefore: 0, wtuAfter: 0 };
 	for (const s of rows.sort((a, b) => b.chars - a.chars)) {
 		const p = proposalFor(s.key);
-		const ccTotal = p.description.length + p.when_to_use.length;
-		const flag = ccTotal > CLAUDE_PER_SKILL_CAP ? ' **OVER CAP**' : '';
-		if (ccTotal > CLAUDE_PER_SKILL_CAP) capViolations++;
+		const stale = !!supersededReason(s.key);
+		const descAfter = stale ? s.chars : p.description.length;
+		const wtuAfter = stale ? s.wtuChars : p.when_to_use.length;
+		const ccTotal = descAfter + wtuAfter;
+		let flag = stale ? ' _superseded_' : '';
+		if (ccTotal > CLAUDE_PER_SKILL_CAP) { capViolations++; flag += ' **OVER CAP**'; }
 		t.descBefore += s.chars;
-		t.descAfter += p.description.length;
+		t.descAfter += descAfter;
 		t.wtuBefore += s.wtuChars;
-		t.wtuAfter += p.when_to_use.length;
+		t.wtuAfter += wtuAfter;
 		console.log(
-			`| ${s.key} | ${s.chars} | ${p.description.length} | ${p.description.length - s.chars} | ${s.wtuChars} | ${p.when_to_use.length} | ${ccTotal}${flag} |`,
+			`| ${s.key} | ${s.chars} | ${descAfter} | ${descAfter - s.chars} | ${s.wtuChars} | ${wtuAfter} | ${ccTotal}${flag} |`,
 		);
 	}
 	console.log(
@@ -213,10 +228,11 @@ console.log(`  implicit:      ${i.descBefore} -> ${i.descAfter}`);
 console.log(`\n## Claude Code budget (description + when_to_use, ${CLAUDE_PER_SKILL_CAP}-char cap per skill)\n`);
 const ccRows = proposed.map((s) => {
 	const p = proposalFor(s.key);
+	const stale = !!supersededReason(s.key);
 	return {
 		key: s.key,
 		before: s.chars + s.wtuChars,
-		after: p.description.length + p.when_to_use.length,
+		after: stale ? s.chars + s.wtuChars : p.description.length + p.when_to_use.length,
 	};
 });
 const ccBefore = ccRows.reduce((a, r) => a + r.before, 0);
@@ -224,13 +240,18 @@ const ccAfter = ccRows.reduce((a, r) => a + r.after, 0);
 console.log(`Combined before: ${ccBefore} chars; after: ${ccAfter} chars (delta ${ccAfter - ccBefore})`);
 const worst = [...ccRows].sort((a, b) => b.after - a.after)[0];
 console.log(`Largest per-skill combined after: ${worst.key} at ${worst.after} (${pct(worst.after, CLAUDE_PER_SKILL_CAP)}% of the ${CLAUDE_PER_SKILL_CAP} cap)`);
-console.log(`Skills over the ${CLAUDE_PER_SKILL_CAP} cap: ${capViolations}`);
+console.log(`Proposed skills over the ${CLAUDE_PER_SKILL_CAP} cap: ${capViolations} of ${proposed.length} measured; the ${unproposed.length} unproposed skills are not cap-checked`);
 
 const withWtu = proposed.filter((s) => proposalFor(s.key).when_to_use.length > 0);
 console.log(`\nProposals carrying a when_to_use: ${withWtu.length}`);
 
+if (superseded.length) {
+	console.log(`\nSuperseded proposals (measured against the live text, not the proposal): ${superseded.length}`);
+	for (const k of superseded) console.log(`  ${k}: ${supersededReason(k)}`);
+}
+
 const over = proposed
-	.map((s) => [s.key, proposalFor(s.key).description.length])
+	.map((s) => [s.key, supersededReason(s.key) ? s.chars : proposalFor(s.key).description.length])
 	.filter(([, n]) => n > 200)
 	.sort((a, b) => b[1] - a[1]);
 console.log(`\nProposed descriptions over 200 chars: ${over.length}`);

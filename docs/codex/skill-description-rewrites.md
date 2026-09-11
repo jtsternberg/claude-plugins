@@ -6,13 +6,16 @@ in [`proposed-descriptions.json`](proposed-descriptions.json); every number belo
 re-parses the live SKILL.md frontmatter and the proposals on each run:
 
 ```bash
-node scripts/compare-skill-descriptions.mjs                 # the tables below (exits 1 on any 1,536-cap violation)
+node scripts/compare-skill-descriptions.mjs                 # the tables below (exits 1 if a PROPOSED text breaches the 1,536 cap)
 node scripts/compare-skill-descriptions.mjs --dump-current  # current state as JSON
 ```
 
 **Status: Phase 1 (the explicit-only description rewrites) has landed, and Phase 2 all but
-three rows** — `hotline/dial`, `session-tools/sessions-catch-up`, and
-`gws/gmail-draft-from-markdown` still carry their pre-rewrite descriptions. The "before"
+two rows** — `hotline/dial` and `gws/gmail-draft-from-markdown` still carry their pre-rewrite
+descriptions. `session-tools/sessions-catch-up`'s proposal is **superseded**, not pending: the
+skill became implicitly invocable, and since Codex ignores `when_to_use`, its trigger phrases
+moved back into `description` deliberately. Its row is therefore measured against the live
+text, and `proposed-descriptions.json` carries the reason. The "before"
 columns below re-read the live tree, so every landed row shows a zero delta; the pre-rewrite
 baseline across the 50 proposed skills was 15,902 chars (198.77% of the Codex budget).
 Skills added after the proposal snapshot are listed under "No proposal yet" and are excluded
@@ -48,10 +51,10 @@ Codex test settled the other half. Withdrawn.
 Unchanged from the first draft. **Per-skill ceilings, not a repo-total quota:** explicit-only
 `description` ≤ 120 chars; implicitly-invocable `description` ≤ 200 default, ≤ 270 only with
 written justification; `description` + `when_to_use` ≤ 1,536 per skill (hard cap, enforced by
-the comparator's exit code). The proposed-set Codex figure lands at **6,557 chars (81.96%)**; a
+the comparator's exit code). The proposed-set Codex figure lands at **6,646 chars (83.08%)**; a
 deliberately heavy 10-plugin install (gws, slack, work-with-media, session-tools, handoff,
-pr-workflow, skill-tools, research-tools, collab-tools, thinking-tools) totals **4,040 chars
-(50.50%)** — and relocation doesn't change either figure, because `when_to_use` costs Codex
+pr-workflow, skill-tools, research-tools, collab-tools, thinking-tools) totals **4,129 chars
+(51.61%)** — and relocation doesn't change either figure, because `when_to_use` costs Codex
 nothing.
 
 The repo total is the wrong unit because nobody installs all 27 plugins; what composes across
@@ -71,7 +74,7 @@ Two different jobs, two different rules:
   matching nothing in either harness.
 - **Implicitly invocable (27 skills).** The description keeps every distinctive noun/verb a
   user would actually type (proper nouns, URL shapes, file extensions, error strings,
-  companion-skill routing), averaging 173 chars. Trigger vocabulary that still carries
+  companion-skill routing), averaging 176 chars. Trigger vocabulary that still carries
   matching signal but didn't earn `description` chars moves to `when_to_use` — merged into the
   11 implicit skills that already had one (never clobbered), added fresh to 9 more, and
   deliberately **not** relocated where the cut text was noise (see "Dropped entirely" below).
@@ -128,7 +131,7 @@ cleanup decision (662 chars of per-skill-cap dead weight, no budget impact).
 | hotline/dial | 231 | 136 | -95 | 0 | 0 | 136 |
 | thinking-tools/pink-elephant | 222 | 222 | 0 | 147 | 147 | 369 |
 | thinking-tools/chestertons-fence | 211 | 211 | 0 | 143 | 143 | 354 |
-| session-tools/sessions-catch-up | 199 | 110 | -89 | 580 | 580 | 690 |
+| session-tools/sessions-catch-up | 199 | 199 | 0 | 580 | 580 | 779 _superseded_ |
 | cmux-cli/auto-rename | 196 | 196 | 0 | 159 | 159 | 355 |
 | gws/gmail-draft-from-markdown | 194 | 127 | -67 | 251 | 170 | 297 |
 | localwp-shell/localwp-shell | 191 | 191 | 0 | 0 | 0 | 191 |
@@ -148,7 +151,7 @@ cleanup decision (662 chars of per-skill-cap dead weight, no budget impact).
 | gws/gmail-read | 122 | 122 | 0 | 94 | 94 | 216 |
 | hotline/wiretap | 119 | 119 | 0 | 0 | 0 | 119 |
 | hotline/caller-id | 75 | 75 | 0 | 0 | 0 | 75 |
-| **subtotal** | **4913** | **4662** | **-251** | **6582** | **6501** | — |
+| **subtotal** | **4913** | **4751** | **-162** | **6582** | **6501** | — |
 
 ### No proposal yet (28 skills)
 
@@ -162,13 +165,13 @@ cleanup decision (662 chars of per-skill-cap dead weight, no budget impact).
 | maestro/conduct | no | 455 | 0 | 455 |
 | cmux-cli/send-at | no | 454 | 676 | 1130 |
 | agentmail/relay-work-order | no | 444 | 321 | 765 |
-| maestro/your-cue | no | 420 | 0 | 420 |
 | agentmail/contacts | no | 416 | 429 | 845 |
 | agentmail/check-mail | no | 402 | 352 | 754 |
 | agentmail/using-agentmail | no | 385 | 615 | 1000 |
 | agentmail/replying | no | 379 | 330 | 709 |
 | session-tools/note-to-self | yes | 280 | 326 | 606 |
 | thinking-tools/interview-mode | no | 272 | 137 | 409 |
+| maestro/your-cue | no | 261 | 144 | 405 |
 | hotline/call-status | no | 189 | 167 | 356 |
 | session-tools/self-recap | yes | 185 | 483 | 668 |
 | codex/sol-mode | no | 168 | 0 | 168 |
@@ -182,9 +185,9 @@ cleanup decision (662 chars of per-skill-cap dead weight, no budget impact).
 | beads-workflow/fix-findings-beads-tasks | yes | 79 | 0 | 79 |
 | pr-workflow/update-pr-description/update-pr-description | yes | 78 | 0 | 78 |
 | beads-workflow/tackle-epic | yes | 61 | 0 | 61 |
-| **subtotal** | — | **8967** | — | — |
+| **subtotal** | — | **8808** | — | — |
 
-These carry 8967 chars of Codex description budget that the figures below exclude.
+These carry 8808 chars of Codex description budget that the figures below exclude.
 
 ### Totals
 
@@ -192,21 +195,26 @@ These carry 8967 chars of Codex description budget that the figures below exclud
 ## Codex budget (description only, 8000-char global pool)
 
 Before: 6808 chars (85.10%)
-After:  6557 chars (81.96%)
+After:  6646 chars (83.08%)
   explicit-only: 1895 -> 1895
-  implicit:      4913 -> 4662
+  implicit:      4913 -> 4751
 
 ## Claude Code budget (description + when_to_use, 1536-char cap per skill)
 
-Combined before: 14052 chars; after: 13720 chars (delta -332)
+Combined before: 14052 chars; after: 13809 chars (delta -243)
 Largest per-skill combined after: slack/read-slack at 853 (55.53% of the 1536 cap)
-Skills over the 1536 cap: 0
+Proposed skills over the 1536 cap: 0 of 50 measured; the 28 unproposed skills are not cap-checked
 
 Proposals carrying a when_to_use: 23
+
+Superseded proposals (measured against the live text, not the proposal): 1
+  session-tools/sessions-catch-up: trigger phrases moved back INTO description: the skill is implicitly invocable and Codex ignores when_to_use, so the live text is the target now
 ```
 
-The 1,536-cap concern is verified, not assumed: the comparator checks every skill and exits
-non-zero on a violation. Worst case after relocation is 853/1,536.
+The 1,536-cap concern is verified *for the rewrite set*, not assumed: the comparator measures
+the 50 proposed texts and exits non-zero on a violation there. Worst case inside the set is
+853/1,536. It never measures the 28 unproposed skills, and one of those (`delayed-work/until`,
+1,816) is already over — closing that gap is its own task, not this doc's.
 
 ## The relocation, skill by skill
 
