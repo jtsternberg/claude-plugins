@@ -31,7 +31,6 @@ export const RISK_BY_SKILL = new Map([
 	['watch-pr-then-action:watch-pr-then-action', ['external-side-effect', 'Polls GitHub and then performs an arbitrary follow-up action.']],
 	['session-tools:note-to-self', ['local-side-effect', 'Records a durable conversation breadcrumb.']],
 	['session-tools:self-recap', ['read-only-or-advisory', 'Summarizes the current session from context in view; reads and reports only.']],
-	['session-tools:sessions-catch-up', ['read-only-or-advisory', 'Reads another transcript and reports a briefing.']],
 	['session-tools:sessions-fork', ['read-only-or-advisory', 'Reads another transcript and imports context into the current session.']],
 	['session-tools:sessions-weekly-recap', ['local-side-effect', 'Writes recap notes from transcript history.']],
 	['skill-tools:create-skill', ['local-side-effect', 'Scaffolds and edits skill files.']],
