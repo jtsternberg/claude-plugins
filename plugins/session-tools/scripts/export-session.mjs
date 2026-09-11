@@ -23,7 +23,8 @@
 //   --truncate N                   per-turn char cap in a digest (default 2000)
 //   --fast                         smaller window / tighter per-turn caps
 //   --no-beads                     skip the `bd show` lookup (saves ~0.5s)
-//   --compaction-full              do not cap the compaction summary
+//   --compaction-full              lift the 8,000-char compaction-summary cap
+//       (--max-chars still shrinks it when the budget binds)
 //   --out PATH                     also write to PATH
 //   --cwd PATH                     cwd used to disambiguate names (default: $PWD)
 //   --list                         list all sessions (id, idle, cwd, slug)

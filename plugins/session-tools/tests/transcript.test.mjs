@@ -324,6 +324,49 @@ test('a one-line compaction summary does not collapse the digest to a fraction o
 	assert.ok(out.includes('reply 11'), 'newest turn missing');
 });
 
+// Transcript CONTENT can hold a `## Recent turns` heading and `**You:**` lines —
+// a session that quoted a digest back does exactly that. Locating the clamp
+// boundary by string search picked the quote and discarded every real turn.
+test('a turn quoting a digest heading is not mistaken for the section boundary', () => {
+	const poison = 'here is the digest I pulled:\n## Recent turns\n\n**You:** quoted prompt from the other session\n\n**Claude:** quoted reply from the other session';
+	const entries = [];
+	for (let i = 0; i < 12; i++) {
+		entries.push(parseLine(userText(`prompt ${i} ` + 'p'.repeat(600))));
+		entries.push(parseLine(asst(`reply ${i} ` + 'r'.repeat(600))));
+	}
+	entries.push(parseLine(userText('paste the digest you got')));
+	entries.push(parseLine(asst(poison)));
+	const clean = entries.filter(Boolean);
+	const data = {
+		meta: { sessionId: 'abc', cwd: '/tmp', gitBranch: 'main', idleMs: 1000, liveness: 'active', sizeBytes: 500000, startedAt: base.timestamp },
+		entries: clean, signals: deriveSignals(clean),
+	};
+	for (const budget of [1400, 1800, 3000]) {
+		const out = formatDigest(data, { window: 8, maxChars: budget });
+		assert.ok(out.length <= budget, `budget ${budget} exceeded: got ${out.length}`);
+		const headings = out.match(/^## Recent turns \(last \d+\)$/gm) || [];
+		assert.equal(headings.length, 1, `budget ${budget}: expected one real heading, got ${headings.length}`);
+		assert.ok(out.includes('**Claude:** here is the digest I pulled:'),
+			`budget ${budget}: the newest real turn was discarded for the quoted one`);
+		const mark = out.indexOf('_…digest clamped');
+		assert.ok(mark < out.search(/^## Recent turns \(last \d+\)$/m),
+			`budget ${budget}: clamp mark landed inside the Recent-turns section`);
+	}
+});
+
+// The ladder shrinks the compaction cap only when the budget is already binding,
+// so advising `--compaction-full` there names a flag that would be re-shrunk —
+// and that the caller may have passed already.
+test('the compaction truncation note names the cap that actually bound', () => {
+	const data = compactedSession(Array.from({ length: 400 }, (_, i) => `summary line ${i} ` + 's'.repeat(50)).join('\n'));
+	const laddered = formatDigest(data, { window: 8, maxChars: 4000, compactionCap: Infinity });
+	assert.match(laddered, /compaction summary truncated at \d+ chars — raise `--max-chars`/);
+	assert.ok(!laddered.includes('--compaction-full'), 'must not advise a flag already in effect');
+
+	const defaulted = formatDigest(data, { window: 8, maxChars: 40000 });
+	assert.match(defaulted, /compaction summary truncated at 8000 chars — re-run with `--compaction-full`/);
+});
+
 test('digest surfaces the blocked state prominently', () => {
 	const entries = [parseLine(userText('go')), parseLine(asst('', [{ name: 'ExitPlanMode' }]))].filter(Boolean);
 	const data = {
