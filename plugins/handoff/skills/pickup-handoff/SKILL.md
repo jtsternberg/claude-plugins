@@ -54,7 +54,11 @@ Resume work from a handoff written by a previous agent. The companion `handoff` 
    - **Anything that doesn't add up**: discrepancies or open questions the doc left unresolved.
    - **Stale sweep**: list any *other* `HANDOFF*.md` files in the directory with mechanical facts only — file age, and in a git repo also commits since their anchor SHA and whether their branch is merged or deleted (`git branch --merged`) — and flag obvious corpses for deletion. Outside a repo, fall back to file age alone. Cheap commands only; no subagents for this.
 
-5. **If the doc is thin on a detail you need**: its **Session** section (when present) names the previous session's transcript JSONL — grep it for the missing specifics (decisions, error messages, exact commands). If the `hotline:dial` skill is available, you can also offer to dial a fresh agent seeded with that transcript for interactive questioning; read hotline's dial skill for how.
+5. **If the doc is thin on a detail you need**: its **Session** section (when present) names the previous session's id and transcript JSONL. Get the missing specifics (decisions, error messages, exact commands) from there:
+
+   - **If the `session-tools` plugin is installed, read the transcript with it** — `/session-tools:sessions-catch-up <session-id>` under Claude Code, `$session-tools:sessions-catch-up <session-id>` under Codex — rather than hand-rolling `jq`/`grep` over raw transcript JSON. That skill also names its bundled `scripts/export-session.mjs` reader, which takes a session id or prefix: `--format md` for readable turns to search, `--format digest --fast` for a cheap overview. It handles harness noise, tool-result truncation, and compaction boundaries; ad-hoc JSONL parsing gets those wrong.
+   - **Otherwise** grep the JSONL path directly, and expect to sift raw tool traffic.
+   - If the `hotline:dial` skill is available, you can also offer to dial a fresh agent seeded with that transcript for interactive questioning; read hotline's dial skill for how.
 
 6. **Proceed with the plan** (respecting the current permission mode / plan mode).
 

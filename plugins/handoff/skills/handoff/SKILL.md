@@ -49,7 +49,7 @@ Sections, in order:
    bash "$SKILL_DIR/scripts/session-info.sh"
    ```
 
-   If it prints JSON, include the `session_id` and `transcript_path` values here (they let the next agent grep this session's transcript). If it prints nothing, errors, or the script doesn't exist, omit this section silently — no placeholder, no apology.
+   If it prints JSON, include the `session_id` and `transcript_path` values here (they let the next agent read this session's transcript). If it prints nothing, errors, or the script doesn't exist, omit this section silently — no placeholder, no apology.
 
 ## To resume (end every run with this)
 
