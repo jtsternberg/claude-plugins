@@ -103,6 +103,62 @@ function renderTimeline(older, maxPrompts = 25) {
 	return parts.join('\n\n');
 }
 
+const RECENT_HEADING = '\n## Recent turns';
+const CLAMP_MARK = '\n\n_…digest clamped to the --max-chars budget._\n';
+const COMPACTION_CAP_FLOOR = 800;
+
+/**
+ * Cut `s` to `n` chars on a line boundary — but only when the partial line being
+ * dropped is small. A one-line compaction summary is a single 8000-char "line", so
+ * an unconditional walk-back to the previous newline threw away the whole budget
+ * (an 8000-char budget once returned 493 chars).
+ */
+function cutLines(s, n) {
+	if (s.length <= Math.max(0, n)) return s;
+	const cut = s.slice(0, Math.max(0, n));
+	const nl = cut.lastIndexOf('\n');
+	return nl >= 0 && cut.length - nl <= 200 ? cut.slice(0, nl) : cut;
+}
+
+/**
+ * Keep the heading plus as many of the NEWEST turns as `budget` allows. Reached only
+ * when the whole Recent-turns section overruns the budget on its own; shedding from
+ * the front is what keeps the last turn — the point of the section — present.
+ */
+function keepNewestTurns(tail, budget) {
+	const nl = tail.indexOf('\n', 1);
+	const heading = nl < 0 ? tail : tail.slice(0, nl);
+	const turns = (nl < 0 ? '' : tail.slice(nl + 1)).trim().split(/\n{2,}(?=\*\*(?:You|Claude):\*\*)/);
+	const room = Math.max(0, budget - heading.length - 2);
+	const kept = [];
+	let used = 0;
+	for (let i = turns.length - 1; i >= 0; i--) {
+		const t = turns[i].trim();
+		const cost = t.length + (kept.length ? 2 : 0);
+		if (kept.length && used + cost > room) break;
+		used += cost;
+		kept.unshift(t);
+	}
+	// Truncating the newest turn is the last resort: a cut-off turn beats no turn.
+	if (used > room) kept[0] = cutLines(kept[0], room);
+	return `${heading.replace(/\(last \d+\)/, `(last ${kept.length})`)}\n\n${kept.join('\n\n')}`;
+}
+
+/**
+ * Final guarantee that the whole string fits. Cuts from the sections ABOVE
+ * `## Recent turns`, never from the tail: the newest turns are the one thing a
+ * catch-up digest cannot be useful without, and they render last.
+ */
+function clampDigest(out, limit) {
+	const budget = Math.max(0, limit - CLAMP_MARK.length);
+	const idx = out.lastIndexOf(RECENT_HEADING);
+	if (idx < 0) return cutLines(out, budget) + CLAMP_MARK;
+	const head = out.slice(0, idx);
+	const tail = out.slice(idx);
+	const keptTail = tail.length <= budget ? tail : keepNewestTurns(tail, budget);
+	return cutLines(head, budget - keptTail.length) + CLAMP_MARK + keptTail;
+}
+
 export function formatDigest(data, opts = {}) {
 	const { meta, entries, signals } = data;
 	const window = opts.window ?? 12;
@@ -111,7 +167,7 @@ export function formatDigest(data, opts = {}) {
 
 	const convo = conversational(entries);
 
-	const build = (win, truncAt, timelinePrompts) => {
+	const build = (win, truncAt, timelinePrompts, compactionCap) => {
 		const recent = convo.slice(-win);
 		const older = convo.slice(0, Math.max(0, convo.length - win));
 		const L = [];
@@ -176,12 +232,12 @@ export function formatDigest(data, opts = {}) {
 			L.push('_This session was compacted. Everything before this point exists only as this summary._');
 			L.push('');
 			// High-value (it is Claude's own structured summary) but can run to tens of
-			// KB. Capped so it cannot eat the whole budget on the fast path.
-			const cap = opts.compactionCap ?? 8000;
-			L.push(trunc(signals.compaction.text, cap));
-			if (signals.compaction.text.length > cap) {
+			// KB. Capped so it cannot eat the whole budget on the fast path, and the cap
+			// shrinks further as a budget rung below.
+			L.push(trunc(signals.compaction.text, compactionCap));
+			if (signals.compaction.text.length > compactionCap) {
 				L.push('');
-				L.push(`_(compaction summary truncated at ${cap} chars — re-run with \`--compaction-full\` for all ${signals.compaction.text.length}.)_`);
+				L.push(`_(compaction summary truncated at ${compactionCap} chars — re-run with \`--compaction-full\` for all ${signals.compaction.text.length}.)_`);
 			}
 			L.push('');
 		}
@@ -197,23 +253,32 @@ export function formatDigest(data, opts = {}) {
 	};
 
 	// Budget guard. `maxChars` is a hard ceiling, so the ladder runs cheapest-first
-	// (per-turn detail, then the least-valuable section, then the window) and a final
-	// clamp guarantees the contract even at absurdly small budgets.
+	// (per-turn detail, the compressed timeline, the compaction summary, then the
+	// window) and a final clamp guarantees the contract even at absurdly small budgets.
 	let win = window;
 	let truncAt = opts.truncAt ?? TURN_TRUNC_DEFAULT;
 	let prompts = 25;
-	let out = build(win, truncAt, prompts);
-	while (out.length > maxChars && truncAt > 400) { truncAt = Math.floor(truncAt / 2); out = build(win, truncAt, prompts); }
-	while (out.length > maxChars && prompts > 3) { prompts = Math.max(3, Math.floor(prompts / 2)); out = build(win, truncAt, prompts); }
-	while (out.length > maxChars && win > 4) { win = Math.max(4, win - 3); out = build(win, truncAt, prompts); }
+	let cap = opts.compactionCap ?? 8000;
+	let out = build(win, truncAt, prompts, cap);
+	while (out.length > maxChars && truncAt > 400) { truncAt = Math.floor(truncAt / 2); out = build(win, truncAt, prompts, cap); }
+	while (out.length > maxChars && prompts > 3) { prompts = Math.max(3, Math.floor(prompts / 2)); out = build(win, truncAt, prompts, cap); }
+	// The compaction summary sheds before the window does: on a compacted session its
+	// cap alone can exceed the budget, and shrinking the window instead used to leave
+	// the summary intact and the newest turns gone. `--compaction-full` passes Infinity,
+	// so the first step down has to come off the real text length.
+	while (out.length > maxChars && cap > COMPACTION_CAP_FLOOR) {
+		const finite = Number.isFinite(cap) ? cap : (signals.compaction?.text.length ?? COMPACTION_CAP_FLOOR);
+		cap = Math.max(COMPACTION_CAP_FLOOR, Math.floor(finite / 2));
+		out = build(win, truncAt, prompts, cap);
+	}
+	while (out.length > maxChars && win > 4) { win = Math.max(4, win - 3); out = build(win, truncAt, prompts, cap); }
 
 	// Reserve room for the header, which is prepended below — the ceiling covers the
 	// whole returned string, not just the body.
 	const HEADER_RESERVE = 220;
 	let clamped = false;
 	if (out.length > maxChars - HEADER_RESERVE) {
-		out = out.slice(0, Math.max(0, maxChars - HEADER_RESERVE)).replace(/\n[^\n]*$/, '')
-			+ '\n\n_…digest clamped to the --max-chars budget._\n';
+		out = clampDigest(out, maxChars - HEADER_RESERVE);
 		clamped = true;
 	}
 

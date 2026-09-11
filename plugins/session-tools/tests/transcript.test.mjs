@@ -287,6 +287,43 @@ test('digest respects --max-chars by shrinking detail then window', () => {
 	assert.ok(big.length > small.length, 'a larger budget yields more detail');
 });
 
+// A compacted session is where the budget ladder used to delete the whole
+// `## Recent turns` section: the capped summary alone filled the budget and the final
+// clamp cut the tail, which is exactly where the newest turns render.
+const compactedSession = (summary, turns = 12) => {
+	const entries = [parseLine(J({ ...base, type: 'user', isCompactSummary: true, message: { role: 'user', content: summary } }))];
+	for (let i = 0; i < turns; i++) {
+		entries.push(parseLine(userText(`prompt ${i} ` + 'p'.repeat(600))));
+		entries.push(parseLine(asst(`reply ${i} ` + 'r'.repeat(600))));
+	}
+	const clean = entries.filter(Boolean);
+	return {
+		meta: { sessionId: 'abc', cwd: '/tmp', gitBranch: 'main', idleMs: 1000, liveness: 'active', sizeBytes: 500000, startedAt: base.timestamp },
+		entries: clean, signals: deriveSignals(clean),
+	};
+};
+
+test('digest keeps Recent turns and the newest turn on a compacted session', () => {
+	const data = compactedSession(Array.from({ length: 400 }, (_, i) => `summary line ${i} ` + 's'.repeat(50)).join('\n'));
+	for (const budget of [8000, 4000, 2000]) {
+		const out = formatDigest(data, { window: 8, maxChars: budget });
+		assert.ok(out.length <= budget, `budget ${budget} exceeded: got ${out.length}`);
+		assert.match(out, /## Recent turns/, `budget ${budget}: Recent turns section dropped`);
+		assert.ok(out.includes('reply 11'), `budget ${budget}: newest turn missing`);
+		const win = Number(out.match(/window=(\d+)/)[1]);
+		assert.ok(win >= 4, `budget ${budget}: window floor breached (${win})`);
+	}
+});
+
+test('a one-line compaction summary does not collapse the digest to a fraction of the budget', () => {
+	const data = compactedSession('one enormous single line: ' + 'z'.repeat(30000));
+	const out = formatDigest(data, { window: 8, maxChars: 8000 });
+	assert.ok(out.length <= 8000, `budget exceeded: got ${out.length}`);
+	assert.ok(out.length >= 4800, `clamp discarded most of the budget: got ${out.length} of 8000`);
+	assert.match(out, /## Recent turns/);
+	assert.ok(out.includes('reply 11'), 'newest turn missing');
+});
+
 test('digest surfaces the blocked state prominently', () => {
 	const entries = [parseLine(userText('go')), parseLine(asst('', [{ name: 'ExitPlanMode' }]))].filter(Boolean);
 	const data = {

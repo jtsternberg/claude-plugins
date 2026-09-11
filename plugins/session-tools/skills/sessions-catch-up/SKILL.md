@@ -42,7 +42,7 @@ Codex: if the invocation text above is not populated, use the text after the ski
 - **first positional** — session id, id-prefix, slug, or title. Required.
 - `--deep` — run Phase 2 without asking.
 - `--window N` — turns kept near-verbatim (default 12).
-- `--max-chars N` — ceiling on the whole digest (default 40000); over budget it sheds per-turn detail, then the compressed timeline, then the window, so the newest turns survive.
+- `--max-chars N` — ceiling on the whole digest (default 40000); over budget it sheds per-turn detail, then the compressed timeline, then the compaction summary, then the window (floor 4), and cuts from the sections above `## Recent turns` — so that section, and the newest turn in it, always survive.
 
 If no target was given, list sessions and ask which one.
 
