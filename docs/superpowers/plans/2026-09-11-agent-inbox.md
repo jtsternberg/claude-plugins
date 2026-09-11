@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a small read-only Maestro skill that catches the user up on live cmux and Herdr agents without double-counting Hotline callees.
+**Goal:** Add a small read-only Maestro skill that catches the user up on live cmux and Herdr agents, with Hotline callees nested beneath their callers.
 
-**Architecture:** Compose existing Herdr, cmux, Session Tools, and Hotline capabilities in prose. One small Hotline helper exposes caller/callee relationships; no generalized provider framework or Maestro status engine is introduced.
+**Architecture:** Use Graveyard as an optional unified inventory when installed, with existing Herdr/cmux capabilities as the portable path. Use Hotline for caller/callee relationships and Session Tools for bounded catch-up. The implementation consists of one Maestro skill and one small Hotline helper.
 
 **Tech Stack:** Markdown skills, Bash, `jq`, existing plugin scripts
 
@@ -12,12 +12,12 @@
 
 ## Global Constraints
 
-- Read-only: never send input, resume, focus, close, mark seen, or clear notifications.
-- Reachability is sufficient; the inbox need not run inside cmux or Herdr.
-- Ask before continuing when either host is unreachable.
+- Use read-only commands that preserve input, focus, lifecycle, seen state, and notifications.
+- Reachability is sufficient whether the inbox runs inside or outside cmux or Herdr.
+- Ask whether to continue with the available coverage when a host is unreachable.
 - Use visible names as locators; IDs are fallback-only.
 - Summarize at most five unclear workstreams from bounded Session Tools digests.
-- Do not add user-facing options in V1.
+- V1 is a single zero-argument workflow.
 
 ---
 
@@ -45,13 +45,13 @@ traced-call behavior so both consumers share one interpretation.
 - [ ] **Step 2: Write failing status tests**
 
 Cover one caller with multiple callees, legacy entries, malformed files, and an empty
-registry. Assert exact caller/callee IDs and host handles; malformed entries must not hide
-valid ones.
+registry. Assert exact caller/callee IDs and host handles; every valid entry remains in
+the result when another entry is malformed.
 
 - [ ] **Step 3: Implement the read-only skill**
 
-Run the shared reader and print compact records without starting Switchboard, opening a
-browser, changing registry files, or interpreting transcript content. Mirror
+Run the shared reader and print compact registry records directly. Preserve Switchboard's
+process/browser state and the registry bytes. Mirror
 `disable-model-invocation: true` in `agents/openai.yaml`.
 
 - [ ] **Step 4: Verify**
@@ -79,35 +79,37 @@ git commit -m "add read-only Hotline call status"
 - Test: `plugins/maestro/tests/agent-inbox-skill_test.sh`
 
 **Interfaces:**
-- Consumes: Herdr agent status, cmux tree/sidebar/notifications, Hotline call status, and Session Tools catch-up digests.
+- Consumes: optional Graveyard candidates, Herdr agent status, cmux tree/sidebar metadata, Hotline call status, and Session Tools catch-up digests.
 - Produces: one human briefing with waiting, working, finished, optional coverage, and `Next for you:` sections.
 
 - [ ] **Step 1: Write a failing skill-contract test**
 
-Assert read-only behavior, reachability probes, confirmation before a partial run,
-visible-name locators, Hotline child collapse, five-summary limit, digest bounds, and the
-absence of user-facing configuration flags.
+Assert read-only behavior, Graveyard fast-path and portable-path inventories, confirmation
+before a partial run, visible-name locators, Hotline child nesting, five-summary limit,
+digest bounds, and the single zero-argument invocation.
 
 - [ ] **Step 2: Implement preflight and inventory**
 
-Probe `cmux tree --all --json --id-format both` and `herdr agent list`. Ask before
-continuing if either fails. Otherwise collect native state and visible hierarchy names.
-Do not read terminal screens by default.
+When `graveyard` is installed, run `graveyard candidates --json` for the unified inventory.
+Otherwise use `herdr agent list` plus cmux tree/sidebar metadata. Ask before continuing
+when either path finds only one reachable transport. Reserve terminal reads for
+shortlisted unclear rows.
 
 - [ ] **Step 3: Correlate Hotline calls**
 
 Invoke `hotline:call-status`, match exact session IDs or recorded host handles, and nest
-known callees beneath callers. Never merge on similar cwd or title; keep IDs out of prose.
+known callees beneath callers. Correlate by exact session ID or recorded host handle and
+render visible names in prose.
 
 - [ ] **Step 4: Summarize unclear workstreams**
 
-Use Session Tools only when native status and recent output are insufficient. Limit each
+Use Session Tools when native status and recent output are insufficient. Limit each
 digest to eight turns and 8,000 characters, delegate to a cheaper model when available,
 and stop after five summaries.
 
 - [ ] **Step 5: Render the briefing**
 
-Omit empty sections. Use Herdr `<agent> in <tab>, <workspace>` and cmux `<surface title>
+Render populated sections. Use Herdr `<agent> in <tab>, <workspace>` and cmux `<surface title>
 in <workspace>`. Add a window anchor only when necessary. End with one `Next for you:`.
 
 - [ ] **Step 6: Verify**
