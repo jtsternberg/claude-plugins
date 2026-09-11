@@ -1,0 +1,12 @@
+{
+  "caller": "/tmp/legacy-ws",
+  "connections": {
+    "/tmp/legacy-callee": {
+      "session_id": "eeeeeeee-4444-5555-6666-777777777777",
+      "started": 1740000000,
+      "last_contact": 1740000060,
+      "mode": "quick_call",
+      "exchange_count": 1
+    }
+  }
+}

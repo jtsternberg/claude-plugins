@@ -1,0 +1,3 @@
+interface:
+  display_name: Hotline Call Status
+  short_description: Read the hotline call registry — which caller dialed which callee, and where

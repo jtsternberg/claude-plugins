@@ -85,7 +85,8 @@
   },
   "session-tools/sessions-catch-up": {
     "description": "Distill another session's transcript into a briefing — status, blockers, what's waiting — without touching it.",
-    "when_to_use": "Use when the user wants to get back up to speed on a DIFFERENT session:\n\"catch me up on <session-id>\", \"what was I doing in that session\",\n\"what's waiting on me in <id>\", \"summarize session <id>\",\n\"I stalled out on this a couple days ago, where did we land\".\nTypically the target is a stalled session the user is returning to.\nNot for summarizing the CURRENT conversation, and not for git/branch\ncatch-up (that is the unrelated /catchup command).\nIf the user wants to BUILD on that session's work rather than just be\nbriefed on it, use the companion `sessions-fork` skill instead."
+    "when_to_use": "Use when the user wants to get back up to speed on a DIFFERENT session:\n\"catch me up on <session-id>\", \"what was I doing in that session\",\n\"what's waiting on me in <id>\", \"summarize session <id>\",\n\"I stalled out on this a couple days ago, where did we land\".\nTypically the target is a stalled session the user is returning to.\nNot for summarizing the CURRENT conversation, and not for git/branch\ncatch-up (that is the unrelated /catchup command).\nIf the user wants to BUILD on that session's work rather than just be\nbriefed on it, use the companion `sessions-fork` skill instead.",
+    "superseded": "trigger phrases moved back INTO description: the skill is implicitly invocable and Codex ignores when_to_use, so the live text is the target now"
   },
   "session-tools/sessions-fork": {
     "description": "Prime this session with another session's transferable context (decisions, constraints, repo state), then check in.",

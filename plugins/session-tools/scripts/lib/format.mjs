@@ -103,15 +103,75 @@ function renderTimeline(older, maxPrompts = 25) {
 	return parts.join('\n\n');
 }
 
+const CLAMP_MARK = '\n\n_…digest clamped to the --max-chars budget._\n';
+const COMPACTION_CAP_FLOOR = 800;
+
+/**
+ * Cut `s` to `n` chars on a line boundary — but only when the partial line being
+ * dropped is small. A one-line compaction summary is a single 8000-char "line", so
+ * an unconditional walk-back to the previous newline threw away the whole budget
+ * (an 8000-char budget once returned 493 chars).
+ */
+function cutLines(s, n) {
+	if (s.length <= Math.max(0, n)) return s;
+	const cut = s.slice(0, Math.max(0, n));
+	const nl = cut.lastIndexOf('\n');
+	return nl >= 0 && cut.length - nl <= 200 ? cut.slice(0, nl) : cut;
+}
+
+/**
+ * Keep the heading plus as many of the NEWEST turns as `budget` allows. Reached only
+ * when the whole Recent-turns section overruns the budget on its own; shedding from
+ * the front is what keeps the last turn — the point of the section — present.
+ */
+function keepNewestTurns(tail, budget, starts) {
+	const nl = tail.indexOf('\n', 1);
+	const heading = nl < 0 ? tail : tail.slice(0, nl);
+	const turns = starts.map((s, i) => tail.slice(s, starts[i + 1]).trim()).filter(Boolean);
+	const room = Math.max(0, budget - heading.length - 2);
+	const kept = [];
+	let used = 0;
+	for (let i = turns.length - 1; i >= 0; i--) {
+		const t = turns[i].trim();
+		const cost = t.length + (kept.length ? 2 : 0);
+		if (kept.length && used + cost > room) break;
+		used += cost;
+		kept.unshift(t);
+	}
+	// Truncating the newest turn is the last resort: a cut-off turn beats no turn.
+	if (used > room) kept[0] = cutLines(kept[0], room);
+	return `${heading.replace(/\(last \d+\)/, `(last ${kept.length})`)}\n\n${kept.join('\n\n')}`;
+}
+
+/**
+ * Final guarantee that the whole string fits. Cuts from the sections ABOVE
+ * `## Recent turns`, never from the tail: the newest turns are the one thing a
+ * catch-up digest cannot be useful without, and they render last.
+ *
+ * `recentAt` and `turnStarts` come from the builder because transcript CONTENT
+ * can hold a `## Recent turns` heading and `**You:**` lines — a session that
+ * quoted a digest. Re-finding the boundary by string search picked the quote and
+ * threw every real turn away.
+ */
+function clampDigest(out, limit, recentAt, turnStarts) {
+	const budget = Math.max(0, limit - CLAMP_MARK.length);
+	const head = out.slice(0, recentAt);
+	const tail = out.slice(recentAt);
+	const rel = turnStarts.map(i => i - recentAt);
+	const keptTail = tail.length <= budget ? tail : keepNewestTurns(tail, budget, rel);
+	return cutLines(head, budget - keptTail.length) + CLAMP_MARK + keptTail;
+}
+
 export function formatDigest(data, opts = {}) {
 	const { meta, entries, signals } = data;
 	const window = opts.window ?? 12;
 	const maxChars = opts.maxChars ?? 40000;
 	const resolvedBeads = opts.resolvedBeads || {};
+	const startCap = opts.compactionCap ?? 8000;
 
 	const convo = conversational(entries);
 
-	const build = (win, truncAt, timelinePrompts) => {
+	const build = (win, truncAt, timelinePrompts, compactionCap) => {
 		const recent = convo.slice(-win);
 		const older = convo.slice(0, Math.max(0, convo.length - win));
 		const L = [];
@@ -176,12 +236,22 @@ export function formatDigest(data, opts = {}) {
 			L.push('_This session was compacted. Everything before this point exists only as this summary._');
 			L.push('');
 			// High-value (it is Claude's own structured summary) but can run to tens of
-			// KB. Capped so it cannot eat the whole budget on the fast path.
-			const cap = opts.compactionCap ?? 8000;
-			L.push(trunc(signals.compaction.text, cap));
-			if (signals.compaction.text.length > cap) {
+			// KB. Capped so it cannot eat the whole budget on the fast path, and the cap
+			// shrinks further as a budget rung below.
+			L.push(trunc(signals.compaction.text, compactionCap));
+			if (signals.compaction.text.length > compactionCap) {
+				// Which flag helps depends on which cap bound. An unshrunk cap is the 8000-char
+				// default, so `--compaction-full` alone lifts it. Once the ladder has shrunk the
+				// cap the budget is what binds — but a bigger `--max-chars` only climbs back to
+				// the start cap, so the default case needs both flags, and only the case that
+				// already passed `--compaction-full` (start cap Infinity) needs the budget alone.
+				const fix = compactionCap >= startCap
+					? 're-run with `--compaction-full`'
+					: Number.isFinite(startCap)
+						? 'raise `--max-chars` and re-run with `--compaction-full`'
+						: 'raise `--max-chars`';
 				L.push('');
-				L.push(`_(compaction summary truncated at ${cap} chars — re-run with \`--compaction-full\` for all ${signals.compaction.text.length}.)_`);
+				L.push(`_(compaction summary truncated at ${compactionCap} chars — ${fix} for all ${signals.compaction.text.length}.)_`);
 			}
 			L.push('');
 		}
@@ -189,31 +259,47 @@ export function formatDigest(data, opts = {}) {
 		const timeline = renderTimeline(older, timelinePrompts);
 		if (timeline) { L.push(`## Earlier (compressed)`); L.push(timeline); L.push(''); }
 
+		// Offsets into the joined string, so the clamp never has to re-find them.
+		const at = () => L.reduce((n, l) => n + l.length + 1, -1);
+		const recentAt = at();
 		L.push(`## Recent turns (last ${recent.length})`);
 		L.push('');
-		for (const e of recent) { L.push(renderTurn(e, truncAt)); L.push(''); }
+		const turnStarts = [];
+		for (const e of recent) { turnStarts.push(at() + 1); L.push(renderTurn(e, truncAt)); L.push(''); }
 
-		return L.join('\n');
+		return { text: L.join('\n'), recentAt, turnStarts };
 	};
 
 	// Budget guard. `maxChars` is a hard ceiling, so the ladder runs cheapest-first
-	// (per-turn detail, then the least-valuable section, then the window) and a final
-	// clamp guarantees the contract even at absurdly small budgets.
+	// (per-turn detail, the compressed timeline, the compaction summary, then the
+	// window) and a final clamp holds the ceiling down to ~155 chars — below that the
+	// reserved header plus the clamp mark alone overrun it.
 	let win = window;
 	let truncAt = opts.truncAt ?? TURN_TRUNC_DEFAULT;
 	let prompts = 25;
-	let out = build(win, truncAt, prompts);
-	while (out.length > maxChars && truncAt > 400) { truncAt = Math.floor(truncAt / 2); out = build(win, truncAt, prompts); }
-	while (out.length > maxChars && prompts > 3) { prompts = Math.max(3, Math.floor(prompts / 2)); out = build(win, truncAt, prompts); }
-	while (out.length > maxChars && win > 4) { win = Math.max(4, win - 3); out = build(win, truncAt, prompts); }
+	let cap = startCap;
+	let built = build(win, truncAt, prompts, cap);
+	const over = () => built.text.length > maxChars;
+	while (over() && truncAt > 400) { truncAt = Math.floor(truncAt / 2); built = build(win, truncAt, prompts, cap); }
+	while (over() && prompts > 3) { prompts = Math.max(3, Math.floor(prompts / 2)); built = build(win, truncAt, prompts, cap); }
+	// The compaction summary sheds before the window does: on a compacted session its
+	// cap alone can exceed the budget, and shrinking the window instead used to leave
+	// the summary intact and the newest turns gone. `--compaction-full` passes Infinity,
+	// so the first step down has to come off the real text length.
+	while (over() && cap > COMPACTION_CAP_FLOOR) {
+		const finite = Number.isFinite(cap) ? cap : (signals.compaction?.text.length ?? COMPACTION_CAP_FLOOR);
+		cap = Math.max(COMPACTION_CAP_FLOOR, Math.floor(finite / 2));
+		built = build(win, truncAt, prompts, cap);
+	}
+	while (over() && win > 4) { win = Math.max(4, win - 3); built = build(win, truncAt, prompts, cap); }
 
 	// Reserve room for the header, which is prepended below — the ceiling covers the
 	// whole returned string, not just the body.
 	const HEADER_RESERVE = 220;
+	let out = built.text;
 	let clamped = false;
 	if (out.length > maxChars - HEADER_RESERVE) {
-		out = out.slice(0, Math.max(0, maxChars - HEADER_RESERVE)).replace(/\n[^\n]*$/, '')
-			+ '\n\n_…digest clamped to the --max-chars budget._\n';
+		out = clampDigest(out, maxChars - HEADER_RESERVE, built.recentAt, built.turnStarts);
 		clamped = true;
 	}
 

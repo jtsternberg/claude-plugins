@@ -18,6 +18,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { pathToFileURL } = require('url');
 
 const HOME = os.homedir();
 const SESSIONS_DIR = process.env.HOTLINE_SESSIONS_DIR || path.join(HOME, '.agents-hotline', 'sessions');
@@ -65,6 +66,24 @@ function findTranscript(sessionId, hintCwd) {
 }
 
 // ---- registry reader ---------------------------------------------------------
+// Registry parsing lives in the plugin-root call-registry.mjs, shared with the
+// call-status skill so the two can never disagree about what an entry means. It
+// is ESM, so it is imported dynamically and the server does not listen until the
+// assignment below has landed — readCalls() runs synchronously inside a request.
+let readRegistry;
+const REGISTRY_READER = path.join(__dirname, '..', '..', '..', 'scripts', 'call-registry.mjs');
+
+// The reader warns once per malformed registry file per call; readCalls() runs on
+// every /api/calls poll, and switchboard.sh appends this stderr to an unrotated
+// log. One corrupt file would otherwise write the same line every few seconds for
+// as long as a dashboard stays open, so each distinct warning is reported once
+// for the life of the process. A file whose breakage changes says so again.
+const reportedRegistryWarnings = new Set();
+function warnRegistryOnce(message) {
+  if (reportedRegistryWarnings.has(message)) return;
+  reportedRegistryWarnings.add(message);
+  console.error(`call-registry: ${message}`);
+}
 
 function fileMtime(p) {
   try { return fs.statSync(p).mtimeMs / 1000; } catch { return 0; }
@@ -169,35 +188,31 @@ function discoverCalls(knownCalleeSids) {
 }
 
 function readCalls() {
-  let files = [];
-  try { files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json')); } catch { /* no registry */ }
+  if (!readRegistry) {
+    // The reader is imported dynamically and the server only listens once that
+    // has landed, so this is unreachable from a request — a startup-time caller
+    // added later gets a name instead of a bare TypeError.
+    throw new Error('call-registry not loaded yet');
+  }
   const calls = [];
-  for (const f of files) {
-    let reg;
-    try { reg = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf8')); } catch { continue; }
-    const callerPath = reg.caller || '';
-    const callerSid = reg.caller_session_id || path.basename(f, '.json');
-    const callerTranscript = findTranscript(callerSid, callerPath);
-    const connections = reg.connections || {};
-    for (const [calleePath, conn] of Object.entries(connections)) {
-      const calleeSid = conn.session_id || '';
-      const calleeTranscript = findTranscript(calleeSid, calleePath);
-      const lastActivity = Math.max(
-        conn.last_contact || 0,
-        callerTranscript ? fileMtime(callerTranscript) : 0,
-        calleeTranscript ? fileMtime(calleeTranscript) : 0
-      );
-      calls.push({
-        id: `${callerSid}:${calleeSid}`,
-        caller: { path: callerPath, name: shortName(callerPath), session_id: callerSid, has_transcript: !!callerTranscript },
-        callee: { path: calleePath, name: shortName(calleePath), session_id: calleeSid, has_transcript: !!calleeTranscript },
-        mode: conn.mode || 'unknown',
-        started: conn.started || 0,
-        last_activity: lastActivity,
-        exchange_count: conn.exchange_count || 0,
-        status: classify(lastActivity),
-      });
-    }
+  for (const rec of readRegistry(SESSIONS_DIR, { warn: warnRegistryOnce })) {
+    const callerTranscript = findTranscript(rec.caller_session_id, rec.caller_path);
+    const calleeTranscript = findTranscript(rec.callee_session_id, rec.target);
+    const lastActivity = Math.max(
+      rec.last_contact,
+      callerTranscript ? fileMtime(callerTranscript) : 0,
+      calleeTranscript ? fileMtime(calleeTranscript) : 0
+    );
+    calls.push({
+      id: `${rec.caller_session_id}:${rec.callee_session_id}`,
+      caller: { path: rec.caller_path, name: shortName(rec.caller_path), session_id: rec.caller_session_id, has_transcript: !!callerTranscript },
+      callee: { path: rec.target, name: shortName(rec.target), session_id: rec.callee_session_id, has_transcript: !!calleeTranscript },
+      mode: rec.mode,
+      started: rec.started,
+      last_activity: lastActivity,
+      exchange_count: rec.exchange_count,
+      status: classify(lastActivity),
+    });
   }
   // Merge in calls reconstructed from ringing handshakes; registry wins on
   // any callee session it already tracks.
@@ -854,8 +869,14 @@ server.on('error', (err) => {
   throw err;
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Hotline Switchboard listening on http://127.0.0.1:${PORT}`);
-  console.log(`Registry: ${SESSIONS_DIR}`);
-  console.log(`Transcripts: ${PROJECTS_ROOT}`);
+import(pathToFileURL(REGISTRY_READER).href).then((registry) => {
+  readRegistry = registry.readRegistry;
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`Hotline Switchboard listening on http://127.0.0.1:${PORT}`);
+    console.log(`Registry: ${SESSIONS_DIR}`);
+    console.log(`Transcripts: ${PROJECTS_ROOT}`);
+  });
+}).catch((err) => {
+  console.error(`Cannot load the shared registry reader at ${REGISTRY_READER}: ${err.message}`);
+  process.exit(1);
 });

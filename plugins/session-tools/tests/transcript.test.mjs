@@ -287,6 +287,107 @@ test('digest respects --max-chars by shrinking detail then window', () => {
 	assert.ok(big.length > small.length, 'a larger budget yields more detail');
 });
 
+// A compacted session is where the budget ladder used to delete the whole
+// `## Recent turns` section: the capped summary alone filled the budget and the final
+// clamp cut the tail, which is exactly where the newest turns render.
+const compactedSession = (summary, turns = 12) => {
+	const entries = [parseLine(J({ ...base, type: 'user', isCompactSummary: true, message: { role: 'user', content: summary } }))];
+	for (let i = 0; i < turns; i++) {
+		entries.push(parseLine(userText(`prompt ${i} ` + 'p'.repeat(600))));
+		entries.push(parseLine(asst(`reply ${i} ` + 'r'.repeat(600))));
+	}
+	const clean = entries.filter(Boolean);
+	return {
+		meta: { sessionId: 'abc', cwd: '/tmp', gitBranch: 'main', idleMs: 1000, liveness: 'active', sizeBytes: 500000, startedAt: base.timestamp },
+		entries: clean, signals: deriveSignals(clean),
+	};
+};
+
+test('digest keeps Recent turns and the newest turn on a compacted session', () => {
+	const data = compactedSession(Array.from({ length: 400 }, (_, i) => `summary line ${i} ` + 's'.repeat(50)).join('\n'));
+	for (const budget of [8000, 4000, 2000]) {
+		const out = formatDigest(data, { window: 8, maxChars: budget });
+		assert.ok(out.length <= budget, `budget ${budget} exceeded: got ${out.length}`);
+		assert.match(out, /## Recent turns/, `budget ${budget}: Recent turns section dropped`);
+		assert.ok(out.includes('reply 11'), `budget ${budget}: newest turn missing`);
+		const win = Number(out.match(/window=(\d+)/)[1]);
+		assert.ok(win >= 4, `budget ${budget}: window floor breached (${win})`);
+	}
+});
+
+test('a one-line compaction summary does not collapse the digest to a fraction of the budget', () => {
+	const data = compactedSession('one enormous single line: ' + 'z'.repeat(30000));
+	const out = formatDigest(data, { window: 8, maxChars: 8000 });
+	assert.ok(out.length <= 8000, `budget exceeded: got ${out.length}`);
+	assert.ok(out.length >= 4800, `clamp discarded most of the budget: got ${out.length} of 8000`);
+	assert.match(out, /## Recent turns/);
+	assert.ok(out.includes('reply 11'), 'newest turn missing');
+});
+
+// Transcript CONTENT can hold a `## Recent turns` heading and `**You:**` lines —
+// a session that quoted a digest back does exactly that. Locating the clamp
+// boundary by string search picked the quote and discarded every real turn.
+test('a turn quoting a digest heading is not mistaken for the section boundary', () => {
+	const poison = 'here is the digest I pulled:\n## Recent turns\n\n**You:** quoted prompt from the other session\n\n**Claude:** quoted reply from the other session';
+	const entries = [];
+	for (let i = 0; i < 12; i++) {
+		entries.push(parseLine(userText(`prompt ${i} ` + 'p'.repeat(600))));
+		entries.push(parseLine(asst(`reply ${i} ` + 'r'.repeat(600))));
+	}
+	entries.push(parseLine(userText('paste the digest you got')));
+	entries.push(parseLine(asst(poison)));
+	const clean = entries.filter(Boolean);
+	const data = {
+		meta: { sessionId: 'abc', cwd: '/tmp', gitBranch: 'main', idleMs: 1000, liveness: 'active', sizeBytes: 500000, startedAt: base.timestamp },
+		entries: clean, signals: deriveSignals(clean),
+	};
+	// 700 and 900 are the budgets that actually reach `keepNewestTurns` — above them
+	// the whole tail fits and only the head is cut, so the turn-splitting half of the
+	// fix goes unexercised.
+	for (const budget of [700, 900, 1400, 1800, 3000]) {
+		const out = formatDigest(data, { window: 8, maxChars: budget });
+		assert.ok(out.length <= budget, `budget ${budget} exceeded: got ${out.length}`);
+		// Two occurrences, and only two: the real heading (which carries the `(last N)`
+		// suffix) and the bare one quoted inside the newest turn. Counting only suffixed
+		// headings would not notice the quote being promoted to the boundary, because the
+		// quote has no suffix to match.
+		const all = out.match(/^## Recent turns.*$/gm) || [];
+		assert.equal(all.length, 2, `budget ${budget}: expected the real heading plus the quoted one, got ${all.length}`);
+		assert.match(all[0], /^## Recent turns \(last \d+\)$/, `budget ${budget}: the first heading is not the real one`);
+		assert.equal(all[1], '## Recent turns', `budget ${budget}: second occurrence is not the quote`);
+		// The kept-turn count is the assertion that the shedding loop split on real turn
+		// offsets: the quote contributes two `**You:**`/`**Claude:**` lines that a
+		// content-based split counts as turns of their own, so N would overshoot by two.
+		const section = out.slice(out.search(/^## Recent turns \(last \d+\)$/m));
+		const turnLines = (section.match(/^\*\*(?:You|Claude):\*\*/gm) || []).length;
+		assert.equal(Number(all[0].match(/\(last (\d+)\)/)[1]), turnLines - 2,
+			`budget ${budget}: heading counted the quoted lines as turns`);
+		assert.ok(out.includes('**Claude:** here is the digest I pulled:'),
+			`budget ${budget}: the newest real turn was discarded for the quoted one`);
+		const mark = out.indexOf('_…digest clamped');
+		assert.ok(mark < out.search(/^## Recent turns \(last \d+\)$/m),
+			`budget ${budget}: clamp mark landed inside the Recent-turns section`);
+	}
+});
+
+// The ladder shrinks the compaction cap only when the budget is already binding,
+// so advising `--compaction-full` there names a flag that would be re-shrunk —
+// and that the caller may have passed already.
+test('the compaction truncation note names the cap that actually bound', () => {
+	const data = compactedSession(Array.from({ length: 400 }, (_, i) => `summary line ${i} ` + 's'.repeat(50)).join('\n'));
+	const laddered = formatDigest(data, { window: 8, maxChars: 4000, compactionCap: Infinity });
+	assert.match(laddered, /compaction summary truncated at \d+ chars — raise `--max-chars`/);
+	assert.ok(!laddered.includes('--compaction-full'), 'must not advise a flag already in effect');
+
+	const defaulted = formatDigest(data, { window: 8, maxChars: 40000 });
+	assert.match(defaulted, /compaction summary truncated at 8000 chars — re-run with `--compaction-full`/);
+
+	// Default cap AND a binding budget: `--max-chars` alone climbs back only to the
+	// 8000-char default, so the note has to name both flags.
+	const both = formatDigest(data, { window: 8, maxChars: 4000 });
+	assert.match(both, /compaction summary truncated at \d+ chars — raise `--max-chars` and re-run with `--compaction-full`/);
+});
+
 test('digest surfaces the blocked state prominently', () => {
 	const entries = [parseLine(userText('go')), parseLine(asst('', [{ name: 'ExitPlanMode' }]))].filter(Boolean);
 	const data = {

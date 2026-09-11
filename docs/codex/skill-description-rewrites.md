@@ -6,14 +6,20 @@ in [`proposed-descriptions.json`](proposed-descriptions.json); every number belo
 re-parses the live SKILL.md frontmatter and the proposals on each run:
 
 ```bash
-node scripts/compare-skill-descriptions.mjs                 # the tables below (exits 1 on any 1,536-cap violation)
+node scripts/compare-skill-descriptions.mjs                 # the tables below (exits 1 if a PROPOSED text breaches the 1,536 cap)
 node scripts/compare-skill-descriptions.mjs --dump-current  # current state as JSON
 ```
 
-**Status: Phase 1 (the 24 explicit-only description rewrites) has landed** — explicit-only
-descriptions now total 2,005 chars in the live tree. The "before" figures in the tables below
-are therefore post-Phase-1; the original all-50 baseline was 15,902 chars (198.77% of the
-Codex budget), measured before any landing.
+**Status: Phase 1 (the explicit-only description rewrites) has landed, and Phase 2 all but
+two rows** — `hotline/dial` and `gws/gmail-draft-from-markdown` still carry their pre-rewrite
+descriptions. `session-tools/sessions-catch-up`'s proposal is **superseded**, not pending: the
+skill became implicitly invocable, and since Codex ignores `when_to_use`, its trigger phrases
+moved back into `description` deliberately. Its row is therefore measured against the live
+text, and `proposed-descriptions.json` carries the reason. The "before"
+columns below re-read the live tree, so every landed row shows a zero delta; the pre-rewrite
+baseline across the 50 proposed skills was 15,902 chars (198.77% of the Codex budget).
+Skills added after the proposal snapshot are listed under "No proposal yet" and are excluded
+from the budget figures below.
 
 ## The verified Codex / Claude Code asymmetry (this changed the plan)
 
@@ -34,7 +40,9 @@ which would have *deleted* it from Claude Code's matcher too, a silent recall lo
 corrected plan **relocates** it: `description` carries the short, Codex-safe trigger core;
 `when_to_use` carries the overflow vocabulary that Claude Code alone matches on. Each entry in
 `proposed-descriptions.json` is now either a string (description only) or
-`{ "description", "when_to_use" }`.
+`{ "description", "when_to_use" }`. A value carrying a `superseded` note is history, not a
+target — the live text has deliberately diverged, so the row and the cap check measure the
+live text and the note is echoed under "Superseded proposals".
 
 An earlier "bad ideas" bullet here claimed the `when_to_use` escape hatch "mostly moves
 phrases out of both matchers." That was wrong on the Claude Code half, and the empirical
@@ -45,10 +53,10 @@ Codex test settled the other half. Withdrawn.
 Unchanged from the first draft. **Per-skill ceilings, not a repo-total quota:** explicit-only
 `description` ≤ 120 chars; implicitly-invocable `description` ≤ 200 default, ≤ 270 only with
 written justification; `description` + `when_to_use` ≤ 1,536 per skill (hard cap, enforced by
-the comparator's exit code). The full-repo Codex figure lands at **6,557 chars (81.96%)**; a
+the comparator's exit code). The proposed-set Codex figure lands at **6,646 chars (83.08%)**; a
 deliberately heavy 10-plugin install (gws, slack, work-with-media, session-tools, handoff,
-pr-workflow, skill-tools, research-tools, collab-tools, thinking-tools) totals **4,040 chars
-(50.50%)** — and relocation doesn't change either figure, because `when_to_use` costs Codex
+pr-workflow, skill-tools, research-tools, collab-tools, thinking-tools) totals **4,129 chars
+(51.61%)** — and relocation doesn't change either figure, because `when_to_use` costs Codex
 nothing.
 
 The repo total is the wrong unit because nobody installs all 27 plugins; what composes across
@@ -62,13 +70,13 @@ descriptions.
 
 Two different jobs, two different rules:
 
-- **Explicit-only (24 skills, `disable-model-invocation: true`).** Landed. These can never be
-  implicitly invoked; the description is a picker label. One sentence that disambiguates from
-  siblings. 6,648 → **2,005** (avg 84). No relocation needed — trigger phrases cut from these
-  were matching nothing in either harness.
-- **Implicitly invocable (26 skills).** The description keeps every distinctive noun/verb a
+- **Explicit-only (23 skills, `disable-model-invocation: true`).** Landed. These can never be
+  implicitly invoked; the description is a picker label: one sentence that disambiguates from
+  siblings, averaging 82 chars. No relocation needed — trigger phrases cut from these were
+  matching nothing in either harness.
+- **Implicitly invocable (27 skills).** The description keeps every distinctive noun/verb a
   user would actually type (proper nouns, URL shapes, file extensions, error strings,
-  companion-skill routing): 9,254 → **4,552** (avg 175). Trigger vocabulary that still carries
+  companion-skill routing), averaging 176 chars. Trigger vocabulary that still carries
   matching signal but didn't earn `description` chars moves to `when_to_use` — merged into the
   11 implicit skills that already had one (never clobbered), added fresh to 9 more, and
   deliberately **not** relocated where the cut text was noise (see "Dropped entirely" below).
@@ -80,19 +88,18 @@ in the only field it reads.
 
 ## Two-budget before/after (all numbers from `compare-skill-descriptions.mjs`)
 
-### Explicit-only (disable-model-invocation: true) (24 skills)
+### Explicit-only (disable-model-invocation: true) (23 skills)
 
 | plugin/skill | desc before | desc after | delta | wtu before | wtu after | CC combined after (cap 1536) |
 |---|---:|---:|---:|---:|---:|---:|
 | session-tools/sessions-fork | 115 | 115 | 0 | 467 | 467 | 582 |
 | gws/md-to-google-doc | 111 | 111 | 0 | 0 | 0 | 111 |
-| pr-workflow/watch-pr-then-action | 111 | 111 | 0 | 0 | 0 | 111 |
-| session-tools/sessions-catch-up | 110 | 110 | 0 | 580 | 580 | 690 |
+| pr-workflow/watch-pr-then-action/watch-pr-then-action | 111 | 111 | 0 | 0 | 0 | 111 |
 | gws/google-doc-to-md | 106 | 106 | 0 | 0 | 0 | 106 |
 | session-tools/sessions-weekly-recap | 104 | 104 | 0 | 0 | 0 | 104 |
 | skill-tools/create-skill | 103 | 103 | 0 | 0 | 0 | 103 |
 | slides-presentation/create-slides-presentation | 102 | 102 | 0 | 0 | 0 | 102 |
-| pr-workflow/qa-walkthrough-pr | 98 | 98 | 0 | 195 | 195 | 293 |
+| pr-workflow/qa-walkthrough-pr/qa-walkthrough-pr | 98 | 98 | 0 | 195 | 195 | 293 |
 | hotline/ringing | 97 | 97 | 0 | 0 | 0 | 97 |
 | mac-caffeinate/caffeinate-computer | 88 | 88 | 0 | 0 | 0 | 88 |
 | git-tree/create-git-tree | 81 | 81 | 0 | 0 | 0 | 81 |
@@ -108,64 +115,108 @@ in the only field it reads.
 | bible/bible-nlt-lookup | 62 | 62 | 0 | 0 | 0 | 62 |
 | export-presentation/export-presentation | 58 | 58 | 0 | 0 | 0 | 58 |
 | hotline/whoami | 56 | 56 | 0 | 0 | 0 | 56 |
-| **subtotal** | **2005** | **2005** | **0** | **1242** | **1242** | — |
+| **subtotal** | **1895** | **1895** | **0** | **662** | **662** | — |
 
-Three explicit-only skills (sessions-fork, sessions-catch-up, qa-walkthrough-pr) carry a
-pre-existing `when_to_use`. It is matched by nothing (they can't be implicitly invoked in
-either harness), so it's proposed unchanged here to keep this change surgical — deleting it
-is a separate cleanup decision (1,242 chars of per-skill-cap dead weight, no budget impact).
+Two explicit-only skills (sessions-fork, qa-walkthrough-pr) carry a pre-existing
+`when_to_use`. It is matched by nothing (they can't be implicitly invoked in either harness),
+so it's proposed unchanged here to keep this change surgical — deleting it is a separate
+cleanup decision (662 chars of per-skill-cap dead weight, no budget impact).
 
-### Implicitly invocable (26 skills)
+### Implicitly invocable (27 skills)
 
 | plugin/skill | desc before | desc after | delta | wtu before | wtu after | CC combined after (cap 1536) |
 |---|---:|---:|---:|---:|---:|---:|
-| slack/read-slack | 638 | 268 | -370 | 585 | 585 | 853 |
-| work-with-media/macwhisper-cli | 606 | 254 | -352 | 360 | 444 | 698 |
-| gws/youtube | 577 | 168 | -409 | 338 | 421 | 589 |
-| thinking-tools/pink-elephant | 488 | 222 | -266 | 0 | 147 | 369 |
-| fable/fable-mode | 466 | 259 | -207 | 0 | 114 | 373 |
-| thinking-tools/chestertons-fence | 448 | 211 | -237 | 0 | 143 | 354 |
-| gws/calendar | 439 | 157 | -282 | 243 | 423 | 580 |
-| obsidian-cli/obsidian-cli | 430 | 161 | -269 | 0 | 0 | 161 |
-| work-with-media/yt-dlp | 417 | 263 | -154 | 535 | 535 | 798 |
-| gws/gmail-draft-from-markdown | 374 | 127 | -247 | 0 | 170 | 297 |
-| cmux-cli/auto-rename | 370 | 196 | -174 | 0 | 159 | 355 |
-| gws/gmail-read | 348 | 122 | -226 | 0 | 94 | 216 |
-| hotline/switchboard | 348 | 142 | -206 | 0 | 127 | 269 |
-| handoff/pickup-handoff | 346 | 152 | -194 | 0 | 90 | 242 |
-| handoff/handoff | 336 | 169 | -167 | 0 | 87 | 256 |
-| research-tools/fetch-docs | 331 | 186 | -145 | 470 | 470 | 656 |
-| localwp-shell/localwp-shell | 314 | 191 | -123 | 0 | 0 | 191 |
-| collab-tools/diff-view | 247 | 176 | -71 | 440 | 440 | 616 |
-| hotline/wiretap | 247 | 119 | -128 | 0 | 0 | 119 |
-| hotline/dial | 242 | 136 | -106 | 0 | 0 | 136 |
-| fable/fable-delegate | 240 | 177 | -63 | 0 | 0 | 177 |
-| collab-tools/temp-draft | 239 | 149 | -90 | 271 | 271 | 420 |
-| hotline/caller-id | 238 | 75 | -163 | 0 | 0 | 75 |
-| cmux-cli/using-cmux-cli | 213 | 185 | -28 | 327 | 327 | 512 |
-| gws/account | 168 | 129 | -39 | 445 | 445 | 574 |
-| collab-tools/promote-draft | 144 | 158 | 14 | 429 | 429 | 587 |
-| **subtotal** | **9254** | **4552** | **-4702** | **4443** | **5921** | — |
+| slack/read-slack | 268 | 268 | 0 | 585 | 585 | 853 |
+| work-with-media/yt-dlp | 263 | 263 | 0 | 535 | 535 | 798 |
+| fable/fable-mode | 259 | 259 | 0 | 114 | 114 | 373 |
+| work-with-media/macwhisper-cli | 254 | 254 | 0 | 444 | 444 | 698 |
+| hotline/dial | 231 | 136 | -95 | 0 | 0 | 136 |
+| thinking-tools/pink-elephant | 222 | 222 | 0 | 147 | 147 | 369 |
+| thinking-tools/chestertons-fence | 211 | 211 | 0 | 143 | 143 | 354 |
+| session-tools/sessions-catch-up | 199 | 199 | 0 | 580 | 580 | 779 _superseded_ |
+| cmux-cli/auto-rename | 196 | 196 | 0 | 159 | 159 | 355 |
+| gws/gmail-draft-from-markdown | 194 | 127 | -67 | 251 | 170 | 297 |
+| localwp-shell/localwp-shell | 191 | 191 | 0 | 0 | 0 | 191 |
+| research-tools/fetch-docs | 186 | 186 | 0 | 470 | 470 | 656 |
+| cmux-cli/using-cmux-cli | 185 | 185 | 0 | 327 | 327 | 512 |
+| fable/fable-delegate | 177 | 177 | 0 | 0 | 0 | 177 |
+| collab-tools/diff-view | 176 | 176 | 0 | 440 | 440 | 616 |
+| handoff/handoff | 169 | 169 | 0 | 87 | 87 | 256 |
+| gws/youtube | 168 | 168 | 0 | 421 | 421 | 589 |
+| obsidian-cli/obsidian-cli | 161 | 161 | 0 | 0 | 0 | 161 |
+| collab-tools/promote-draft | 158 | 158 | 0 | 429 | 429 | 587 |
+| gws/calendar | 157 | 157 | 0 | 423 | 423 | 580 |
+| handoff/pickup-handoff | 152 | 152 | 0 | 90 | 90 | 242 |
+| collab-tools/temp-draft | 149 | 149 | 0 | 271 | 271 | 420 |
+| hotline/switchboard | 142 | 142 | 0 | 127 | 127 | 269 |
+| gws/account | 129 | 129 | 0 | 445 | 445 | 574 |
+| gws/gmail-read | 122 | 122 | 0 | 94 | 94 | 216 |
+| hotline/wiretap | 119 | 119 | 0 | 0 | 0 | 119 |
+| hotline/caller-id | 75 | 75 | 0 | 0 | 0 | 75 |
+| **subtotal** | **4913** | **4751** | **-162** | **6582** | **6501** | — |
+
+### No proposal yet (28 skills)
+
+| plugin/skill | explicit-only | desc chars | wtu chars | CC combined (cap 1536) |
+|---|:---:|---:|---:|---:|
+| delayed-work/until | no | 854 | 962 | 1816 |
+| beads-workflow/triage-beads | no | 836 | 207 | 1043 |
+| beads-workflow/tripwire-scan | no | 690 | 148 | 838 |
+| maestro/patient-waiting | no | 516 | 0 | 516 |
+| pr-workflow/walk-through-work-history/walk-through-work-history | no | 508 | 0 | 508 |
+| maestro/conduct | no | 455 | 0 | 455 |
+| cmux-cli/send-at | no | 454 | 676 | 1130 |
+| agentmail/relay-work-order | no | 444 | 321 | 765 |
+| agentmail/contacts | no | 416 | 429 | 845 |
+| agentmail/check-mail | no | 402 | 352 | 754 |
+| agentmail/using-agentmail | no | 385 | 615 | 1000 |
+| agentmail/replying | no | 379 | 330 | 709 |
+| session-tools/note-to-self | yes | 280 | 326 | 606 |
+| thinking-tools/interview-mode | no | 272 | 137 | 409 |
+| maestro/your-cue | no | 261 | 144 | 405 |
+| hotline/call-status | no | 189 | 167 | 356 |
+| session-tools/self-recap | yes | 185 | 483 | 668 |
+| codex/sol-mode | no | 168 | 0 | 168 |
+| codex/fable-mode | no | 164 | 0 | 164 |
+| codex/sol-delegate | no | 158 | 0 | 158 |
+| skill-tools/validate-dual-harness-skill | yes | 139 | 0 | 139 |
+| git-commits/commit-staged | yes | 134 | 0 | 134 |
+| git-commits/commit-unstaged | yes | 130 | 0 | 130 |
+| pr-workflow/address-pr-comments/address-pr-comments | yes | 91 | 0 | 91 |
+| pr-workflow/address-pr-comments/address-pr-comments-human | yes | 80 | 0 | 80 |
+| beads-workflow/fix-findings-beads-tasks | yes | 79 | 0 | 79 |
+| pr-workflow/update-pr-description/update-pr-description | yes | 78 | 0 | 78 |
+| beads-workflow/tackle-epic | yes | 61 | 0 | 61 |
+| **subtotal** | — | **8808** | — | — |
+
+These carry 8808 chars of Codex description budget that the figures below exclude.
 
 ### Totals
 
 ```
 ## Codex budget (description only, 8000-char global pool)
-Before: 11259 chars (140.74%)        [post-Phase-1; original all-50 baseline was 15902 = 198.77%]
-After:  6557 chars (81.96%)
-  explicit-only: 2005 -> 2005
-  implicit:      9254 -> 4552
+
+Before: 6808 chars (85.10%)
+After:  6646 chars (83.08%)
+  explicit-only: 1895 -> 1895
+  implicit:      4913 -> 4751
 
 ## Claude Code budget (description + when_to_use, 1536-char cap per skill)
-Combined before: 16944 chars; after: 13720 chars (delta -3224)
+
+Combined before: 14052 chars; after: 13809 chars (delta -243)
 Largest per-skill combined after: slack/read-slack at 853 (55.53% of the 1536 cap)
-Skills over the 1536 cap: 0
+Proposed skills over the 1536 cap: 0 of 50 measured; the 28 unproposed skills are not cap-checked
 
 Proposals carrying a when_to_use: 23
+
+Superseded proposals (measured against the live text, not the proposal): 1
+  session-tools/sessions-catch-up: trigger phrases moved back INTO description: the skill is implicitly invocable and Codex ignores when_to_use, so the live text is the target now
 ```
 
-The 1,536-cap concern is verified, not assumed: the comparator checks every skill and exits
-non-zero on a violation. Worst case after relocation is 853/1,536.
+The 1,536-cap concern is verified *for the rewrite set*, not assumed: the comparator measures
+the 50 proposed texts and exits non-zero on a violation there. Worst case inside the set is
+853/1,536. It never measures the 28 unproposed skills, and one of those (`delayed-work/until`,
+1,816) is already over — closing that gap is its own task, not this doc's.
 
 ## The relocation, skill by skill
 
