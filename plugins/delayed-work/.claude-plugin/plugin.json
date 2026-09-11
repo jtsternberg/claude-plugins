@@ -1,7 +1,7 @@
 {
   "name": "delayed-work",
   "description": "Hit a session limit mid-task? Stop for now and have this same session resume the work at the reset, with the context it already has and zero tokens spent waiting. Also plain timed work: run X at 9pm, or in 30 minutes.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

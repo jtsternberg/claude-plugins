@@ -25,7 +25,9 @@ test('until preserves cross-harness contracts and its deliberate mechanics', () 
 	const content = readFileSync(skillFile, 'utf8');
 	assert.match(content, /\$ARGUMENTS/);
 	assert.match(content, /Codex: if that token is not substituted/);
-	assert.match(content, /argument-hint: "<when> <what to run>"/);
+	assert.match(content, /argument-hint: "\[--caffeinate\] <when> <what to run>"/);
+	assert.match(content, /Caffeination is off by default/);
+	assert.match(content, /only when the\s+invocation includes the standalone `--caffeinate` flag/);
 
 	// A single long sleep is the bug this skill exists to prevent; the loop must stay.
 	assert.match(content, /while \[ "\$\(date \+%s\)" -lt "\$TARGET" \]; do sleep 30; done/);

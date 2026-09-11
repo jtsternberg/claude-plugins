@@ -42,9 +42,9 @@ up rather than nothing.
 - The watcher **dies with the session**. If the session is gone at the target time,
   nothing fires and there is no catch-up. Not cron, not a durable scheduler.
 - **A sleeping machine freezes the loop.** No form of this wakes a Mac; a target that
-  passes during system sleep fires on wake instead of on time. The skill holds the
-  machine awake with `caffeinate` for the life of the watcher, which stops idle sleep but
-  cannot beat a closed lid — leave the lid open.
+  passes during system sleep fires on wake instead of on time. Add the opt-in
+  `--caffeinate` invocation flag to hold the machine awake for the life of the watcher.
+  It stops idle sleep but cannot beat a closed lid — leave the lid open.
 - It does survive the rate limit itself: a session that was HTTP 429'd kept its watchers
   running, and the fire at the reset time woke that same session. Events that arrive
   while the session is rate-limited are queued rather than dropped, and land together in
@@ -63,6 +63,7 @@ Claude Code:
 
 ```text
 /delayed-work:until at 9pm resume the review of PR 701 where we left off
+/delayed-work:until --caffeinate at 9pm resume the review of PR 701 where we left off
 /delayed-work:until 9:05pm run /review-pr on https://github.com/OWNER/REPO/pull/701
 /delayed-work:until in 2h run the full test suite and report failures
 ```
@@ -71,6 +72,7 @@ Codex:
 
 ```text
 $delayed-work:until in 30 minutes run the full test suite and report failures
+$delayed-work:until --caffeinate in 30 minutes run the full test suite and report failures
 ```
 
 ## Additional Documentation

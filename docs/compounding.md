@@ -252,16 +252,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   in a loop; the guard is the string canary in
   `plugins/delayed-work/tests/skills-layout.test.mjs`, which pins that loop in `until`'s
   SKILL.md. (claude-plugins-erak, 0005347)
-- **A frozen process is not a clock: hold the machine awake in its own command, and say
-  the lid stays open.** System sleep stops a poll loop exactly as it stops one long
-  `sleep`, so a target crossed while the machine sleeps fires on wake rather than on
-  time, and a doc claiming the poll lands on time "regardless" gets corrected in the
-  field by the agents reading it. Assert wakefulness as a separate backgrounded
-  `caffeinate -ims -t <seconds-to-target+margin>`, never by wrapping the watcher in
-  `caffeinate … sh -c '…'` — that buries the payload in a second layer of single quotes
-  and fails at fire time, hours later, silently. `caffeinate` cannot override a closed
-  lid, so anything recommending it says the lid stays open. (delayed-work 0.1.3, green-pass
-  REFACTOR 1-2)
+- **A frozen process is not a clock: offer wakefulness as an explicit opt-in, keep it in
+  its own command, and say the lid stays open.** System sleep stops a poll loop exactly
+  as it stops one long `sleep`, so a target crossed while the machine sleeps fires on
+  wake rather than on time. Run a separate backgrounded
+  `caffeinate -ims -t <seconds-to-target+margin>` only for an explicit invocation flag,
+  never by wrapping the watcher in `caffeinate … sh -c '…'`; `caffeinate` cannot override
+  a closed lid. (delayed-work 0.1.3, green-pass REFACTOR 1-2, claude-plugins-qxp7)
 
 - **A list of live OS handles must shrink as they die, or cleanup broadcasts to bystanders.**
   `tests/run-all.sh`'s `ACTIVE_PIDS` only ever appended; its sole reset ran after the

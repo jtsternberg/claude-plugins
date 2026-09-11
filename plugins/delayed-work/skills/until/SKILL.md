@@ -14,7 +14,7 @@ when_to_use: |
   NOT for schedules that must survive this session closing — nothing here does. NOT for
   repeating schedules (cron, the `schedule` skill). NOT for delivering a prompt into a
   different cmux surface, which is cmux-cli's `send-at`.
-argument-hint: "<when> <what to run>"
+argument-hint: "[--caffeinate] <when> <what to run>"
 allowed-tools:
   - "Bash(date *)"
   - "Bash(caffeinate *)"
@@ -34,7 +34,10 @@ It covers the plain timed case too: run X at 9pm, run X in 30 minutes, or queue 
 jobs across tonight spaced apart.
 
 `$ARGUMENTS` carries the *when* and the *what*: a time or delay, plus the work to run
-when it arrives.
+when it arrives. It may also carry `--caffeinate`, which explicitly opts into holding
+the Mac awake until the work fires. Remove that flag before parsing the time and payload.
+Caffeination is off by default; never infer consent from the delay length, an overnight
+target, or the human walking away.
 
 Codex: if that token is not substituted, take the when and the payload from the text
 following the skill name in the current request.
@@ -106,8 +109,8 @@ Five things there are deliberate:
    machine was asleep, while comparing `date +%s` to a fixed target re-reads the wall
    clock and fires within one poll interval of the wake. Say that out loud whenever the
    horizon is long enough that the machine will plausibly sleep first — an overnight
-   target, or any target the human is walking away from — and hold the machine awake
-   (see *Keeping the machine awake*).
+   target, or any target the human is walking away from — and explain that `--caffeinate`
+   is available (see *Keeping the machine awake*). Do not enable it unless requested.
 2. **`date -j -f` is the BSD/macOS form.** GNU `date -d` fails here; on a GNU box it
    is the other way round, so check `uname` before pasting either.
 3. **The loop exits after exactly one `echo`.** Exit ends the watch, so exactly one
@@ -149,9 +152,11 @@ the human wants overnight, that is the moment to tell them this can't guarantee 
 
 ## Keeping the machine awake
 
-Nothing here wakes a sleeping Mac, so on any horizon where the machine will plausibly
-idle-sleep first, hold it awake for the life of the watcher. Arm the `Monitor` first,
-then run this as a **separate backgrounded `Bash` call**:
+Nothing here wakes a sleeping Mac. By default, arm only the watcher and explain that a
+sleeping machine delays the fire until it wakes. Hold the machine awake only when the
+invocation includes the standalone `--caffeinate` flag. When present, remove the flag
+from the time/payload input, arm the `Monitor` first, then run this as a **separate
+backgrounded `Bash` call**:
 
 ```bash
 caffeinate -ims -t 12000
@@ -228,7 +233,7 @@ the reset time. The work in flight is a multi-step review that is not finished.
 2. Resolve the reset time and arm one `Monitor` whose emitted line names the resumption
    point, not just "continue":
    `FIRE — quota refilled, resume the review of https://github.com/OWNER/REPO/pull/701 at the security pass (step 3 of 5) now`.
-   Back it with a `caffeinate` window if the human is walking away.
+   Back it with a `caffeinate` window only if the invocation includes `--caffeinate`.
 3. Report the task ID the call returned, the exact reset time, and that the watcher dies
    with the session.
 4. Spend the remaining margin on the step in flight, then stop.
