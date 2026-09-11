@@ -134,18 +134,25 @@ has "nests callees beneath their caller" 'nested beneath its caller'
 has "matches on callee_session_id" 'callee_session_id'
 has "matches on host_handle" 'host_handle'
 has "ignores registry rows absent from the live inventory" '[Ff]ilter to the live inventory'
+# A `--remote` callee runs on another box, so its session id and host handle
+# belong to that box's inventory, not this one. Without the carve-out the row
+# falls through the stale filter and a live workstream is briefed as absent.
+has "reads the registry's remote field" '`remote`'
+has "keeps a remote callee instead of dropping it as stale" 'remote callee on <host>, not inventoried here'
+has "cues a remote callee as not inventoried" 'Your cue: nothing — remote host not inventoried'
+has "names the remote host under Coverage" 'Coverage. line naming that host'
 
 # --- bounded catch-up --------------------------------------------------------
 
 has "uses the sessions-catch-up skill for unclear workstreams" 'session-tools:sessions-catch-up'
 has "bounds the digest to eight turns with the real flag" '\-\-window 8'
-# `8,?000` alone is satisfied by the `head -c 8000` line below, so pin the
-# bullet that carries the ceiling.
+# `8,?000` alone also matches the `--max-chars 8000` invocations above, so pin
+# the bullet that carries the ceiling.
 has "bounds the digest to 8,000 characters" '^- \*\*8,000 characters\*\*'
 has "enforces the character ceiling with the real flag" '\-\-max-chars[= ]8000'
-# A byte cut drops the tail — the newest turns, the ones that say where the agent
-# stopped. `--max-chars` sheds detail instead, so the ceiling must never go back
-# to piping the digest through a byte-counting truncation.
+# `--max-chars` sheds cheapest-first and keeps `Recent turns`. Piping the
+# finished digest through a byte-counting truncation instead cuts the tail — the
+# newest turns, the ones that say where the agent stopped.
 lacks "never byte-cuts the digest output" 'head -c'
 has "states that sessions-catch-up is model-invocable" 'is model-invocable'
 has "dispatches one cheap subagent per shortlisted row" 'one cheap subagent per shortlisted row'
@@ -153,9 +160,9 @@ has "dispatches one cheap subagent per shortlisted row" 'one cheap subagent per 
 # would break that: Step 4 writes the nudge ledger and Step 3 offers `--deep`.
 has "work order skips the nudge bump so the briefing stays read-only" 'nudge\.mjs bump'
 has "work order skips the --deep offer" 'skip its `--deep` offer'
-# The hedge this section used to carry — sessions-catch-up was explicit-only, so
-# the fallback was cueing the human. The flag is gone (34f84cb); a reintroduced
-# hedge would silently degrade the briefing back to a manual step.
+# sessions-catch-up is model-invocable (34f84cb), so your-cue routes to it
+# itself. A hedge about being unable to route degrades the briefing to a manual
+# step the human has to run.
 lacks "no hedge about being unable to route to sessions-catch-up" 'explicitly.invoked only|cue the human to run it'
 has "delegates the summary to a cheaper model under Claude Code" 'model: "(haiku|sonnet)"'
 has "tells Codex to invoke it inline when it has no subagent" '\-\-max-chars[= ]8000`? inline'

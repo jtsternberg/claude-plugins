@@ -113,7 +113,7 @@ locates it.
 Read the call registry through `/hotline:hotline-call-status` (Codex:
 `$hotline:hotline-call-status`). Each line gives `caller_session_id`,
 `caller_path`, `target`, `callee_session_id`, `mode`, `last_contact`,
-`host_handle`, and `transport`.
+`host_handle`, `transport`, and `remote`.
 
 **Filter to the live inventory first.** The registry is append-only and nothing
 prunes it, so the filter typically discards the overwhelming majority of rows —
@@ -122,6 +122,16 @@ skip it and the briefing is unreadable. Nest a callee only when its
 inventory from step 2, *and* its caller is in that inventory too. Every other
 row is stale — ignore it silently, and never mention a caller or callee the
 human cannot currently see.
+
+**A remote callee is off-box, not stale.** `remote` carries the SSH target when
+the callee runs on another machine, so its `callee_session_id` and `host_handle`
+belong to that box and can never appear in a step-2 inventory built from local
+reads. A row with a non-empty `remote` — or a `host_handle` naming another
+machine — whose caller *is* in the inventory survives the filter: nest it under
+that caller as `remote callee on <host>, not inventoried here` with
+`Your cue: nothing — remote host not inventoried`, or `Your cue: clarify` when
+the caller looks blocked on it. Add one `Coverage` line naming that host.
+Dropping the row briefs a live workstream as absent.
 
 A surviving callee renders nested beneath its caller, by visible name. A callee
 that is itself a caller nests two deep — the chain is the point. Show a child
@@ -167,11 +177,10 @@ Both bounds are real flags on the digest command, and both degrade gracefully:
 
 - **Eight turns** — `--window 8`.
 - **8,000 characters** — `--max-chars 8000`, against a default of 40,000. The
-  digest spends the budget cheapest-first — per-turn detail, then the compressed
-  timeline, then the window — and clamps at a line boundary with a
-  `_…digest clamped_` marker, so all eight turns survive. Cutting the output by
-  byte count instead would lop off the newest turns, which are the ones that
-  say where the agent stopped.
+  digest sheds cheapest-first to fit the budget: per-turn detail, then the
+  prompt list, then the compaction summary, then the window itself down to a
+  floor of four turns. The clamp never removes `Recent turns`, so the newest
+  turn survives at 8,000 — the turn that says where the agent stopped.
 
 ## 5. Render the briefing
 
@@ -201,7 +210,7 @@ Finished while you were away
   continue, bury this session/plot, or nothing with reason>.
 
 Coverage
-- <only when cmux or Herdr was unavailable>
+- <only when a host was unavailable, or a remote callee's host is not inventoried>
 
 Next for you: <the highest-priority non-nothing cue and visible locator, or "nothing" when
 every workstream's cue is nothing>.
