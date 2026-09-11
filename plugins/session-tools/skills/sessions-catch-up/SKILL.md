@@ -12,7 +12,7 @@ when_to_use: |
   If the user wants to BUILD on that session's work rather than just be
   briefed on it, use the companion `sessions-fork` skill instead.
 allowed-tools: "Bash(node *) Bash(bash *) Bash(bd *) Read Grep"
-argument-hint: "<session-id|prefix|slug> [--deep] [--window N]"
+argument-hint: "<session-id|prefix|slug> [--deep] [--window N] [--max-chars N]"
 ---
 
 # Sessions Catch-Up
@@ -37,9 +37,12 @@ immediately. Phase 2 is optional and only happens if the user wants the longer a
 
 Parse `$ARGUMENTS`:
 
+Codex: if the invocation text above is not populated, use the text after the skill name.
+
 - **first positional** — session id, id-prefix, slug, or title. Required.
 - `--deep` — run Phase 2 without asking.
 - `--window N` — turns kept near-verbatim (default 12).
+- `--max-chars N` — ceiling on the whole digest (default 40000); over budget it sheds per-turn detail, then the compressed timeline, then the window, so the newest turns survive.
 
 If no target was given, list sessions and ask which one.
 
