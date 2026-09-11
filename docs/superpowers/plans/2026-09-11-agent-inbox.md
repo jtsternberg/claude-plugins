@@ -238,7 +238,7 @@ git commit -m "add agent inbox correlation engine"
 
 **Interfaces:**
 - Consumes: output from `session-tools:sessions-status`, `hotline:call-status`, documented Herdr `agent list`, and documented cmux `tree`, `sidebar-state`, and notification commands.
-- Produces: the briefing format in the spec and optional `--json` output.
+- Produces: the human briefing format in the spec.
 
 - [ ] **Step 1: Write a failing skill-contract test**
 
@@ -285,7 +285,7 @@ Supply `sessions-catch-up` digest data with `--window 8 --max-chars 8000 --fast
 three, and never ask for `--deep`. If model selection is unavailable, summarize no more
 than three candidates inline and label unsummarized records with their locator.
 
-- [ ] **Step 6: Render the briefing and JSON mode**
+- [ ] **Step 6: Render the briefing**
 
 Omit empty groups, show confidence only when medium/low, indent Hotline child status under
 the caller only when it explains a blocker or conflict, list unavailable providers last,

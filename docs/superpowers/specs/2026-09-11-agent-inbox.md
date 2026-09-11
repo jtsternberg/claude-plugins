@@ -102,7 +102,7 @@ an agent session on JT's behalf during preflight. Probes must not mark agents or
 4. User-facing locators use human names, never arbitrary IDs: Herdr agent name + tab name
    + workspace name; cmux surface/tab title + workspace title, plus a visible window
    anchor when multiple windows make it necessary. Raw IDs remain internal join keys and
-   appear only in `--json` or a low-confidence diagnostic.
+   appear only in a diagnostic when no human-readable locator can be constructed.
 5. A caller summary may include one compact child line such as “reviewer finished; answer
    not yet relayed” or “callee is blocked on approval”.
 6. Independent Herdr/cmux agents remain top-level records. Hotline children are
@@ -138,7 +138,7 @@ Defaults:
 - Read-only: no resume, prompt, focus, close, mark-seen, or notification clearing.
 
 Optional flags: `--since <duration|timestamp>`, `--provider <name>`, `--allow-partial`,
-`--max <1..20>`, `--no-summaries`, and `--json`.
+`--max <1..20>`, and `--no-summaries`.
 
 Human output:
 
