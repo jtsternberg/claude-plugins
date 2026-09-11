@@ -137,40 +137,48 @@ agent is idle mid-task and the screen doesn't say what task — shortlist the ro
 for a bounded transcript summary. `sessions-catch-up` is model-invocable, so
 route to it yourself; never pull a raw transcript into your own context instead.
 
-**Dispatch one cheap subagent per unclear row, all of them in one message so
-they run concurrently.** Under Claude Code that is the Agent tool with
-`model: "haiku"` — `model: "sonnet"` when the transcript is tangled. Every work
-order is the same three steps:
+**Stop after five summaries.** Shortlist at most five unclear rows before
+dispatching anything, and list the remainder — every still-unclear workstream —
+by its visible locator with `Your cue: clarify`. An exhaustive briefing that
+arrives late has failed at the one thing it was for.
 
-> Invoke `/session-tools:sessions-catch-up <session-id> --window 8`. When you run
-> the digest command that skill hands you, pipe it through `head -c 8000` before
-> reading it. Report three sentences: what it was doing, where it stopped, what
+**Then dispatch one cheap subagent per shortlisted row, all of them in one
+message so they run concurrently.** Under Claude Code that is the Agent tool with
+`model: "haiku"` — `model: "sonnet"` when the transcript is tangled. Every work
+order is the same:
+
+> Invoke
+> `/session-tools:sessions-catch-up <session-id> --window 8 --max-chars 8000`.
+> Perform only that skill's digest and briefing steps: skip its `--deep` offer
+> and skip its `nudge.mjs bump`, both of which write state this briefing must
+> not touch. Report three sentences: what it was doing, where it stopped, what
 > it needs.
 
 Those three sentences are all that reaches you. You never run the digest and
 never see the transcript.
 
 Under Codex, use its subagent mechanism the same way when one is available. With
-none, invoke `$session-tools:sessions-catch-up <session-id> --window 8` inline,
-apply `head -c 8000` to the digest command it runs, and keep only the
-three-sentence conclusion in your working notes.
+none, invoke
+`$session-tools:sessions-catch-up <session-id> --window 8 --max-chars 8000` inline
+— same two skips — and keep only the three-sentence conclusion in your working
+notes.
 
-Two bounds, and only one of them is a flag:
+Both bounds are real flags on the digest command, and both degrade gracefully:
 
-- **Eight turns** — `--window 8` is real; pass it.
-- **8,000 characters** — there is no character-limit flag anywhere in session
-  tools. The ceiling is enforced with `head -c 8000` on the digest command.
-
-**Stop after five summaries.** List the remainder — every still-unclear
-workstream — by its visible locator with `Your cue: clarify`. An exhaustive
-briefing that arrives late has failed at the one thing it was for.
+- **Eight turns** — `--window 8`.
+- **8,000 characters** — `--max-chars 8000`, against a default of 40,000. The
+  digest spends the budget cheapest-first — per-turn detail, then the compressed
+  timeline, then the window — and clamps at a line boundary with a
+  `_…digest clamped_` marker, so all eight turns survive. Cutting the output by
+  byte count instead would lop off the newest turns, which are the ones that
+  say where the agent stopped.
 
 ## 5. Render the briefing
 
-One workstream is one caller session plus its nested live callees — a callee
-gets its own line only when step 3 says to show it — and a plot is a workspace
-holding one or more workstreams. One cue per workstream, never one cue spanning
-two unrelated sessions.
+One workstream is one session plus any live callees it dialed — a callee gets
+its own line only when step 3 says to show it — so a session that dialed nobody
+is a workstream of one. A plot is a workspace holding one or more workstreams.
+One cue per workstream, never one cue spanning two unrelated sessions.
 
 Render only the sections that have content. Every workstream ends with
 `Your cue:` — a concrete verb (answer, approve, review, review and close,
@@ -230,7 +238,7 @@ to a later explicit request, and never runs `graveyard bury` itself.
 | A list of running sessions | A cue per workstream |
 | Silently briefing one host | Stop and ask, then add `Coverage` |
 | Session UUIDs and pane ids in prose | Visible names the human can see |
-| Reading full transcripts into your context | `--window 8`, `head -c 8000`, cheaper model |
+| Reading full transcripts into your context | `--window 8 --max-chars 8000`, cheaper model |
 | Nesting every registry row | Only callees present in the live inventory |
 | Burying, focusing, or notifying anything | Read-only; burial is a cue |
 | Ending with a menu | One `Next for you:` |

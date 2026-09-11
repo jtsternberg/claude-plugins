@@ -9,7 +9,7 @@
 # delete the paragraph and the matching assertion fails.
 #
 # Two classes of assertion matter most. The negative ones (no mutating
-# command appears as an instruction, no character-limit flag is claimed) guard
+# command appears as an instruction, the digest is never byte-cut) guard
 # against a future edit reintroducing a footgun the fact-finding ruled out.
 # The format ones (`Your cue:`, `Next for you:`) guard the rendering contract
 # the human reads.
@@ -142,17 +142,23 @@ has "bounds the digest to eight turns with the real flag" '\-\-window 8'
 # `8,?000` alone is satisfied by the `head -c 8000` line below, so pin the
 # bullet that carries the ceiling.
 has "bounds the digest to 8,000 characters" '^- \*\*8,000 characters\*\*'
-has "enforces the character ceiling by truncation" 'head -c 8000'
-has "says no character-limit flag exists" 'no character-limit flag'
-lacks "claims no character-ceiling flag that does not exist" '\-\-(max-chars|chars|limit) '
+has "enforces the character ceiling with the real flag" '\-\-max-chars[= ]8000'
+# A byte cut drops the tail — the newest turns, the ones that say where the agent
+# stopped. `--max-chars` sheds detail instead, so the ceiling must never go back
+# to piping the digest through a byte-counting truncation.
+lacks "never byte-cuts the digest output" 'head -c'
 has "states that sessions-catch-up is model-invocable" 'is model-invocable'
-has "dispatches one cheap subagent per unclear row" 'one cheap subagent per unclear row'
+has "dispatches one cheap subagent per shortlisted row" 'one cheap subagent per shortlisted row'
+# Rule zero promises the run changes nothing, and sessions-catch-up's own steps
+# would break that: Step 4 writes the nudge ledger and Step 3 offers `--deep`.
+has "work order skips the nudge bump so the briefing stays read-only" 'nudge\.mjs bump'
+has "work order skips the --deep offer" 'skip its `--deep` offer'
 # The hedge this section used to carry — sessions-catch-up was explicit-only, so
 # the fallback was cueing the human. The flag is gone (34f84cb); a reintroduced
 # hedge would silently degrade the briefing back to a manual step.
 lacks "no hedge about being unable to route to sessions-catch-up" 'explicitly.invoked only|cue the human to run it'
 has "delegates the summary to a cheaper model under Claude Code" 'model: "(haiku|sonnet)"'
-has "tells Codex to invoke it inline when it has no subagent" '\-\-window 8`? inline'
+has "tells Codex to invoke it inline when it has no subagent" '\-\-max-chars[= ]8000`? inline'
 has "the main agent never reads the full transcript itself" 'never see the transcript'
 has "stops after five summaries" '\*\*Stop after five summaries\.\*\*'
 has "lists the remainder by visible locator" 'the remainder'
@@ -188,7 +194,11 @@ has "offers bury this session" 'bury this session'
 has "offers bury this plot" 'bury this plot'
 has "burial stays text; execution needs a later explicit request" 'leaves execution to'
 has "an unverified transcript downgrades to review, never to burial" '[Uu]nverified is not failed'
-has "defines one workstream for cue purposes" 'One workstream is one caller session'
+# The verb itself, not just the paragraph: the five-summary cap means most
+# finished rows never had their transcript read, so this is the common branch.
+has "the unverified branch names the review and close verb" 'Your cue: review and close'
+has "defines one workstream for cue purposes" 'One workstream is one session'
+has "a session that dialed nobody is still a workstream" 'workstream of one'
 
 # --- dual-harness surface ----------------------------------------------------
 
