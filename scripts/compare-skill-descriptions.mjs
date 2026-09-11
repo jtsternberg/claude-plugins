@@ -21,7 +21,9 @@
 //         depth covers plugin groups, whose children are the plugins (see plugins/pr-workflow/).
 //         (description, when_to_use, disable-model-invocation)
 //         docs/codex/proposed-descriptions.json — keyed by "plugin/skill"; each value is either
-//         a string (description only) or { "description": ..., "when_to_use": ... }.
+//         a string (description only) or { "description": ..., "when_to_use": ... }. A value
+//         carrying a `superseded` note is history, not a target: the row and the cap check
+//         measure the live text instead, and the note is echoed under "Superseded proposals".
 //
 // Frontmatter parsing mirrors scripts/measure-skill-descriptions.sh: plain scalars,
 // single/double-quoted scalars, and YAML folded (>) / literal (|) block scalars.

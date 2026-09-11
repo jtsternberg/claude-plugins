@@ -40,7 +40,9 @@ which would have *deleted* it from Claude Code's matcher too, a silent recall lo
 corrected plan **relocates** it: `description` carries the short, Codex-safe trigger core;
 `when_to_use` carries the overflow vocabulary that Claude Code alone matches on. Each entry in
 `proposed-descriptions.json` is now either a string (description only) or
-`{ "description", "when_to_use" }`.
+`{ "description", "when_to_use" }`. A value carrying a `superseded` note is history, not a
+target — the live text has deliberately diverged, so the row and the cap check measure the
+live text and the note is echoed under "Superseded proposals".
 
 An earlier "bad ideas" bullet here claimed the `when_to_use` escape hatch "mostly moves
 phrases out of both matchers." That was wrong on the Claude Code half, and the empirical
