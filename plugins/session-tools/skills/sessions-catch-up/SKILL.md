@@ -1,6 +1,6 @@
 ---
 name: sessions-catch-up
-description: "Distill another session's transcript into a briefing — status, blockers, what's waiting — without touching it."
+description: "Distill another session's transcript into a briefing — status, blockers, what's waiting — without touching it. 'catch me up on <session-id>', 'summarize session <id>', 'what's waiting on me in <id>'."
 when_to_use: |
   Use when the user wants to get back up to speed on a DIFFERENT session:
   "catch me up on <session-id>", "what was I doing in that session",
@@ -11,7 +11,6 @@ when_to_use: |
   catch-up (that is the unrelated /catchup command).
   If the user wants to BUILD on that session's work rather than just be
   briefed on it, use the companion `sessions-fork` skill instead.
-disable-model-invocation: true
 allowed-tools: "Bash(node *) Bash(bash *) Bash(bd *) Read Grep"
 argument-hint: "<session-id|prefix|slug> [--deep] [--window N]"
 ---
