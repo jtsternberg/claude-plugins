@@ -4,7 +4,9 @@
 
 Add `/maestro:agent-inbox` (Codex: `$maestro:agent-inbox`), a read-only morning briefing
 that answers which agents are working, which are waiting on the user, and what finished
-while the user was away. The result is a quick orientation to current agent work.
+while the user was away. Catch-up is the input; the purpose is to tell the user what each
+workstream needs from them now. The result is a quick orientation with one actionable cue
+per workstream.
 
 ## Existing Functionality to Reuse
 
@@ -17,7 +19,8 @@ while the user was away. The result is a quick orientation to current agent work
 - **Session Tools:** the session list finds transcripts and `sessions-catch-up` supplies
   bounded, read-only transcript briefings.
 - **Hotline:** its registry maps caller sessions to callee sessions and host handles.
-- **Maestro:** owns the orchestration viewpoint and final `Next for you:` action.
+- **Maestro:** owns the orchestration viewpoint, each workstream's `Your cue:`, and the
+  final prioritized `Next for you:` action.
 
 ## Workflow
 
@@ -67,24 +70,31 @@ ceiling. These are fixed internal safeguards. List any remainder by visible loca
 
 ### 5. Brief the user
 
+Every workstream ends with `Your cue:`. Use a concrete verb when the user has a move:
+answer, approve, review, resume, clarify, or close. Use `Your cue: nothing — <reason>` when
+the agent is still working or the result is already settled. This makes “nothing needed”
+an explicit conclusion rather than an omission.
+
 Use only sections with content:
 
 ```text
 ## Agent inbox
 
 Waiting on you
-- <visible agent locator> — <what it needs>
+- <visible agent locator> — <current status>. Your cue: <specific action>.
 
 Working
-- <visible agent locator> — <current task>
+- <visible agent locator> — <current task>. Your cue: nothing — it is still working.
 
 Finished while you were away
-- <visible agent locator> — <outcome and verification caveat>
+- <visible agent locator> — <outcome and verification caveat>. Your cue: <review, close,
+  continue, or nothing with reason>.
 
 Coverage
 - <only when cmux or Herdr was unavailable>
 
-Next for you: <one concrete action and visible locator>.
+Next for you: <the highest-priority non-nothing cue and visible locator, or "nothing" when
+every workstream's cue is nothing>.
 ```
 
 ## V1 Boundary
@@ -104,4 +114,6 @@ briefings from Session Tools.
 - Normal output uses visible names rather than arbitrary IDs.
 - The main agent receives bounded summaries rather than full transcripts.
 - At most five unclear workstreams receive bounded semantic summaries.
-- The briefing ends with one concrete `Next for you:` action.
+- Every workstream states `Your cue:` with a concrete action or an explicit “nothing” and
+  reason.
+- The briefing ends with the single highest-priority cue as `Next for you:`.

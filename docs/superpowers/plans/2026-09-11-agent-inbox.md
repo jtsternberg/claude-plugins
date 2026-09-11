@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a small read-only Maestro skill that catches the user up on live cmux and Herdr agents, with Hotline callees nested beneath their callers.
+**Goal:** Add a small read-only Maestro skill that catches the user up on live cmux and Herdr agents and states what each workstream needs from the user next, with Hotline callees nested beneath their callers.
 
 **Architecture:** Use Graveyard as an optional unified inventory when installed, with existing Herdr/cmux capabilities as the portable path. Use Hotline for caller/callee relationships and Session Tools for bounded catch-up. The implementation consists of one Maestro skill and one small Hotline helper.
 
@@ -16,6 +16,7 @@
 - Reachability is sufficient whether the inbox runs inside or outside cmux or Herdr.
 - Ask whether to continue with the available coverage when a host is unreachable.
 - Use visible names as locators; IDs are fallback-only.
+- Give every workstream one `Your cue:` action or an explicit “nothing” with a reason.
 - Summarize at most five unclear workstreams from bounded Session Tools digests.
 - V1 is a single zero-argument workflow.
 
@@ -80,13 +81,14 @@ git commit -m "add read-only Hotline call status"
 
 **Interfaces:**
 - Consumes: optional Graveyard candidates, Herdr agent status, cmux tree/sidebar metadata, Hotline call status, and Session Tools catch-up digests.
-- Produces: one human briefing with waiting, working, finished, optional coverage, and `Next for you:` sections.
+- Produces: one human briefing with waiting, working, finished, optional coverage, a `Your cue:` for every workstream, and one prioritized `Next for you:`.
 
 - [ ] **Step 1: Write a failing skill-contract test**
 
 Assert read-only behavior, Graveyard fast-path and portable-path inventories, confirmation
 before a partial run, visible-name locators, Hotline child nesting, five-summary limit,
-digest bounds, and the single zero-argument invocation.
+digest bounds, one cue per workstream, final cue prioritization, and the single
+zero-argument invocation.
 
 - [ ] **Step 2: Implement preflight and inventory**
 
@@ -109,8 +111,11 @@ and stop after five summaries.
 
 - [ ] **Step 5: Render the briefing**
 
-Render populated sections. Use Herdr `<agent> in <tab>, <workspace>` and cmux `<surface title>
-in <workspace>`. Add a window anchor only when necessary. End with one `Next for you:`.
+Render populated sections. Use Herdr `<agent> in <tab>, <workspace>` and cmux `<surface
+title> in <workspace>`. Add a window anchor only when necessary. End every workstream with
+`Your cue: <action>` or `Your cue: nothing — <reason>`. Select the highest-priority
+non-nothing cue for the final `Next for you:`; report `Next for you: nothing` when every
+workstream is already working or settled.
 
 - [ ] **Step 6: Verify**
 
