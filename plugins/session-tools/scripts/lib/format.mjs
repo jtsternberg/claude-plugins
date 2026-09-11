@@ -155,7 +155,6 @@ function keepNewestTurns(tail, budget, starts) {
  */
 function clampDigest(out, limit, recentAt, turnStarts) {
 	const budget = Math.max(0, limit - CLAMP_MARK.length);
-	if (recentAt < 0) return cutLines(out, budget) + CLAMP_MARK;
 	const head = out.slice(0, recentAt);
 	const tail = out.slice(recentAt);
 	const rel = turnStarts.map(i => i - recentAt);
@@ -241,12 +240,16 @@ export function formatDigest(data, opts = {}) {
 			// shrinks further as a budget rung below.
 			L.push(trunc(signals.compaction.text, compactionCap));
 			if (signals.compaction.text.length > compactionCap) {
-				// Which flag helps depends on which cap bound: the ladder only shrinks the
-				// cap when the budget is already binding, so `--compaction-full` there would
-				// be re-shrunk on the next run (and may be what the caller already passed).
-				const fix = compactionCap < startCap
-					? 'raise `--max-chars`'
-					: 're-run with `--compaction-full`';
+				// Which flag helps depends on which cap bound. An unshrunk cap is the 8000-char
+				// default, so `--compaction-full` alone lifts it. Once the ladder has shrunk the
+				// cap the budget is what binds — but a bigger `--max-chars` only climbs back to
+				// the start cap, so the default case needs both flags, and only the case that
+				// already passed `--compaction-full` (start cap Infinity) needs the budget alone.
+				const fix = compactionCap >= startCap
+					? 're-run with `--compaction-full`'
+					: Number.isFinite(startCap)
+						? 'raise `--max-chars` and re-run with `--compaction-full`'
+						: 'raise `--max-chars`';
 				L.push('');
 				L.push(`_(compaction summary truncated at ${compactionCap} chars — ${fix} for all ${signals.compaction.text.length}.)_`);
 			}

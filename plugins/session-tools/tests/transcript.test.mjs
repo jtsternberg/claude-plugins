@@ -341,11 +341,27 @@ test('a turn quoting a digest heading is not mistaken for the section boundary',
 		meta: { sessionId: 'abc', cwd: '/tmp', gitBranch: 'main', idleMs: 1000, liveness: 'active', sizeBytes: 500000, startedAt: base.timestamp },
 		entries: clean, signals: deriveSignals(clean),
 	};
-	for (const budget of [1400, 1800, 3000]) {
+	// 700 and 900 are the budgets that actually reach `keepNewestTurns` — above them
+	// the whole tail fits and only the head is cut, so the turn-splitting half of the
+	// fix goes unexercised.
+	for (const budget of [700, 900, 1400, 1800, 3000]) {
 		const out = formatDigest(data, { window: 8, maxChars: budget });
 		assert.ok(out.length <= budget, `budget ${budget} exceeded: got ${out.length}`);
-		const headings = out.match(/^## Recent turns \(last \d+\)$/gm) || [];
-		assert.equal(headings.length, 1, `budget ${budget}: expected one real heading, got ${headings.length}`);
+		// Two occurrences, and only two: the real heading (which carries the `(last N)`
+		// suffix) and the bare one quoted inside the newest turn. Counting only suffixed
+		// headings would not notice the quote being promoted to the boundary, because the
+		// quote has no suffix to match.
+		const all = out.match(/^## Recent turns.*$/gm) || [];
+		assert.equal(all.length, 2, `budget ${budget}: expected the real heading plus the quoted one, got ${all.length}`);
+		assert.match(all[0], /^## Recent turns \(last \d+\)$/, `budget ${budget}: the first heading is not the real one`);
+		assert.equal(all[1], '## Recent turns', `budget ${budget}: second occurrence is not the quote`);
+		// The kept-turn count is the assertion that the shedding loop split on real turn
+		// offsets: the quote contributes two `**You:**`/`**Claude:**` lines that a
+		// content-based split counts as turns of their own, so N would overshoot by two.
+		const section = out.slice(out.search(/^## Recent turns \(last \d+\)$/m));
+		const turnLines = (section.match(/^\*\*(?:You|Claude):\*\*/gm) || []).length;
+		assert.equal(Number(all[0].match(/\(last (\d+)\)/)[1]), turnLines - 2,
+			`budget ${budget}: heading counted the quoted lines as turns`);
 		assert.ok(out.includes('**Claude:** here is the digest I pulled:'),
 			`budget ${budget}: the newest real turn was discarded for the quoted one`);
 		const mark = out.indexOf('_…digest clamped');
@@ -365,6 +381,11 @@ test('the compaction truncation note names the cap that actually bound', () => {
 
 	const defaulted = formatDigest(data, { window: 8, maxChars: 40000 });
 	assert.match(defaulted, /compaction summary truncated at 8000 chars — re-run with `--compaction-full`/);
+
+	// Default cap AND a binding budget: `--max-chars` alone climbs back only to the
+	// 8000-char default, so the note has to name both flags.
+	const both = formatDigest(data, { window: 8, maxChars: 4000 });
+	assert.match(both, /compaction summary truncated at \d+ chars — raise `--max-chars` and re-run with `--compaction-full`/);
 });
 
 test('digest surfaces the blocked state prominently', () => {

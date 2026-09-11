@@ -186,14 +186,24 @@ else
 fi
 
 # --plugin-root with no value used to leave the arg list untouched and spin
-# forever (`shift 2 || true` with one arg left), so this case is bounded by
-# `timeout` on purpose: a regression hangs the suite rather than failing it.
-MISSING_ERR=$(timeout 5 bash "$CALL_STATUS" --plugin-root 2>&1 >/dev/null)
-MISSING_STATUS=$?
-if [[ $MISSING_STATUS -eq 2 && "$MISSING_ERR" == *"--plugin-root needs a directory"* ]]; then
-  pass "--plugin-root with no value exits 2 instead of looping"
+# forever (`shift 2 || true` with one arg left), so this case is bounded by a
+# timeout on purpose: a regression hangs the suite rather than failing it. Base
+# macOS ships neither `timeout` nor `gtimeout`, and running the case unbounded
+# there would hang the whole run — so it self-skips instead.
+TIMEOUT_BIN=""
+for t in timeout gtimeout; do
+  if command -v "$t" >/dev/null 2>&1; then TIMEOUT_BIN="$t"; break; fi
+done
+if [[ -z "$TIMEOUT_BIN" ]]; then
+  echo "  ⚠ SKIP — neither timeout nor gtimeout available, so the hang case cannot be bounded"
 else
-  fail "--plugin-root with no value exits 2 instead of looping (status: $MISSING_STATUS, err: $MISSING_ERR)"
+  MISSING_ERR=$(HOTLINE_SESSIONS_DIR="$REGISTRY" "$TIMEOUT_BIN" 5 bash "$CALL_STATUS" --plugin-root 2>&1 >/dev/null)
+  MISSING_STATUS=$?
+  if [[ $MISSING_STATUS -eq 2 && "$MISSING_ERR" == *"--plugin-root needs a directory"* ]]; then
+    pass "--plugin-root with no value exits 2 instead of looping"
+  else
+    fail "--plugin-root with no value exits 2 instead of looping (status: $MISSING_STATUS, err: $MISSING_ERR)"
+  fi
 fi
 
 # ---- case: degenerate registry shapes ---------------------------------------
