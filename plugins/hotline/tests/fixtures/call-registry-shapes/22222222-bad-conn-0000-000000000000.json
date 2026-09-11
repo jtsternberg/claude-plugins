@@ -1,0 +1,14 @@
+{
+  "caller": "/tmp/mixed-ws",
+  "caller_session_id": "22222222-bad-conn-0000-000000000000",
+  "connections": {
+    "/tmp/string-conn": "bbbbbbbb-not-an-object",
+    "/tmp/good-conn": {
+      "session_id": "99999999-aaaa-bbbb-cccc-dddddddddddd",
+      "started": 1750000500,
+      "last_contact": 1750000600,
+      "mode": "quick_call",
+      "exchange_count": 2
+    }
+  }
+}

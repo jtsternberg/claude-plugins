@@ -11,8 +11,10 @@
 #
 # --plugin-root is how the skill hands over the installed plugin directory, so
 # the reader is addressed from the plugin root rather than by counting parent
-# directories. Without it the script falls back to its own location, which keeps
-# a direct invocation (and the tests) working.
+# directories. Omit the flag entirely and the script falls back to its own
+# location, which keeps a direct invocation (and the tests) working; pass it with
+# no value and it exits 2, because a --plugin-root that resolves to nothing is a
+# broken invocation, not a request for the fallback.
 #
 # Defaults to $HOTLINE_SESSIONS_DIR, else ~/.agents-hotline/sessions. An empty or
 # missing registry prints nothing and exits 0. A malformed registry file is
@@ -33,13 +35,18 @@ while [[ $# -gt 0 ]]; do
       echo "host_handle, transport, remote."
       exit 0
       ;;
-    --plugin-root)
-      PLUGIN_ROOT="${2:-}"
-      shift 2 || true
-      ;;
-    --plugin-root=*)
-      PLUGIN_ROOT="${1#*=}"
-      shift
+    --plugin-root|--plugin-root=*)
+      if [[ "$1" == --plugin-root ]]; then
+        PLUGIN_ROOT="${2-}"
+        [[ $# -ge 2 ]] && shift 2 || shift
+      else
+        PLUGIN_ROOT="${1#*=}"
+        shift
+      fi
+      if [[ -z "$PLUGIN_ROOT" ]]; then
+        echo "call-status: --plugin-root needs a directory (omit the flag to use the script's own location)" >&2
+        exit 2
+      fi
       ;;
     *)
       ARGS+=("$1")

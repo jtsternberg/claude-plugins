@@ -14,6 +14,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURES="$SCRIPT_DIR/fixtures/call-registry"
+SHAPES="$SCRIPT_DIR/fixtures/call-registry-shapes"
 CALL_STATUS="$SCRIPT_DIR/../skills/call-status/scripts/call-status.sh"
 
 PASS=0
@@ -182,6 +183,48 @@ if [[ $BOGUS_STATUS -eq 1 && "$BOGUS_ERR" == *"no-such-plugin/scripts/call-regis
   pass "a wrong --plugin-root fails loudly instead of being ignored"
 else
   fail "a wrong --plugin-root fails loudly instead of being ignored (status: $BOGUS_STATUS, err: $BOGUS_ERR)"
+fi
+
+# --plugin-root with no value used to leave the arg list untouched and spin
+# forever (`shift 2 || true` with one arg left), so this case is bounded by
+# `timeout` on purpose: a regression hangs the suite rather than failing it.
+MISSING_ERR=$(timeout 5 bash "$CALL_STATUS" --plugin-root 2>&1 >/dev/null)
+MISSING_STATUS=$?
+if [[ $MISSING_STATUS -eq 2 && "$MISSING_ERR" == *"--plugin-root needs a directory"* ]]; then
+  pass "--plugin-root with no value exits 2 instead of looping"
+else
+  fail "--plugin-root with no value exits 2 instead of looping (status: $MISSING_STATUS, err: $MISSING_ERR)"
+fi
+
+# ---- case: degenerate registry shapes ---------------------------------------
+# A top-level `null` parses fine, so the reader's `reg &&` guards are what keep
+# it from taking down the whole run; a connection that is not an object costs
+# only itself.
+
+SHAPES_DIR="$SANDBOX/shapes"
+mkdir -p "$SHAPES_DIR"
+cp "$SHAPES"/*.json "$SHAPES_DIR/"
+SHAPES_OUT="$SANDBOX/shapes.jsonl"
+SHAPES_ERR="$SANDBOX/shapes.err"
+HOTLINE_SESSIONS_DIR="$SHAPES_DIR" bash "$CALL_STATUS" > "$SHAPES_OUT" 2> "$SHAPES_ERR"
+SHAPES_STATUS=$?
+
+if [[ $SHAPES_STATUS -eq 0 ]]; then
+  pass "a null-bodied registry file does not take down the run (exit 0)"
+else
+  fail "a null-bodied registry file does not take down the run (exit 0, got: $SHAPES_STATUS, err: $(cat "$SHAPES_ERR"))"
+fi
+
+if [[ $(jq -r 'select(.callee_session_id=="99999999-aaaa-bbbb-cccc-dddddddddddd") | .target' "$SHAPES_OUT") == "/tmp/good-conn"    && $(wc -l < "$SHAPES_OUT" | tr -d ' ') == "1" ]]; then
+  pass "the valid connection beside a non-object one survives (1 record)"
+else
+  fail "the valid connection beside a non-object one survives (1 record, got: $(cat "$SHAPES_OUT"))"
+fi
+
+if grep -q "connection /tmp/string-conn: not an object" "$SHAPES_ERR"; then
+  pass "a non-object connection is named in a stderr warning"
+else
+  fail "a non-object connection is named in a stderr warning (stderr: $(cat "$SHAPES_ERR"))"
 fi
 
 # ---- summary ----------------------------------------------------------------
