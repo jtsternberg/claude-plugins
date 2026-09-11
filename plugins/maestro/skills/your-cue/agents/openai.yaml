@@ -1,0 +1,3 @@
+interface:
+  display_name: Your Cue
+  short_description: Read-only briefing of every live agent session, with one cue per workstream

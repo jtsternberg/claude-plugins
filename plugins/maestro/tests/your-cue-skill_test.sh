@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# =============================================================================
+# Contract canary for maestro's `your-cue` skill.
+#
+# `your-cue` is prose a model executes against live hosts, so there is no
+# behavior to unit-test — what breaks is a paragraph going missing. Each
+# assertion below pins one acceptance criterion from
+# docs/superpowers/specs/2026-09-11-your-cue.md to the text that carries it:
+# delete the paragraph and the matching assertion fails.
+#
+# Two classes of assertion matter most. The negative ones (no mutating
+# command appears as an instruction, no character-limit flag is claimed) guard
+# against a future edit reintroducing a footgun the fact-finding ruled out.
+# The format ones (`Your cue:`, `Next for you:`) guard the rendering contract
+# the human reads.
+# =============================================================================
+set -u
+
+PASS=0
+FAIL=0
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+SKILL="$ROOT/plugins/maestro/skills/your-cue/SKILL.md"
+OPENAI="$ROOT/plugins/maestro/skills/your-cue/agents/openai.yaml"
+README="$ROOT/plugins/maestro/README.md"
+
+pass() { PASS=$((PASS + 1)); echo "ok - $1"; }
+fail() { FAIL=$((FAIL + 1)); echo "not ok - $1"; }
+
+# has <description> <pattern> [file]
+has() {
+  local msg="$1" pat="$2" file="${3:-$SKILL}"
+  if [[ -f "$file" ]] && grep -qE -- "$pat" "$file"; then
+    pass "$msg"
+  else
+    fail "$msg"
+  fi
+}
+
+# lacks <description> <pattern> [file]
+lacks() {
+  local msg="$1" pat="$2" file="${3:-$SKILL}"
+  if [[ -f "$file" ]] && ! grep -qE -- "$pat" "$file"; then
+    pass "$msg"
+  else
+    fail "$msg"
+  fi
+}
+
+# --- the skill exists where discovery expects it -----------------------------
+
+if [[ -f "$SKILL" ]]; then
+  pass "SKILL.md exists at plugins/maestro/skills/your-cue/SKILL.md"
+else
+  fail "SKILL.md exists at plugins/maestro/skills/your-cue/SKILL.md"
+fi
+
+has "frontmatter declares the bare name your-cue" '^name: your-cue$'
+has "description routes Codex on the briefing terms" '^description:'
+
+# Zero-argument: no Claude argument metadata, no interpolation token, and the
+# prose says so, so a future editor does not quietly add a parameter.
+lacks "no argument-hint (zero-argument invocation)" '^argument-hint:'
+lacks "no \$ARGUMENTS interpolation" '\$ARGUMENTS'
+has "prose states the skill takes no arguments" '[Tt]akes no arguments'
+
+# It is a workflow the model runs on request, not a gated command.
+lacks "model invocation is not disabled" '^disable-model-invocation:'
+
+# --- read-only contract ------------------------------------------------------
+
+has "declares the whole run read-only" '[Rr]ead-only'
+has "preserves focus, seen state, notifications, and input" 'focus.*notification|notification.*focus'
+
+# Name the forbidden commands: a fresh agent will not know which cmux/herdr
+# verbs mutate, and several read like probes.
+has "names cmux focus-pane as forbidden" 'focus-pane'
+has "names cmux clear-notifications as forbidden" 'clear-notifications'
+has "names cmux clear-history as forbidden" 'clear-history'
+has "names cmux send-key as forbidden" 'send-key'
+has "names herdr prompt/send-keys as forbidden" 'herdr[^.]*(prompt|send-keys)|(prompt|send-keys)[^.]*herdr'
+has "names herdr rename/start/attach as forbidden" '`rename`, `start`, `attach`'
+
+# --- inventory: graveyard fast path and portable path ------------------------
+
+has "graveyard fast path command" 'graveyard candidates --json'
+has "portable path uses herdr agent list" 'herdr agent list'
+has "portable path uses cmux tree" 'cmux tree --all --json'
+has "portable path reads cmux sidebar state" 'cmux sidebar-state'
+has "reads recent output only for shortlisted unclear rows" 'cmux read-screen --surface'
+has "resolves the herdr workspace title with an extra read" 'herdr workspace (get|list)'
+has "notes herdr agent get/read key on the herdr name, not the session UUID" 'herdr `?name'
+
+# --- confirmation before partial coverage ------------------------------------
+
+has "probes each host directly instead of trusting graveyard's row set" '[Pp]robe each host yourself'
+has "warns that graveyard hides an unreachable host" 'relabels every herdr row|not a reachability field'
+has "stops and asks when only one transport is reachable" '[Ss]top and ask|ask (the user|first)'
+has "confirmation covers the one-reachable-transport case" 'only one transport'
+has "offers a transcript-only briefing when neither host answers" 'transcript-only'
+has "renders a Coverage section when a host was unavailable" '^Coverage$'
+
+# --- visible-name locators ---------------------------------------------------
+
+has "herdr locator form" '<agent name>` in `<tab name>'
+has "cmux locator form" '<surface title>` in `<workspace title>'
+has "window anchor only when needed" 'window anchor'
+has "session UUIDs and pane ids stay internal, not output" 'pane ids are internal lookup keys, not output'
+
+# --- hotline nesting ---------------------------------------------------------
+
+has "consumes the hotline call-status skill by its invocation form" '/hotline:hotline-call-status'
+has "gives the Codex invocation form for call-status" '\$hotline:hotline-call-status'
+has "nests callees beneath their caller" 'nested beneath its caller'
+has "matches on callee_session_id" 'callee_session_id'
+has "matches on host_handle" 'host_handle'
+has "ignores registry rows absent from the live inventory" '[Ff]ilter to the live inventory'
+
+# --- bounded catch-up --------------------------------------------------------
+
+has "uses the sessions-catch-up skill for unclear workstreams" 'session-tools:sessions-catch-up'
+has "bounds the digest to eight turns with the real flag" '\-\-window 8'
+has "bounds the digest to 8,000 characters" '8,?000'
+has "enforces the character ceiling by truncation" 'head -c 8000'
+has "says no character-limit flag exists" 'no character-limit flag'
+lacks "claims no character-ceiling flag that does not exist" '\-\-(max-chars|chars|limit) '
+has "delegates the summary to a cheaper model under Claude Code" 'model: "(haiku|sonnet)"'
+has "tells Codex to use its subagent mechanism or summarize inline" 'inline'
+has "stops after five summaries" 'five'
+has "lists the remainder by visible locator" 'the remainder'
+
+# --- rendering contract ------------------------------------------------------
+
+has "renders the Waiting on you section" 'Waiting on you'
+has "renders the Working section" '^Working$'
+has "renders the Finished while you were away section" 'Finished while you were away'
+has "every workstream ends with Your cue:" 'Your cue:'
+has "explicit nothing cue keeps its reason" 'Your cue: nothing — '
+has "one cue per workstream is stated as a rule" '[Ee]very workstream'
+has "final line is Next for you:" 'Next for you:'
+has "Next for you: nothing when everything is settled" 'Next for you: nothing'
+
+# The rendering block is the human-facing contract, and the spec's `## Your cue`
+# fence is its canonical form. Compare them literally rather than grepping for
+# fragments, so a reworded section header cannot pass.
+SPEC="$ROOT/docs/superpowers/specs/2026-09-11-your-cue.md"
+extract_fence() { awk '/^```text$/{f=1;next} /^```$/{if(f)exit} f{print}' "$1"; }
+if [[ -f "$SPEC" ]] && diff -q <(extract_fence "$SPEC") <(extract_fence "$SKILL") >/dev/null 2>&1; then
+  pass "rendering block matches the spec's canonical \`## Your cue\` fence verbatim"
+else
+  fail "rendering block matches the spec's canonical \`## Your cue\` fence verbatim"
+fi
+
+# --- burial cues -------------------------------------------------------------
+
+has "native host status outranks graveyard busy" '[Nn]ative status outranks'
+has "burial cue requires graveyard buryable" 'buryable'
+has "plot cue requires every targetable session" 'targetable'
+has "offers bury this session" 'bury this session'
+has "offers bury this plot" 'bury this plot'
+has "burial stays text; execution needs a later explicit request" 'leaves execution to'
+
+# --- dual-harness surface ----------------------------------------------------
+
+if [[ -f "$OPENAI" ]]; then
+  pass "agents/openai.yaml exists"
+else
+  fail "agents/openai.yaml exists"
+fi
+has "openai.yaml declares interface metadata" '^interface:' "$OPENAI"
+lacks "openai.yaml has no policy block (implicit invocation stays allowed)" '^policy:' "$OPENAI"
+
+# --- README ------------------------------------------------------------------
+
+has "README documents the your-cue skill" '^### `your-cue`$' "$README"
+has "README lists your-cue in the skill list" '\[`your-cue`\]\(skills/your-cue/SKILL.md\)' "$README"
+has "README gives the your-cue triggers line" '\*\*Triggers\*\* when the user wants to know what their agents' "$README"
+
+echo "${PASS} passed, ${FAIL} failed"
+[[ $FAIL -eq 0 ]]
