@@ -163,6 +163,27 @@ else
   fail "skill script resolves the shared reader from any cwd (got: $CWD_OUT)"
 fi
 
+# ---- case: --plugin-root addresses the shared reader ------------------------
+# How the skill invokes it: the plugin root is handed in rather than counted out
+# in parent directories.
+
+ROOT_OUT=$(cd / && HOTLINE_SESSIONS_DIR="$REGISTRY" bash "$CALL_STATUS" \
+  --plugin-root "$SCRIPT_DIR/.." 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$ROOT_OUT" == "3" ]]; then
+  pass "--plugin-root resolves the shared reader"
+else
+  fail "--plugin-root resolves the shared reader (got: $ROOT_OUT)"
+fi
+
+BOGUS_ERR=$(HOTLINE_SESSIONS_DIR="$REGISTRY" bash "$CALL_STATUS" \
+  --plugin-root "$SANDBOX/no-such-plugin" 2>&1 >/dev/null)
+BOGUS_STATUS=$?
+if [[ $BOGUS_STATUS -eq 1 && "$BOGUS_ERR" == *"no-such-plugin/scripts/call-registry.mjs"* ]]; then
+  pass "a wrong --plugin-root fails loudly instead of being ignored"
+else
+  fail "a wrong --plugin-root fails loudly instead of being ignored (status: $BOGUS_STATUS, err: $BOGUS_ERR)"
+fi
+
 # ---- summary ----------------------------------------------------------------
 
 echo ""

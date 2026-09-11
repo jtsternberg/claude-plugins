@@ -17,17 +17,21 @@ Use this instead of reading the registry files directly. It shares one reader wi
 ## Read the registry
 
 ```bash
-# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+# Codex: these paths resolve under Claude Code; substitute the directory
+# containing this SKILL.md, then the installed Hotline plugin directory.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
-bash "$SKILL_DIR/scripts/call-status.sh"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$SKILL_DIR/scripts/call-status.sh" --plugin-root "$PLUGIN_ROOT"
 ```
 
-Pass a registry directory as the first argument to read somewhere other than `$HOTLINE_SESSIONS_DIR` / `~/.agents-hotline/sessions`:
+Pass a registry directory as the trailing argument to read somewhere other than `$HOTLINE_SESSIONS_DIR` / `~/.agents-hotline/sessions`:
 
 ```bash
-# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+# Codex: these paths resolve under Claude Code; substitute the directory
+# containing this SKILL.md, then the installed Hotline plugin directory.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
-bash "$SKILL_DIR/scripts/call-status.sh" /path/to/sessions
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$SKILL_DIR/scripts/call-status.sh" --plugin-root "$PLUGIN_ROOT" /path/to/sessions
 ```
 
 ## Output
@@ -50,9 +54,11 @@ One JSON object per line, so `jq` reads it without buffering the whole registry:
 Group by `caller_session_id` to nest callees under their caller:
 
 ```bash
-# Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+# Codex: these paths resolve under Claude Code; substitute the directory
+# containing this SKILL.md, then the installed Hotline plugin directory.
 SKILL_DIR="${CLAUDE_SKILL_DIR}"
-bash "$SKILL_DIR/scripts/call-status.sh" | jq -s 'group_by(.caller_session_id)'
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+bash "$SKILL_DIR/scripts/call-status.sh" --plugin-root "$PLUGIN_ROOT" | jq -s 'group_by(.caller_session_id)'
 ```
 
 ## Notes

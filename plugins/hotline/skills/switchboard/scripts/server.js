@@ -73,6 +73,18 @@ function findTranscript(sessionId, hintCwd) {
 let readRegistry;
 const REGISTRY_READER = path.join(__dirname, '..', '..', '..', 'scripts', 'call-registry.mjs');
 
+// The reader warns once per malformed registry file per call; readCalls() runs on
+// every /api/calls poll, and switchboard.sh appends this stderr to an unrotated
+// log. One corrupt file would otherwise write the same line every few seconds for
+// as long as a dashboard stays open, so each distinct warning is reported once
+// for the life of the process. A file whose breakage changes says so again.
+const reportedRegistryWarnings = new Set();
+function warnRegistryOnce(message) {
+  if (reportedRegistryWarnings.has(message)) return;
+  reportedRegistryWarnings.add(message);
+  console.error(`call-registry: ${message}`);
+}
+
 function fileMtime(p) {
   try { return fs.statSync(p).mtimeMs / 1000; } catch { return 0; }
 }
@@ -176,8 +188,14 @@ function discoverCalls(knownCalleeSids) {
 }
 
 function readCalls() {
+  if (!readRegistry) {
+    // The reader is imported dynamically and the server only listens once that
+    // has landed, so this is unreachable from a request — a startup-time caller
+    // added later gets a name instead of a bare TypeError.
+    throw new Error('call-registry not loaded yet');
+  }
   const calls = [];
-  for (const rec of readRegistry(SESSIONS_DIR)) {
+  for (const rec of readRegistry(SESSIONS_DIR, { warn: warnRegistryOnce })) {
     const callerTranscript = findTranscript(rec.caller_session_id, rec.caller_path);
     const calleeTranscript = findTranscript(rec.callee_session_id, rec.target);
     const lastActivity = Math.max(

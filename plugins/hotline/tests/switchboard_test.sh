@@ -430,6 +430,24 @@ else
   fail "discovery: non-hotline transcripts ignored"
 fi
 
+# ---- case: a malformed registry file warns once, not once per poll ----------
+# readCalls() runs on every /api/calls request and the dashboard polls every 5s,
+# while switchboard.sh appends this stderr to an unrotated log — so a per-call
+# warning would grow the log forever off one corrupt file.
+
+BAD_SID="ffffffff-dead-beef-cafe-000000000000"
+printf '{ not json at all' > "$SESSIONS_DIR/${BAD_SID}.json"
+curl -sf "$BASE/api/calls" >/dev/null
+curl -sf "$BASE/api/calls" >/dev/null
+curl -sf "$BASE/api/calls" >/dev/null
+BAD_WARNINGS=$(grep -c "$BAD_SID" "$SANDBOX/server.log" | tr -d ' ')
+if [[ "$BAD_WARNINGS" == "1" ]]; then
+  pass "registry: malformed file warns once across repeated polls"
+else
+  fail "registry: malformed file warns once across repeated polls (got $BAD_WARNINGS warnings)"
+fi
+rm -f "$SESSIONS_DIR/${BAD_SID}.json"
+
 # ---- case: launchers persist call meta; wait-for-session registers the call -------
 
 DIAL_SCRIPTS_DIR="$SCRIPT_DIR/../skills/dial/scripts"
