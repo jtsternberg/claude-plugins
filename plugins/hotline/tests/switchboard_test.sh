@@ -448,6 +448,29 @@ else
 fi
 rm -f "$SESSIONS_DIR/${BAD_SID}.json"
 
+# ---- case: the server reads the registry through the shared reader only ------
+# The transcript parser diverged twice before tests/parser-drift.test.mjs caught
+# it. Registry parsing lives once, in plugins/hotline/scripts/call-registry.mjs;
+# a second copy regrown here would reinterpret legacy entries and optional
+# fields differently from call-status, silently.
+
+SERVER_JS="$SB_SCRIPTS/server.js"
+if grep -qE "REGISTRY_READER *=.*'call-registry\\.mjs'" "$SERVER_JS"; then
+  pass "registry: server resolves the shared call-registry.mjs"
+else
+  fail "registry: server resolves the shared call-registry.mjs"
+fi
+if grep -q "readdirSync(SESSIONS_DIR" "$SERVER_JS"; then
+  fail "registry: server grows no registry directory scan of its own"
+else
+  pass "registry: server grows no registry directory scan of its own"
+fi
+if grep -q "JSON.parse(fs.readFileSync(" "$SERVER_JS"; then
+  fail "registry: server grows no registry file parser of its own"
+else
+  pass "registry: server grows no registry file parser of its own"
+fi
+
 # ---- case: launchers persist call meta; wait-for-session registers the call -------
 
 DIAL_SCRIPTS_DIR="$SCRIPT_DIR/../skills/dial/scripts"
