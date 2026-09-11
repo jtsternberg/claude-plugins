@@ -28,8 +28,8 @@ me?”. The user-facing invocation should be `/maestro:agent-inbox` in Claude Co
 |---|---|---|
 | `session-tools` | Shared transcript parser, cached session index, tail-state inference, current bead resolution, bounded digest | `--list` is text-only and does not bulk-return compact tail state; Claude transcripts only |
 | Hotline | Registry already maps caller session to callee session, target, mode, transport, host handle, and last contact | No small read-only “all calls as JSON” skill; Switchboard is HTML and too heavy for composition |
-| Herdr | `agent list/get/read` expose authoritative `working`, `blocked`, `done`, `idle`, and `unknown` states | Inspection is allowed only with `HERDR_ENV=1`; independent Herdr agents cannot be inventoried from a cmux-only session |
-| cmux | `tree --all --json`, sidebar state/status, notifications, stable UUIDs, surface titles | Inspection is allowed only from a cmux-hosted session; no normalized agent/session identity or lifecycle state |
+| Herdr | `agent list/get/read` expose authoritative lifecycle state plus agent, tab, and workspace names | The installed skill needs a narrow read-only outside-context inventory path |
+| cmux | `tree --all --json`, sidebar state/status, notifications, stable UUIDs, surface and workspace titles | No normalized agent/session identity or lifecycle state; screen scraping is expensive and unreliable |
 | Maestro | Correct owner for orchestration policy, “Next for you”, and zero-token waiting discipline | No durable global ledger or inbox command |
 | handoff | Strong explicit transfer artifact for future work | No global handoff index; a handoff is not evidence that work is currently active |
 | Fable mode | Supports delegating mechanical work to cheaper models while retaining judgment in the main model | A stance, not a status source; should influence execution but never appear as an inbox provider |
@@ -47,7 +47,15 @@ type ProviderRecord = {
   parent_session_id?: string;
   cwd?: string;
   title?: string;
-  host?: { kind: "herdr" | "cmux" | "headless"; id?: string; label?: string };
+  host?: {
+    kind: "herdr" | "cmux" | "headless";
+    id?: string;
+    agent_name?: string;
+    surface_title?: string;
+    tab_title?: string;
+    workspace_title?: string;
+    window_anchor?: string;
+  };
   state: "working" | "waiting_on_user" | "done_unseen" | "idle" | "unknown" | "stale";
   state_source: "native" | "transcript" | "metadata" | "heuristic";
   updated_at?: string;
@@ -57,31 +65,30 @@ type ProviderRecord = {
 ```
 
 Providers must distinguish `unknown` from `idle`, and every inferred result must carry a
-lower confidence than native lifecycle state. Missing non-host providers emit one
-diagnostic record; they do not disappear silently. cmux and Herdr are different: host
-context is an authorization boundary, so the skill must not inspect either one from
-outside that host even when a socket or CLI is reachable.
+lower confidence than native lifecycle state. Missing providers emit one diagnostic
+record; they do not disappear silently. Verified read-only reachability is sufficient for
+cmux and Herdr; the inbox session does not need to be hosted by that system.
 
-## Host-Context Preflight
+## Provider-Reachability Preflight
 
-The ideal launch point is an agent session nested in both systems: a Herdr-managed agent
-running inside a cmux surface. Detect cmux from `CMUX_SURFACE_ID` plus a successful
-`cmux identify --json` whose caller surface matches that UUID. Detect Herdr from
-`HERDR_ENV=1`, `HERDR_PANE_ID`, and `herdr pane current --current` resolving the same pane.
-Environment variables alone are not enough.
+The ideal launch point remains an agent session nested in both systems: a Herdr-managed
+agent running inside a cmux surface. It is not required. Probe cmux with
+`cmux tree --all --json --id-format both` and Herdr with `herdr agent list`. Native
+context enriches locators but is not required when the provider answers its read-only
+probe.
 
 Before reading either host:
 
-1. Both contexts verified: continue with full coverage.
-2. Exactly one verified: stop and ask whether JT wants a partial run or wants to resume
-   the command in a session nested in both hosts. Do not collect data before the answer.
-3. Neither verified: stop and ask JT to resume the command in cmux + Herdr. A partial run
-   is still available only after explicit confirmation.
+1. Both providers answer: continue with full coverage, inside or outside either host.
+2. Exactly one answers: stop and ask whether JT wants a partial run or wants to resume
+   where the missing provider is reachable. Do not collect beyond capability probes first.
+3. Neither answers: stop and ask JT to resume where cmux and/or Herdr are reachable. A
+   transcript-only run remains available after explicit confirmation.
 4. `--provider cmux`, `--provider herdr`, or `--allow-partial` is prior consent for the
    named partial scope, so no second confirmation is needed.
 
 The skill may explain how to resume, but it must not create, move, focus, resume, or prompt
-an agent session on JT's behalf during preflight.
+an agent session on JT's behalf during preflight. Probes must not mark agents or tabs seen.
 
 ## Correlation Rules
 
@@ -92,12 +99,16 @@ an agent session on JT's behalf during preflight.
    says `waiting_on_user`.
 3. Exact session IDs are the only high-confidence cross-provider join. Host UUID/name plus
    cwd is medium confidence. Title or cwd alone is never enough to silently merge records.
-4. A caller summary may include one compact child line such as “reviewer finished; answer
+4. User-facing locators use human names, never arbitrary IDs: Herdr agent name + tab name
+   + workspace name; cmux surface/tab title + workspace title, plus a visible window
+   anchor when multiple windows make it necessary. Raw IDs remain internal join keys and
+   appear only in `--json` or a low-confidence diagnostic.
+5. A caller summary may include one compact child line such as “reviewer finished; answer
    not yet relayed” or “callee is blocked on approval”.
-5. Independent Herdr/cmux agents remain top-level records. Hotline children are
+6. Independent Herdr/cmux agents remain top-level records. Hotline children are
    de-emphasized, not discarded: expand them only when they contain the blocker or their
    state conflicts with the caller.
-6. Repeated runs are read-only and stateless in V1. “Done overnight” means activity after
+7. Repeated runs are read-only and stateless in V1. “Done overnight” means activity after
    a user-supplied/default time boundary, not an unread flag invented by this skill.
 
 ## Token Budget
@@ -144,7 +155,7 @@ Finished since yesterday (1)
 - [project / task] Outcome and any verification caveat.
 
 Uncertain / unavailable
-- Herdr inventory unavailable outside Herdr; Hotline-linked Herdr calls are still included.
+- Herdr server was unreachable; Hotline-linked Herdr calls are still included from metadata.
 
 Next for you: answer <the highest-priority concrete question> in <locator>.
 ```
@@ -155,8 +166,8 @@ but do not dominate the briefing.
 ## V1 Boundary
 
 V1 supports Claude transcript workstreams, Hotline correlation, native Herdr state when
-invoked inside Herdr, and cmux metadata/status/notifications when invoked inside cmux. A
-full run is expected to originate in a session nested in both hosts. It does not claim complete
+the Herdr server is reachable, and cmux metadata/status/notifications when the cmux socket
+is reachable. Running inside both gives the best locators, but is not required. It does not claim complete
 coverage of independent Codex, Pi, or other cmux-hosted agents until cmux or those agents
 expose a stable session identity and lifecycle record.
 
@@ -170,9 +181,9 @@ Two pared-down provider additions are justified:
 
 For cmux, add `cmux-cli:agent-status` only after a discovery spike proves a stable signal
 for agent identity. Until then, `agent-inbox` directly composes documented cmux topology,
-sidebar status, and notifications and labels unmatched surfaces as uncertain. For Herdr,
-request an upstream read-only snapshot capability usable outside `HERDR_ENV=1`; do not
-weaken the installed skill’s safety boundary merely for this feature.
+sidebar status, and notifications and labels unmatched surfaces as uncertain. Herdr needs
+a separate, explicitly read-only inventory path that permits an outside caller when the
+CLI can reach the server; control and mutation remain behind `HERDR_ENV=1`.
 
 ## Acceptance Criteria
 
@@ -180,8 +191,10 @@ weaken the installed skill’s safety boundary merely for this feature.
 - Hotline callees never appear as duplicate top-level workstreams when the caller mapping
   is present.
 - “Waiting on JT” is traceable to native blocked state or transcript tail evidence.
-- Host-context mismatch pauses before inspection unless partial coverage was explicitly
-  requested; provider absence and low-confidence joins are explicit.
+- An unreachable cmux or Herdr provider pauses after capability probes unless partial
+  coverage was explicitly requested; provider absence and low-confidence joins are explicit.
+- Every rendered workstream has a plain-language locator; arbitrary IDs are hidden from
+  normal prose.
 - No operation writes to, resumes, focuses, or marks activity seen in an agent session.
 - The default run has a hard cap of eight workstreams, three summary jobs, 8,000 input
   characters per summarized workstream, and one final prioritization pass.

@@ -13,8 +13,9 @@
 ## Global Constraints
 
 - The workflow is read-only: never resume, prompt, focus, close, mark-seen, or clear notifications.
-- Never inspect cmux outside a verified cmux caller context or Herdr outside a verified `HERDR_ENV=1` caller context.
-- A default full run requires both host contexts; partial coverage requires confirmation or an explicit partial-scope flag.
+- cmux and Herdr may be inspected outside their host contexts when their read-only capability probes succeed.
+- A default full run requires both providers to be reachable; partial coverage requires confirmation or an explicit partial-scope flag.
+- Human output identifies Herdr agents by agent/tab/workspace names and cmux agents by surface/workspace titles, not arbitrary IDs.
 - Default caps are eight top-level workstreams, three summary jobs, eight transcript turns, and 8,000 input characters per summarized workstream.
 - Hotline callee sessions are children of their caller session and are not top-level duplicates.
 - Provider failures and low-confidence correlations remain visible.
@@ -241,8 +242,8 @@ git commit -m "add agent inbox correlation engine"
 
 - [ ] **Step 1: Write a failing skill-contract test**
 
-Assert exact defaults and safety language, dual-harness path tokens, the two-host preflight,
-Herdr’s environment gate, verified cmux caller identity, partial-run confirmation, cmux UUID
+Assert exact defaults and safety language, dual-harness path tokens, the two-provider preflight,
+Herdr’s read-only outside-context path, cmux reachability, partial-run confirmation, cmux UUID
 usage, no screen reads by default, summary caps, `--no-summaries`, and the singular
 `Next for you:` line.
 
@@ -252,22 +253,22 @@ Run: `bash plugins/maestro/tests/agent-inbox-skill_test.sh`
 
 Expected: FAIL because the skill does not exist.
 
-- [ ] **Step 3: Implement the host-context preflight**
+- [ ] **Step 3: Implement the provider-reachability preflight**
 
-Verify cmux by matching `CMUX_SURFACE_ID` to `cmux identify --json`'s caller UUID and
-verify Herdr with `HERDR_ENV=1`, `HERDR_PANE_ID`, and `herdr pane current --current`.
-When only one or neither verifies, ask before any provider collection whether to continue
-partially or resume in a session nested in both. `--provider cmux`, `--provider herdr`, and
-`--allow-partial` bypass only that confirmation; they never bypass the relevant host gate.
-The skill must not move or launch the current conversation itself.
+Probe cmux with `cmux tree --all --json --id-format both` and Herdr with `herdr agent list`.
+Both probes must be documented as read-only and must not mark tabs or agents seen. Native
+`CMUX_*` and `HERDR_*` context enriches locators but is not required. When only one or
+neither provider answers, ask before collection beyond the probes whether to continue
+partially or resume where both are reachable. Explicit partial flags bypass only that
+confirmation. The skill must not move or launch the current conversation itself.
 
 - [ ] **Step 4: Implement provider collection in the skill**
 
 After preflight consent, the skill loads provider skills when installed, captures each
-JSONL stream separately, and feeds their concatenation to `agent-inbox.mjs`. Inside Herdr,
-use `herdr agent list` and map native states without calling `agent get/read` unless a
-shortlisted record lacks a summary hint. Inside cmux, snapshot
-`tree --all --json --id-format both`, query sidebar state and notifications read-only, and
+JSONL stream separately, and feeds their concatenation to `agent-inbox.mjs`. Through a
+reachable Herdr server, use `herdr agent list` and map native states without calling
+`agent get/read` unless a shortlisted record lacks a summary hint. Through a reachable
+cmux socket, snapshot `tree --all --json --id-format both`, query sidebar state and notifications read-only, and
 do not infer a session ID from a title. A partial run emits an explicit coverage banner.
 
 - [ ] **Step 5: Implement bounded cheap summarization**
@@ -289,6 +290,9 @@ than three candidates inline and label unsummarized records with their locator.
 Omit empty groups, show confidence only when medium/low, indent Hotline child status under
 the caller only when it explains a blocker or conflict, list unavailable providers last,
 and end with one `Next for you:` action chosen from the highest-ranked concrete blocker.
+Render Herdr locations as `<agent name> in <tab name>, <workspace name>` and cmux locations
+as `<surface title> in <workspace title>` plus a window anchor only when needed. Never
+render a UUID/pane ID as the primary locator.
 
 - [ ] **Step 7: Validate the skill and focused suites**
 
@@ -362,11 +366,12 @@ the one expected `codex: live-plugin` skip unless `CODEX_LIVE=1` is intentionall
 
 - [ ] **Step 5: Perform two read-only live probes**
 
-From a cmux-only session, run `/maestro:agent-inbox --no-summaries` and verify that it
-pauses before collection; then explicitly approve a partial run and verify the coverage
-banner. Repeat from a Herdr-only session. Finally run from a Herdr-managed agent nested in
-cmux and verify both native provider inventories appear without touching any surface.
-Record actual output counts and any low-confidence joins.
+From outside Herdr but with its server reachable, run `/maestro:agent-inbox --no-summaries`
+and verify both provider inventories appear without touching any surface. Repeat with one
+provider genuinely unreachable and verify that the skill pauses after capability probes;
+approve a partial run and verify the coverage banner. Finally run from a Herdr-managed
+agent nested in cmux and verify richer native locators. Confirm every normal locator uses
+visible names rather than IDs, and record actual output counts and low-confidence joins.
 
 - [ ] **Step 6: Commit release metadata and generated files**
 
@@ -390,7 +395,7 @@ validation, merge result, marketplace refresh, `bd dolt push`, `git push`, and f
 - Create only if evidence supports it: `plugins/cmux-cli/skills/agent-status/SKILL.md`
 - Create only if evidence supports it: `plugins/cmux-cli/skills/agent-status/scripts/agent-status.sh`
 - Test only if created: `plugins/cmux-cli/tests/agent-status_test.sh`
-- External follow-up: Herdr read-only global snapshot capability
+- External follow-up: Herdr read-only outside-context inventory skill/capability
 
 **Interfaces:**
 - Consumes: stable session identity/lifecycle signals discovered from cmux and Herdr.
@@ -411,11 +416,12 @@ do not build heuristic screen parsing.
 
 - [ ] **Step 3: Specify the Herdr upstream change**
 
-Request a read-only global snapshot or exported status file that can be consumed outside
-`HERDR_ENV=1` without permitting pane control. Require stable agent name, pane ID, cwd,
-agent kind, session ID when known, lifecycle state, and last transition time. Until that
-exists, the only supported native Herdr inventory path remains running `agent-inbox`
-inside Herdr.
+Add a separate read-only global inventory skill or snapshot that can be consumed outside
+`HERDR_ENV=1` when `herdr agent list` can reach the server. Require stable agent name,
+tab/workspace names, pane ID, cwd, agent kind, session ID when known, lifecycle state, and
+last transition time. Keep every control or mutation command behind `HERDR_ENV=1`. Until
+that change lands, treat outside-context Herdr inventory as unavailable rather than
+bypassing the installed skill contract.
 
 - [ ] **Step 4: File linked beads for accepted follow-up work**
 
