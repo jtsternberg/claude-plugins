@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a small read-only Maestro skill that catches JT up on live cmux and Herdr agents without double-counting Hotline callees.
+**Goal:** Add a small read-only Maestro skill that catches the user up on live cmux and Herdr agents without double-counting Hotline callees.
 
 **Architecture:** Compose existing Herdr, cmux, Session Tools, and Hotline capabilities in prose. One small Hotline helper exposes caller/callee relationships; no generalized provider framework or Maestro status engine is introduced.
 

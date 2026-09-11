@@ -3,8 +3,9 @@
 ## Goal
 
 Add `/maestro:agent-inbox` (Codex: `$maestro:agent-inbox`), a read-only morning briefing
-that answers which agents are working, which are waiting on JT, and what finished while JT
-was away. It should orient JT quickly, not build a general session-management system.
+that answers which agents are working, which are waiting on the user, and what finished
+while the user was away. It should orient the user quickly, not build a general
+session-management system.
 
 ## Existing Functionality to Reuse
 
@@ -23,7 +24,7 @@ Fable is an operating stance, not a data source.
 ### 1. Check reachability
 
 Probe cmux and Herdr with read-only commands. The inbox may run inside or outside either
-host when the CLI can reach it. If one is unreachable, ask whether JT wants a partial
+host when the CLI can reach it. If one is unreachable, ask whether the user wants a partial
 briefing or wants to resume somewhere both are reachable. If both are unreachable, ask
 before producing a transcript-only briefing.
 
@@ -35,7 +36,7 @@ or send input.
 Read Herdr's agent list and cmux's tree/sidebar status. Prefer native lifecycle state. Do
 not read every terminal screen; read recent output only when status cannot be explained.
 
-Every item uses a locator JT can see:
+Every item uses a locator the user can see:
 
 - Herdr: `<agent name>` in `<tab name>`, `<workspace name>`.
 - cmux: `<surface title>` in `<workspace title>`; add a window anchor only when needed.
@@ -63,7 +64,7 @@ Summarize no more than five unclear workstreams, using the last eight turns and 
 8,000-character ceiling. These are internal safeguards, not user options. List any
 remainder by visible location without semantic summary.
 
-### 5. Brief JT
+### 5. Brief the user
 
 Use only sections with content:
 
