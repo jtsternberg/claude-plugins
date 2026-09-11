@@ -73,15 +73,16 @@ node scripts/compare-skill-descriptions.mjs --dump-current
 ```
 
 This is a phase/rewrite-plan tool, not the current budget guard. Its proposal
-file describes the earlier 50-skill rewrite set, while the live tree now has
-60 skills; it therefore exits with a count mismatch until that proposal set
-and its report are deliberately refreshed. Do not turn its exit code into CI
-policy without updating the proposal inventory and regenerating the companion
-rewrite report.
+file covers a 50-skill rewrite set while the live tree has 78 skills, so the
+skills outside that set are reported under "No proposal yet" and left out of
+the budget figures. It exits non-zero only on a per-skill 1,536-cap violation
+or a proposal naming a skill that is not in the tree. Do not turn its exit code
+into CI policy without updating the proposal inventory and regenerating the
+companion rewrite report.
 
-To refresh that plan, first dump the live frontmatter, add proposals for every
-new skill, update the expected count in the script, then rerun the comparison
-and inspect both budget sections before editing any `SKILL.md` files.
+To refresh that plan, first dump the live frontmatter, add proposals for the
+skills listed under "No proposal yet", then rerun the comparison and inspect
+both budget sections before editing any `SKILL.md` files.
 
 ## Where to document future changes
 

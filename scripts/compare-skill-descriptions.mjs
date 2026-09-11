@@ -10,6 +10,8 @@
 //
 // Usage:
 //   node scripts/compare-skill-descriptions.mjs                # tables + totals for both budgets
+// Skills the proposal snapshot does not cover are listed under "No proposal yet" and left
+// out of the budget figures; only a proposal naming a skill absent from the tree exits 1.
 //   node scripts/compare-skill-descriptions.mjs --dump-current # emit current state as JSON
 //
 // Reads:  plugins/*/skills/*/SKILL.md and plugins/*/*/skills/*/SKILL.md — the second
@@ -135,13 +137,17 @@ if (process.argv.includes('--dump-current')) {
 const proposalsFile = join(repoRoot, 'docs', 'codex', 'proposed-descriptions.json');
 const proposals = JSON.parse(readFileSync(proposalsFile, 'utf8'));
 
-const missing = skills.filter((s) => !(s.key in proposals));
+// The proposal set is a snapshot of one rewrite phase, so skills added afterwards
+// are listed as unproposed rather than blocking the tables the doc is regenerated
+// from. A proposal naming a skill that is not in the tree is drift the snapshot
+// itself has to resolve, so that still fails.
+const unproposed = skills.filter((s) => !(s.key in proposals));
 const extra = Object.keys(proposals).filter((k) => !skills.some((s) => s.key === k));
-if (missing.length || extra.length) {
-	if (missing.length) console.error(`Missing proposals for: ${missing.map((s) => s.key).join(', ')}`);
-	if (extra.length) console.error(`Proposals for unknown skills: ${extra.join(', ')}`);
+if (extra.length) {
+	console.error(`Proposals for unknown skills: ${extra.join(', ')}`);
 	process.exit(1);
 }
+const proposed = skills.filter((s) => s.key in proposals);
 
 function proposalFor(key) {
 	const p = proposals[key];
@@ -175,11 +181,24 @@ function table(rows, label) {
 	return t;
 }
 
-const explicitOnly = skills.filter((s) => s.dmi);
-const implicit = skills.filter((s) => !s.dmi);
+const explicitOnly = proposed.filter((s) => s.dmi);
+const implicit = proposed.filter((s) => !s.dmi);
 
 const e = table(explicitOnly, 'Explicit-only (disable-model-invocation: true)');
 const i = table(implicit, 'Implicitly invocable');
+
+if (unproposed.length) {
+	console.log(`\n## No proposal yet (${unproposed.length} skills)\n`);
+	console.log('| plugin/skill | explicit-only | desc chars | wtu chars | CC combined (cap 1536) |');
+	console.log('|---|:---:|---:|---:|---:|');
+	let descTotal = 0;
+	for (const s of [...unproposed].sort((a, b) => b.chars - a.chars)) {
+		descTotal += s.chars;
+		console.log(`| ${s.key} | ${s.dmi ? 'yes' : 'no'} | ${s.chars} | ${s.wtuChars} | ${s.chars + s.wtuChars} |`);
+	}
+	console.log(`| **subtotal** | — | **${descTotal}** | — | — |`);
+	console.log(`\nThese carry ${descTotal} chars of Codex description budget that the figures below exclude.`);
+}
 
 const pct = (n, budget) => ((n / budget) * 100).toFixed(2);
 const codexBefore = e.descBefore + i.descBefore;
@@ -192,7 +211,7 @@ console.log(`  explicit-only: ${e.descBefore} -> ${e.descAfter}`);
 console.log(`  implicit:      ${i.descBefore} -> ${i.descAfter}`);
 
 console.log(`\n## Claude Code budget (description + when_to_use, ${CLAUDE_PER_SKILL_CAP}-char cap per skill)\n`);
-const ccRows = skills.map((s) => {
+const ccRows = proposed.map((s) => {
 	const p = proposalFor(s.key);
 	return {
 		key: s.key,
@@ -207,10 +226,10 @@ const worst = [...ccRows].sort((a, b) => b.after - a.after)[0];
 console.log(`Largest per-skill combined after: ${worst.key} at ${worst.after} (${pct(worst.after, CLAUDE_PER_SKILL_CAP)}% of the ${CLAUDE_PER_SKILL_CAP} cap)`);
 console.log(`Skills over the ${CLAUDE_PER_SKILL_CAP} cap: ${capViolations}`);
 
-const withWtu = skills.filter((s) => proposalFor(s.key).when_to_use.length > 0);
+const withWtu = proposed.filter((s) => proposalFor(s.key).when_to_use.length > 0);
 console.log(`\nProposals carrying a when_to_use: ${withWtu.length}`);
 
-const over = skills
+const over = proposed
 	.map((s) => [s.key, proposalFor(s.key).description.length])
 	.filter(([, n]) => n > 200)
 	.sort((a, b) => b[1] - a[1]);
