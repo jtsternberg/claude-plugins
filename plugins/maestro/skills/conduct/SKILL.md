@@ -124,6 +124,13 @@ dependencies in the PR description, not just chat.
   a separate token** (`… .md - #decide-92`) — a path fused to an anchor opens
   nothing. Answer tokens alone are the failure — `still owe "fold" or "defer"`
   means nothing to a human who left four hours ago.
+- **Every answer token carries a one-letter alias** in parentheses, so the
+  human can answer with one keystroke: `` `file` (F) ``, `` `ok` (k) ``. The
+  alias is a letter from its token — the first letter when free — and unique
+  within the message. When a decision bundles numbered recommendations, also
+  offer `N: <change>` to override item N alone. On the receiving side, a lone
+  letter (any case) maps to its token and `N: …` to that item's override;
+  name the mapped action in one clause as you act on it (`k → taking all 8`).
 - Questions get assessments, directives get execution: "how hard is X?" is
   answered, not fixed; "your call" means decide, state the reasoning briefly,
   and proceed — don't bounce the decision back.
@@ -156,4 +163,5 @@ template, the naming and resolution rules, and worked `Next for you:` lines.
 | Relaying a report unverified | Check the diff/PR/CI yourself first |
 | Ending with a menu of options | One `Next for you:` action (or "nothing") |
 | `Next for you:` carrying only the answer tokens | Tokens + subject clause + ledger path, anchor separate |
+| Answer tokens with no alias | `` `ok` (k) `` — one keystroke answers |
 | Asking a decision, then writing it down later | Ledger section first, then the message |

@@ -233,7 +233,9 @@ decision is about, and where the orchestrator kept a decisions ledger
 (`/tmp/maestro/decisions-<session-id>.md`, written by the sibling `conduct`
 skill), its path followed by the anchor as a separate token
 (`… .md - #decide-92`), because a path fused to an anchor opens nothing — both
-found by reading the ledger, never invented.
+found by reading the ledger, never invented. Relay each answer token with the
+one-letter alias the orchestrator gave it (`"fold" (F)`), since that letter is
+what the orchestrator will accept as the answer.
 
 ### Burial cues
 

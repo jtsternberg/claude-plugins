@@ -41,8 +41,8 @@ what an id refers to ("PR #92 fixes a bug where …"), never just the number.
 **Why it matters:** the cost of getting it wrong, or of deciding later.
 
 **Options:**
-- "<exact token to type>" — what it does, what it costs, how long it takes.
-- "<exact token to type>" — same.
+- "<exact token to type>" (<alias>) — what it does, what it costs, how long it takes.
+- "<exact token to type>" (<alias>) — same.
 
 **Recommendation:** one option, one sentence of why.
 
@@ -73,8 +73,11 @@ watched the session, rewrite it.
   token the human can click or paste, and the anchor has to be greppable.
   Keep `## Open` above `## Decided` so opening the file lands on live
   questions.
-- **Options are the literal strings you'll accept as an answer.** The human
-  should be able to reply with one token and nothing else.
+- **Options are the literal strings you'll accept as an answer**, each with
+  the same one-letter alias the asking message uses. The human should be able
+  to reply with one token, or one letter, and nothing else. A decision that
+  bundles numbered recommendations also accepts `N: <change>`, overriding
+  item N alone.
 - **Resolve in the same turn you act on the answer:** move the section to
   `Decided` with the date and what was chosen. A ledger whose `Open` list is
   stale is worse than none, because it re-asks settled questions.
@@ -83,8 +86,9 @@ watched the session, rewrite it.
 
 ## `Next for you:` lines
 
-Three parts, always: the answer tokens, a plain clause naming the subject, and
-the ledger path followed by the anchor as a separate token.
+Three parts, always: the answer tokens with their one-letter aliases, a plain
+clause naming the subject, and the ledger path followed by the anchor as a
+separate token.
 
 Bad — tokens with no subject, and a path fused to its anchor, which opens
 nothing:
@@ -97,9 +101,24 @@ Next for you: still owe "fold campaigns into 92" or "defer campaigns"
 Good:
 
 ```
-Next for you: answer "fold campaigns into 92" or "defer campaigns" — whether PR #92
-also fixes the wrong exit code in the five campaigns commands
+Next for you: answer "fold campaigns into 92" (F) or "defer campaigns" (D) — whether
+PR #92 also fixes the wrong exit code in the five campaigns commands
 (/tmp/maestro/decisions-c54f524f.md - #decide-92-campaigns)
+```
+
+Numbered recommendations bundled into one decision, with per-item override:
+
+```
+Next for you: type `ok` (k) to take all 8 recommendations and file the 11 sub-issues
+for frontend#2653, or `N: <change>` to override item N
+(/tmp/maestro/decisions-c54f524f.md - #decide-2653-split)
+```
+
+Nothing owed now, but the next step is already known — its token still carries
+its alias:
+
+```
+Next for you: nothing. After I confirm the edits, the next step is your `file` (F) on #2653.
 ```
 
 The clause stays short enough (≈15 words) that a human who was present never
