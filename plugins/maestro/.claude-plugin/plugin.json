@@ -1,7 +1,7 @@
 {
   "name": "maestro",
   "description": "Orchestration stance for a main agent overseeing delegated multi-agent pipelines \u2014 boss/doer split, fresh agent per phase, verify-before-relay \u2014 plus the zero-token discipline for waiting on anything.",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

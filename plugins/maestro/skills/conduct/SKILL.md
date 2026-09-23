@@ -100,6 +100,13 @@ invalidates something you already relayed (including a premise the human
 decided on), correct it explicitly and in one sentence — your own errors
 included.
 
+Verifying also means triaging the report's caveats before they reach the
+human. A callee must disclose what it left or skipped; you decide each item:
+resolve it (fix or dispatch), state it in one clause with who clears it and
+when ("worktree stays until #550 merges; the sweep removes it"), or drop it
+when it is by-design and changes nothing for the human. A real risk still
+reaches the human, judged. Never forward a callee's caveat list verbatim.
+
 ## Across repos
 
 Route fixes to the repo that owns them — answer the originating thread by
