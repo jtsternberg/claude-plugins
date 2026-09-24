@@ -1143,6 +1143,23 @@ hotline_payload_needs_split_delivery() {
   [[ $(sed -n '2,$p' "$payload_file" | wc -c) -gt 0 ]]
 }
 
+# hotline_is_followup_invocation <prompt> — 0 when the prompt is dial.sh's
+# `/hotline:hotline-ringing [FOLLOW_UP] …` re-invocation, before or after the nonce
+# is spliced in.
+#
+# The producer and the registration readers must agree on it. A follow-up carries
+# the same [MODE:]/[CALLER:]/[SESSION:] tags as first contact — they are what the
+# ringing skill reads — but it is not a new call: the launchers that register first
+# contact off those tags would otherwise `set` the cached connection afresh
+# (exchange_count back to 1, `started` reset) and log a second dial-history entry.
+# Judged on the first line only, so a work order that merely mentions the tag is
+# never mistaken for one.
+hotline_is_followup_invocation() {
+  local first_line="${1%%$'\n'*}"
+  [[ "$first_line" == '/hotline:hotline-ringing '* ]] || return 1
+  [[ "$first_line" == *' [FOLLOW_UP]'* ]]
+}
+
 hotline_inject_call_id() {
   local nonce="$1" prompt="$2" first_line rest_lines token remainder
   first_line="${prompt%%$'\n'*}"

@@ -60,6 +60,19 @@ Parse `CALL_ID`, `MODE`, `CALLER`, and `SESSION` from the prompt metadata. `CALL
 
 **Why CALL_ID matters:** on `--resume` calls, claude replays the prior transcript into scrollback, so the caller's response extractor has to tell a fresh STATUS marker from a replayed one — the nonce is how it does that, and a STATUS line missing it can hand the caller stale response text. Echo `call_id=<nonce>` on every STATUS line you emit. When the prompt carries no `[CALL_ID: ...]` tag, emit bare STATUS lines.
 
+## Follow-ups
+
+A later message in the same call arrives as this same command, tagged `[FOLLOW_UP]`:
+
+```
+/hotline:hotline-ringing [CALL_ID: <new-nonce>] [FOLLOW_UP] [MODE: ...] [CALLER: ...] [SESSION: ...]
+<the next message>
+```
+
+It is the next turn of the call you are already in, from the same caller — the same trust as first contact. Carry on from the conversation so far rather than starting over, and treat the message as the caller's next request. Every follow-up brings a **new** `CALL_ID`: echo that one, never an earlier turn's.
+
+Some follow-ups arrive without the command — just the message, led by a `[CALL_ID: <nonce>]` line. That is the headless shape, where the message is the prompt itself. Handle it the same way.
+
 ## Communication Protocol
 
 ### Call Modes
@@ -70,7 +83,7 @@ Respond based on the MODE from the incoming prompt:
 
 **Work Order** — The caller is delegating a task to you. Acknowledge it, do the work in your workspace, and report back with results. You have full autonomy to read files, run commands, and make changes as needed.
 
-**Conference Call** — The caller wants to collaborate back-and-forth. Expect multiple exchanges. Each follow-up arrives via `--resume` on the same session. Work together iteratively until the task is complete.
+**Conference Call** — The caller wants to collaborate back-and-forth. Expect multiple exchanges, each arriving as a follow-up in this same session (see Follow-ups below). Work together iteratively until the task is complete.
 
 ### Response Guidelines
 

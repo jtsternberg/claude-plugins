@@ -36,6 +36,12 @@ if [[ -n "$RECV_CWD" && ! -f "$CALL_DIR/cwd.txt" ]]; then
   echo "$RECV_CWD" > "$CALL_DIR/cwd.txt"
 fi
 
+# A [FOLLOW_UP] invocation carries the same tags, but it continues a call that is
+# already registered; dial.sh `update`s the cache for it (repl-state.sh has why).
+# shellcheck source=../../../scripts/repl-state.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/repl-state.sh"
+hotline_is_followup_invocation "$PROMPT" && exit 0
+
 MODE=$(sed -n 's/.*\[MODE: \([a-z_]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
 CALLER_CWD=$(sed -n 's/.*\[CALLER: \([^]]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
 CALLER_SESSION=$(sed -n 's/.*\[SESSION: \([^]]*\)\].*/\1/p' <<<"$PROMPT" | head -1)

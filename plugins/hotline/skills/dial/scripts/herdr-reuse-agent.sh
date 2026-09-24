@@ -51,9 +51,11 @@
 #     REPL's box at all (alternate-screen TUI) and does not need to: submission is
 #     atomic, and a busy callee QUEUES the prompt rather than welding it onto
 #     leftover text.
-#   • No re-wrapping in the ringing invocation. That is first contact's job; this
-#     session already ran it. dial.sh hands us the raw message, and re-invoking
-#     the slash command would re-run first-contact setup inside a live call.
+#   • No shaping of the payload. dial.sh hands over the finished message — for an
+#     interactive follow-up, the `/hotline:hotline-ringing [FOLLOW_UP] …` invocation
+#     — and herdr-prompt.sh splits it exactly as it splits first contact, on the
+#     same predicate. A second opinion here about what a follow-up looks like is
+#     how the two would drift.
 #
 # TWO STATES REFUSE THE REUSE, and both refuse before submitting anything — but
 # they are NOT the same refusal, and reporting them alike orphaned a live callee:

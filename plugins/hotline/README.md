@@ -348,12 +348,17 @@ Follow-ups behave exactly as local ones do, with one guard: the session cache re
                   [CALLER: ...] [SESSION: ...] \
                   <the actual prompt>"
 
-              Follow-up (existing session) delivers the raw
-              message into the surface that session already
-              lives in — the ringing skill is loaded in its
-              context already. Only when that surface refuses
-              before anything is sent do we open a fresh one
-              and --resume into it.
+              Follow-up (existing session) delivers:
+                "/hotline:hotline-ringing [FOLLOW_UP] \
+                  [MODE: ...] [CALLER: ...] [SESSION: ...] \
+                  <the actual prompt>"
+              into the surface that session already lives
+              in, so the message lands in command-args
+              rather than as pasted text the callee won't
+              act on. Only when that surface refuses before
+              anything is sent do we open a fresh one and
+              --resume into it. Headless follow-ups send
+              the raw message to `claude -p --resume`.
                                 │
 ┌──────────────────────────┼──────────────────────────────────────────┐
 │  WORKSPACE B (Receiver)  ▼                                          │

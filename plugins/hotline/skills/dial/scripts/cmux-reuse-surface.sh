@@ -11,7 +11,9 @@
 #
 # This script:
 #   1. Verifies the stored surface still exists (the user may have closed it).
-#   2. Pastes the raw message (led by a fresh [CALL_ID:] nonce line) into it.
+#   2. Pastes the message dial.sh built — for a follow-up, the
+#      `/hotline:hotline-ringing [FOLLOW_UP] …` invocation — into it, with a fresh
+#      [CALL_ID:] nonce injected.
 #   3. Returns a call_dir wired exactly like cmux-call-async.sh's surface mode,
 #      so wait-for-response.sh polls THIS surface and — thanks to the fresh
 #      nonce — ignores the prior exchange's stale STATUS lines in scrollback.
@@ -37,9 +39,10 @@
 # data instead of scraping the screen (its preferred path). Omitting it still
 # works — wait-for-response falls back to screen-scraping.
 #
-# ONE DELIVERY MODE, whatever the payload's size or shape: the whole message is
-# pasted into the REPL in a single `terminal.paste` over cmux's control socket
-# (cmux-paste.sh), which then proves the nonce reached the callee.
+# ONE DELIVERY PATH, whatever the payload's size or shape: cmux-paste.sh pastes it
+# over cmux's control socket — as two pastes for a slash command with a body, which
+# is every [FOLLOW_UP] invocation, exactly as for first contact — and then proves
+# the nonce reached the callee.
 #
 # Size- or shape-dependent delivery is off the table, and so is `cmux send` as the
 # carrier: it interprets \n/\r/\t with no escape hatch and drops contiguous bytes
@@ -297,8 +300,8 @@ echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 
 # Fresh per-call nonce so wait-for-response.sh distinguishes THIS turn's STATUS
 # from the prior exchange's markers still in the surface's scrollback. Minting and
-# placement are shared with both launchers (repl-state.sh) — a follow-up is never a
-# slash command, so in practice the nonce lands on its own leading line here.
+# placement are shared with both launchers (repl-state.sh), so a [FOLLOW_UP]
+# invocation gets its nonce inline after the command token, as first contact does.
 CALL_ID=$(hotline_mint_call_id)
 echo "$CALL_ID" > "$CALL_DIR/call_id.txt"
 

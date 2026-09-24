@@ -297,8 +297,9 @@ fi
 # live on CC 2.1.226: slash parsed AND every body marker present in
 # <command-args>, both when the body was glued to the invocation and when it sat
 # on its own line below it). The split fires only for a slash-command first line
-# that HAS a body beneath it; single-line invocations and all follow-ups take the
-# one-paste path unchanged.
+# that HAS a body beneath it — first contact, and every interactive follow-up,
+# which dial.sh sends as a `[FOLLOW_UP]` invocation (claude-plugins-2i6g). Anything
+# else takes the one-paste path unchanged.
 #
 # The two-paste sequence does NOT let either paste submit (submit_key none); a
 # real Enter KEY EVENT after both land is what submits, because it arrives outside

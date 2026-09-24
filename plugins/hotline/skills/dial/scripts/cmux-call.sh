@@ -299,9 +299,11 @@ fi
 # the next dial to that workspace found no cached session, treated it as first
 # contact, and opened a second surface beside the abandoned one.
 #
-# Best-effort, as before: skipped silently when the prompt carries no ringing tags.
+# Best-effort, as before: skipped silently when the prompt carries no ringing tags,
+# and for a [FOLLOW_UP] invocation, which carries them but continues a call that is
+# already registered — dial.sh `update`s the cache for it (repl-state.sh has why).
 EFFECTIVE_SID="${RESUME_ID:-$SESSION_ID_PRESET}"
-if [[ -n "$EFFECTIVE_SID" && -n "$PROMPT" ]]; then
+if [[ -n "$EFFECTIVE_SID" && -n "$PROMPT" ]] && ! hotline_is_followup_invocation "$PROMPT"; then
   REG_MODE=$(sed -n 's/.*\[MODE: \([a-z_]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
   REG_CALLER_SESSION=$(sed -n 's/.*\[SESSION: \([^]]*\)\].*/\1/p' <<<"$PROMPT" | head -1)
   if [[ -n "$REG_MODE" && -n "$REG_CALLER_SESSION" ]]; then

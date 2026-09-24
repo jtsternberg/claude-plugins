@@ -2583,13 +2583,19 @@ check "…and working nothing around: no fallbacks at all" $? "out=$out"
 [[ "$(jq -r '.confirmed // "<absent>"' <<<"$out" 2>/dev/null)" == "transcript" ]]
 check "…and forwarding the delivery's proof tier (.confirmed), as the cmux path does" $? "out=$out"
 
-# The RAW message, not the ringing invocation: this session already ran first
-# contact, and re-invoking the slash command would re-run its setup mid-call.
+# The [FOLLOW_UP] ringing invocation, split like first contact: the invocation line
+# alone via `pane send-text`, the message via `agent prompt`. Submitted as one
+# atomic `agent prompt`, a multi-line follow-up reaches the callee as a
+# <pasted_content> block the harness tells it not to take instructions from
+# (claude-plugins-2i6g); through the command, the message lands in command-args.
 DELIVERED="$t/home/.claude/projects/$(encode_cwd "$(cd "$t/target" && pwd -P)")/$CACHED_SID.jsonl"
-grep -q 'and now step 2' "$DELIVERED" 2>/dev/null \
-  && ! grep -q 'hotline-ringing' "$DELIVERED" 2>/dev/null
-check "…delivering the RAW follow-up, never re-wrapped with the ringing invocation" $? \
-  "delivered: $(cat "$DELIVERED" 2>/dev/null | head -c 300)"
+DELIVERED_TEXT=$(jq -r 'select(.type=="user") | .message.content' "$DELIVERED" 2>/dev/null | tail -c 2000)
+[[ "$DELIVERED_TEXT" == '/hotline:hotline-ringing [CALL_ID: '*'] [FOLLOW_UP] [MODE: work_order] [CALLER: '*'] [SESSION: caller-dial-1]'$'\n''and now step 2' ]]
+check "…delivering the follow-up as a [FOLLOW_UP] ringing invocation with the message beneath" $? \
+  "delivered: $(printf '%q' "$DELIVERED_TEXT")"
+grep -q 'pane send-text [^ ]* /hotline:hotline-ringing \[CALL_ID: [0-9a-z-]*\] \[FOLLOW_UP\]' <<<"$log"
+check "…with the invocation line placed alone by \`pane send-text\` (the split delivery)" $? \
+  "herdr calls: $log"
 
 NEW_NONCE=$(jq -r '.call_id' <<<"$out" 2>/dev/null)
 [[ -n "$NEW_NONCE" && "$NEW_NONCE" != "prior-nonce" ]] \

@@ -264,6 +264,7 @@ make_claude() {
   cat > "$1/claude" <<'EOF'
 #!/usr/bin/env bash
 SID="${FAKE_CLAUDE_SESSION_ID:-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee}"
+[[ -n "${FAKE_CLAUDE_STDIN_LOG:-}" ]] && cat > "$FAKE_CLAUDE_STDIN_LOG"
 printf '{"type":"system","session_id":"%s"}\n' "$SID"
 printf '{"type":"result","session_id":"%s","result":"ok","num_turns":1}\n' "$SID"
 EOF
@@ -596,28 +597,37 @@ call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 check "follow-up connects with first_contact=false" $? \
   "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
 
-pasted="$(last_paste)"
-[[ "$pasted" == *'one more thing' && "$(last_paste surface_id)" == "SURFACE-UUID-777" ]]
-check "the follow-up message is pasted into the existing surface" $? \
-  "pasted=$pasted surface=$(last_paste surface_id)"
+# A follow-up into a live REPL re-invokes the ringing command, tagged [FOLLOW_UP],
+# and rides the same two-paste delivery as first contact: invocation line alone on
+# paste 1, message on paste 2. Pasted RAW, a multi-line message reaches the callee
+# as a <pasted_content> block, which the harness tells it not to take instructions
+# from — so the callee refused the work it was sent (claude-plugins-2i6g). Through
+# the command, the message lands in command-args, the channel first contact uses.
+# The request log is suite-wide, so this delivery's pastes are the LAST two.
+n=$(paste_count)
+invite="$(nth_paste $((n - 1)))"
+pasted="$(nth_paste "$n")"
+[[ "$pasted" == 'one more thing' \
+   && "$(nth_paste $((n - 1)) surface_id)" == "SURFACE-UUID-777" \
+   && "$(nth_paste "$n" surface_id)" == "SURFACE-UUID-777" ]]
+check "the follow-up message is pasted into the existing surface, invocation then body" $? \
+  "invite=$invite pasted=$pasted count=$(paste_count) surface=$(last_paste surface_id)"
 
-if grep -q 'hotline:hotline-ringing' <<<"$pasted"; then
-  fail "follow-ups never re-wrap with the ringing command" "pasted=$pasted"
+[[ "$invite" == '/hotline:hotline-ringing [CALL_ID: '*'] [FOLLOW_UP] [MODE: work_order] [CALLER: '*'] [SESSION: caller-5555]' ]]
+check "the follow-up invocation carries the nonce inline, then [FOLLOW_UP] and the protocol tags" $? \
+  "invite=$(printf '%q' "$invite")"
+
+[[ "$invite" != *$'\n'* && "$invite" != *'one more thing'* ]]
+check "the follow-up invocation paste is one line with no message glued on" $? \
+  "invite=$(printf '%q' "$invite")"
+
+# No `cmux send` of the payload: it never touches the transport that used to lose
+# bytes from it. The one Enter is the split's submit, sent as a key event outside
+# either bracketed paste.
+if [[ "$(grep -c . "$t/sendkey_calls" 2>/dev/null || true)" -le 1 ]]; then
+  pass "reuse sends at most the split's one submit Enter"
 else
-  pass "follow-ups never re-wrap with the ringing command"
-fi
-
-# The nonce leads its own line for a follow-up: nothing here is a slash command,
-# and a header on its own line cannot be broken across a rendered wrap.
-[[ "$pasted" == '[CALL_ID: '*']'$'\n''one more thing' ]]
-check "the follow-up carries the nonce on a line of its own" $? "pasted=$(printf '%q' "$pasted")"
-
-# No send-key, and no `cmux send` of the payload: submit_key does the submitting,
-# and the payload never touches the transport that used to lose bytes from it.
-if [[ -s "$t/sendkey_calls" ]]; then
-  fail "reuse needs no separate send-key Enter" "sendkey_calls=$(cat "$t/sendkey_calls")"
-else
-  pass "reuse needs no separate send-key Enter"
+  fail "reuse sends at most the split's one submit Enter" "sendkey_calls=$(cat "$t/sendkey_calls")"
 fi
 if grep -q 'one more thing' "$t/send_calls" 2>/dev/null; then
   fail "the payload never goes out through cmux send" "send_calls=$(cat "$t/send_calls")"
@@ -734,9 +744,10 @@ call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 check "a multi-line follow-up reuses the live surface, opening no second one" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
-# The WHOLE payload, in ONE request, tail included.
-[[ "$(last_paste)" == *"$(cat "$t/msg.txt")" ]]
-check "the multi-line payload is pasted byte-identical, tail sentinel and all" $? \
+# The WHOLE message, in the body paste, tail included.
+[[ "$(last_paste)" == "$(cat "$t/msg.txt")" \
+   && "$(nth_paste $(( $(paste_count) - 1 )))" == '/hotline:hotline-ringing '*'[FOLLOW_UP]'* ]]
+check "the multi-line message is pasted byte-identical as the body, tail sentinel and all" $? \
   "pasted=$(printf '%q' "$(last_paste)")"
 
 # No sidecar, and nothing for the callee to go read outside its own workspace.
@@ -848,6 +859,7 @@ out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
   HOTLINE_OPEN_SIDE_SURFACE="$t/nope.sh" HOTLINE_PLUGINS_DIR="$t/empty" \
   HOTLINE_PENDING_DIR="$t/pending" \
   FAKE_CLAUDE_SESSION_ID="6c6c6c6c-6c6c-4c6c-8c6c-6c6c6c6c6c6c" \
+  FAKE_CLAUDE_STDIN_LOG="$t/claude_stdin.txt" \
   bash "$DIAL" --target "$t/target" --mode work_order --label "probe label" \
     --prompt "fold me into headless" --boot-timeout 8 2>"$t/err.txt")
 call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
@@ -861,6 +873,16 @@ check "the headless fold-in still applies on a follow-up" $? \
 
 [[ "$(jq -r --arg t "$target_real" '.connections[$t] | has("surface_ref")' "$cache_6c")" == "false" ]]
 check "a headless follow-up CLEARS the stale surface_ref" $? "$(cat "$cache_6c" 2>/dev/null)"
+
+# The [FOLLOW_UP] invocation is for an interactive REPL, where a raw paste reaches
+# the callee as <pasted_content>. `claude -p --resume` takes the message as the
+# prompt itself, so it stays raw — even when the dial decided the transport was
+# cmux first and folded into headless afterwards.
+for _ in $(seq 1 40); do [[ -s "$t/claude_stdin.txt" ]] && break; sleep 0.1; done
+[[ "$(cat "$t/claude_stdin.txt" 2>/dev/null)" == *'fold me into headless' ]] \
+  && ! grep -q 'hotline-ringing' "$t/claude_stdin.txt"
+check "a follow-up folded into headless sends the RAW message, not the [FOLLOW_UP] invocation" $? \
+  "stdin=$(cat "$t/claude_stdin.txt" 2>/dev/null)"
 
 # Side placement degrading to detached: open-side-surface exits 2 with the
 # identify diagnostic cmux-call-async.sh keys on, so the call lands in its own
@@ -1271,8 +1293,9 @@ check "the ignored session is named in fallbacks, not silently dropped" $? "out=
 # A brand-new session needs the ringing protocol loaded, which is the first-contact
 # wrapper — a --fresh dial that sent the raw message would reach a callee that
 # never loaded the skill.
-grep -q '/hotline:hotline-ringing' <<<"$(nth_paste 1)"
-check "--fresh delivers the first-contact ringing invocation" $? "paste1=$(nth_paste 1)"
+grep -q '/hotline:hotline-ringing' <<<"$(nth_paste 1)" \
+  && ! grep -qF '[FOLLOW_UP]' <<<"$(nth_paste 1)"
+check "--fresh delivers the first-contact ringing invocation, not a [FOLLOW_UP]" $? "paste1=$(nth_paste 1)"
 
 new_session=$(jq -r .remote_session_id <<<"$out")
 [[ -n "$new_session" && "$new_session" != "6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a" ]]

@@ -1127,9 +1127,7 @@ elif ! $FIRST_CONTACT; then
   EFFECTIVE_RESUME="$REMOTE_SESSION_ID"
 fi
 
-# First contact wraps the ringing slash command + protocol tags. Follow-ups send
-# the raw message: the remote session already loaded the ringing skill, and
-# re-invoking it would re-run first-contact setup.
+# First contact wraps the message in the ringing slash command + protocol tags.
 #
 # The slash command + tags go on their OWN line, with the work-order message on
 # the line(s) below. This is what lets EITHER transport deliver first contact as two
@@ -1145,11 +1143,40 @@ ringing_payload() {
   printf '/hotline:hotline-ringing [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s' \
     "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE"
 }
-if $FIRST_CONTACT; then
-  SEND_PROMPT=$(ringing_payload)
-else
-  SEND_PROMPT="$MESSAGE"
-fi
+
+# An INTERACTIVE follow-up (cmux, herdr) re-invokes the same command, tagged
+# [FOLLOW_UP], in the same two-line shape — so it takes the same split delivery.
+# Pasted raw, a multi-line follow-up reaches the callee as a <pasted_content> block,
+# and the harness tells the callee to take instructions from pasted text only where
+# the user's own message asks: callees refused the work they were sent
+# (claude-plugins-2i6g). Through the command, the message lands in command-args,
+# the channel first contact already uses. Probe-verified on CC 2.1.280 over both
+# transports, into an idle callee and into one mid-tool-call: a busy callee queues
+# it and runs it as the command once its turn ends.
+#
+# Re-invoking costs the ringing skill's text per turn and re-runs nothing else: the
+# skill has no setup step (logging moved to the caller), and [FOLLOW_UP] tells the
+# callee it is continuing the call it is already in.
+#
+# HEADLESS STAYS RAW. `claude -p --resume` takes the message as the prompt itself,
+# never as a paste, so there is nothing to route around.
+followup_payload() {
+  printf '/hotline:hotline-ringing [FOLLOW_UP] [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s' \
+    "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE"
+}
+
+# Re-run whenever TRANSPORT changes after this point: a cmux follow-up that folds
+# into headless must not carry the interactive shape into `claude -p`.
+write_send_prompt() {
+  if $FIRST_CONTACT || $RESHAPED_AS_FIRST_CONTACT; then
+    SEND_PROMPT=$(ringing_payload)
+  elif [[ "$TRANSPORT" == "headless" ]]; then
+    SEND_PROMPT="$MESSAGE"
+  else
+    SEND_PROMPT=$(followup_payload)
+  fi
+  printf '%s' "$SEND_PROMPT" > "$SEND_PROMPT_FILE"
+}
 
 # On disk, always, 0600 — even when the caller passed --prompt. Every launcher and
 # the reuse path then take --prompt-file, so the payload never rides an argv where
@@ -1158,7 +1185,8 @@ fi
 # ringing invocation, so the bytes to deliver are not the bytes it handed us.
 SEND_PROMPT_FILE=$(mktemp /tmp/hotline-prompt-XXXXX)
 chmod 600 "$SEND_PROMPT_FILE"
-printf '%s' "$SEND_PROMPT" > "$SEND_PROMPT_FILE"
+RESHAPED_AS_FIRST_CONTACT=false
+write_send_prompt
 trap 'rm -f "$ERR_FILE" "$SEND_PROMPT_FILE"' EXIT
 
 # ---------------------------------------------------------------------------
@@ -1183,9 +1211,9 @@ trap 'rm -f "$ERR_FILE" "$SEND_PROMPT_FILE"' EXIT
 SESSION_NAME="hotline: $LABEL ($MODE_TAG)"
 
 # A follow-up that ends up launching a FRESH callee is first contact for the callee,
-# whatever it is for the caller. That callee never loaded the ringing skill, so a raw
-# follow-up message lands in it as prose: no STATUS line is ever emitted, and the
-# caller's waiter spends its whole budget on a protocol nobody engaged. cmux never
+# whatever it is for the caller. That callee has none of the prior conversation, so a
+# [FOLLOW_UP] invocation would tell it to continue a call it has no record of; it
+# needs the first-contact invocation, as any new callee does. cmux never
 # reaches this state — its fresh launch `--resume`s the same session, which already
 # loaded the skill — but herdr cannot re-host a session at all (see fire_herdr), so
 # its reuse→fresh fallback genuinely opens a new conversation.
@@ -1194,11 +1222,9 @@ SESSION_NAME="hotline: $LABEL ($MODE_TAG)"
 # the same reason (see THE CACHE ENTRY GOES). FIRST_CONTACT is not flipped: it
 # answers "did this dial have a cached session to work from", and this one did — the
 # cache entry is real, and the emitted contract says so.
-RESHAPED_AS_FIRST_CONTACT=false
 reshape_as_first_contact() {
   RESHAPED_AS_FIRST_CONTACT=true
-  SEND_PROMPT=$(ringing_payload)
-  printf '%s' "$SEND_PROMPT" > "$SEND_PROMPT_FILE"
+  write_send_prompt
 }
 
 PLACEMENT_ARGS=()
@@ -1494,6 +1520,7 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
     # unavailable. Re-route through headless rather than bouncing to the model.
     add_fallback "cmux-cli-missing→headless"
     TRANSPORT="headless"
+    write_send_prompt
   elif [[ "$CONF_UNDELIVERED" == "true" ]]; then
     # The surface is open and its REPL is live, but it was never told anything —
     # the same situation as a failed first-contact paste, so the same stage.
@@ -1525,8 +1552,8 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
     # conference follow-up finds no surface_ref, skips the reuse guard above, and
     # opens a SECOND surface resuming the session whose REPL is still live in the
     # first one. Re-`set` on first contact (the entry was just created, so
-    # exchange_count 1 is right); `update` on a follow-up, whose raw message
-    # carries no tags for cmux-call.sh to register from at all — so without this
+    # exchange_count 1 is right); `update` on a follow-up, whose [FOLLOW_UP]
+    # invocation cmux-call.sh deliberately does not register from — so without this
     # last_contact and exchange_count would never move either.
     if $FIRST_CONTACT; then
       bash "$DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
@@ -1617,6 +1644,7 @@ if [[ "$TRANSPORT" == "cmux" ]]; then
   if [[ "$(jq -r '.fallback // empty' <<<"$CALL_RESULT" 2>/dev/null)" == "headless" ]]; then
     add_fallback "cmux-cli-missing→headless"
     TRANSPORT="headless"
+    write_send_prompt
     CALL_RESULT=$(fire_headless)
   fi
 elif [[ "$TRANSPORT" == "herdr" ]]; then
