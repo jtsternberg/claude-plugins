@@ -152,6 +152,8 @@ The script creates the epic, all tasks, and wires up dependencies in one shot. I
 bd create --title="QA: $QA_LABEL — <short description>" --description="Manual QA walkthrough for $QA_LABEL" --type=epic --priority=1
 ```
 
+Create each task with `--parent=<epic-id>` so `bd list --parent <epic-id>` finds it; dependencies alone don't group tasks under the epic.
+
 Group related sub-steps into single tasks (e.g., "Admin UI: field rendering & persistence" rather than separate tasks for each click). Run `bd create` commands in parallel for efficiency.
 
 ### Set dependencies (manual creation only)

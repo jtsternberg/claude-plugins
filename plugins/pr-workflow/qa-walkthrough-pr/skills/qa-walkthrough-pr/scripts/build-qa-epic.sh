@@ -52,7 +52,7 @@ for i in $(seq 0 $((TASK_COUNT - 1))); do
 
   TASK_OUTPUT=$(bd create --title="$TASK_NAME" \
     --description="$TASK_DESC" \
-    --type=task --priority=2 --json 2>/dev/null)
+    --type=task --priority=2 --parent="$EPIC_ID" --json 2>/dev/null)
 
   TASK_ID=$(echo "$TASK_OUTPUT" | jq -r '.id // empty')
   if [[ -z "$TASK_ID" ]]; then
