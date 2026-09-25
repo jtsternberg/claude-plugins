@@ -489,7 +489,13 @@ function generate_status_line($input_data) {
         );
     }
 
-    $line1 .= "\n" . implode('  ', $line2_parts);
+    $line2 = implode('  ', $line2_parts);
+
+    if (!empty($input_data['session_id'])) {
+        $line2 .= ' | ' . getMsg($input_data['session_id'], 'dark_gray');
+    }
+
+    $line1 .= "\n" . $line2;
 
     return $line1;
 }

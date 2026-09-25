@@ -37,6 +37,7 @@ Displays a dynamic status line at the bottom of your Claude Code terminal showin
 - **Git branch**: Active git branch (if in a repo)
 - **Git status**: Clean, modified, or staged indicator
 - **Context usage**: Visual bar showing conversation context consumption
+- **Session ID**: Shown at the end of the second line, so you don't need `/status` to copy it
 
 ## Example Output
 
