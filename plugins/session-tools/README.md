@@ -303,13 +303,18 @@ node --test plugins/session-tools/tests/transcript.test.mjs
 
 ---
 
+### 🔎 sessions-find
+
+"Find the session where we X." Greps every transcript under `~/.claude/projects/` for the event, then answers with session id, date, cwd, and a `claude --resume` command. One file, no script — exact events like a clone or a PR are what semantic search misses.
+
+---
+
 ## Planned skills
 
 Candidates for future inclusion (not built yet):
 
 - **sessions-prune** — archive or delete old transcripts
 - **sessions-retitle** — rename session files based on actual content
-- **sessions-search** — full-text search across transcripts
 
 ---
 
