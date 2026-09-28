@@ -214,6 +214,19 @@ It exits 0 only when every suite that *could* run passed. A suite that cannot ru
 its runtime is absent, or it is opt-in and not enabled — is reported as **SKIP**,
 never silently passed, so read the summary, not just the exit code.
 
+**A fast suite matters almost as much as TDD itself.** A slow suite gets run
+less, and a suite that isn't run pins nothing. So:
+
+- **While developing a feature, run only the involved suites** — call each one's
+  runner directly (`node --test <file>`, `bash <file>_test.sh`, `python3 -m
+  unittest discover <dir>`; paths in the table below). Run the full
+  `bash tests/run-all.sh` once, when the work is done, as the final smoke/sanity
+  check before committing — not after every edit.
+- **Treat a new slow test as a defect.** Real sleeps, real servers, real model
+  or network calls, and wide filesystem walks belong behind an injected seam
+  (a `PATH` stub, a stubbed callable, a fake clock), not in the default run.
+  If a test genuinely has to be slow, say why in it.
+
 **A skip is only honest if something can actually satisfy it.** The gws suites were
 gated on `import pytest` while CI installed no python packages, so 54 tests were
 permanently skipped and the run still exited 0 — indistinguishable from a real pass
