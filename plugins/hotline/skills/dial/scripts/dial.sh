@@ -589,12 +589,13 @@ fi
   "Put the task/question in --prompt-file (or --prompt) before dialing."
 
 # --- TTL sweep: reap abandoned call dirs before minting a new one. ----------
-# Cleanup on the happy path is the CALLER's job (SKILL.md's `rm -rf "$CALL_DIR"`),
-# and a terminal failure below cleans its own pending_paste.md — but neither
-# covers a call dir a caller never got back to, or the wrapper's own dirs from
-# stages that don't run this cleanup (deliver's, deliberately, and any wrapped
-# in a script that crashed before dial.sh got control back). 296 such dirs, 218
-# with no `done` marker, were found abandoned on one machine — some for a week.
+# This sweep is the ONLY cleanup a finished call gets; SKILL.md tells callers
+# to leave their call dir alone. A caller-side `rm -rf "$CALL_DIR"` depends on
+# a variable that does not survive across agent tool calls, so callers skip it
+# (296 dirs, 218 with no `done` marker, were found abandoned on one machine,
+# some for a week) or reach for `rm -rf /tmp/hotline-call-*`, which deletes
+# other sessions' in-flight calls. The age floor below keeps this sweep from
+# doing the same.
 # Best-effort and scoped to our own name pattern only, like the launch-script
 # sweep below: a dial must not fail because a sweep did (claude-plugins-qq9f).
 # `HOTLINE_CALL_HOME` already isolates test suites from the real /tmp; this

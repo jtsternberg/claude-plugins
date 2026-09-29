@@ -62,6 +62,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   refusal, name the feature nobody has built or the open question that gates it; a
   phase label is honest only when a phase actually gates the work.
   (claude-plugins-7wze.8, jtsternberg/claude-plugins#22, design doc §12)
+- **Cleanup of a shared-namespace artifact belongs to code, never to the agent's
+  prose steps.** The dial skill told callers `rm -rf "$CALL_DIR"`, but the variable
+  dies between tool calls: callers either skipped it (296 abandoned dirs) or, holding
+  a batch of random `mktemp` names, reached for `rm -rf /tmp/hotline-call-*`, which
+  targets every session's in-flight calls. When an artifact lives in a machine-wide
+  namespace, let the code that created it reap it behind a safety floor (age,
+  owner stamp), and tell the agent to leave it. (claude-plugins-tlxg)
 
 ## Verification
 

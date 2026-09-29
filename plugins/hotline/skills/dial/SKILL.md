@@ -482,13 +482,13 @@ Exit codes that are not failures:
   real trust decision, and no help against the startup trust dialog, which no
   permissions knob bypasses. See § Environment knobs.)
 
-Clean up when the exchange is done: `rm -rf "$CALL_DIR"`. That is the happy
-path only — a terminal failure (`stage` other than `deliver`) already drops its
-own `pending_paste.md`, and the wrapper reaps whatever call dir is left, of any
-age past `HOTLINE_CALL_SWEEP_DAYS` (default 3 days), at the start of the next
-dial. `deliver` failures keep everything: the pending prompt there is the
-surviving copy the recovery path reads, and it is left for you or the caller to
-clean up once the exchange actually resolves.
+Leave the call dir where it is when the exchange is done; cleanup is the
+wrapper's job, not yours. Every dial starts by reaping call dirs older than
+`HOTLINE_CALL_SWEEP_DAYS` (default 3 days), and that age floor is what makes the
+reap safe: every session on the machine shares the `hotline-call-*` namespace,
+so a younger dir may be another caller's call still waiting on its response.
+Leaving the dir also keeps a `deliver` failure recoverable, because its pending
+prompt is the surviving copy the recovery path reads.
 
 Follow-ups need nothing special: dial the same target again with the next
 message. The wrapper finds the cached session, re-addresses the host it lives in —
@@ -563,9 +563,8 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   `HOTLINE_CALL_HOME` (default `/tmp`) older than this. `find -mtime` drops the
   fractional day, so the effective floor is **n+1 full days**: at the default, a
   dir 3 days 23 hours old survives one more hour. It errs toward sparing, never
-  toward reaping something too young. Catches whatever a
-  caller's own `rm -rf "$CALL_DIR"` never reached — a call nobody followed up
-  on, or one that failed at a stage this file doesn't clean up itself.
+  toward reaping something too young. This sweep is the only cleanup
+  a finished call gets.
 - **`HOTLINE_PASTE_BOX_TIMEOUT=<seconds>`** — how long delivery waits for the
   callee's REPL to draw its input box before refusing to paste. Defaults to
   `--boot-timeout` (itself 60 for cmux), because both are waiting for the same
