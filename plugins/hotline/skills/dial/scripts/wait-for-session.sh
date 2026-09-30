@@ -52,6 +52,14 @@
 #
 # Usage:
 #   wait-for-session.sh <call_dir> [--timeout <seconds>]
+#
+# Environment:
+#   HOTLINE_BOOT_POLL_SLEEP — real seconds to sleep per poll tick (default 1).
+#     --timeout is accounted in integer ticks either way, so lowering this
+#     collapses wall-clock without changing how many polls run or what they
+#     decide — the same split as wait-for-response.sh's HOTLINE_POLL_SLEEP.
+#     Tests set it to ~0. Ticks spent blocked on signal D's event wait are
+#     unaffected.
 # =============================================================================
 set -euo pipefail
 
@@ -63,6 +71,7 @@ source "$SCRIPT_DIR/../../../scripts/transport.sh"
 
 CALL_DIR="${1:-}"
 TIMEOUT=""
+BOOT_POLL_SLEEP="${HOTLINE_BOOT_POLL_SLEEP:-1}"
 
 if [[ -z "$CALL_DIR" || ! -d "$CALL_DIR" ]]; then
   echo '{"error":"Call directory not provided or does not exist"}' >&2
@@ -447,7 +456,7 @@ if $CMUX_MODE; then
         break
       fi
     else
-      sleep 1
+      sleep "$BOOT_POLL_SLEEP"
     fi
     ELAPSED=$((ELAPSED + 1))
   done
@@ -533,7 +542,7 @@ while [[ ! -f "$CALL_DIR/session_id.txt" ]]; do
     fi
     exit 1
   fi
-  sleep 1
+  sleep "$BOOT_POLL_SLEEP"
   ELAPSED=$((ELAPSED + 1))
 done
 

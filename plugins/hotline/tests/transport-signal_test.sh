@@ -57,6 +57,10 @@ HEADLESS_ASYNC="$SCRIPTS/headless-call-async.sh"
 REUSE_SURFACE="$SCRIPTS/cmux-reuse-surface.sh"
 WAIT_SESSION="$SCRIPTS/wait-for-session.sh"
 WAIT_RESPONSE="$SCRIPTS/wait-for-response.sh"
+# Every boot wait here is staged before it starts, so collapsing the per-tick sleep
+# only stops the timeout case sleeping its budget out; and no case asserts on
+# surface-ready's probe, which the cmux stub never echoes (claude-plugins-bfbh).
+export HOTLINE_BOOT_POLL_SLEEP=0.02 HOTLINE_SURFACE_READY_TIMEOUT=1
 
 pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() {

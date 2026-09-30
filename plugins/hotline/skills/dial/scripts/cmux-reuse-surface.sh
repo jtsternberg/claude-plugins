@@ -260,7 +260,9 @@ if [[ -n "$PARKED" ]]; then
   # "The screen did not change" only means idle when both captures are LIVE. Read
   # through the scrolled viewport this test passed on any scrolled-up pane, because
   # a frozen capture never differs from itself (claude-plugins-r465.6).
-  sleep 0.6
+  # HOTLINE_REUSE_IDLE_WINDOW exists for the suites, whose stub screens advance per
+  # read rather than per second; the window only means something against a real REPL.
+  sleep "${HOTLINE_REUSE_IDLE_WINDOW:-0.6}"
   if ! SCREEN2=$(read_live) || [[ -z "$SCREEN2" ]]; then
     fallback_fresh "surface $SURFACE_REF became unreadable while checking whether its REPL was idle"
   fi
@@ -374,7 +376,8 @@ if $NEEDS_CLEAR; then
     fi
   fi
 
-  sleep 0.4
+  # Same test-only override as the idle window above.
+  sleep "${HOTLINE_REUSE_CLEAR_SETTLE:-0.4}"
   if ! SCREEN3=$(read_live) \
      || { [[ -n "$(input_box_content "$SCREEN3")" ]] && ! box_is_ghost_placeholder; }; then
     rm -rf "$CALL_DIR"

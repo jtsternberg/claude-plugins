@@ -48,6 +48,9 @@ FAILED_CASES=()
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOTLINE_DIR="$(cd "$TESTS_DIR/.." && pwd)"
 SCRIPT_UNDER_TEST="$HOTLINE_DIR/skills/dial/scripts/cmux-reuse-surface.sh"
+# The stub screens advance per read, not per second, so the script's real-REPL
+# settle windows only add wall-clock here (claude-plugins-bfbh).
+export HOTLINE_REUSE_IDLE_WINDOW=0 HOTLINE_REUSE_CLEAR_SETTLE=0
 SOCKET_STUB="$TESTS_DIR/lib/socket-stub.py"
 REAL_PYTHON3="$(command -v python3)"
 
@@ -1484,6 +1487,14 @@ else
 fi
 
 echo ""
+# The suite zeroes both settle windows, so pin what the script ships.
+if grep -qF 'sleep "${HOTLINE_REUSE_IDLE_WINDOW:-0.6}"' "$SCRIPT_UNDER_TEST" \
+   && grep -qF 'sleep "${HOTLINE_REUSE_CLEAR_SETTLE:-0.4}"' "$SCRIPT_UNDER_TEST"; then
+  pass "the shipped idle window (0.6s) and post-clear settle (0.4s) are unchanged"
+else
+  fail "the shipped idle window (0.6s) and post-clear settle (0.4s) are unchanged"
+fi
+
 echo "cmux-reuse-surface: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then
   printf '  - %s\n' "${FAILED_CASES[@]}"
