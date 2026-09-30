@@ -49,6 +49,17 @@ cache_6d3="$t/home/.agents-hotline/sessions/caller-6d3.json"
 check "a detached first contact connects and reports placement detached" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
+# The surface-ready wait took its READY branch: the stub saw the probe and echoed
+# it, and the launcher recorded no timeout. Without this, a stub that stops
+# answering regresses every detached case to timeout-then-continue unnoticed.
+# The call_dir check comes first: with no surface_err.txt to read, the negated grep
+# below exits 2, flips to success, and the case passes on a call that never ran.
+[[ -n "$call_dir" && -d "$call_dir" ]] \
+  && grep -qE '__HOTLINE_PTYREADY_[0-9]+__' "$t/probe_screen.txt" 2>/dev/null \
+  && ! grep -qF "never echoed the readiness probe" "$call_dir/surface_err.txt" 2>/dev/null
+check "…after the surface-ready probe round-trips (ready path, no timeout recorded)" $? \
+  "probe_screen=$(cat "$t/probe_screen.txt" 2>/dev/null || echo NONE) surface_err=$(cat "$call_dir/surface_err.txt" 2>/dev/null || echo NONE)"
+
 # THE UUID, not the positional surface:900 the same tree entry carries. A ref names
 # whatever sits in slot N, and slots renumber between now and the follow-up that
 # reads this.
@@ -102,6 +113,74 @@ check "…and opens no second workspace (new-workspace count unchanged)" $? \
 # that tab, and the reuse step runs before any placement decision.
 [[ "$(jq -r .surface_ref <<<"$out2")" == "SURFACE-UUID-DETACHED" ]]
 check "…re-addressing the same surface the first contact recorded" $? "out2=$out2"
+
+# `connected` alone proves nothing on a timed-out probe: the banner is pre-staged in
+# screen.txt. This asserts the launch command was actually sent, and sent after the
+# probe — the order the timeout branch promises. Matched by the /tmp name the send
+# used: a confirmed boot moves the script and repoints launch_script.txt at the copy.
+launch_sent_after_probe() {  # launch_sent_after_probe <env>
+  local probe_ln launch_ln
+  probe_ln=$(grep -nE '__HOTLINE_PTYREADY_[0-9]+__' "$1/send_calls" 2>/dev/null | tail -1 | cut -d: -f1)
+  launch_ln=$(grep -nE ' bash [^ ]*/hotline-launch-[^ ]+' "$1/send_calls" 2>/dev/null | head -1 | cut -d: -f1)
+  [[ -n "$probe_ln" && -n "$launch_ln" && "$launch_ln" -gt "$probe_ln" ]]
+}
+
+# ===========================================================================
+# 6d2-silent. A detached shell that never runs the probe still gets its launch.
+#
+# surface-ready.sh timing out is non-fatal for a detached placement by design: the
+# launch send can still attach and land, and the boot wait decides. The call must
+# connect anyway, and the timeout must be recorded in surface_err.txt.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\nClaude Code v2.1.221\n' > "$t/screen.txt"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_PROBE_SILENT=1 \
+  HOTLINE_CALLER_SESSION_ID="caller-6d2s" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --placement detached \
+    --label "probe label" --prompt "first contact, silent probe" --boot-timeout 8 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+[[ "$(jq -r .status <<<"$out")" == "connected" \
+   && "$(jq -r .placement <<<"$out")" == "detached" ]] \
+  && grep -qF "never echoed the readiness probe; sending the launch command anyway" \
+       "$call_dir/surface_err.txt" 2>/dev/null
+check "a silent surface-ready probe times out, is recorded, and the detached call still connects" $? \
+  "out=$out surface_err=$(cat "$call_dir/surface_err.txt" 2>/dev/null || echo NONE) stderr=$(cat "$t/err.txt")"
+
+launch_sent_after_probe "$t"
+check "…and the launch command is sent after the probe" $? \
+  "send_calls=$(cat "$t/send_calls" 2>/dev/null || echo NONE)"
+
+# ===========================================================================
+# 6d2-swallowed. A probe typed but never run (the swallowed-\n race) is NOT ready.
+#
+# The typed `echo MARKER` line is one hit; only the shell's output makes the
+# second. A readiness test that accepted one hit would call this surface ready and
+# send the launch command into a line that never executes.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\nClaude Code v2.1.221\n' > "$t/screen.txt"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_PROBE_SWALLOWED=1 \
+  HOTLINE_CALLER_SESSION_ID="caller-6d2w" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --placement detached \
+    --label "probe label" --prompt "first contact, swallowed probe" --boot-timeout 8 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+[[ -n "$call_dir" && -d "$call_dir" \
+   && "$(jq -r .status <<<"$out")" == "connected" ]] \
+  && grep -qE '^echo __HOTLINE_PTYREADY_[0-9]+__$' "$t/probe_screen.txt" 2>/dev/null \
+  && grep -qF "never echoed the readiness probe; sending the launch command anyway" \
+       "$call_dir/surface_err.txt" 2>/dev/null
+check "a swallowed surface-ready probe (typed, never run) takes the timeout branch" $? \
+  "out=$out probe_screen=$(cat "$t/probe_screen.txt" 2>/dev/null || echo NONE) surface_err=$(cat "$call_dir/surface_err.txt" 2>/dev/null || echo NONE) stderr=$(cat "$t/err.txt")"
+
+launch_sent_after_probe "$t"
+check "…and the launch command is sent after the probe" $? \
+  "send_calls=$(cat "$t/send_calls" 2>/dev/null || echo NONE)"
 
 # ===========================================================================
 # 6d-bis. A follow-up delivered MID-TURN into a live detached callee does NOT
