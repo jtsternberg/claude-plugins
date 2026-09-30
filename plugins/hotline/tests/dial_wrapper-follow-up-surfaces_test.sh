@@ -49,6 +49,14 @@ cache_6d3="$t/home/.agents-hotline/sessions/caller-6d3.json"
 check "a detached first contact connects and reports placement detached" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
+# The surface-ready wait took its READY branch: the stub saw the probe and echoed
+# it, and the launcher recorded no timeout. Without this, a stub that stops
+# answering regresses every detached case to timeout-then-continue unnoticed.
+grep -qE '__HOTLINE_PTYREADY_[0-9]+__' "$t/probe_screen.txt" 2>/dev/null \
+  && ! grep -qF "never echoed the readiness probe" "$call_dir/surface_err.txt" 2>/dev/null
+check "…after the surface-ready probe round-trips (ready path, no timeout recorded)" $? \
+  "probe_screen=$(cat "$t/probe_screen.txt" 2>/dev/null || echo NONE) surface_err=$(cat "$call_dir/surface_err.txt" 2>/dev/null || echo NONE)"
+
 # THE UUID, not the positional surface:900 the same tree entry carries. A ref names
 # whatever sits in slot N, and slots renumber between now and the follow-up that
 # reads this.
@@ -102,6 +110,30 @@ check "…and opens no second workspace (new-workspace count unchanged)" $? \
 # that tab, and the reuse step runs before any placement decision.
 [[ "$(jq -r .surface_ref <<<"$out2")" == "SURFACE-UUID-DETACHED" ]]
 check "…re-addressing the same surface the first contact recorded" $? "out2=$out2"
+
+# ===========================================================================
+# 6d2-silent. A detached shell that never runs the probe still gets its launch.
+#
+# surface-ready.sh timing out is non-fatal for a detached placement by design: the
+# launch send can still attach and land, and the boot wait decides. The call must
+# connect anyway, and the timeout must be recorded in surface_err.txt.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\nClaude Code v2.1.221\n' > "$t/screen.txt"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" CMUX_FAKE_PROBE_SILENT=1 \
+  HOTLINE_CALLER_SESSION_ID="caller-6d2s" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --placement detached \
+    --label "probe label" --prompt "first contact, silent probe" --boot-timeout 8 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+[[ "$(jq -r .status <<<"$out")" == "connected" \
+   && "$(jq -r .placement <<<"$out")" == "detached" ]] \
+  && grep -qF "never echoed the readiness probe; sending the launch command anyway" \
+       "$call_dir/surface_err.txt" 2>/dev/null
+check "a silent surface-ready probe times out, is recorded, and the detached call still connects" $? \
+  "out=$out surface_err=$(cat "$call_dir/surface_err.txt" 2>/dev/null || echo NONE) stderr=$(cat "$t/err.txt")"
 
 # ===========================================================================
 # 6d-bis. A follow-up delivered MID-TURN into a live detached callee does NOT

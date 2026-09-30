@@ -155,10 +155,10 @@ capability_count() { grep -cF '"system.capabilities"' "$OK_REQUESTS" 2>/dev/null
 export HOTLINE_PASTE_CONFIRM_TRIES=2
 export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
 export HOTLINE_PASTE_BOX_TIMEOUT=3
-# The cmux stub's `send` never echoes surface-ready.sh's probe back, so every
-# detached or window placement times that wait out — non-fatally, by design — and
-# no case asserts on the probe. 1s keeps that path instead of paying the shipped
-# 8s on every such case (claude-plugins-bfbh).
+# The cmux stub answers surface-ready.sh's probe by default, so detached and window
+# placements take the ready path. The 1s cap only bounds a case that silences the
+# probe (CMUX_FAKE_PROBE_SILENT=1) to exercise the timeout-then-continue branch,
+# instead of paying the shipped 8s (claude-plugins-bfbh).
 export HOTLINE_SURFACE_READY_TIMEOUT=1
 
 pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
@@ -218,12 +218,24 @@ case "$1" in
   #   three suites, not a tweak here.
   # Pointing a case at a socket stub started WITHOUT --echo-file models a paste
   # whose bytes never arrived.
-  read-screen)   if [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]]; then
+  #
+  # The probe echo sits ABOVE everything else: the shell ran it before claude was
+  # launched, so it is scrollback, never what sits under claude's input box.
+  read-screen)   cat "$ST/probe_screen.txt" 2>/dev/null
+                 if [[ -n "${SOCK_ECHO_FILE:-}" && -f "$SOCK_ECHO_FILE" ]]; then
                    cat "$SOCK_ECHO_FILE"  # tripwire: claude-plugins-7u9g
                  fi
                  cat "$ST/screen.txt" 2>/dev/null
                  exit 0 ;;
-  send)          echo "$*" >> "$ST/send_calls"; exit 0 ;;
+  # surface-ready.sh's probe (`echo __HOTLINE_PTYREADY_<n>__`) round-trips as a
+  # shell would show it: the typed line plus the command's output, the >=2 hits the
+  # probe waits for. CMUX_FAKE_PROBE_SILENT=1 models a shell that never ran it.
+  send)          echo "$*" >> "$ST/send_calls"
+                 m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
+                 if [[ -n "$m" && "${CMUX_FAKE_PROBE_SILENT:-0}" != "1" ]]; then
+                   { echo "echo $m"; echo "$m"; } >> "$ST/probe_screen.txt"
+                 fi
+                 exit 0 ;;
   send-key)      echo "$*" >> "$ST/sendkey_calls" ;;
   new-workspace) echo "OK workspace:123" ;;
   # Both the paste and superseded-surface cleanup resolve a surface's workspace
