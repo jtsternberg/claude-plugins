@@ -217,9 +217,11 @@ never silently passed, so read the summary, not just the exit code.
 **A fast suite matters almost as much as TDD itself.** A slow suite gets run
 less, and a suite that isn't run pins nothing. So:
 
-- **While developing a feature, run only the involved suites** — call each one's
-  runner directly (`node --test <file>`, `bash <file>_test.sh`, `python3 -m
-  unittest discover <dir>`; paths in the table below). Run the full
+- **While developing a feature, run only the involved suites.** `run-all.sh`
+  takes no filter, so call each one's runner directly — e.g.
+  `bash plugins/codex/tests/skill-paths_test.sh` or
+  `node --test plugins/skill-tools/tests/validate-dual-harness-skill.test.mjs`
+  (other runners and paths in the table below). Run the full
   `bash tests/run-all.sh` once, when the work is done, as the final smoke/sanity
   check before committing — not after every edit.
 - **Treat a new slow test as a defect.** Real sleeps, real servers, real model
