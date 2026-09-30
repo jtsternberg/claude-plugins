@@ -5,9 +5,9 @@
 # Everything external is stubbed on PATH (cmux, claude, dirmap, and — for the
 # replay round-trip — ps), and every run gets its own $HOME so the sessions
 # registry, identity cache and dial history land in a scratch tree instead of
-# the user's. The one thing that cannot be redirected by env is
-# /tmp/claude-session-<pid> (session-fingerprint.sh hardcodes it), so the fake
-# ancestry uses a pid above the OS maximum and the file is cleaned up.
+# the user's. The pid-keyed session cache (/tmp/claude-session-<pid> in
+# production) goes to a per-run $HOTLINE_SESSION_CACHE_DIR, and the fake
+# ancestry still uses a pid above the OS maximum.
 #
 # Poison stubs sit at the FRONT of PATH for the whole file: a test that forgets
 # its own stub fails loudly here instead of launching a real cmux pane or a real
@@ -36,10 +36,13 @@ FAILED_CASES=()
 HOTLINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIAL="$HOTLINE_DIR/skills/dial/scripts/dial.sh"
 
-# Each shard sets its own FAKE_CLAUDE_PID (99000N, above any real pid) before sourcing:
-# sibling shards run concurrently and the /tmp/claude-session-<pid> path is hardcoded.
+# Each shard sets its own FAKE_CLAUDE_PID (99000N, above any real pid) before sourcing.
+# The per-run cache dir already isolates concurrent shards; distinct pids are a
+# second guard in case a code path ever bypasses the knob.
 : "${FAKE_CLAUDE_PID:?set a shard-unique FAKE_CLAUDE_PID before sourcing this lib}"
-STRAY_SESSION_CACHE="/tmp/claude-session-${FAKE_CLAUDE_PID}"
+HOTLINE_SESSION_CACHE_DIR=$(mktemp -d "$TMP_ROOT"/hotline-session-cache-XXXXXX)
+export HOTLINE_SESSION_CACHE_DIR
+STRAY_SESSION_CACHE="$HOTLINE_SESSION_CACHE_DIR/claude-session-${FAKE_CLAUDE_PID}"
 
 # The suite itself usually runs INSIDE a Claude Code session, which exports
 # $CLAUDE_CODE_SESSION_ID into every subprocess. session-init.sh answers from it
@@ -65,7 +68,7 @@ PATH="$POISON_BIN:$PATH"
 # Launch scripts and call dirs the launchers create live outside our scratch
 # tree; collect and remove them at the end.
 LEAKED=()
-trap 'socket_stub_cleanup; rm -rf "$POISON_BIN" "$STRAY_SESSION_CACHE" ${LEAKED[@]+"${LEAKED[@]}"}' EXIT
+trap 'socket_stub_cleanup; rm -rf "$POISON_BIN" "$HOTLINE_SESSION_CACHE_DIR" ${LEAKED[@]+"${LEAKED[@]}"}' EXIT
 
 # --- control-socket stubs ----------------------------------------------------
 # The stub server and the python3 argv shim come from tests/lib/socket-stub-harness.sh,
