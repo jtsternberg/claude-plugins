@@ -178,24 +178,27 @@ fi
 # 3c. Directory basename or spelling-variant id — "claude-plugins" names a dir
 # whose dirmap keys are "claudeplugins" and "cp", so it matched no key exactly and
 # fell through to the whole-dirmap dump below. Compare with case and every
-# non-alphanumeric stripped. One distinct path resolves; several become the only
-# candidates; none leaves step 4 exactly as it was.
+# non-alphanumeric stripped, for the reference and its 3b filler-stripped form.
+# Only a key match resolves, and only to one distinct path: a basename is not a
+# name anyone gave the dir, so basename matches — even a single one — become the
+# only candidates. No match leaves step 4 exactly as it was.
 NAME_MATCHES=""
 if [[ -n "$DIRMAP_CMD" ]]; then
   DIRMAP_JSON=$($DIRMAP_CMD list --json 2>/dev/null || echo "{}")
-  NAME_MATCHES=$(echo "$DIRMAP_JSON" | jq -r --arg ref "$REFERENCE" '
+  TAGGED=$(echo "$DIRMAP_JSON" | jq -r --arg ref "$REFERENCE" --arg alt "${STRIPPED:-}" '
     def norm: ascii_downcase | gsub("[^a-z0-9]"; "");
-    ($ref | norm) as $r
-    | select($r != "")
+    [$ref, $alt | norm | select(. != "")] as $refs
     | to_entries[]
     | select((.value | type) == "string")
-    | select((.key | norm) == $r
-             or (.value | sub("/+$"; "") | split("/") | last | norm) == $r)
-    | "\(.key)\t\(.value)"' 2>/dev/null || true)
-  if [[ -n "$NAME_MATCHES" ]]; then
-    DISTINCT=$(while IFS=$'\t' read -r _ path; do
-      resolve_path "$path" || true
-    done <<<"$NAME_MATCHES" | sort -u)
+    | (if (.key | norm) as $k | $refs | index([$k]) then "key"
+       elif (.value | sub("/+$"; "") | split("/") | last | norm) as $b | $refs | index([$b]) then "base"
+       else empty end) as $how
+    | "\($how)\t\(.key)\t\(.value)"' 2>/dev/null || true)
+  if [[ -n "$TAGGED" ]]; then
+    NAME_MATCHES=$(cut -f2- <<<"$TAGGED")
+    DISTINCT=$(while IFS=$'\t' read -r how _ path; do
+      if [[ "$how" == key ]]; then resolve_path "$path" || true; fi
+    done <<<"$TAGGED" | sort -u)
     if [[ -n "$DISTINCT" && $(wc -l <<<"$DISTINCT") -eq 1 ]]; then
       echo "$DISTINCT"
       exit 0
