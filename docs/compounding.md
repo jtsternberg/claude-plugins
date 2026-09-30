@@ -62,6 +62,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   refusal, name the feature nobody has built or the open question that gates it; a
   phase label is honest only when a phase actually gates the work.
   (claude-plugins-7wze.8, jtsternberg/claude-plugins#22, design doc §12)
+- **A fix to one skill's step sweeps every skill with the same step shape, not the
+  same text.** A walkthrough page drafted only in thinking reached `AskUserQuestion`
+  with no text block, and qa-walkthrough-pr's explain-then-verdict step fails the same
+  way while sharing none of its wording, so a grep for the fixed sentence finds nothing.
+  A skill that follows another by reference (pr-merge-review) inherits the fix; one that
+  copies the shape does not — name the shape ("content, then a question tool") and check
+  each sibling for it. (9244788; the stance-lockstep set in AGENTS.md is the same failure)
 - **Cleanup of a shared-namespace artifact belongs to code, never to the agent's
   prose steps.** The dial skill told callers `rm -rf "$CALL_DIR"`, but the variable
   dies between tool calls: callers either skipped it (296 abandoned dirs) or, holding
