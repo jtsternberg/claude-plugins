@@ -5,7 +5,7 @@
 # Resolution chain:
 #   1. Raw path → validate exists
 #   2. UUID → session cache lookup
-#   3. Dirmap ID → $DIRMAP_CMD get
+#   3. Dirmap ID → $DIRMAP_CMD get (3c: basename / spelling-variant id)
 #   4. Fuzzy → dump candidates JSON on stderr for agent to pick
 #
 # Exit 0 + stdout = resolved canonical path
@@ -175,6 +175,34 @@ if [[ -n "$DIRMAP_CMD" ]]; then
   fi
 fi
 
+# 3c. Directory basename or spelling-variant id — "claude-plugins" names a dir
+# whose dirmap keys are "claudeplugins" and "cp", so it matched no key exactly and
+# fell through to the whole-dirmap dump below. Compare with case and every
+# non-alphanumeric stripped. One distinct path resolves; several become the only
+# candidates; none leaves step 4 exactly as it was.
+NAME_MATCHES=""
+if [[ -n "$DIRMAP_CMD" ]]; then
+  DIRMAP_JSON=$($DIRMAP_CMD list --json 2>/dev/null || echo "{}")
+  NAME_MATCHES=$(echo "$DIRMAP_JSON" | jq -r --arg ref "$REFERENCE" '
+    def norm: ascii_downcase | gsub("[^a-z0-9]"; "");
+    ($ref | norm) as $r
+    | select($r != "")
+    | to_entries[]
+    | select((.value | type) == "string")
+    | select((.key | norm) == $r
+             or (.value | sub("/+$"; "") | split("/") | last | norm) == $r)
+    | "\(.key)\t\(.value)"' 2>/dev/null || true)
+  if [[ -n "$NAME_MATCHES" ]]; then
+    DISTINCT=$(while IFS=$'\t' read -r _ path; do
+      resolve_path "$path" || true
+    done <<<"$NAME_MATCHES" | sort -u)
+    if [[ -n "$DISTINCT" && $(wc -l <<<"$DISTINCT") -eq 1 ]]; then
+      echo "$DISTINCT"
+      exit 0
+    fi
+  fi
+fi
+
 # 4. Fuzzy match — dump all candidates as JSON for the agent to pick
 # Both real dirmap and fallback accept `list --json` (fallback ignores the flag)
 if [[ -n "$DIRMAP_CMD" ]]; then
@@ -192,7 +220,8 @@ if [[ -n "$DIRMAP_CMD" ]]; then
     fi
     CANDIDATES=$(echo "$CANDIDATES" | jq --arg n "$name" --arg p "$CANONICAL" --argjson id "$IDENTITY" \
       '. + [{id: $n, path: $p, identity: $id}]')
-  done < <(echo "$DIRMAP_JSON" | jq -r 'to_entries[] | "\(.key)\t\(.value)"')
+  done < <(if [[ -n "$NAME_MATCHES" ]]; then echo "$NAME_MATCHES"
+           else echo "$DIRMAP_JSON" | jq -r 'to_entries[] | "\(.key)\t\(.value)"'; fi)
 
   if [[ $(echo "$CANDIDATES" | jq 'length') -gt 0 ]]; then
     echo "$CANDIDATES" >&2
