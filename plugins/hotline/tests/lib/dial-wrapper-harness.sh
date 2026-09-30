@@ -230,9 +230,15 @@ case "$1" in
   # surface-ready.sh's probe (`echo __HOTLINE_PTYREADY_<n>__`) round-trips as a
   # shell would show it: the typed line plus the command's output, the >=2 hits the
   # probe waits for. CMUX_FAKE_PROBE_SILENT=1 models a shell that never ran it.
+  # CMUX_FAKE_PROBE_SWALLOWED=1 models the swallowed-\n race: the line is typed but
+  # never run, so only the ONE hit is on screen. It overwrites rather than appends
+  # because the prober Ctrl-U's the unrun line before every resend — appending would
+  # stack one typed line per resend into a false >=2.
   send)          echo "$*" >> "$ST/send_calls"
                  m=$(printf '%s' "$*" | grep -oE '__HOTLINE_PTYREADY_[0-9]+__' | head -1)
-                 if [[ -n "$m" && "${CMUX_FAKE_PROBE_SILENT:-0}" != "1" ]]; then
+                 if [[ -n "$m" && "${CMUX_FAKE_PROBE_SWALLOWED:-0}" == "1" ]]; then
+                   echo "echo $m" > "$ST/probe_screen.txt"
+                 elif [[ -n "$m" && "${CMUX_FAKE_PROBE_SILENT:-0}" != "1" ]]; then
                    { echo "echo $m"; echo "$m"; } >> "$ST/probe_screen.txt"
                  fi
                  exit 0 ;;
