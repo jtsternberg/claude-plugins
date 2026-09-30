@@ -219,6 +219,49 @@ check "the user's exact reference is echoed back for the ask" $? "out=$out"
 [[ "$(jq -r '.candidates[0] | has("path") and has("id")' <<<"$out")" == "true" ]]
 check "each candidate keeps its id and path" $? "out=$out"
 
+# A directory's own hyphenated name resolves even though no dirmap key spells it
+# that way (claude-plugins-enft): it used to dump the entire dirmap as candidates.
+t=$(new_env); note_leak "$t"
+make_dirmap "$t/bin"
+mkdir -p "$t/home/claude-plugins/plugins/hotline" "$t/home/alpha" \
+  "$t/home/x/twin" "$t/home/y/twin" "$t/home/site/app"
+jq -n --arg cp "$t/home/claude-plugins" --arg h "$t/home/claude-plugins/plugins/hotline" \
+  --arg a "$t/home/alpha" --arg t1 "$t/home/x/twin" --arg t2 "$t/home/y/twin" \
+  --arg sa "$t/home/site/app" \
+  '{claudeplugins:$cp, cp:$cp, hotline:$h, alpha:$a, twinx:$t1, twiny:$t2, siteapp:$sa}' \
+  > "$t/home/.dirmap.json"
+out=$(cd "$t/home/alpha" && PATH="$t/bin:$PATH" HOME="$t/home" \
+  bash "$HOTLINE_DIR/skills/dial/scripts/resolve-workspace.sh" "claude-plugins" 2>"$t/err.txt")
+rc=$?
+[[ "$rc" -eq 0 && "$out" == "$(cd "$t/home/claude-plugins" && pwd -P)" ]]
+check "a hyphenated dir basename resolves to its one dirmap path" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
+out=$(cd "$t/home/alpha" && PATH="$t/bin:$PATH" HOME="$t/home" \
+  bash "$HOTLINE_DIR/skills/dial/scripts/resolve-workspace.sh" "twin" 2>"$t/err.txt")
+rc=$?
+[[ "$rc" -eq 1 && "$(jq -c '[.[].id] | sort' "$t/err.txt")" == '["twinx","twiny"]' ]]
+check "a basename shared by two dirs offers only those two as candidates" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
+out=$(cd "$t/home/alpha" && PATH="$t/bin:$PATH" HOME="$t/home" \
+  bash "$HOTLINE_DIR/skills/dial/scripts/resolve-workspace.sh" "the claude-plugins repo" 2>"$t/err.txt")
+rc=$?
+[[ "$rc" -eq 0 && "$out" == "$(cd "$t/home/claude-plugins" && pwd -P)" ]]
+check "a filler-wrapped hyphenated name resolves via its dirmap key" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
+# A basename alone is a guess, not a name the user gave the dir — even a unique
+# one must be confirmed, never silently dialed.
+out=$(cd "$t/home/alpha" && PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CALLER_SESSION_ID="caller-3333" \
+  HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "app" --mode quick --label "probe label" --prompt "hello?" 2>"$t/err.txt")
+rc=$?
+[[ "$rc" -eq 3 && "$(jq -r .status <<<"$out")" == "needs_disambiguation" \
+   && "$(jq -c '[.candidates[].id]' <<<"$out")" == '["siteapp"]' ]]
+check "a unique basename-only match asks, offering just that dir" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
 # ===========================================================================
 # 4. Headless fold-in: cmux up, cmux-cli missing → re-fire, record a fallback.
 # ===========================================================================
