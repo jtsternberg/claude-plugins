@@ -113,7 +113,7 @@ Cross-workspace communication for agent sessions — dial another workspace to a
 **Install:** `claude plugin install hotline@jtsternberg` or `codex plugin add hotline@jtsternberg`
 
 #### 🧠 [thinking-tools](plugins/thinking-tools)
-Metacognitive reasoning frameworks for careful decision-making. Ships `chestertons-fence` (investigate before removing), `pink-elephant` (rewrite counterproductive prohibitions as positive directives), `interview-mode` (after two rejected drafts of the same artifact, stop generating variants and interview the user to build from their own wording), and `no-meat-proxy` (rewrite what you're about to hand over so the reader can relay it in their own words instead of forwarding your text verbatim).
+Metacognitive reasoning frameworks for careful decision-making. Ships `chestertons-fence` (investigate before removing), `pink-elephant` (rewrite counterproductive prohibitions as positive directives), `interview-mode` (after two rejected drafts of the same artifact, stop generating variants and interview the user to build from their own wording), `no-meat-proxy` (rewrite what you're about to hand over so the reader can relay it in their own words instead of forwarding your text verbatim), and `dont-lead-the-witness` (when you want a genuine response — testing an agent, asking for a review, questioning the user — ask the way the real situation would, with no hint of the answer you expect, and judge by observation).
 
 **Install:** `claude plugin install thinking-tools@jtsternberg`
 
