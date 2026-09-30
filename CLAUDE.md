@@ -251,12 +251,15 @@ suite's output in discovery order as it finishes:
 RUN_ALL_JOBS=1 bash tests/run-all.sh
 ```
 
-A green run reports **`skipped 1`** — `codex: live-plugin`. That suite installs the
-plugin into a scratch `CODEX_HOME` and calls the real API, so it is opt-in: it runs
-only with `CODEX_LIVE=1` plus the `codex` CLI and `OPENAI_API_KEY`, and skips
-everywhere else, CI included. Every other suite runs on every machine — the cmux
-suites stub `cmux` via `PATH` rather than skipping on Linux. Treat a skip count
-above 1 as something to read rather than expected noise.
+A green run on a machine with cmux reports **`skipped 1`** — `codex: live-plugin`.
+That suite installs the plugin into a scratch `CODEX_HOME` and calls the real API, so
+it is opt-in: it runs only with `CODEX_LIVE=1` plus the `codex` CLI and
+`OPENAI_API_KEY`, and skips everywhere else, CI included. CI reports **`skipped 2`**:
+`cmux-cli: events-catalog` also skips there, because its live catalog probe reads the
+real cmux event stream and nothing else can catch an undocumented event name. Every
+other suite runs on every machine — the other cmux suites stub `cmux` via `PATH`
+rather than skipping on Linux. Treat a skip count above those as something to read
+rather than expected noise.
 
 ### Put a new suite where the runner will find it
 
