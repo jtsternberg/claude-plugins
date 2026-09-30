@@ -18,6 +18,13 @@ PASS=0
 FAIL=0
 FAILED_CASES=()
 
+# Collapse both waiters' real per-tick sleep. Each accounts its --timeout in
+# integer ticks, so this keeps every case's poll count and decisions while the
+# timeout cases stop sleeping their budgets out (claude-plugins-bfbh). A case
+# that needs something to happen mid-wait must signal it, never time it.
+export HOTLINE_POLL_SLEEP=0.02
+export HOTLINE_BOOT_POLL_SLEEP=0.02
+
 WAIT_SESSION="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/dial/scripts/wait-for-session.sh"
 WAIT_RESPONSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/dial/scripts/wait-for-response.sh"
 
@@ -43,6 +50,7 @@ make_fake_cmux() {
 #!/usr/bin/env bash
 case "$1" in
   read-screen)
+    [[ -n "${CMUX_FAKE_READ_MARK:-}" ]] && : > "$CMUX_FAKE_READ_MARK"
     cat "${CMUX_FAKE_SCREEN:?CMUX_FAKE_SCREEN not set}"
     ;;
   close-workspace)
@@ -95,6 +103,9 @@ fi
 rm -rf "$tmp"
 
 # Case 2: no banner → times out with actionable error.
+# The one timeout case that runs the SHIPPED tick (override unset): every other
+# case collapses it, so this is what would notice a default that spins instead of
+# sleeping. 3 ticks of 1s cannot finish inside 2 wall seconds; a spin does.
 tmp=$(mktemp -d "$TMP_ROOT"/hotline-wait-test-XXXXXX)
 make_fake_cmux "$tmp/bin"
 cat > "$tmp/screen.txt" <<'EOF'
@@ -104,13 +115,21 @@ EOF
 cd="$tmp/call"
 stage_call_dir "$cd" "preset-uuid-2" "workspace:99"
 
-out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
-  bash "$WAIT_SESSION" "$cd" --timeout 2 2>"$tmp/err.txt")
+START=$SECONDS
+out=$(env -u HOTLINE_BOOT_POLL_SLEEP PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+  bash "$WAIT_SESSION" "$cd" --timeout 3 2>"$tmp/err.txt")
 rc=$?
+ELAPSED=$((SECONDS - START))
 if [[ $rc -ne 0 ]]; then
   pass "no banner: exits non-zero on timeout"
 else
   fail "no banner: exits non-zero on timeout" "rc=$rc"
+fi
+if [[ $ELAPSED -ge 2 ]]; then
+  pass "unset override → the boot wait sleeps the shipped 1s per tick (${ELAPSED}s for 3 ticks)"
+else
+  fail "unset override → the boot wait sleeps the shipped 1s per tick" \
+       "took ${ELAPSED}s for a 3-tick budget"
 fi
 if grep -q "Claude REPL to boot" "$tmp/err.txt"; then
   pass "no banner: stderr explains the failure"
@@ -167,11 +186,17 @@ RECV_CWD="/Users/fake/Code/proj.name"
 echo "$RECV_CWD" > "$cd/cwd.txt"
 ENC=$(printf '%s' "$RECV_CWD" | sed 's|[/.]|-|g')
 mkdir -p "$tmp/home/.claude/projects/$ENC"
-( sleep 1; echo '{"type":"user"}' > "$tmp/home/.claude/projects/$ENC/preset-uuid-3b.jsonl" ) &
+# The writer waits for the first screen read, which the wait makes only after it
+# has taken the transcript baseline — so the file always appears mid-wait, however
+# slowly the wait starts. The budget is ticks, not seconds: a boot ends the wait at
+# once, so the headroom costs nothing on the pass path.
+( for _ in $(seq 1 3000); do [[ -e "$tmp/read_mark" ]] && break; sleep 0.02; done
+  echo '{"type":"user"}' > "$tmp/home/.claude/projects/$ENC/preset-uuid-3b.jsonl" ) &
 WRITER=$!
 
 out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
-  bash "$WAIT_SESSION" "$cd" --timeout 8 2>"$tmp/err.txt")
+  CMUX_FAKE_READ_MARK="$tmp/read_mark" \
+  bash "$WAIT_SESSION" "$cd" --timeout 3000 2>"$tmp/err.txt")
 rc=$?
 wait $WRITER 2>/dev/null || true
 if [[ $rc -eq 0 && "$out" == "preset-uuid-3b" ]]; then
@@ -283,7 +308,10 @@ RECV_CWD="/private/tmp/untrusted-scratch"
 echo "$RECV_CWD" > "$cd/cwd.txt"
 
 START=$SECONDS
-out=$(HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
+# The shipped 1s tick, because "fast" is asserted in wall-clock seconds: with the
+# collapsed tick the whole 20-tick budget fits under 10s, and a fast-fail that
+# regressed into burning it would still pass.
+out=$(env -u HOTLINE_BOOT_POLL_SLEEP HOME="$tmp/home" PATH="$tmp/bin:$PATH" CMUX_FAKE_SCREEN="$tmp/screen.txt" \
   bash "$WAIT_SESSION" "$cd" --timeout 20 2>"$tmp/err.txt")
 rc=$?
 ELAPSED=$((SECONDS - START))

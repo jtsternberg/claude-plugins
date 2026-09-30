@@ -155,6 +155,11 @@ capability_count() { grep -cF '"system.capabilities"' "$OK_REQUESTS" 2>/dev/null
 export HOTLINE_PASTE_CONFIRM_TRIES=2
 export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
 export HOTLINE_PASTE_BOX_TIMEOUT=3
+# The cmux stub's `send` never echoes surface-ready.sh's probe back, so every
+# detached or window placement times that wait out — non-fatally, by design — and
+# no case asserts on the probe. 1s keeps that path instead of paying the shipped
+# 8s on every such case (claude-plugins-bfbh).
+export HOTLINE_SURFACE_READY_TIMEOUT=1
 
 pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() {
