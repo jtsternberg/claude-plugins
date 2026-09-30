@@ -14,9 +14,14 @@ const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, '.claude-plugi
 
 test('packages the walkthrough as a versioned walk-through-work-history plugin', () => {
 	assert.equal(manifest.name, 'walk-through-work-history');
-	assert.equal(manifest.version, '1.2.0');
+	assert.equal(manifest.version, '1.2.1');
 	assert.match(skill, /^---\nname: walk-through-work-history\ndescription: .+\n---\n/);
 	assert.match(skill, /Ready to \*\*turn the page\*\*\?/);
+});
+
+test('sends each page as visible text before the advance prompt', () => {
+	assert.match(skill, /Send the page as visible reply text, before the advance prompt/);
+	assert.match(skill, /drafted only in thinking never reaches the user/);
 });
 
 test('resolves the GitHub reference in both Claude and Codex', () => {

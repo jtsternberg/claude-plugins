@@ -189,7 +189,7 @@ Process tasks one at a time following the dependency order:
 
 1. Run `bd ready` to find the next unblocked task
 2. Claim it: `bd update <id> --status in_progress`
-3. **Explain to the user** what to do — be specific:
+3. **Explain to the user** what to do, as visible reply text sent before the verdict prompt (instructions drafted only in thinking never reach the user) — be specific:
    - What page/URL to visit
    - What data to enter
    - What action to take

@@ -40,6 +40,7 @@ Turn a dense work history into a causal narrative delivered one short page per u
    - Explain what changed, why it changed, and what that caused next.
    - Use short paragraphs and a few bullets only where they improve scanning.
    - Link a small number of especially useful primary events; do not turn the page into a citation list.
+   - Send the page as visible reply text, before the advance prompt. A page drafted only in thinking never reaches the user: the question arrives with nothing above it, and the user sees only a one-line thinking summary. Keep the page out of the question tool's text too.
    - End every non-final page with an advance prompt. Prefer an interactive click-to-answer prompt over making the user type: if the harness offers one (`AskUserQuestion` in Claude Code; `request_user_input` in Codex when available), offer a two-option question — **"Next"** (turn the page) and **"Something else"** (the user wants to pause, jump, go back, or give feedback instead; they describe what). When no interactive question tool is available, or the user just types, end with exactly: `Ready to **turn the page**?` — a typed "yes," "next," or "turn the page" counts as Next; anything else is the "Something else" path.
    - Stop. Do not include the next page in the same response.
 

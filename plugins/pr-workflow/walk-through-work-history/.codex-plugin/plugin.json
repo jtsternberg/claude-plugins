@@ -1,6 +1,6 @@
 {
   "name": "walk-through-work-history",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Explain how work progressed — PR, branch, or project — one page at a time, plus a pre-merge PR review lens.",
   "author": {
     "name": "JT Sternberg",
