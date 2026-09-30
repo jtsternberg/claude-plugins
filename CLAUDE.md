@@ -36,7 +36,7 @@ Each skill's `SKILL.md` belongs at `plugins/<plugin-name>/skills/<skill-name>/SK
 
 ## Dual-Harness Skill Contract
 
-Every new or edited skill must preserve behavior under both Claude Code and Codex unless it is explicitly marked harness-specific. Skills are the authoring primitive and plugins are the distribution primitive: add reusable workflows as `skills/<name>/SKILL.md`, not `commands/*.md`. Before committing a skill change, run `validate-dual-harness-skill` against it and run the focused compatibility tests plus `bash tests/run-all.sh`; behavior involving path resolution, invocation, hooks, or permissions needs a representative probe in both harnesses.
+Every new or edited skill must preserve behavior under both Claude Code and Codex unless it is explicitly marked harness-specific. Skills are the authoring primitive and plugins are the distribution primitive: add reusable workflows as `skills/<name>/SKILL.md`, not `commands/*.md`. Before committing a skill change, run `validate-dual-harness-skill` against it plus the focused checks (`bash plugins/codex/tests/skill-paths_test.sh`, `node --test plugins/codex/tests/compatibility.test.mjs`); both take seconds. Run `bash tests/run-all.sh` only when the change touches something a suite executes: scripts, tests, path tokens, `$ARGUMENTS`, hooks, or a manifest or catalog. A prose-only SKILL.md edit stops at the focused checks, and CI runs the full suite on push. Behavior involving path resolution, invocation, hooks, or permissions needs a representative probe in both harnesses.
 
 The review must account for the actual contracts, not assume one harness mirrors the other: keep Codex routing terms in `description` because it ignores Claude's `when_to_use`; preserve Claude's literal `$ARGUMENTS` wherever positional interpolation matters and give Codex adjacent fallback prose; mirror `disable-model-invocation: true` with `policy.allow_implicit_invocation: false` in `agents/openai.yaml`; and treat Claude's `argument-hint`, `when_to_use`, `effort`, dynamic `!` context, and `allowed-tools` permission grants as Claude-only behavior unless current Codex evidence says otherwise. Keep `allowed-tools` synchronized with the commands Claude will actually execute.
 
@@ -222,8 +222,8 @@ less, and a suite that isn't run pins nothing. So:
   `bash plugins/codex/tests/skill-paths_test.sh` or
   `node --test plugins/skill-tools/tests/validate-dual-harness-skill.test.mjs`
   (other runners and paths in the table below). Run the full
-  `bash tests/run-all.sh` once, when the work is done, as the final smoke/sanity
-  check before committing — not after every edit.
+  `bash tests/run-all.sh` once, when work that changed executable code is done,
+  as the final smoke/sanity check before committing — not after every edit.
 - **Treat a new slow test as a defect.** Real sleeps, real servers, real model
   or network calls, and wide filesystem walks belong behind an injected seam
   (a `PATH` stub, a stubbed callable, a fake clock), not in the default run.
