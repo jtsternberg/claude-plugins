@@ -70,7 +70,7 @@ si() {  # si <VAR=VALUE>... -- <session-init.sh args>...
 
 # Fake process ancestry whose claude process is $FAKE_CLAUDE_PID, so the
 # fingerprint cache key is stable and lives at a path no real process owns.
-# Copied in shape from dial_wrapper_test.sh's make_ps.
+# Copied in shape from lib/dial-wrapper-harness.sh's make_ps.
 #
 # `comm=` deliberately reports the FULL executable path, which is what macOS
 # `ps -o comm=` actually prints (Linux prints the bare name). Both walkers strip

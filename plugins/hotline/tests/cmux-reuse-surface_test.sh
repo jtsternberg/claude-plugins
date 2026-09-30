@@ -99,7 +99,7 @@ PATH="$POISON_BIN:$PATH"
 STUBROOT="$(mktemp -d)"
 
 # --- Socket stub plumbing ---------------------------------------------------
-# Shared with dial_wrapper_test.sh via tests/lib/socket-stub-harness.sh: the stub
+# Shared with lib/dial-wrapper-harness.sh via tests/lib/socket-stub-harness.sh: the stub
 # server and the python3 argv shim were duplicated here before, which is how one
 # copy learns about a new option and the other keeps passing without it.
 # shellcheck source=lib/socket-stub-harness.sh

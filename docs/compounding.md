@@ -282,8 +282,9 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   it back on stdin (a fixed remote `herdr agent prompt <name> "$(cat)"` with the file
   on ssh's stdin), because the LOCAL ssh's argv is one more place it must not appear.
   Guard: the hotline suites assert a sentinel never appears in recorded argv, and
-  `herdr-transport_test.sh` pins the local exposure to that single invocation (§ 3)
-  and the remote form to stdin (§ 9) — copy all three for new launchers.
+  `herdr-transport-delivery_test.sh` pins the local exposure to that single
+  invocation (§ 3) and `herdr-transport-remote_test.sh` the remote form to stdin
+  (§ 9) — copy all three for new launchers.
   (claude-plugins-86ka, claude-plugins-bwu1)
 - **Each constant has one source; docs point at it rather than restating it.** A
   box-wait "default 60" documented in two files was hardcoded 20 at both call
@@ -382,7 +383,7 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   report it was protecting. Derive the count, or drop the guard and let the report
   state the number. (claude-plugins-nwtk, -lvj0)
 - **A leak check matches its own artifact, not a count of a shared namespace.**
-  `dial_wrapper_test.sh` compared `ls /tmp/hotline-prompt-* | wc -l` before and after
+  `dial_wrapper-delivery_test.sh` compared `ls /tmp/hotline-prompt-* | wc -l` before and after
   a dial, and `/tmp` is machine-global, so any other hotline session dialing inside
   that window pushed the count up and failed the assertion — three times over. Stamp
   the artifact with something only this run can produce (`$$` in the payload) and
