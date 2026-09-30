@@ -17,9 +17,10 @@
 # run would answer the legacy and codex cases from the harness's own identity
 # and pass for the wrong reason.
 #
-# The one thing no env var can redirect is /tmp/claude-session-<pid>
-# (session-fingerprint.sh hardcodes it), so the fake ancestry uses a pid above
-# the OS maximum and the file is cleaned up on exit.
+# The pid-keyed session cache (/tmp/claude-session-<pid> in production) is
+# redirected per run with $HOTLINE_SESSION_CACHE_DIR. The fake ancestry still
+# uses a pid above the OS maximum, so a case that escapes the knob can never
+# read or clobber a real session's cache.
 # =============================================================================
 set -u
 # Keep standalone runs under the system temp directory while honoring the runner.
@@ -34,12 +35,13 @@ HOTLINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION_INIT="$HOTLINE_DIR/scripts/session-init.sh"
 
 FAKE_CLAUDE_PID=990101          # above any real pid, so it can never collide
-STRAY_SESSION_CACHE="/tmp/claude-session-${FAKE_CLAUDE_PID}"
-STRAY_TRANSCRIPT_CACHE="/tmp/claude-session-${FAKE_CLAUDE_PID}.transcript"
+HOTLINE_SESSION_CACHE_DIR=$(mktemp -d "$TMP_ROOT"/hotline-session-cache-XXXXXX)
+export HOTLINE_SESSION_CACHE_DIR
+STRAY_SESSION_CACHE="$HOTLINE_SESSION_CACHE_DIR/claude-session-${FAKE_CLAUDE_PID}"
+STRAY_TRANSCRIPT_CACHE="$HOTLINE_SESSION_CACHE_DIR/claude-session-${FAKE_CLAUDE_PID}.transcript"
 
-SCRATCH=()
-trap 'rm -f "$STRAY_SESSION_CACHE" "$STRAY_TRANSCRIPT_CACHE"
-      rm -rf ${SCRATCH[@]+"${SCRATCH[@]}"}' EXIT
+SCRATCH=("$HOTLINE_SESSION_CACHE_DIR")
+trap 'rm -rf ${SCRATCH[@]+"${SCRATCH[@]}"}' EXIT
 
 pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() {
@@ -168,7 +170,7 @@ check "uppercase hex is accepted and returned verbatim" $? "out=$out"
 # ===========================================================================
 # Every case here stubs `ps` so $CLAUDE_PID is $FAKE_CLAUDE_PID, which pins the
 # cache filename to a path no real process owns. Without that the script would
-# read the REAL /tmp/claude-session-<pid>.transcript of the session running this
+# read the REAL claude-session-<pid>.transcript of the session running this
 # suite, and which rung answered would depend on the developer's machine.
 
 # --- rung 3: nothing to go on but the cwd convention ------------------------
@@ -365,6 +367,32 @@ out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
 check "a native id beats a populated legacy fingerprint cache" $? \
   "cached=$(cat "$STRAY_SESSION_CACHE" 2>/dev/null) out=$out"
 rm -f "$STRAY_SESSION_CACHE"
+
+# The discover step WRITES the cache the plant step reads, so both must resolve
+# the same directory. A fingerprinted transcript makes discover succeed; the
+# cache must land in $HOTLINE_SESSION_CACHE_DIR, never the hardcoded /tmp.
+DISC_SID="22222222-3333-4444-8555-666666666666"
+mkdir -p "$t/home/.claude/projects/disc-project"
+DISC_PATH="$t/home/.claude/projects/disc-project/${DISC_SID}.jsonl"
+printf '{"type":"user","text":"%s"}\n' "$fp" > "$DISC_PATH"
+out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
+         "FAKE_CLAUDE_PID=$FAKE_CLAUDE_PID" -- discover "$fp" 2>/dev/null )
+[[ "$(jq -r .status <<<"$out")" == "discovered" \
+   && "$(cat "$STRAY_SESSION_CACHE" 2>/dev/null)" == "$DISC_SID" \
+   && "$(cat "$STRAY_TRANSCRIPT_CACHE" 2>/dev/null)" == "$DISC_PATH" ]]
+check "discover caches id + transcript under \$HOTLINE_SESSION_CACHE_DIR" $? \
+  "out=$out dir=$(ls "$HOTLINE_SESSION_CACHE_DIR")"
+
+[[ ! -e "/tmp/claude-session-${FAKE_CLAUDE_PID}" ]]
+check "discover leaves /tmp untouched when the cache dir is overridden" $?
+rm -f "/tmp/claude-session-${FAKE_CLAUDE_PID}" "/tmp/claude-session-${FAKE_CLAUDE_PID}.transcript"
+
+out=$( cd "$t/work" && si "PATH=$t/bin:$PATH" "HOME=$t/home" \
+         "FAKE_CLAUDE_PID=$FAKE_CLAUDE_PID" -- --expanded 2>/dev/null )
+[[ "$(jq -r .session_id <<<"$out")" == "$DISC_SID" \
+   && "$(jq -r .transcript_path <<<"$out")" == "$DISC_PATH" ]]
+check "the next call is a legacy cache hit read back from the same dir" $? "out=$out"
+rm -f "$STRAY_SESSION_CACHE" "$STRAY_TRANSCRIPT_CACHE"
 
 # ===========================================================================
 # 8. No identity anywhere → a hard error, not a silent empty session id.

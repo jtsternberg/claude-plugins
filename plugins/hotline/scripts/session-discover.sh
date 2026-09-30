@@ -18,7 +18,8 @@
 # On success: writes session ID to stdout, exit 0
 # On failure: writes error to stderr, exit 1
 #
-# Also caches the result to /tmp/claude-session-<claude-pid> so subsequent
+# Also caches the result to /tmp/claude-session-<claude-pid> (or
+# $HOTLINE_SESSION_CACHE_DIR, for tests) so subsequent
 # session-fingerprint.sh calls return immediately (cache hit, exit 0).
 
 set -euo pipefail
@@ -120,7 +121,8 @@ done
 
 # Cache session ID and transcript path for future lookups
 if [[ -n "$CLAUDE_PID" ]]; then
-  CACHE_FILE="/tmp/claude-session-${CLAUDE_PID}"
+  # Must match session-fingerprint.sh, which reads it back.
+  CACHE_FILE="${HOTLINE_SESSION_CACHE_DIR:-/tmp}/claude-session-${CLAUDE_PID}"
   echo "$SESSION_ID" > "$CACHE_FILE"
   echo "$TRANSCRIPT" > "${CACHE_FILE}.transcript"
 fi

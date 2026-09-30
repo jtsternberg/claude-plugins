@@ -52,7 +52,10 @@ if [[ -z "$CLAUDE_PID" ]]; then
   exit 2
 fi
 
-CACHE_FILE="/tmp/claude-session-${CLAUDE_PID}"
+# Fixed /tmp, not $TMPDIR: every reader and writer is a Bash-tool child of the
+# same claude process and must agree on this path. HOTLINE_SESSION_CACHE_DIR
+# exists only so tests can isolate it; production leaves it unset.
+CACHE_FILE="${HOTLINE_SESSION_CACHE_DIR:-/tmp}/claude-session-${CLAUDE_PID}"
 
 # Cache hit — return session ID on stdout, exit 0
 if [[ -f "$CACHE_FILE" ]]; then

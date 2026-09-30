@@ -103,7 +103,7 @@ if [[ "${CLAUDE_CODE_SESSION_ID:-}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F
     # the session ID, so a match is authoritative), then the cwd convention.
     CLAUDE_PID="$(find_claude_pid)"
     TRANSCRIPT_PATH=""
-    TRANSCRIPT_CACHE="/tmp/claude-session-${CLAUDE_PID}.transcript"
+    TRANSCRIPT_CACHE="${HOTLINE_SESSION_CACHE_DIR:-/tmp}/claude-session-${CLAUDE_PID}.transcript"
     if [[ -n "$CLAUDE_PID" && -f "$TRANSCRIPT_CACHE" ]]; then
       CANDIDATE=$(cat "$TRANSCRIPT_CACHE")
       if [[ "${CANDIDATE##*/}" == "${CLAUDE_CODE_SESSION_ID}.jsonl" && -f "$CANDIDATE" ]]; then
@@ -189,7 +189,7 @@ case $EXIT_CODE in
       # Look up cached transcript path, or reconstruct it
       CLAUDE_PID=$(find_claude_pid)
 
-      TRANSCRIPT_CACHE="/tmp/claude-session-${CLAUDE_PID}.transcript"
+      TRANSCRIPT_CACHE="${HOTLINE_SESSION_CACHE_DIR:-/tmp}/claude-session-${CLAUDE_PID}.transcript"
       if [[ -n "$CLAUDE_PID" && -f "$TRANSCRIPT_CACHE" ]]; then
         TRANSCRIPT_PATH=$(cat "$TRANSCRIPT_CACHE")
       else
