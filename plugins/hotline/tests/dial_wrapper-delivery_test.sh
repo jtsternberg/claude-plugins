@@ -412,7 +412,7 @@ signal_b_case() {   # signal_b_case <name> <pre-existing-bytes|""> <grow:yes|no>
   cat > "$d/bin/cmux" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
-  read-screen) printf 'old scrollback, no repl here\n' ;;
+  read-screen) : > "$SIGB_READ_MARK"; printf 'old scrollback, no repl here\n' ;;
   *) exit 0 ;;
 esac
 EOF
@@ -426,10 +426,14 @@ EOF
   mkdir -p "$d/home/.claude/projects/$enc"
   local tr="$d/home/.claude/projects/$enc/${sid}.jsonl"
   [[ -n "$pre" ]] && printf '%s' "$pre" > "$tr"
+  # The writer waits for the first screen read, which the wait makes only after it
+  # has taken the transcript baseline — so the write always lands mid-wait, however
+  # slowly the wait starts.
   if [[ "$grow" == "yes" ]]; then
-    ( sleep 1; printf '{"type":"user","message":{"role":"user","content":"fresh turn"}}\n' >> "$tr" ) &
+    ( for _ in $(seq 1 3000); do [[ -e "$d/read_mark" ]] && break; sleep 0.02; done
+      printf '{"type":"user","message":{"role":"user","content":"fresh turn"}}\n' >> "$tr" ) &
   fi
-  SIGB_OUT="$(PATH="$d/bin:$PATH" HOME="$d/home" \
+  SIGB_OUT="$(PATH="$d/bin:$PATH" HOME="$d/home" SIGB_READ_MARK="$d/read_mark" \
     bash "$WFS" "$d/call" --timeout 6 2>&1)"
   SIGB_RC=$?
   wait 2>/dev/null || true
