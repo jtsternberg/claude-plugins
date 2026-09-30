@@ -391,6 +391,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   mistaken for one. This is the count guard above one layer out: a count standing in
   for the thing you actually mean. (claude-plugins-iyau, claude-plugins-nwtk,
   07ca971)
+- **Every path a suite writes resolves under a per-run dir; a fixed machine-global
+  path races the sibling shards the runner executes concurrently.** Splitting one
+  suite into shards made `/tmp/claude-session-<pid>` a shared file, and a pid
+  collision between two dial_wrapper shards failed CI. When a script hardcodes such a
+  path, give it a dir knob defaulting to the production path and point every harness
+  at its own `mktemp -d` (`HOTLINE_SESSION_CACHE_DIR`). (#27 CI run 36729320619,
+  5162c06)
 - **A suite is not green until it is green on Linux.** The ubuntu runner is the
   only Linux check, and a macOS-green suite hid a red CI for the entire
   terminal.paste rework — portability bugs (BSD-only `stat`, `getppid` reparenting
