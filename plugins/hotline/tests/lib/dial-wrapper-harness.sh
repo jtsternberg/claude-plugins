@@ -36,7 +36,9 @@ FAILED_CASES=()
 HOTLINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIAL="$HOTLINE_DIR/skills/dial/scripts/dial.sh"
 
-FAKE_CLAUDE_PID=990001          # above any real pid, so it can never collide
+# Each shard sets its own FAKE_CLAUDE_PID (99000N, above any real pid) before sourcing:
+# sibling shards run concurrently and the /tmp/claude-session-<pid> path is hardcoded.
+: "${FAKE_CLAUDE_PID:?set a shard-unique FAKE_CLAUDE_PID before sourcing this lib}"
 STRAY_SESSION_CACHE="/tmp/claude-session-${FAKE_CLAUDE_PID}"
 
 # The suite itself usually runs INSIDE a Claude Code session, which exports

@@ -9,6 +9,7 @@
 # dial_wrapper-*_test.sh shards hold the other sections.
 # =============================================================================
 set -u
+FAKE_CLAUDE_PID=990002
 # shellcheck source=lib/dial-wrapper-harness.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/dial-wrapper-harness.sh"
 
