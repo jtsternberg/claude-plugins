@@ -17,8 +17,10 @@ EPIC_ID="${1:?Usage: qa-cleanup.sh <epic-id> [--dry-run]}"
 DRY_RUN=""
 [[ "$2" == "--dry-run" ]] && DRY_RUN=1
 
-# Get all task IDs that are subtasks of this epic
-TASKS=$(bd list --json 2>/dev/null | jq -r ".[] | select(.epic == \"$EPIC_ID\") | .id")
+# Tasks are linked by --parent (see build-qa-epic.sh). --all because a finished
+# walkthrough has closed them, which the default list hides; --limit 0 lifts the
+# 50-row cap.
+TASKS=$(bd list --parent "$EPIC_ID" --all --limit 0 --json 2>/dev/null | jq -r '.[].id')
 
 if [[ -z "$TASKS" ]]; then
   echo "No tasks found under epic $EPIC_ID" >&2
@@ -39,6 +41,9 @@ fi
 
 echo "Deleting $COUNT items..." >&2
 # shellcheck disable=SC2086
-bd delete $ALL_IDS --force 2>/dev/null
+if ! bd delete $ALL_IDS --force >/dev/null; then
+  echo "bd delete failed; some QA items may remain" >&2
+  exit 1
+fi
 
 echo "Cleaned up $COUNT QA items (epic: $EPIC_ID)" >&2
