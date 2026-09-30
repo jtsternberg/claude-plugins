@@ -5,7 +5,8 @@
 # SOURCE this, don't execute it.
 #
 # Two seams live here, and both were duplicated near-verbatim in
-# cmux-reuse-surface_test.sh and dial_wrapper_test.sh before this file existed —
+# cmux-reuse-surface_test.sh and the dial_wrapper suite (now
+# lib/dial-wrapper-harness.sh) before this file existed —
 # the same two-copies pattern that has already cost this repo time twice in the
 # transcript parser. When one copy learns about a new stub option and the other
 # does not, the suite that did not learn keeps passing against a stale idea of the

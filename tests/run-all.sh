@@ -135,7 +135,8 @@ enqueue() {      # enqueue <label> <kind> <path>
 # tail from being one multi-minute suite finishing alone while every slot sits
 # idle. Refresh this list from the `completed in Ns` lines the runner already
 # prints; it is deliberately not a persisted timing cache.
-SLOW_FIRST="herdr-transport dial_wrapper cmux-reuse-surface wait-for-cmux"
+SLOW_FIRST="wait-for-cmux cmux-reuse-surface dial_wrapper-follow-up dial_wrapper-follow-up-surfaces
+	dial_wrapper-delivery dial_wrapper-identity-args herdr-transport-dial herdr-transport-remote"
 
 already_queued() {  # already_queued <task-index>
 	local candidate="$1" queued

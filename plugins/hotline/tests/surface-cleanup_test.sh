@@ -57,7 +57,7 @@ PATH="$POISON_BIN:$PATH"
 STUBROOT="$(mktemp -d)"
 
 # --- Socket stub plumbing ---------------------------------------------------
-# Shared with cmux-reuse-surface_test.sh and dial_wrapper_test.sh via
+# Shared with cmux-reuse-surface_test.sh and lib/dial-wrapper-harness.sh via
 # tests/lib/socket-stub-harness.sh: the grid fixtures the placeholder judgement reads
 # are defined once there, so no suite can test against a cmux that answers
 # differently from the one another suite imagines.

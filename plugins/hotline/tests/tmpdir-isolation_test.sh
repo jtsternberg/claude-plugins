@@ -11,7 +11,12 @@ fail() { FAIL=$((FAIL + 1)); echo "  ✗ $1"; }
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHANGED_TESTS=(
   cmux-call-async_test.sh cmux-call_test.sh dial-history_test.sh
-  dial_wrapper_test.sh herdr-transport_test.sh reproduce-jq-parse-error.sh
+  dial_wrapper-identity-args_test.sh dial_wrapper-follow-up_test.sh
+  dial_wrapper-follow-up-surfaces_test.sh dial_wrapper-delivery_test.sh
+  lib/dial-wrapper-harness.sh
+  herdr-transport-launch_test.sh herdr-transport-delivery_test.sh
+  herdr-transport-dial_test.sh herdr-transport-remote_test.sh
+  lib/herdr-transport-harness.sh reproduce-jq-parse-error.sh
   session-cache_test.sh session_init_test.sh surface-placement_test.sh
   transport-signal_test.sh wait-for-cmux_test.sh wait-for-response_test.sh
 )
