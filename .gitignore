@@ -44,3 +44,4 @@ __pycache__/
 # visual-review build artifacts
 /.visual-review/
 /.visual-review-*/
+/.beads.gate.lock
