@@ -115,7 +115,10 @@ has "names herdr rename/start/attach as forbidden" '`rename`, `start`, `attach`'
 
 # --- inventory: graveyard fast path and portable path ------------------------
 
-has "graveyard fast path command" 'graveyard candidates --json'
+has "graveyard fast path command" 'graveyard candidates --json --no-verdict'
+# Without --no-verdict, candidates runs a local-model classification per row
+# (slow cold, and a stderr line when the model is missing).
+lacks "no graveyard candidates call without --no-verdict" 'graveyard candidates( --json)?`'
 has "inventory is reachable from outside either host" 'works from outside both hosts'
 has "portable path uses herdr agent list" 'herdr agent list'
 has "portable path uses cmux tree" 'cmux tree --all --json'

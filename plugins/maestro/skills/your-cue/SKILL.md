@@ -31,7 +31,7 @@ Read-only and safe:
   `cmux read-screen --surface <id> --scrollback --lines <n>`.
 - **herdr** — `herdr agent list`, `herdr agent get|read`,
   `herdr workspace list|get`, `herdr tab list|get`, `herdr pane list|get|read`.
-- **graveyard** — `graveyard candidates --json`.
+- **graveyard** — `graveyard candidates --json --no-verdict`.
 
 Never run, even to "just check":
 
@@ -50,17 +50,23 @@ viewport, not the live bottom, so always pass `--scrollback`.
 
 ## 1. Check reachability
 
-`graveyard candidates --json` is the fast path when `graveyard` is installed:
-one unified cmux + herdr inventory, and it works from outside both hosts.
-Without it, take the portable path — `herdr agent list` plus
+`graveyard candidates --json --no-verdict` is the fast path when `graveyard` is
+installed: one unified cmux + herdr inventory that
+works from outside both hosts. Without graveyard, take the portable path — `herdr agent list` plus
 `cmux tree --all --json` and `cmux sidebar-state`.
+
+Always pass `--no-verdict`. Without it graveyard classifies every row with a
+local model — tens of seconds on a cold cache, plus a stderr line when that
+model is missing. This briefing reads none of those verdicts, and that stderr
+line is not a host error.
 
 **Probe each host yourself, even on the fast path.** One cheap read per
 transport — `herdr agent list`, `cmux tree --all --json` — is the only honest
 reachability signal. Graveyard does not report a host being down: with the
-`herdr` CLI unavailable it exits 0, writes nothing to stderr, and relabels
-every herdr row's `transport` as `cmux`. A row count that looks complete is
-not evidence both hosts answered, and `transport` is not a reachability field.
+`herdr` CLI unavailable it exits 0, writes nothing to stderr under `--no-verdict`,
+and relabels every herdr row's `transport` as `cmux`. A row count that looks
+complete is not evidence both hosts answered, and `transport` is not a
+reachability field.
 
 **Stop and ask before briefing partial coverage.** When only one transport
 answers, ask whether the human wants the one-host briefing now or wants to
