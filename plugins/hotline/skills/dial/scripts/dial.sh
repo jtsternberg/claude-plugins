@@ -1147,7 +1147,19 @@ fi
 # with it — the whole regression.
 ringing_payload() {
   printf '/hotline:hotline-ringing [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s' \
-    "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE"
+    "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$(skill_args_message)"
+}
+
+# THE MESSAGE RIDES THE RINGING SKILL'S ARGUMENTS, and Claude Code substitutes
+# ${CLAUDE_*} variables there with ringing's own values — its skill dir, plugin
+# root, the callee's session id — after inserting the arguments, and no backslash
+# escapes them (code.claude.com/docs/en/skills § Available string substitutions).
+# A caller's literal `${CLAUDE_SKILL_DIR}` reached the callee as ringing's path.
+# So every `${CLAUDE_` goes out as `$\{CLAUDE_`, and ringing's SKILL.md tells the
+# callee to read it back. Only the payloads that invoke the skill use this; a
+# headless follow-up is the prompt itself and is never substituted.
+skill_args_message() {
+  printf '%s' "${MESSAGE//\$\{CLAUDE_/\$\\{CLAUDE_}"
 }
 
 # An INTERACTIVE follow-up (cmux, herdr) re-invokes the same command, tagged
@@ -1168,7 +1180,7 @@ ringing_payload() {
 # never as a paste, so there is nothing to route around.
 followup_payload() {
   printf '/hotline:hotline-ringing [FOLLOW_UP] [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s' \
-    "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE"
+    "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$(skill_args_message)"
 }
 
 # Re-run whenever TRANSPORT changes after this point: a cmux follow-up that folds
