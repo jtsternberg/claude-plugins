@@ -950,4 +950,38 @@ ws_cd=$(jq -r '.call_dir // empty' <<<"$WS_FRESH_OUT" 2>/dev/null)
 check "a workspace target with --fresh still connects (the refusal is scoped)" $? \
   "out=$WS_FRESH_OUT"
 
+# --- A --no-fork re-dial of the session we already host is a FOLLOW-UP ------
+# --no-fork resumes the id itself, so once a dial has that session live in a
+# surface, a second --no-fork dial to the same id that launches again leaves two
+# claude REPLs on one transcript — and reported first_contact:true with
+# fallbacks:[] while doing it. The cache already names that session for this
+# workspace, so the dial is the same conversation and takes the reuse path.
+# (A forked dial still forks every time: each fork is its own session.)
+t4=$(new_env); note_leak "$t4"
+make_cmux "$t4/bin"; make_side_opener "$t4/side.sh"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\n' > "$t4/screen.txt"
+T4_PATH=$(cd "$t4/target" && pwd -P)
+T4_ENC=$(printf '%s' "$T4_PATH" | sed 's|[^a-zA-Z0-9]|-|g')
+mkdir -p "$t4/home/.claude/projects/$T4_ENC"
+printf '{"type":"user","cwd":"%s","sessionId":"%s"}\n' "$T4_PATH" "$TARGET_SESSION" \
+  > "$t4/home/.claude/projects/$T4_ENC/$TARGET_SESSION.jsonl"
+HOME="$t4/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$T4_PATH" \
+  --caller-session "caller-sess5" --session "$TARGET_SESSION" \
+  --mode work_order --surface "SURFACE-UUID-777"
+NF_OUT=$(PATH="$t4/bin:$PATH" HOME="$t4/home" CMUX_FAKE_STATE="$t4" \
+  HOTLINE_CALLER_SESSION_ID="caller-sess5" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t4/side.sh" HOTLINE_PENDING_DIR="$t4/pending" \
+  bash "$DIAL" --target "$TARGET_SESSION" --no-fork --mode work_order --label "sid follow-up" \
+    --prompt "next step" --boot-timeout 5 2>"$t4/err.txt")
+nf_cd=$(jq -r '.call_dir // empty' <<<"$NF_OUT" 2>/dev/null)
+[[ -n "$nf_cd" ]] && note_leak "$nf_cd"
+[[ "$(jq -r .status <<<"$NF_OUT")" == "connected" \
+   && "$(jq -r .first_contact <<<"$NF_OUT")" == "false" ]]
+check "a --no-fork re-dial of the cached session id is a follow-up" $? \
+  "out=$NF_OUT stderr=$(cat "$t4/err.txt")"
+[[ -n "$nf_cd" && ! -f "$nf_cd/launch_script.txt" \
+   && "$(last_paste surface_id)" == "SURFACE-UUID-777" ]]
+check "…pasted into the surface that session lives in, launching nothing" $? \
+  "call_dir=$nf_cd surface=$(last_paste surface_id) out=$NF_OUT"
+
 dial_wrapper_finish

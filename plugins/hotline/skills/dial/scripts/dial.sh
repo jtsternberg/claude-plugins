@@ -411,11 +411,12 @@ fi
 # session that resolve-workspace.sh resolves as a directory, and the two would
 # disagree about what was even dialed.
 #
-# ONE CONSEQUENCE WORTH KNOWING: a session-id target does not take the follow-up
-# path. Step 4's cache lookup runs only when no resume was asked for, so dialing
-# the same session id twice forks it twice rather than continuing one callee.
-# Dial the WORKSPACE to hold a conversation with a callee; dial a SESSION ID to
-# branch from a conversation.
+# ONE CONSEQUENCE WORTH KNOWING: a FORKED session-id target does not take the
+# follow-up path, so dialing the same session id twice forks it twice rather than
+# continuing one callee. Dial the WORKSPACE to hold a conversation with a callee;
+# dial a SESSION ID to branch from a conversation. With --no-fork there is no
+# branch — the id itself is resumed — so a re-dial of the session already cached
+# for this target IS a follow-up (step 4).
 HOTLINE_SESSION_UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 TARGET_IS_SESSION=false
 if [[ -z "$RESUME_ARG" && "$TARGET_REF" =~ $HOTLINE_SESSION_UUID_RE ]]; then
@@ -1019,7 +1020,10 @@ mismatch_close_cmd() {
 
 # ---------------------------------------------------------------------------
 # Step 4 — Existing session? (our own cache only — a user-supplied --resume is
-# somebody else's session, which is the fork path, not a follow-up)
+# somebody else's session, which is the fork path, not a follow-up — UNLESS it is
+# a --no-fork resume of the very session cached for this target. That one is
+# already live in the cached surface, so launching it again would put two REPLs
+# on one transcript; it is a follow-up like any other.)
 #
 # --fresh still READS the entry, and declines to use it. The PREV_* refs have to
 # come from somewhere for step 7 to close the surface this dial supersedes, while
@@ -1045,9 +1049,10 @@ PREV_SESSION_ID=""
 # The call dir of the exchange before this one, so step 5a can ask whether that
 # exchange is still in flight. See detached_exchange_still_waiting there.
 PREV_CALL_DIR=""
-if [[ -z "$RESUME_ARG" ]]; then
+if [[ -z "$RESUME_ARG" ]] || $NO_FORK; then
   if CACHED=$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" \
-                --caller-session "$MY_SESSION_ID" 2>/dev/null) && [[ -n "$CACHED" ]]; then
+                --caller-session "$MY_SESSION_ID" 2>/dev/null) && [[ -n "$CACHED" ]] \
+     && [[ -z "$RESUME_ARG" || "$(jq -r '.session_id // empty' <<<"$CACHED")" == "$RESUME_ARG" ]]; then
     # The PREV_* group is what this dial SUPERSEDES, so it is read whether or not
     # --fresh goes on to decline the entry: step 7 closes the old surface either
     # way, and step 6's cache healing compares against the id that was cached.
