@@ -6,40 +6,180 @@
   },
   "description": "Custom Claude Code plugins — skills, commands, hooks, and automation",
   "plugins": [
-    { "name": "git-tree", "source": "./plugins/git-tree" },
-    { "name": "headline-refiner", "source": "./plugins/headline-refiner" },
-    { "name": "obsidian-cli", "source": "./plugins/obsidian-cli" },
-    { "name": "publish-insights", "source": "./plugins/publish-insights" },
-    { "name": "generating-blog-images", "source": "./plugins/generating-blog-images" },
-    { "name": "git-commits", "source": "./plugins/git-commits" },
-    { "name": "address-pr-comments", "source": "./plugins/pr-workflow/address-pr-comments" },
-    { "name": "qa-walkthrough-pr", "source": "./plugins/pr-workflow/qa-walkthrough-pr" },
-    { "name": "update-pr-description", "source": "./plugins/pr-workflow/update-pr-description" },
-    { "name": "walk-through-work-history", "source": "./plugins/pr-workflow/walk-through-work-history" },
-    { "name": "watch-pr-then-action", "source": "./plugins/pr-workflow/watch-pr-then-action" },
-    { "name": "pr-workflow", "source": "./plugins/pr-workflow/bundle" },
-    { "name": "skill-tools", "source": "./plugins/skill-tools" },
-    { "name": "beads-workflow", "source": "./plugins/beads-workflow" },
-    { "name": "handoff", "source": "./plugins/handoff" },
-    { "name": "workspace-status", "source": "./plugins/workspace-status" },
-    { "name": "slides-presentation", "source": "./plugins/slides-presentation" },
-    { "name": "export-presentation", "source": "./plugins/export-presentation" },
-    { "name": "localwp-shell", "source": "./plugins/localwp-shell" },
-    { "name": "thinking-tools", "source": "./plugins/thinking-tools" },
-    { "name": "bible", "source": "./plugins/bible" },
-    { "name": "hotline", "source": "./plugins/hotline" },
-    { "name": "paperclip", "source": "./plugins/paperclip" },
-    { "name": "gws", "source": "./plugins/gws" },
-    { "name": "session-tools", "source": "./plugins/session-tools" },
-    { "name": "work-with-media", "source": "./plugins/work-with-media" },
-    { "name": "research-tools", "source": "./plugins/research-tools" },
-    { "name": "cmux-cli", "source": "./plugins/cmux-cli" },
-    { "name": "mac-caffeinate", "source": "./plugins/mac-caffeinate" },
-    { "name": "collab-tools", "source": "./plugins/collab-tools" },
-    { "name": "slack", "source": "./plugins/slack" },
-    { "name": "fable", "source": "./plugins/fable" },
-    { "name": "agentmail", "source": "./plugins/agentmail" },
-    { "name": "maestro", "source": "./plugins/maestro" },
-    { "name": "delayed-work", "source": "./plugins/delayed-work" }
+    {
+      "name": "git-tree",
+      "source": "./plugins/git-tree",
+      "description": "Create and tear down git worktrees, and triage a repo's leftovers. Use when user says \"git worktree\", \"work on two branches\", \"parallel branch work\", \"review PR without switching\", \"keep my changes while checking out another branch\", or wants to clean up stale worktrees, merged or abandoned branches, stale remote-tracking refs, and old stashes without losing work."
+    },
+    {
+      "name": "headline-refiner",
+      "source": "./plugins/headline-refiner",
+      "description": "Refines headlines using the 5-Part Headline Framework (Number, What, Who, Why, Twist the Knife). Triggers when writing or improving headlines for articles, blog posts, email subject lines, landing pages, or social media. Activates on requests like \"improve this headline\", \"write a better title\", or \"make this catchier\"."
+    },
+    {
+      "name": "obsidian-cli",
+      "source": "./plugins/obsidian-cli",
+      "description": "Interacts with Obsidian vaults from the terminal using the official Obsidian CLI (v1.12+). Manages notes, tasks, properties, daily notes, bases, tags, search, vault health, file operations, and Obsidian automation. Triggers on \"obsidian\", \"vault\", \"daily note\", \"obsidian task\", \"obsidian search\", \"obsidian property\", \"note in obsidian\", \"obsidian base\", or any request involving Obsidian vault interaction from the command line."
+    },
+    {
+      "name": "publish-insights",
+      "source": "./plugins/publish-insights",
+      "description": "Publish Claude Code /insights reports to GitHub Pages for easy sharing. Note: the full plugin is maintained in jtsternberg/claude-usage-data."
+    },
+    {
+      "name": "generating-blog-images",
+      "source": "./plugins/generating-blog-images",
+      "description": "Generates AI image prompts for blog posts by analyzing content, identifying optimal placement points, and crafting detailed prompts. Use when the user asks for image prompts, illustrations, or visual suggestions for blog content, or mentions AI image generators like Midjourney, DALL-E, Imagen, or Nano Banana."
+    },
+    {
+      "name": "git-commits",
+      "source": "./plugins/git-commits",
+      "description": "Skills for creating git commits from staged or unstaged files with AI-generated commit messages."
+    },
+    {
+      "name": "address-pr-comments",
+      "source": "./plugins/pr-workflow/address-pr-comments",
+      "description": "Address PR review comments — automated resolution or human-in-the-loop drafts."
+    },
+    {
+      "name": "qa-walkthrough-pr",
+      "source": "./plugins/pr-workflow/qa-walkthrough-pr",
+      "description": "Guide manual QA of a pull request with a generated walkthrough and checklist."
+    },
+    {
+      "name": "update-pr-description",
+      "source": "./plugins/pr-workflow/update-pr-description",
+      "description": "Regenerate a pull request's description from its current diff and commits."
+    },
+    {
+      "name": "walk-through-work-history",
+      "source": "./plugins/pr-workflow/walk-through-work-history",
+      "description": "Explain how work progressed — PR, branch, or project — one page at a time, plus a pre-merge PR review lens."
+    },
+    {
+      "name": "watch-pr-then-action",
+      "source": "./plugins/pr-workflow/watch-pr-then-action",
+      "description": "Watch a PR for events (CI, reviews, ready-for-review) and run a follow-up action."
+    },
+    {
+      "name": "pr-workflow",
+      "source": "./plugins/pr-workflow/bundle",
+      "description": "PR workflow bundle: installs all five PR skills plugins (address-pr-comments, qa-walkthrough-pr, update-pr-description, walk-through-work-history, watch-pr-then-action)."
+    },
+    {
+      "name": "skill-tools",
+      "source": "./plugins/skill-tools",
+      "description": "Skills for creating and reviewing Claude Code extensions and validating shared skills under Claude Code and Codex."
+    },
+    {
+      "name": "beads-workflow",
+      "source": "./plugins/beads-workflow",
+      "description": "Skills for working through beads epics and fixing findings with granular task and commit tracking."
+    },
+    {
+      "name": "handoff",
+      "source": "./plugins/handoff",
+      "description": "Skills and hooks for creating and picking up handoffs to preserve context between Claude Code sessions — session-start detection, drift-aware pickup, and a beads backend with markdown-file fallback."
+    },
+    {
+      "name": "workspace-status",
+      "source": "./plugins/workspace-status",
+      "description": "Status line showing model name, directory, git branch/status, and context usage."
+    },
+    {
+      "name": "slides-presentation",
+      "source": "./plugins/slides-presentation",
+      "description": "Creates self-contained HTML slide presentations from talk prompts, outlines, or content descriptions. Supports dark/light themes, SVG diagrams, and AI-generated illustrations."
+    },
+    {
+      "name": "export-presentation",
+      "source": "./plugins/export-presentation",
+      "description": "Exports HTML slide presentations to PDF or PNG screenshots using browser automation. Companion to the slides-presentation plugin."
+    },
+    {
+      "name": "localwp-shell",
+      "source": "./plugins/localwp-shell",
+      "description": "Run WP-CLI, PHP, MySQL, and Composer through LocalWP's sandboxed environment"
+    },
+    {
+      "name": "thinking-tools",
+      "source": "./plugins/thinking-tools",
+      "description": "Metacognitive reasoning frameworks for careful decision-making. Includes Chesterton's Fence (investigate before removing), Pink Elephant (rewriting counterproductive negative instructions), Interview Mode (stop guessing after two rejected drafts and extract the user's own words), No Meat Proxy (rewrite a draft so the reader can relay it in their own words instead of forwarding it verbatim), Don't Lead the Witness (ask the way the real situation would, with no hint of the expected answer, so the response is genuine), and room for more thinking tools like pre-mortems, steelmanning, and first principles."
+    },
+    {
+      "name": "bible",
+      "source": "./plugins/bible",
+      "description": "Look up Bible verses and passages using the NLT API. Supports passage retrieval, reference parsing, and keyword search across NLT, KJV, and other translations."
+    },
+    {
+      "name": "hotline",
+      "source": "./plugins/hotline",
+      "description": "Cross-workspace Claude Code communication. Dial another workspace to ask questions, delegate work, or collaborate in real-time."
+    },
+    {
+      "name": "paperclip",
+      "source": "./plugins/paperclip",
+      "description": "Rich interface for working with a locally-running Paperclip instance via the paperclipai CLI and direct filesystem access."
+    },
+    {
+      "name": "gws",
+      "source": "./plugins/gws",
+      "description": "Google Workspace CLI (gws) integrations — upload markdown to Google Docs, draft Gmail messages from markdown, manage Drive files, manage YouTube playlists, and more."
+    },
+    {
+      "name": "session-tools",
+      "source": "./plugins/session-tools",
+      "description": "Tools for managing Claude Code session transcripts — read one out of a session, catch up on it, fork new work off it, generate recaps, or leave yourself a breadcrumb before pausing one of your parallel conversations. Shared transcript machinery lives at the plugin root so the skills cannot drift."
+    },
+    {
+      "name": "work-with-media",
+      "source": "./plugins/work-with-media",
+      "description": "Turns audio and video into text on macOS. Bundles a MacWhisper `mw` CLI wrapper for local-file transcription with a yt-dlp skill that pulls captions, descriptions, chapters, and audio from YouTube/Vimeo/any URL. The two skills compose — yt-dlp usually finishes URL requests from captions alone, and falls back to downloading audio for macwhisper-cli only when transcription is actually needed."
+    },
+    {
+      "name": "research-tools",
+      "source": "./plugins/research-tools",
+      "description": "Tools for researching external sources from within Claude Code. Ships fetch-docs, a skill that pulls raw URL content into a local file so agents read the authoritative source instead of WebFetch's filtered summary."
+    },
+    {
+      "name": "cmux-cli",
+      "source": "./plugins/cmux-cli",
+      "description": "Control cmux (terminal multiplexer / workspace manager) from the command line. Manage windows, workspaces, panes, surfaces, and tabs; send keystrokes; read screen output; split panes; wait on and verify work through the cmux event stream; drive the embedded browser; send notifications. Triggers on mentions of cmux, workspaces, panes, surfaces, tabs, splits, or requests to send input to / read output from a cmux session."
+    },
+    {
+      "name": "mac-caffeinate",
+      "source": "./plugins/mac-caffeinate",
+      "description": "Keep your Mac awake while long-running Claude Code agents or commands run, using macOS's built-in caffeinate."
+    },
+    {
+      "name": "collab-tools",
+      "source": "./plugins/collab-tools",
+      "description": "Skills that help Claude collaborate more naturally with the user — routing work out of chat into appropriate channels (editor, files, etc.) when chat isn't the right surface."
+    },
+    {
+      "name": "slack",
+      "source": "./plugins/slack",
+      "description": "Slack from the terminal via the Slack Web API — read a thread, message, search result, or channel history as clean text (read-slack), and post notifications and summaries into one fixed channel through an incoming webhook (notify-slack)."
+    },
+    {
+      "name": "fable",
+      "source": "./plugins/fable",
+      "description": "Skills for working with — and like — the Fable model (claude-fable-5). Ships fable-delegate, which keeps a Fable main agent in the thinker/boss role and routes execution to Opus/Sonnet subagents, and fable-mode, which codifies the operating stance behind Fable's judgment for agents on other models."
+    },
+    {
+      "name": "agentmail",
+      "source": "./plugins/agentmail",
+      "description": "Give an agent its own email address. Send and receive email through the AgentMail API via the official agentmail CLI: create inboxes, send mail, read incoming messages and threads, reply / reply-all / forward, manage and schedule drafts, triage an inbox, keep a local address book of people and other agents, relay tagged work orders to another AI agent, and run the agent self-signup and OTP verification flow. Ships an opt-in hook that notices unread mail during a session. Triggers on mentions of AgentMail, agent email, inbox creation, sending or checking email for an agent, contacts or address lookup, inbox triage, and emailing another agent."
+    },
+    {
+      "name": "maestro",
+      "source": "./plugins/maestro",
+      "description": "Orchestration stance for a main agent overseeing delegated multi-agent pipelines — boss/doer split, fresh agent per phase, verify-before-relay — plus the zero-token discipline for waiting on anything."
+    },
+    {
+      "name": "delayed-work",
+      "source": "./plugins/delayed-work",
+      "description": "Hit a session limit mid-task? Stop for now and have this same session resume the work at the reset, with the context it already has and zero tokens spent waiting. Also plain timed work: run X at 9pm, or in 30 minutes."
+    }
   ]
 }
