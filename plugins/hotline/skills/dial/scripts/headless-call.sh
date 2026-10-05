@@ -68,6 +68,13 @@ if [[ -z "$PROMPT" ]]; then
   exit 1
 fi
 
+# HOTLINE_CALLEE_ENV rides the callee's argv as a settings env block — see
+# scripts/callee-env.sh. dial.sh refuses a malformed value at its args stage; this
+# repeats the check for a direct invocation rather than launching without it.
+source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/callee-env.sh"
+callee_env_validate || { jq -nc --arg e "HOTLINE_CALLEE_ENV: $CALLEE_ENV_ERR" '{error: $e}'; exit 1; }
+CALLEE_SETTINGS=$(callee_env_settings_json)
+
 # Build the command as an array. NO positional prompt — it arrives on stdin.
 CMD=(claude -p --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbose)
 [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && CMD+=(--model "$HOTLINE_CLAUDE_MODEL")
@@ -76,6 +83,7 @@ CMD=(claude -p --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbo
 # `ps`, the same leak the work-order payload is kept off argv to avoid.
 [[ -n "${HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE:-}" ]] && \
   CMD+=(--append-system-prompt-file "$HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE")
+[[ -n "$CALLEE_SETTINGS" ]] && CMD+=(--settings "$CALLEE_SETTINGS")
 
 if [[ -n "$RESUME_ID" ]]; then
   CMD+=(--resume "$RESUME_ID")

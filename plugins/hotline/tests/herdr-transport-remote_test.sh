@@ -862,4 +862,19 @@ out=$(remote_dial "$t" "HERDR_PANE_ID=w1:p1" \
 check "a cached CMUX surface handle is not re-addressed as a herdr agent either" $? \
   "out=$out stderr=$(cat "$t/err.txt")"
 
+# --- HOTLINE_CALLEE_ENV over the hop ------------------------------------------
+# The env block is JSON — quotes, braces, colons — riding a command line that is
+# shell-quoted for ssh and re-parsed on the far side. The far herdr must get it
+# byte-for-byte, which the stub's %q log lets us read back.
+t=$(remote_env)
+out=$(rcheck "$t" HERDR_PANE_ID="w1:p1" HOTLINE_CALLEE_ENV="AGENTIC_DEV_ROLE=builder AGENTIC_DEV_RUN=42" \
+      -- "$HERDR_ASYNC" --cwd "$t/target" --prompt "hi")
+line=$(grep 'agent start' "$t/herdr.log" 2>/dev/null | tail -1)
+settings=""; prev=""
+eval "argv=($line)"
+for a in ${argv[@]+"${argv[@]}"}; do [[ "$prev" == "--settings" ]] && settings="$a"; prev="$a"; done
+jq -e '.env == {AGENTIC_DEV_ROLE:"builder", AGENTIC_DEV_RUN:"42"}' <<<"$settings" >/dev/null 2>&1
+check "HOTLINE_CALLEE_ENV crosses the ssh hop intact as the remote \`agent start\`'s --settings" $? \
+  "out=$out settings=$settings herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
 herdr_suite_finish

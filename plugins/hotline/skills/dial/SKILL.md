@@ -553,6 +553,20 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   read it; the file must stay readable until the callee boots. Applies at first
   contact only (a session's system prompt is set once, at birth); follow-ups
   reuse that session. A missing/unreadable path fails the dial up front.
+- **`HOTLINE_CALLEE_ENV="KEY=VALUE KEY2=VALUE2"`** — environment variables for the
+  callee, which its Bash tool then sees. Space-separated pairs; keys are variable
+  names, values are non-empty with no spaces, each key once — anything else fails
+  the dial at the `args` stage before anything launches. Your own exports never
+  reach a cmux or herdr callee (its pane's shell is the terminal app's or the herdr
+  server's, not yours); this does, on every transport, as `claude --settings
+  '{"env":{...}}'`. The payload reports it as `.callee_env: "settings"`. **Only a
+  fresh claude process receives it**: a follow-up typed into a live callee cannot
+  change a running process's environment, so it reports `"not-redelivered"` with a
+  `.callee_env_note`, while a launch that resumes — every headless follow-up, a cmux
+  relaunch after reuse refused — is a fresh process and gets this dial's value (so
+  set it on those follow-ups too). Values ride the callee's argv, where `ps` shows
+  them: use it for markers such as a pipeline role or run id, never secrets. Unset,
+  no flag is passed and the payload has no `callee_env` key.
 - **`HOTLINE_CALLER_SESSION_ID=<id>`** — supply the caller identity directly.
   Skips the fingerprint dance entirely, so `replay` never happens. This is the
   escape hatch when identity discovery fails.

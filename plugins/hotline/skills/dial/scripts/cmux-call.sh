@@ -113,6 +113,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Tree reading (and the input-box judgement) live in one place.
 # shellcheck source=../../../scripts/repl-state.sh
 source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
+
+# HOTLINE_CALLEE_ENV rides the callee's argv as a settings env block — see
+# scripts/callee-env.sh. dial.sh refuses a malformed value at its args stage; this
+# repeats the check for a direct invocation rather than launching without it.
+source "$SCRIPT_DIR/../../../scripts/callee-env.sh"
+callee_env_validate || { jq -nc --arg e "HOTLINE_CALLEE_ENV: $CALLEE_ENV_ERR" '{error: $e}'; exit 1; }
+CALLEE_SETTINGS=$(callee_env_settings_json)
 BOX_TIMEOUT="${BOX_TIMEOUT:-${HOTLINE_PASTE_BOX_TIMEOUT:-$HOTLINE_BOOT_TIMEOUT_CMUX}}"
 
 # Side-by-side delegates to cmux-cli's canonical open-side-surface.sh (single
@@ -247,6 +254,7 @@ chmod 700 "$LAUNCH_SCRIPT"
   # readable via `ps`, the leak the work-order payload is kept off argv to avoid.
   [[ -n "${HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE:-}" ]] && \
     printf ' --append-system-prompt-file %q' "$HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE"
+  [[ -n "$CALLEE_SETTINGS" ]] && printf ' --settings %q' "$CALLEE_SETTINGS"
   [[ -n "$RESUME_ID" ]] && printf ' --resume %q' "$RESUME_ID"
   # --session-id only when the preset is OURS (first contact or fork).
   $PRESET_IS_OURS && [[ -n "$SESSION_ID_PRESET" ]] && \

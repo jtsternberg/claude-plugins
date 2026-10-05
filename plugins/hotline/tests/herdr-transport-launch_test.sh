@@ -704,4 +704,51 @@ grep -q '## herdr Failures' "$HOTLINE_DIR/skills/dial/references/error-recovery.
 check "error-recovery.md has both § herdr Failures sections the hints name" $? \
   "sections: $(grep -c '^## ' "$HOTLINE_DIR/skills/dial/references/error-recovery.md")"
 
+# --- HOTLINE_CALLEE_ENV ------------------------------------------------------
+# The callee's pane belongs to the herdr SERVER's shell, so a dialer's export never
+# reaches it; the variables ride the claude argv as a settings env block instead.
+# Each log line is a %q-quoted argv, so eval it back to read the value as herdr got it.
+settings_from_herdr_log() {  # <log> — the --settings value of the `agent start` call
+  local line a prev="" ; local -a argv
+  line=$(grep 'agent start' "$1" 2>/dev/null | tail -1)
+  eval "argv=($line)"
+  for a in ${argv[@]+"${argv[@]}"}; do
+    [[ "$prev" == "--settings" ]] && { printf '%s' "$a"; return; }
+    prev="$a"
+  done
+}
+t=$(new_env)
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_PANE_ID="w1:p1" \
+      HOTLINE_CALLEE_ENV="AGENTIC_DEV_ROLE=builder AGENTIC_DEV_RUN=42" \
+      bash "$HERDR_ASYNC" --cwd "$t/target" --prompt "hi" 2>/dev/null)
+jq -e '.env == {AGENTIC_DEV_ROLE:"builder", AGENTIC_DEV_RUN:"42"}' \
+  <<<"$(settings_from_herdr_log "$t/herdr.log")" >/dev/null 2>&1
+check "HOTLINE_CALLEE_ENV reaches \`agent start\` as --settings with that env block" $? \
+  "out=$out herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+t=$(new_env)
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_PANE_ID="w1:p1" \
+      bash "$HERDR_ASYNC" --cwd "$t/target" --prompt "hi" 2>/dev/null)
+grep -q 'agent start' "$t/herdr.log" 2>/dev/null && ! grep -q -- '--settings' "$t/herdr.log"
+check "…and with it unset, \`agent start\` carries no --settings" $? \
+  "herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+t=$(new_env)
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_PANE_ID="w1:p1" HOTLINE_CALLEE_ENV="1BAD=x" \
+      bash "$HERDR_ASYNC" --cwd "$t/target" --prompt "hi" 2>/dev/null); rc=$?
+[[ $rc -ne 0 && "$(jq -r .error <<<"$out")" == "HOTLINE_CALLEE_ENV: "* ]] \
+  && ! grep -q 'pane split\|agent start' "$t/herdr.log" 2>/dev/null
+check "a malformed HOTLINE_CALLEE_ENV is refused before any pane is split" $? \
+  "rc=$rc out=$out herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
+t=$(new_env)
+wrap_herdr_transcript "$t" unused
+out=$(dial "$t" HERDR_PANE_ID="w1:p1" HOTLINE_CALLEE_ENV="AGENTIC_DEV_RUN=7" \
+      -- --target "$t/target" --mode work_order --prompt "hi" --transport herdr --boot-timeout 5)
+[[ "$(jq -r .status <<<"$out")" == "connected" && "$(jq -r .callee_env <<<"$out")" == "settings" ]]
+check "dial over herdr reports callee_env=settings" $? "out=$out stderr=$(cat "$t/err.txt" 2>/dev/null)"
+
 herdr_suite_finish

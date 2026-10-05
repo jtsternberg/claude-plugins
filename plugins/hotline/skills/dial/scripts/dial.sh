@@ -121,6 +121,8 @@ source "$PLUGIN_SCRIPTS/transport.sh"
 # other remote question belongs to a sub-script.
 # shellcheck source=../../../scripts/herdr-remote.sh
 source "$PLUGIN_SCRIPTS/herdr-remote.sh"
+# shellcheck source=../../../scripts/callee-env.sh
+source "$PLUGIN_SCRIPTS/callee-env.sh"
 
 # Pending-fingerprint state. NOT in /tmp: the file is keyed by the claude PID, so
 # a reused PID would inherit a dead session's fingerprint, and /tmp is
@@ -334,6 +336,12 @@ if [[ -z "${LABEL//[[:space:]]/}" ]]; then
   emit_error args "No --label provided (it is required on every dial)" \
     "Pass --label \"<2-4 word slug of the task>\" — it names the callee in the cmux tab strip, which is the only thing that tells two callees in one repo apart. Examples: --label \"fix hotline titles\", --label \"review pr 2393\"."
 fi
+
+# Refused here, before anything is resolved or launched: every launcher re-checks,
+# but a malformed value caught there would fail a dial that already did the work of
+# resolving and picking a transport.
+callee_env_validate || emit_error args "HOTLINE_CALLEE_ENV: $CALLEE_ENV_ERR" \
+  "Set HOTLINE_CALLEE_ENV to space-separated KEY=VALUE pairs — variable-name keys, non-empty values with no spaces, each key once — e.g. HOTLINE_CALLEE_ENV=\"AGENTIC_DEV_ROLE=builder AGENTIC_DEV_RUN=42\". Or unset it."
 
 case "$PLACEMENT" in
   side|detached) ;;
@@ -798,8 +806,9 @@ fi
 if $REFRESH_IDENTITY; then
   # The callee's system-prompt override is for the user's delegated work, not for
   # hotline's own identity plumbing — this pickup is a throwaway internal call, so
-  # unset the knob for it rather than steering a mechanical /hotline-pickup.
-  if HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE= \
+  # unset the knob for it rather than steering a mechanical /hotline-pickup. Same for
+  # HOTLINE_CALLEE_ENV: its markers label delegated work, and this is not that.
+  if HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE= HOTLINE_CALLEE_ENV= \
      bash "$DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
        --prompt "/hotline:hotline-pickup --fresh" >/dev/null 2>"$ERR_FILE"; then
     add_fallback "identity→refreshed"
@@ -1273,6 +1282,7 @@ emit_connected() {  # emit_connected <awaiting_response:true|false>
     --argjson identity_stale "$IDENTITY_STALE" \
     --argjson awaiting "$1" \
     --argjson fallbacks "$(fb_json)" \
+    --arg callee_env "$CALLEE_ENV_PATH" \
     '{status:"connected", caller_session_id:$caller_session, caller_kind:$caller_kind,
       workspace:$workspace, mode:$mode, transport:$transport, placement:$placement,
       first_contact:$first_contact, remote_session_id:$remote_session,
@@ -1285,10 +1295,20 @@ emit_connected() {  # emit_connected <awaiting_response:true|false>
      + (if $retried   == "" then {} else {retried_enter:($retried == "true")} end)
      + (if $submit_frames == "" then {} else {submit_frames:($submit_frames|tonumber)} end)
      + (if $remote_target == "" then {} else {remote_target:$remote_target} end)
-     + (if $remote_pane   == "" then {} else {remote_pane:$remote_pane} end)'
+     + (if $remote_pane   == "" then {} else {remote_pane:$remote_pane} end)
+     + (if $callee_env == "" then {}
+        elif $callee_env == "not-redelivered" then {callee_env:$callee_env,
+          callee_env_note:"follow-up into a live callee: its environment was fixed when it launched, so HOTLINE_CALLEE_ENV was not delivered this turn"}
+        else {callee_env:$callee_env} end)'
   exit 0
 }
 CALL_ID_OUT=""
+# How HOTLINE_CALLEE_ENV reached the callee, and only when it is set — an unset knob
+# keeps the payload's keys exactly as they were. Every launcher takes it the same
+# way, as `claude --settings` (scripts/callee-env.sh); the two live-reuse branches
+# below overwrite this, because typing into a running REPL delivers nothing to it.
+CALLEE_ENV_PATH=""
+[[ -n "$(callee_env_settings_json)" ]] && CALLEE_ENV_PATH="settings"
 # The pane the remote herdr split for this callee, and the ONLY handle a human has
 # for closing it: herdr never closes anything after a call (that is the point of the
 # transport), and a pane on another box is not visible in anything local. Emitted
@@ -1410,6 +1430,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
       bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
         --caller-session "$MY_SESSION_ID" --surface "$SURFACE_REF" \
         ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} --call-dir "$CALL_DIR" >/dev/null 2>&1
+      [[ -n "$CALLEE_ENV_PATH" ]] && CALLEE_ENV_PATH="not-redelivered"
       emit_connected true
     fi
     # {"fallback":"fresh"} — refused BEFORE anything was sent, so a fresh surface is
@@ -1492,6 +1513,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
       bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
         --caller-session "$MY_SESSION_ID" --surface "$SURFACE_REF" \
         ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} >/dev/null 2>&1
+      [[ -n "$CALLEE_ENV_PATH" ]] && CALLEE_ENV_PATH="not-redelivered"
       emit_connected true
     fi
     # {"fallback":"fresh"} — refused BEFORE anything was submitted (the agent is

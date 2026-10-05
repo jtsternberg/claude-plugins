@@ -99,6 +99,13 @@ source "$HOTLINE_SCRIPTS/repl-state.sh"
 # shellcheck source=../../../scripts/herdr-state.sh
 source "$HOTLINE_SCRIPTS/herdr-state.sh"
 
+# HOTLINE_CALLEE_ENV rides the callee's argv as a settings env block — see
+# scripts/callee-env.sh. dial.sh refuses a malformed value at its args stage; this
+# repeats the check for a direct invocation rather than launching without it.
+source "$HOTLINE_SCRIPTS/callee-env.sh"
+callee_env_validate || { jq -nc --arg e "HOTLINE_CALLEE_ENV: $CALLEE_ENV_ERR" '{error: $e}'; exit 1; }
+CALLEE_SETTINGS=$(callee_env_settings_json)
+
 CWD=""
 PROMPT=""
 PROMPT_FILE=""
@@ -394,6 +401,7 @@ READY_POLL="${HOTLINE_HERDR_READY_POLL:-0.5}"
 CLAUDE_ARGS=(--session-id "$SESSION_ID_PRESET")
 [[ -n "$SESSION_NAME" ]] && CLAUDE_ARGS+=(-n "$SESSION_NAME")
 [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && CLAUDE_ARGS+=(--model "$HOTLINE_CLAUDE_MODEL")
+[[ -n "$CALLEE_SETTINGS" ]] && CLAUDE_ARGS+=(--settings "$CALLEE_SETTINGS")
 # Opt-in via HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS — see README. A hotline callee
 # lands in an unattended pane, so without this it stalls on the first permission
 # gate (which herdr at least reports honestly as `blocked`). Off by default; it is
