@@ -105,8 +105,11 @@ for f in "$CWD"/HANDOFF*.md; do
   name=$(basename "$f")
   detail=""
 
-  # Age from mtime (BSD stat first, then GNU stat).
-  mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo "")
+  # Age from mtime. GNU stat first: on GNU, `-f` is "filesystem status" and
+  # succeeds, so a BSD-first `stat -f %m` dumps fs info into the arithmetic.
+  # BSD stat has no `-c`, so on macOS the first form fails and falls through.
+  mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo "")
+  case "$mtime" in ''|*[!0-9]*) mtime="" ;; esac
   if [ -n "$mtime" ] && [ -n "$now" ]; then
     secs=$(( now - mtime ))
     if [ "$secs" -lt 3600 ]; then detail="$(( secs / 60 ))m old"

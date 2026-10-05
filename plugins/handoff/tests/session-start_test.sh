@@ -218,6 +218,20 @@ else
   fail "prints nothing when clean (got: $EMPTY_OUT)"
 fi
 
+# --- HANDOFF*.md files are announced, with an age ---------------------------
+# Regression: the age lookup tried BSD `stat -f %m` first. On GNU coreutils
+# `-f` means "filesystem status" and SUCCEEDS, so the fs dump landed in the
+# arithmetic, the hook died, and no HANDOFF*.md was ever announced on Linux.
+FILEDIR="$TMP/filedir"; mkdir -p "$FILEDIR"
+printf '# handoff\n' > "$FILEDIR/HANDOFF-some-work.md"
+FILE_OUT=$(printf '{"session_id":"s","transcript_path":"/tmp/t","cwd":"%s"}' "$FILEDIR" \
+  | PATH="$BIN:$PATH" CLAUDE_CODE_SESSION_ID=s bash "$HOOK" 2>&1)
+if grep -qE '^- Handoff file: HANDOFF-some-work\.md \([0-9]+m old\)$' <<<"$FILE_OUT"; then
+  pass "announces a HANDOFF*.md file with its age"
+else
+  fail "HANDOFF*.md file not announced cleanly (got: $FILE_OUT)"
+fi
+
 # --- never fails the session ------------------------------------------------
 if printf 'not json at all' | PATH="$BIN:$PATH" bash "$HOOK" >/dev/null 2>&1; then
   pass "exits 0 on malformed stdin"

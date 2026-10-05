@@ -365,11 +365,12 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
 
 ## Testing
 
-- **Read a file's mode with GNU `stat -c` before BSD `stat -f`.** On Linux
-  `stat -f` is `--file-system` and prints verbose output instead of failing, so a
-  BSD-first `stat -f … || stat -c …` never reaches the fallback and permission
-  assertions read empty on the ubuntu runner. Grep tests for any `stat -f` placed
-  before its `stat -c` fallback. (289ef4a)
+- **Call GNU `stat -c` before BSD `stat -f` — in tests and shipped scripts alike.**
+  On Linux `stat -f` is `--file-system` and prints a filesystem dump whether or not
+  it then exits non-zero, so `$(stat -f … || stat -c …)` captures that dump (alone,
+  or ahead of the fallback's output) and mode checks or mtime arithmetic break.
+  Grep for any `stat -f` ahead of its `stat -c`; an `if/else` that reassigns the
+  variable in its fallback branch is safe. (289ef4a, fcad216)
 - **An injectable delay keeps its shipped default under test, and patience is
   asserted on the exit path rather than the stopwatch.** Collapsing a poller's sleep
   for speed makes every wall-clock assertion vacuous and hides a `0` default that
