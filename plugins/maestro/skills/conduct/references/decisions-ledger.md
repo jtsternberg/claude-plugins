@@ -36,7 +36,8 @@ One section per decision. Resolved ones move to the bottom with the answer.
 ### decide-<slug> — <the question as a question>
 
 **What happened:** the facts that produced the question, in words. Spell out
-what an id refers to ("PR #92 fixes a bug where …"), never just the number.
+what an id refers to ("[acme/app#92](https://github.com/acme/app/pull/92) fixes
+a bug where …"), never just the number.
 
 **Why it matters:** the cost of getting it wrong, or of deciding later.
 
@@ -81,6 +82,11 @@ watched the session, rewrite it.
 - **Resolve in the same turn you act on the answer:** move the section to
   `Decided` with the date and what was chosen. A ledger whose `Open` list is
   stale is worse than none, because it re-asks settled questions.
+- **Every GitHub ref is a link labeled with the full `owner/repo#N`:**
+  `[acme/app#92](https://github.com/acme/app/pull/92)` (`/issues/N` works too;
+  GitHub redirects between them), never a bare `#92` or `app#92`. The human
+  opens the ledger hours later from a `Next for you:` line with no scrollback,
+  so every ref has to be one click.
 - **One file, appended all session.** Don't start a second ledger for a second
   decision, and don't rewrite history in `Decided`.
 
@@ -102,7 +108,8 @@ Good:
 
 ```
 Next for you: answer "fold campaigns into 92" (F) or "defer campaigns" (D) — whether
-PR #92 also fixes the wrong exit code in the five campaigns commands
+[acme/app#92](https://github.com/acme/app/pull/92) also fixes the wrong exit code
+in the five campaigns commands
 (/tmp/maestro/decisions-c54f524f.md - #decide-92-campaigns)
 ```
 
@@ -110,7 +117,8 @@ Numbered recommendations bundled into one decision, with per-item override:
 
 ```
 Next for you: type `ok` (k) to take all 8 recommendations and file the 11 sub-issues
-for frontend#2653, or `N: <change>` to override item N
+for [acme/frontend#2653](https://github.com/acme/frontend/issues/2653), or `N: <change>`
+to override item N
 (/tmp/maestro/decisions-c54f524f.md - #decide-2653-split)
 ```
 
@@ -118,7 +126,8 @@ Nothing owed now, but the next step is already known — its token still carries
 its alias:
 
 ```
-Next for you: nothing. After I confirm the edits, the next step is your `file` (F) on #2653.
+Next for you: nothing. After I confirm the edits, the next step is your `file` (F) on
+[acme/frontend#2653](https://github.com/acme/frontend/issues/2653).
 ```
 
 The clause stays short enough (≈15 words) that a human who was present never

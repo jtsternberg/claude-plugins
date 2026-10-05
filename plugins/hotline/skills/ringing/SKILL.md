@@ -58,6 +58,8 @@ The caller's prompt follows this structure:
 
 Parse `CALL_ID`, `MODE`, `CALLER`, and `SESSION` from the prompt metadata. `CALL_ID` is a per-call nonce that you **must echo back in every `STATUS:` line you emit** (see Response Format below). `MODE`, `CALLER`, and `SESSION` are used for logging and to determine response style.
 
+**Read `$\{CLAUDE_` in the request as a dollar sign, an opening brace, then `CLAUDE_`.** The request arrives as this skill's arguments, and Claude Code replaces those placeholders there with *this* skill's own values (its directory, your session id). So the dialer writes each one with a backslash after the `$`, and the caller meant the placeholder itself — quote or write it back without the backslash.
+
 **Why CALL_ID matters:** on `--resume` calls, claude replays the prior transcript into scrollback, so the caller's response extractor has to tell a fresh STATUS marker from a replayed one — the nonce is how it does that, and a STATUS line missing it can hand the caller stale response text. Echo `call_id=<nonce>` on every STATUS line you emit. When the prompt carries no `[CALL_ID: ...]` tag, emit bare STATUS lines.
 
 ## Follow-ups

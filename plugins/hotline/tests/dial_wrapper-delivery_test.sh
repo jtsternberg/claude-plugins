@@ -511,4 +511,42 @@ for doc in "$HOTLINE_DIR/skills/dial/SKILL.md" "$HOTLINE_DIR/README.md"; do
   check "$rel ties it to --boot-timeout rather than naming a second number" $? "no --boot-timeout reference"
 done
 
+# ===========================================================================
+# A ${CLAUDE_*} placeholder in the caller's message reaches the callee literally.
+# The message rides the ringing skill's arguments, and Claude Code substitutes
+# ${CLAUDE_*} variables there with RINGING's own values (its skill dir, the
+# callee's session id) — after inserting the arguments, with no backslash escape.
+# So dial.sh writes each `${CLAUDE_` as `$\{CLAUDE_`, which ringing reads back.
+# ===========================================================================
+SUBST_MSG='write "${CLAUDE_SKILL_DIR}/scripts/x.sh" || true, log ${CLAUDE_SESSION_ID}, keep ${HOME}'
+SUBST_WANT='write "$\{CLAUDE_SKILL_DIR}/scripts/x.sh" || true, log $\{CLAUDE_SESSION_ID}, keep ${HOME}'
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-subst1" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$DIAL" --target "$t/target" --mode work_order --label "probe label" \
+    --prompt "$SUBST_MSG" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+[[ "$(jq -r .status <<<"$out")" == "connected" && "$(last_paste)" == "$SUBST_WANT" ]]
+check "first contact escapes \${CLAUDE_ in the message, and only that" $? \
+  "pasted=$(last_paste) out=$out stderr=$(cat "$t/err.txt")"
+
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\n' > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-subst2" --session "5ab5ab5a-5ab5-45ab-85ab-5ab5ab5ab5ab" \
+  --mode work_order --surface "SURFACE-UUID-777"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-subst2" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --label "probe label" \
+    --prompt "$SUBST_MSG" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+[[ "$(jq -r .first_contact <<<"$out")" == "false" && "$(last_paste)" == "$SUBST_WANT" ]]
+check "an interactive follow-up escapes it the same way" $? \
+  "pasted=$(last_paste) out=$out stderr=$(cat "$t/err.txt")"
+
 dial_wrapper_finish

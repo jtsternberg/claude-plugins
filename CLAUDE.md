@@ -74,7 +74,7 @@ restatement — two sources for one rule is itself entry-one's failure mode.
 2. Put `plugin.json` at `plugins/<plugin-name>/.claude-plugin/plugin.json`
 3. For each skill, create `plugins/<plugin-name>/skills/<skill-name>/SKILL.md`, and bundle any scripts it runs in that same `skills/<skill-name>/scripts/` directory
 4. Add hooks (`hooks/`) and slash commands (`commands/`) at the plugin root as needed
-5. Register the plugin in `.claude-plugin/marketplace.json` by adding an entry to the `plugins` array — this is the single inventory source of truth
+5. Register the plugin in `.claude-plugin/marketplace.json` by adding an entry to the `plugins` array — this is the single inventory source of truth. Give the entry `name`, `source`, and a `description` copied verbatim from the plugin's `plugin.json` (directory listings read the entry, not the manifest; `tests/marketplace-descriptions.test.mjs` pins the copy)
 6. Regenerate the Codex-native catalog: `node scripts/gen-codex-catalog.mjs` (add a `policy` override to `scripts/codex-catalog.config.json` first if the plugin has no usable Codex surface). `.agents/plugins/marketplace.json` is generated, never hand-edited, and `bash tests/run-all.sh` fails on drift if you skip this. See [`docs/release.md`](docs/release.md) §1.
 7. Update `README.md` with documentation for the new plugin
 

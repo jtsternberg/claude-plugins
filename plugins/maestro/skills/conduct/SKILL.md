@@ -143,7 +143,8 @@ Keep `/tmp/maestro/decisions-<session-id>.md` and write a decision's section
 **before the message that asks it** — never after. The human answers hours
 later with no scrollback, so the section carries what happened, why it matters,
 the options as the exact tokens to type, your recommendation, and what happens
-next either way, in plain language for someone who has never seen the repo.
+next either way, in plain language for someone who has never seen the repo,
+with every GitHub ref a one-click link labeled `owner/repo#N`.
 Resolved decisions move to a `Decided` list with the date and the answer: that
 list is the audit trail, and it's the decisions half of a handoff, which
 **points at the ledger** instead of restating it.
