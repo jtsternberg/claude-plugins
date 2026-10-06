@@ -1062,15 +1062,22 @@ PREV_CALL_DIR=""
 # same workspace took the slot) may still name a session LIVE in a surface. Register
 # it as this target's cached callee so the lookup below sees an ordinary follow-up and
 # reuse applies its idle/dirty-box gates; a miss leaves today's resume untouched.
-if $NO_FORK && [[ -n "$RESUME_ARG" ]] && ! $FRESH && [[ "$TRANSPORT" == "cmux" && -z "$REMOTE_TARGET" ]] \
-   && [[ "$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID" 2>/dev/null \
-            | jq -r '.session_id // empty' 2>/dev/null)" != "$RESUME_ARG" ]] \
-   && LIVE=$(bash "$DIAL_SCRIPTS/find-live-surface.sh" "$RESUME_ARG" 2>/dev/null); then
-  bash "$DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
-    --caller-session "$MY_SESSION_ID" --session "$RESUME_ARG" --mode "$MODE_TAG" \
-    --surface "$(jq -r '.surface_ref' <<<"$LIVE")" --call-id "$(jq -r '.call_id' <<<"$LIVE")" \
-    --call-dir "$(jq -r '.call_dir' <<<"$LIVE")" --transport cmux >/dev/null 2>&1
-  add_fallback "live-session-adopted($RESUME_ARG in surface $(jq -r '.surface_ref' <<<"$LIVE"); the cache had lost it)"
+# ADOPTED_SURFACE is what the later steps key on: a session adopted as live must never
+# be launched a second time, so a refusal from reuse stops the dial instead of falling
+# back to a fresh `claude --resume`.
+ADOPTED_SURFACE=""
+if $NO_FORK && [[ -n "$RESUME_ARG" ]] && ! $FRESH && [[ "$TRANSPORT" == "cmux" && -z "$REMOTE_TARGET" ]]; then
+  CACHED_SID=$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID" 2>/dev/null \
+                 | jq -r '.session_id // empty' 2>/dev/null)
+  if [[ "$CACHED_SID" != "$RESUME_ARG" ]] \
+     && LIVE=$(bash "$DIAL_SCRIPTS/find-live-surface.sh" "$RESUME_ARG" 2>/dev/null); then
+    ADOPTED_SURFACE=$(jq -r '.surface_ref' <<<"$LIVE")
+    bash "$DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
+      --caller-session "$MY_SESSION_ID" --session "$RESUME_ARG" --mode "$MODE_TAG" \
+      --surface "$ADOPTED_SURFACE" --call-id "$(jq -r '.call_id' <<<"$LIVE")" \
+      --call-dir "$(jq -r '.call_dir' <<<"$LIVE")" --transport cmux >/dev/null 2>&1
+    add_fallback "live-session-adopted($RESUME_ARG in surface $ADOPTED_SURFACE; ${CACHED_SID:+displaced cached $CACHED_SID, }the cache had lost it)"
+  fi
 fi
 if [[ -z "$RESUME_ARG" ]] || $NO_FORK; then
   if CACHED=$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" \
@@ -1433,6 +1440,17 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
     fi
 
     REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
+    # On an adopted session only the transcript tier proves the message reached THAT
+    # session. The screen tier reads the nonce off the pane, which a REPL the user has
+    # since /resume'd or /clear'ed into another session shows just the same — the order
+    # would run there while the waiter polls the target's transcript to its timeout.
+    # Same verdict, and same do-not-re-dial warning, as a paste that went out unconfirmed.
+    if [[ -n "$ADOPTED_SURFACE" && -n "$REUSE_DIR" ]] \
+       && [[ "$(jq -r '.confirmed // empty' <<<"$REUSE" 2>/dev/null)" != "transcript" ]]; then
+      CALL_DIR="$REUSE_DIR"
+      emit_error deliver "the follow-up was pasted into surface $ADOPTED_SURFACE but could not be confirmed in session $RESUME_ARG's transcript (the screen shows the message, but the REPL there may now be a different session)" \
+        "The REPL in that surface may ALREADY have the message, in whichever session it is now running; $REUSE_DIR holds the call. Check which session the surface is in and read the target's transcript for the call_id before doing anything. See references/error-recovery.md § Delivery. Do NOT re-dial — that would deliver it twice."
+    fi
     if [[ -n "$REUSE_DIR" ]]; then
       CALL_DIR="$REUSE_DIR"
       # cmux-paste.sh's confidence, forwarded rather than dropped.
@@ -1453,7 +1471,13 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
       emit_connected true
     fi
     # {"fallback":"fresh"} — refused BEFORE anything was sent, so a fresh surface is
-    # safe: the callee received nothing.
+    # safe: the callee received nothing. NOT for an adopted live session: the fresh
+    # path is `claude --resume` of an id whose REPL is still running, which is the
+    # second REPL on one transcript that adopting it exists to prevent.
+    if [[ -n "$ADOPTED_SURFACE" ]]; then
+      emit_error deliver "session $RESUME_ARG is live in surface $ADOPTED_SURFACE and reuse refused it: $(reason_full "$REUSE")" \
+        "Nothing was sent and nothing was launched — a fresh launch would start a second REPL on the same session. Wait for that REPL to go idle, or type into surface $ADOPTED_SURFACE yourself, then re-dial the same way. See references/error-recovery.md § Delivery."
+    fi
     add_fallback "surface-reuse→fresh($(reason_of "$REUSE"))"
     SURFACE_REF=""
   fi
