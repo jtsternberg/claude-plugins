@@ -138,10 +138,21 @@ has "renders a Coverage section when a host was unavailable" '^Coverage$'
 
 # --- visible-name locators ---------------------------------------------------
 
-has "herdr locator form" '<agent name>` in `<tab name>'
-has "cmux locator form" '<surface title>` in `<workspace title>'
-has "window anchor only when needed" 'window anchor'
+has "builds locators with the bundled script" 'bash "\$SKILL_DIR/scripts/locate.sh" --graveyard'
+has "script path resolves through the skill-dir token" 'SKILL_DIR="\$\{CLAUDE_SKILL_DIR\}"'
+has "gives Codex the skill-dir substitution prose" 'Codex: this path resolves under Claude Code'
+has "never joins sessions on cwd" 'never joins on `cwd`'
+has "cmux locator form walks window, workspace key, pane, tab" '<tab title> — <window> › ⌘<n> <workspace> › <pane position>, tab <k>/<m>'
+has "names untitled cmux windows by what they show" 'the "<workspace it is showing>" window'
+has "herdr locator form" '<agent name> — <workspace label> \(#<n>\) › tab <tab label> \(#<n>\)'
+has "unlocated rows are never guessed" 'Never guess a position'
 has "session UUIDs and pane ids stay internal, not output" 'pane ids are internal lookup keys, not output'
+has "window legend opens a multi-window briefing" '^Windows: this window'
+has "groups items sharing a workspace under one sub-header" 'print that group once as a sub-header'
+has "Next for you always carries the full locator" 'always carries the\s*$|always carries the full `locator`'
+has "anti-pattern: bare pane numbers and refs" '\| Session UUIDs, refs, or a bare `pane 2` in prose \|'
+has "anti-pattern: title-joined guesses" 'or a title-joined guess \|'
+has "rule zero lists cmux identify as a read" '`cmux identify --json`'
 
 # --- hotline nesting ---------------------------------------------------------
 
