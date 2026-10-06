@@ -791,8 +791,14 @@ if $CMUX_MODE; then
     return 0
   }
 
+  # `force` (first arg) is passed ONLY by the two sites that just captured the
+  # response for OUR nonce. cmux 0.65.0 refuses to close a tab holding a live
+  # process, and the callee's REPL always is one, so without it the tab this
+  # placement promises to auto-close never closes. Timeout and transport-failure
+  # callers share this function and must not force: they have no such proof.
   cleanup_workspace_and_script() {
-    local out
+    local out force=""
+    [[ "${1:-}" == "force" ]] && force="--force"
     rm -f "$LAUNCH_SCRIPT" 2>/dev/null || true
     [[ "$KEEP" == "true" ]] && return 0
     # Stdout is discarded on both paths — close-{surface,workspace}'s "OK …"
@@ -805,7 +811,7 @@ if $CMUX_MODE; then
       # KEEP=true (the surface lives in the caller's own window and is meant to
       # stay visible), so this branch is only reached when a caller asked for a
       # surface placement AND for it to be closed.
-      cmux_close_surface_scoped "response-time cleanup" "$WS_REF" \
+      cmux_close_surface_scoped "response-time cleanup" "$WS_REF" ${force:+force} \
         || record_cleanup_failure "could not close surface $WS_REF after the response: $CMUX_CLOSE_ERR"
     else
       # A DETACHED callee's tab auto-closes once its response is captured — that is
@@ -815,8 +821,8 @@ if $CMUX_MODE; then
       # surface"), so closing the surface would leave the tab open forever
       # (claude-plugins-zaus). A follow-up arriving after this reads its cached
       # surface as gone and takes the existing `surface-reuse→fresh(...)` path.
-      if ! out=$(cmux close-workspace --workspace "$WS_CLOSE_REF" 2>&1); then
-        record_cleanup_failure "could not close workspace $WS_CLOSE_REF after the response: $(printf '%s' "$out" | tr '\n\r\t' '   ' | cut -c1-140)"
+      if ! out=$(CMUX_QUIET=1 cmux close-workspace --workspace "$WS_CLOSE_REF" ${force:+"$force"} 2>&1); then
+        record_cleanup_failure "could not close workspace $WS_CLOSE_REF after the response: $(cmux_err_text "$out")"
       fi
     fi
     return 0
@@ -1002,7 +1008,7 @@ if $CMUX_MODE; then
         0)  # turn complete — T_OUT is {"session_id":..,"response":..}
           printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
           touch "$CALL_DIR/done"
-          cleanup_workspace_and_script
+          cleanup_workspace_and_script force
           emit_response_json
           exit 0
           ;;
@@ -1231,7 +1237,7 @@ if $CMUX_MODE; then
       jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
         '{session_id: $sid, response: $resp}' > "$CALL_DIR/response.json"
       touch "$CALL_DIR/done"
-      cleanup_workspace_and_script
+      cleanup_workspace_and_script force
 
       emit_response_json
       exit 0

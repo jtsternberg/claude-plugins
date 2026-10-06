@@ -126,6 +126,7 @@ screen_shell_prompt_themed() {
 
 # run_case <name> [--no-nonce] [--moving] [--busy] [--interrupted]
 #          [--no-tree] [--orphan-tree] [--close-fails <msg>] [--unreadable]
+#          [--needs-force]
 #          -- [args to the script]
 #
 # Two knobs come from the environment of the call, matching the vocabulary
@@ -136,7 +137,7 @@ screen_shell_prompt_themed() {
 CASEDIR=""; OUT=""; CALLLOG=""; REQLOG=""
 run_case() {
   local name="$1"; shift
-  local no_nonce="" moving="" screen="screen_idle" no_tree="" orphan="" close_fail="" unreadable=""
+  local no_nonce="" moving="" screen="screen_idle" no_tree="" orphan="" close_fail="" unreadable="" needs_force=""
   while [[ $# -gt 0 && "$1" != "--" ]]; do
     case "$1" in
       --no-nonce)    no_nonce=1; shift ;;
@@ -150,6 +151,7 @@ run_case() {
       --orphan-tree) orphan=1; shift ;;
       --unreadable)  unreadable=1; shift ;;
       --close-fails) close_fail="$2"; shift 2 ;;
+      --needs-force) needs_force=1; shift ;;
       *) shift ;;
     esac
   done
@@ -169,6 +171,7 @@ run_case() {
   printf '%s' "${orphan:-}"      > "$CASEDIR/orphan"
   printf '%s' "${close_fail:-}"  > "$CASEDIR/close_fail"
   printf '%s' "${unreadable:-}"  > "$CASEDIR/unreadable"
+  printf '%s' "${needs_force:-}" > "$CASEDIR/needs_force"
   printf '%s' "$SURF" > "$CASEDIR/surf"; printf '%s' "$WS" > "$CASEDIR/ws"
 
   # A per-case socket server when responses are staged, else the poisoned one. The
@@ -229,6 +232,11 @@ case "$1" in
     fi
     exit 0 ;;
   close-surface)
+    # cmux 0.65.0: a live process (the callee's REPL) needs --force, verbatim error.
+    if [[ -s "$D/needs_force" && "$*" != *" --force"* ]]; then
+      echo "Error: confirmation_required: Surface has a running process; retry with force=true" >&2
+      exit 1
+    fi
     if [[ -s "$D/close_fail" ]]; then echo "Error: $(cat "$D/close_fail")" >&2; exit 1; fi
     echo "OK"; exit 0 ;;
   *) exit 0 ;;
@@ -294,6 +302,26 @@ grep -q "^close-surface --workspace $WS --surface $SURF" "$CALLLOG" \
 grep -q '^tree --all --json --id-format both' "$CALLLOG" \
   && pass "the workspace is resolved from the cmux tree by UUID" \
   || fail "the workspace is resolved from the cmux tree by UUID" "$(cat "$CALLLOG")"
+
+# cmux 0.65.0 refuses a live REPL without --force; <= 0.64.25 ignores the flag,
+# so the stub's default (permissive) case above already stands in for an old cmux.
+run_case needs_force --needs-force -- --surface "$SURF" --expect-call-id "$NONCE"
+closed && grep -q -- "^close-surface --workspace $WS --surface $SURF --force" "$CALLLOG" \
+  && pass "on a cmux that demands --force, the proven-idle surface IS closed with it" \
+  || fail "on a cmux that demands --force, the proven-idle surface IS closed with it" "out=$OUT $(cat "$CALLLOG")"
+
+# --force only ever follows the proof: each failed gate still means zero close calls,
+# even against a cmux that would accept the forced close.
+for _gate in busy parked interrupted shell; do
+  run_case "force_$_gate" --needs-force "--$_gate" -- --surface "$SURF" --expect-call-id "$NONCE"
+  ! closed && [[ "$(close_calls)" -eq 0 ]] \
+    && pass "with --force available, a $_gate surface still gets NO close call" \
+    || fail "with --force available, a $_gate surface still gets NO close call" "out=$OUT closes=$(close_calls)"
+done
+run_case force_no_nonce --needs-force --no-nonce -- --surface "$SURF" --expect-call-id "$NONCE"
+! closed && [[ "$(close_calls)" -eq 0 ]] \
+  && pass "with --force available, a surface lacking the prior nonce still gets NO close call" \
+  || fail "with --force available, a surface lacking the prior nonce still gets NO close call" "out=$OUT closes=$(close_calls)"
 
 ! grep -qE 'tty|ttys[0-9]' "$CALLLOG" \
   && pass "nothing is ever targeted by tty" \

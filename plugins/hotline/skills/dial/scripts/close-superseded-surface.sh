@@ -263,8 +263,16 @@ WS="${ADDR%% *}"
 
 # cmux itself refuses to close the last surface in a workspace
 # ("invalid_state: Cannot close the last surface"), which bounds the worst case
-# of a wrong decision here to a no-op rather than a destroyed workspace.
-if ! CLOSE_OUT=$(cmux close-surface --workspace "$WS" --surface "$SURFACE_REF" 2>&1); then
+# of a wrong decision here to a no-op rather than a destroyed workspace. The
+# guard holds under --force too (verified live, cmux 0.65.0).
+#
+# --force: cmux 0.65.0 refuses to close a surface with a live process
+# (confirmation_required), and the callee's claude REPL always is one. Every gate
+# above is the proof that closing is safe, so cmux's own prompt is redundant HERE;
+# keep --force on this call only, never on a close that has not passed them. cmux
+# <= 0.64.25 never reads the flag (its close-surface ignores unknown flags), so no
+# version gate.
+if ! CLOSE_OUT=$(cmux close-surface --workspace "$WS" --surface "$SURFACE_REF" --force 2>&1); then
   refuse "cmux close-surface refused: $(printf '%s' "$CLOSE_OUT" | tr '\n\r\t' '   ' | cut -c1-140)"
 fi
 

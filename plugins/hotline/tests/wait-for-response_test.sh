@@ -1151,6 +1151,25 @@ if [[ "\$1" == "close-surface" && -n "\${CMUX_REFUSE_CLOSE:-}" ]]; then
   echo 'not_found: Surface not found' >&2
   exit 1
 fi
+# CMUX_NEEDS_FORCE models cmux 0.65.0: a close of anything holding a live process
+# (the callee's REPL, always) is refused unless --force rides along.
+# CMUX_SCREEN_FILE feeds read-screen, for the paths that read the callee's box.
+if [[ "\$1" == "read-screen" && -n "\${CMUX_SCREEN_FILE:-}" ]]; then cat "\$CMUX_SCREEN_FILE"; fi
+# CMUX_REFUSE_CONFIRM: 0.65.0's refusal verbatim, preceded by the deprecation banner
+# the aliased verbs print, and refused even WITH --force so a failure can be forced.
+# CMUX_QUIET as seen by the close is logged so a test can pin that it is set.
+if [[ "\$1" == "close-surface" || "\$1" == "close-workspace" ]]; then
+  printf '%s\\n' "\${CMUX_QUIET:-unset}" >> '$sd/quiet.log'
+  if [[ -n "\${CMUX_REFUSE_CONFIRM:-}" ]]; then
+    echo "cmux: '\$1' is now an alias for 'cmux workspace close'. The legacy form keeps working indefinitely; set CMUX_QUIET=1 to silence this notice." >&2
+    echo 'Error: confirmation_required: Workspace has a running process; retry with --force' >&2
+    exit 1
+  fi
+fi
+if [[ ( "\$1" == "close-surface" || "\$1" == "close-workspace" ) && -n "\${CMUX_NEEDS_FORCE:-}" && " \$* " != *" --force "* ]]; then
+  echo 'Error: confirmation_required: has a running process; retry with --force' >&2
+  exit 1
+fi
 exit 0
 STUB
   chmod +x "$sd/cmux"
@@ -1272,6 +1291,112 @@ else
   fail "…and on stderr, leaving stdout pure JSON" "$(cat "$CDN/stderr.txt" 2>/dev/null || echo NONE)"
 fi
 rm -rf "$HN" "$CDN" "$SDN"
+
+# --- cmux 0.65.0 prints a deprecation banner BEFORE the real error ----------
+# The recorded error was cut to its first 140 chars, so the banner filled it and
+# `confirmation_required` never showed. Both closes must record the error itself,
+# and must set CMUX_QUIET=1 so a cmux that honors it never prints the banner.
+for _pl in side detached; do
+  CL=$(setup_cleanup_call "$_pl")
+  HB=${CL%%|*}; rB=${CL#*|}; CDB=${rB%%|*}; rBb=${rB#*|}; SDB=${rBb%%|*}; LOGB=${rBb#*|}
+  set +e
+  OUTB=$(HOME="$HB" PATH="$SDB:$PATH" CMUX_REFUSE_CONFIRM=1 \
+    bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDB" --timeout 20 --submit-deadline 6 2>/dev/null)
+  set -e
+  _rec=$(printf '%s' "$OUTB" | jq -r '.cleanup_error // empty' 2>/dev/null)
+  if [[ "$_rec" == *"confirmation_required"* && "$_rec" != *"is now an alias"* ]]; then
+    pass "a $_pl close refused behind the deprecation banner records confirmation_required, not the banner"
+  else
+    fail "a $_pl close refused behind the deprecation banner records confirmation_required" "cleanup_error=[$_rec]"
+  fi
+  if grep -qx "1" "$SDB/quiet.log" 2>/dev/null; then
+    pass "…and the $_pl close runs with CMUX_QUIET=1"
+  else
+    fail "…and the $_pl close runs with CMUX_QUIET=1" "quiet.log=$(cat "$SDB/quiet.log" 2>/dev/null || echo NONE)"
+  fi
+  rm -rf "$HB" "$CDB" "$SDB"
+done
+
+# --- cmux 0.65.0 refuses a live process: the captured response is the proof ---
+# Both placements are closed with --force, and ONLY after the response was captured.
+for _pl in side detached; do
+  CL=$(setup_cleanup_call "$_pl")
+  HF=${CL%%|*}; rF=${CL#*|}; CDF=${rF%%|*}; rFb=${rF#*|}; SDF=${rFb%%|*}; LOGF=${rFb#*|}
+  set +e
+  OUTF=$(HOME="$HF" PATH="$SDF:$PATH" CMUX_NEEDS_FORCE=1 \
+    bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDF" --timeout 20 --submit-deadline 6 2>/dev/null)
+  set -e
+  if [[ "$_pl" == "side" ]]; then _verb="close-surface --workspace WS-UUID-7 --surface $CLEAN_SURF --force"
+  else _verb="close-workspace --workspace WS-UUID-7 --force"; fi
+  if grep -qF -- "$_verb" "$LOGF" 2>/dev/null && [[ -z "$(printf '%s' "$OUTF" | jq -r '.cleanup_error // empty' 2>/dev/null)" ]] \
+     && [[ ! -s "$CDF/cleanup_err.txt" ]]; then
+    pass "a $_pl call closes with --force on a cmux that demands it, recording no failure"
+  else
+    fail "a $_pl call closes with --force on a cmux that demands it" \
+         "cmux calls: $(cat "$LOGF" 2>/dev/null || echo NONE) out=$OUTF"
+  fi
+  rm -rf "$HF" "$CDF" "$SDF"
+done
+
+# The same function closes after a TIMEOUT, where nothing was captured. That close
+# must never carry --force: it has no proof the callee is done, and a refusal here
+# is the right outcome.
+CL=$(setup_cleanup_call detached)
+HT=${CL%%|*}; rT=${CL#*|}; CDT=${rT%%|*}; rTb=${rT#*|}; SDT=${rTb%%|*}; LOGT=${rTb#*|}
+printf '%s\n' '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] finish up"}}' \
+  > "$HT/.claude/projects/-fake-callee-ws/sess-tcm.jsonl"
+set +e
+HOME="$HT" PATH="$SDT:$PATH" CMUX_NEEDS_FORCE=1 \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDT" --timeout 4 --submit-deadline 2 >/dev/null 2>&1
+RCT=$?
+set -e
+if [[ $RCT -ne 0 ]] && grep -q "close-workspace" "$LOGT" 2>/dev/null && ! grep -q -- "--force" "$LOGT" 2>/dev/null; then
+  pass "a timed-out call's close never carries --force"
+else
+  fail "a timed-out call's close never carries --force" "rc=$RCT cmux calls: $(cat "$LOGT" 2>/dev/null || echo NONE)"
+fi
+rm -rf "$HT" "$CDT" "$SDT"
+
+# The two OTHER exits that close without proof, pinned the same way: a mutation that
+# added `force` to either survived the suite. Both leave a callee that may well still
+# be working, so a refusal is the correct outcome there.
+# (a) Message parked UNSUBMITTED in the callee's box: the BOX_RC=0 fast-fail, exit 1.
+BOXSCREEN=$(mktemp)
+printf '%s\n' "$GLYPH do the thing" "────────────────────────────────────────" \
+  "${GLYPH}${NBSP}[Pasted text #2 +18 lines]" "────────────────────────────────────────" > "$BOXSCREEN"
+CL=$(setup_cleanup_call detached)
+HU=${CL%%|*}; rU=${CL#*|}; CDU=${rU%%|*}; rUb=${rU#*|}; SDU=${rUb%%|*}; LOGU=${rUb#*|}
+printf '%s\n' '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unrelated chatter"}}' \
+  > "$HU/.claude/projects/-fake-callee-ws/sess-tcm.jsonl"
+set +e
+ERRU=$(HOME="$HU" PATH="$SDU:$PATH" CMUX_NEEDS_FORCE=1 CMUX_SCREEN_FILE="$BOXSCREEN" \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDU" --timeout 60 --submit-deadline 4 2>&1 >/dev/null)
+RCU=$?
+set -e
+if [[ $RCU -eq 1 ]] && printf '%s' "$ERRU" | grep -q "still sitting UNSUBMITTED" \
+   && grep -q "close-workspace" "$LOGU" 2>/dev/null && ! grep -q -- "--force" "$LOGU" 2>/dev/null; then
+  pass "an unsubmitted-transport fast-fail's close never carries --force"
+else
+  fail "an unsubmitted-transport fast-fail's close never carries --force" "rc=$RCU err=$ERRU cmux calls: $(cat "$LOGU" 2>/dev/null || echo NONE)"
+fi
+rm -rf "$HU" "$CDU" "$SDU" "$BOXSCREEN"
+
+# (b) Scrape mode (no session id → no transcript) that never sees a STATUS: timeout, exit 1.
+CL=$(setup_cleanup_call detached)
+HV=${CL%%|*}; rV=${CL#*|}; CDV=${rV%%|*}; rVb=${rV#*|}; SDV=${rVb%%|*}; LOGV=${rVb#*|}
+rm -f "$CDV/session_id.txt"
+set +e
+ERRV=$(HOME="$HV" PATH="$SDV:$PATH" CMUX_NEEDS_FORCE=1 \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDV" --timeout 4 --submit-deadline 2 2>&1 >/dev/null)
+RCV=$?
+set -e
+if [[ $RCV -eq 1 ]] && printf '%s' "$ERRV" | grep -q "Timed out waiting for STATUS" \
+   && grep -q "close-workspace" "$LOGV" 2>/dev/null && ! grep -q -- "--force" "$LOGV" 2>/dev/null; then
+  pass "a scrape-mode timeout's close never carries --force"
+else
+  fail "a scrape-mode timeout's close never carries --force" "rc=$RCV err=$ERRV cmux calls: $(cat "$LOGV" 2>/dev/null || echo NONE)"
+fi
+rm -rf "$HV" "$CDV" "$SDV"
 
 # ---- the when-to-read gate: cmux events instead of a 2s tick ---------------
 # Once the transcript has confirmed our message submitted, the only thing left to
