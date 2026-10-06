@@ -1,6 +1,6 @@
 ---
 name: until
-description: "Stop for now and pick this back up when a session limit resets, in THIS session: 'I hit my 5-hour session limit, stop for now and resume this at 9pm when my session resets', 'I'm rate limited, come back at the reset and keep going', 'resume at 9pm where we left off', 'pause on quota and pick this back up at 6am'. Wakes this session at a wall-clock time or after a delay and runs the queued work here, with the context it already has, spending zero tokens while waiting. Also the plain timed case: 'at 9pm run X', 'in 30 minutes do X', 'queue this for later', 'run this review tonight', 'wake me at 6am and ...', 'delayed work', and queueing several jobs at set times. Not cron and not durable — the watcher dies with the session; not a headless or cloud run in a fresh context; not timed delivery into another cmux surface, which is cmux-cli's send-at."
+description: "Stop for now and pick this back up when a session limit resets, in THIS session: 'I hit my 5-hour session limit, stop for now and resume this at 9pm when my session resets', 'I'm rate limited, come back at the reset and keep going', 'resume at 9pm where we left off', 'pause on quota and pick this back up at 6am'. Wakes this session at a wall-clock time or after a delay and runs the queued work here, with the context it already has, spending zero tokens while waiting. Also the plain timed case: 'at 9pm run X', 'in 30 minutes do X', 'queue this for later', 'run this review tonight', 'wake me at 6am and ...', 'delayed work', and queueing several jobs at set times. Not cron and not durable — Claude tasks depend on the session, Codex timers depend on a live queue receiver; not a headless or cloud run in a fresh context; not timed delivery into another cmux surface, which is cmux-cli's send-at."
 when_to_use: |
   Use first when a session limit, quota, or rate limit forces a pause and the work
   should resume at the reset: "I hit my 5-hour limit — stop for now and resume this at
@@ -11,7 +11,7 @@ when_to_use: |
   while it waits: "review this PR at 9:05pm", "in 20 minutes run the suite and report",
   "queue these three reviews for tonight, spaced out". Also when a payload needs a
   human in the loop at fire time, which a headless or cloud run cannot give it.
-  NOT for schedules that must survive this session closing — nothing here does. NOT for
+  NOT for guaranteed schedules across receiver shutdown or machine restart. NOT for
   repeating schedules (cron, the `schedule` skill). NOT for delivering a prompt into a
   different cmux surface, which is cmux-cli's `send-at`.
 argument-hint: "[--caffeinate] <when> <what to run>"
@@ -141,7 +141,7 @@ date -j -f "%Y-%m-%d %H:%M:%S" "2026-09-10 09:00:00" +%s
 date -v+20M +%s
 ```
 
-These calls are a check, not a value to paste. The epoch gets computed *inside* the
+These calls are a check, not a value to paste. For Claude Code, the epoch gets computed *inside* the
 background task, the way the Mechanism block does it: the inline `date -j -f`
 expression re-derives the local offset at arm time, so a re-arm — or a copy of the
 command into another session — can't fire against a stale number.
@@ -176,7 +176,7 @@ armed broken, and it fails at fire time, hours later, silently.
 `caffeinate` cannot override a lid close on a MacBook: a shut lid sleeps the machine
 regardless of any assertion held. Say that when you arm it — the lid has to stay open.
 
-## Say this when you arm it
+## Say this when you arm it (Claude Code)
 
 - **The background task dies with the session and may be reaped on handoff.** If it is
   gone at fire time, nothing fires and there is no fallback or catch-up.
@@ -196,7 +196,7 @@ working directory rather than guessing it. Project skills can be exposed under a
 prefixed name from a subdirectory and a bare name from the repo root, so the name that
 worked when you armed the watcher is not automatically the name that works now.
 
-## Queueing several
+## Queueing several (Claude Code)
 
 Up to about three: one background task each. Each exits after its own fire and each
 notification is unambiguous. Simplest thing that works.
@@ -260,18 +260,140 @@ reviews run here so they can watch and steer before anything is published.
 4. On each notification, run the review for that URL. Don't batch it with a later one
    that hasn't fired.
 
-## Codex
+## Codex — detached timer, same-thread queue
 
-`Monitor` is Claude Code only, and Codex has no wake-from-idle primitive that resumes
-in-pane. Its only in-session wait is a blocking `functions.wait` on a yielded exec cell:
+Codex CLI **0.160.1** was verified with `codex queue --thread <UUID> --message
+<TEXT>`: a queued message arrived as a new user turn after the active turn's final
+response, continuing the same thread with context. This is a verified version, not
+an inferred minimum. Detect capability on the installed CLI before arming:
 
 ```bash
-target=$(date -j -f "%Y-%m-%d %H:%M:%S" "2026-09-09 21:05:00" +%s)
-until [ "$(date +%s)" -ge "$target" ]; do sleep 30; done
+codex --version
+codex queue --help
+printenv CODEX_THREAD_ID
 ```
 
-That blocks the whole turn, so it is honest only for short horizons — minutes to about
-an hour. For anything longer there is no Codex path that keeps this session's context
-and costs nothing while waiting; say that and let the human choose between waiting with
-a blocked turn and nudging you themselves. The zero-token-until-fire property of this
-skill is **Claude-Code-specific**.
+Require successful help showing both `--thread` and `--message`, Python 3, and the
+**current** thread UUID from the active harness environment. Compare any supplied
+thread ID with that live value; a handoff may name a different thread. Never use
+`--last`, a session name, cwd/mtime guesses, a fork, or `codex exec/resume` as a
+substitute. If current identity is unavailable or conflicts, resolve it before
+arming. If queue is unavailable, report that missing capability and offer a manual
+nudge or a short active-turn wait; do not claim all Codex versions require blocking.
+
+Use a detached one-shot Python process that polls wall time and invokes queue once.
+The example below is a **Codex-only** executable block. Replace the explicit ISO
+calendar time (including UTC offset) and payload-file path. First use a literal
+file-writing tool to save the exact payload as UTF-8 in a private file (0600),
+outside git; do not embed it in Python or shell source. For a relative delay,
+resolve and report its absolute target
+at arm time. Do not recompute the delay when the timer fires.
+
+```bash
+python3 - <<'ARM_CODEX_TIMER'
+import datetime, json, os, pathlib, shutil, subprocess, sys, tempfile, uuid
+codex = shutil.which("codex")
+if not codex:
+    raise SystemExit("codex unavailable")
+help_result = subprocess.run([codex, "queue", "--help"], capture_output=True, text=True)
+if help_result.returncode or not all(x in help_result.stdout for x in ("--thread", "--message")):
+    raise SystemExit("installed codex lacks queue capability")
+thread = os.environ.get("CODEX_THREAD_ID", "")
+uuid.UUID(thread)  # fail closed on missing/malformed current identity
+when = datetime.datetime.fromisoformat("2026-10-07T21:05:00-04:00")
+if when.tzinfo is None or when.timestamp() <= datetime.datetime.now().timestamp():
+    raise SystemExit("resolve a future target with an explicit timezone first")
+payload = pathlib.Path("/absolute/path/to/private-payload.txt").read_bytes().decode("utf-8")
+os.umask(0o077)
+job = pathlib.Path(tempfile.mkdtemp(prefix="codex-until-"))
+(job / "job.json").write_text(json.dumps({"codex": codex, "thread": thread,
+    "target": when.timestamp(), "payload": payload}), encoding="utf-8")
+runner = job / "timer.py"
+runner.write_text(r'''
+import datetime, json, pathlib, signal, subprocess, sys, time
+job = pathlib.Path(sys.argv[1])
+config = json.loads((job / "job.json").read_text(encoding="utf-8"))
+def status(value):
+    (job / "status").write_text(value + "\n", encoding="utf-8")
+    print(datetime.datetime.now(datetime.timezone.utc).isoformat(), value, flush=True)
+def cancel(signum, frame):
+    status("cancelled")
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, cancel)
+status("armed")
+while True:
+    if (job / "cancel").exists():
+        status("cancelled")
+        raise SystemExit(0)
+    remaining = config["target"] - time.time()
+    if remaining <= 0:
+        break
+    time.sleep(min(1.0, remaining))
+if (job / "cancel").exists():
+    status("cancelled")
+    raise SystemExit(0)
+status("enqueue_started")
+try:
+    result = subprocess.run([config["codex"], "queue", "--thread", config["thread"],
+        "--message", config["payload"]], stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, timeout=60)
+    status("enqueued" if result.returncode == 0 else "enqueue_failed rc=" + str(result.returncode))
+except subprocess.TimeoutExpired:
+    status("enqueue_timeout outcome_unknown")
+except OSError as error:
+    status("enqueue_failed " + type(error).__name__)
+''', encoding="utf-8")
+with (job / "timer.log").open("ab") as log:
+    process = subprocess.Popen([sys.executable, str(runner), str(job)],
+        stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+        start_new_session=True, close_fds=True)
+(job / "pid").write_text(str(process.pid) + "\n", encoding="utf-8")
+print(json.dumps({"job": str(job), "pid": process.pid, "thread": thread,
+    "target": when.isoformat()}))
+ARM_CODEX_TIMER
+```
+
+Payload storage is private (directory 0700, files 0600); keep it out of git and
+credentials. Reading the literal UTF-8 file as bytes and storing it in JSON preserve
+backslashes, quotes, dollars, backticks and line endings without shell evaluation
+or Python string-escape decoding. `subprocess` uses an argument list,
+never `shell=True`. This CLI exposes only `--message`, so the payload is briefly
+visible in the queue process's argv and subject to OS argument-size limits; keep it
+small and do not put secrets in it. Logs record state, not payload or CLI output.
+
+After launch, read the job's `status` and confirm `armed` (or a terminal state for a
+very short delay); spawning a PID alone is not proof of successful arming. Report the
+job directory, PID, exact UUID, timezone-qualified deadline, exact payload, and log
+path. End the turn: no agent polling, blocked exec cell, or model tokens while waiting.
+A busy thread may receive the turn only after its current response finishes.
+
+**Cancellation:** create `cancel` in this exact job directory; the timer records
+`cancelled` within a poll interval. Do not kill a saved PID blindly: PIDs are reused.
+If immediate termination is necessary, first confirm the live command belongs to
+this job, then send SIGTERM. Cancellation racing `enqueue_started` may be too late;
+a message already accepted cannot be recalled by stopping the timer. Inspect `status`
+and `timer.log`; do not retry an ambiguous timeout automatically. Once terminal,
+remove only this job's files when no longer needed. Never cancel unrelated timers.
+
+**Limits:** detachment releases the agent turn and can outlive that turn, but is not
+reboot persistence or a delivery guarantee. The process can be reaped; machine sleep
+freezes it, then it checks wall time on wake and attempts one late enqueue. It does
+not wake the machine. Queue needs the appropriate live Codex daemon/app-server,
+account/config/endpoint and existing thread available at fire time. Preserve the
+launch environment and, if a remote receiver is in use, verify and supply its exact
+queue connection options without copying credentials into the job. Do not assume
+queue success when the receiver is closed, disconnected or restarted; shutdown,
+reconnect, quota reset and overnight delivery require separate evidence.
+
+`--caffeinate` remains explicit opt-in only. On macOS launch a separate detached
+`caffeinate -ims -t <seconds-until-target+600>` process with closed stdin and file or
+null output; report its PID and cancel it separately after verifying its identity.
+It does not override a closed lid or guarantee receiver availability. Without the
+flag, arm only the timer.
+
+**Evidence:** `enqueued` means the command returned zero, not that the new user turn
+was delivered or the payload ran. Verify delivery from the receiving thread with a
+unique harmless nonce in a short delayed smoke, then execute the queued instruction
+on arrival. Report that observed case separately from future reliability. For multiple
+jobs use one private timer directory per job and space heavy work apart; do not turn
+the Claude schedule-table example into a shell payload launcher for Codex.

@@ -18,7 +18,17 @@ killed, so the main agent "recovered" by rescheduling itself hourly via
 a week — ~140 full-context premium-model turns spent confirming that nothing
 had changed. Every rule below exists because of that.
 
-## The waiting ladder (in order — never skip down)
+## Harness selection
+
+The ladder below uses Claude Code background tasks and `Monitor`. For Codex
+wall-clock work, use the `until` skill (`delayed-work` plugin): capability-detect
+`codex queue` (verified on CLI 0.160.1), then arm a detached one-shot timer targeting
+the exact current thread. It costs no model tokens while waiting and needs a live
+queue receiver at fire time. Queue acceptance is not delivery proof. If unavailable,
+report the missing capability and offer a manual nudge or short active-turn wait.
+This timed path does not establish a general Codex file/event watcher contract.
+
+## The waiting ladder (Claude Code, in order — never skip down)
 
 1. **Background bash `until` loop** (`run_in_background`). Zero tokens while
    waiting; one completion notification when the condition flips.
@@ -64,7 +74,7 @@ had changed. Every rule below exists because of that.
 | Waiting on | Mechanism |
 |---|---|
 | Local file/status flag to flip once | Background bash `until` loop |
-| Wall-clock time / "run X at 9pm" | The `until` skill (`delayed-work` plugin) — background Bash first; `Monitor` only within its reported deadline |
+| Wall-clock time / "run X at 9pm" | The `until` skill (`delayed-work` plugin) — Claude background Bash / deadline-bounded `Monitor`; Codex capability-detected same-thread queue timer |
 | Recurring events (log errors, PR comments) | `Monitor` only when its reported deadline covers the watch; otherwise stop |
 | Human action (submit, approve, "when I'm ready") | Watcher from above — or just tell them to nudge you. Never scheduled wakes. |
 | CI/deploy the harness can't see | `ScheduleWakeup`, interval matched to the job, max 3 quiet polls |
