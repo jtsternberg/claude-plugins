@@ -361,6 +361,12 @@ printf '\n\n  hello  \n\n' > "$t/ws"
 got=$("$REAL_PYTHON3" "$G" "$t/ws")
 [[ "$got" == "5" ]]
 check "surrounding whitespace is stripped from the sent length" $? "got '$got'"
+printf 'ab \xef\xbe\x9e cd' > "$t/halfwidth"                  # U+FF9E: Extend in Swift, though category Lm
+[[ -z "$("$REAL_PYTHON3" "$G" "$t/halfwidth")" ]]
+check "U+FF9E (halfwidth voiced mark) is declined" $?
+printf 'a\x01b' > "$t/ctrl"
+[[ -z "$("$REAL_PYTHON3" "$G" "$t/ctrl")" ]]
+check "an ASCII control character is declined" $?
 printf '\xff\xfe' > "$t/bad"
 [[ -z "$("$REAL_PYTHON3" "$G" "$t/bad")" ]]
 check "invalid UTF-8 is declined, not guessed" $?
