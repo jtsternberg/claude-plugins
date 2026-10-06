@@ -44,6 +44,10 @@ export PATH="$TMP/bin:$PATH"
 # every name narrowing under test is the client-side guard doing the work.
 cat > "$TMP/bin/cmux" <<'STUB'
 #!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then
+  [[ -n "${CMUX_STUB_VERSION:-}" ]] && echo "cmux $CMUX_STUB_VERSION (108) [dda24fbd2]"
+  exit 0
+fi
 [[ "$1" != "events" ]] && exit 0
 shift
 snap=0; noack=0
@@ -278,8 +282,8 @@ frames
 frame "{\"name\":\"workspace.prompt.submitted\",\"seq\":30,\"workspace_id\":\"$WS\",\"payload\":{\"message_length\":43}}"
 GOT=$(cmux_submit_lengths "$WS" 1 || true)
 [[ "$GOT" == "43" ]] \
-  && pass "one frame, length under the 240 cap → reported verbatim and exact" \
-  || fail "one frame, length under the 240 cap → reported verbatim and exact" "got '$GOT'"
+  && pass "one frame, length under 240 → reported verbatim and exact" \
+  || fail "one frame, length under 240 → reported verbatim and exact" "got '$GOT'"
 
 frames
 frame "{\"name\":\"workspace.prompt.submitted\",\"seq\":31,\"workspace_id\":\"$WS\",\"payload\":{\"message_length\":19}}"
@@ -288,15 +292,14 @@ GOT=$(cmux_submit_lengths "$WS" 1 || true)
   && pass "a short length is reported verbatim, so a caller can call byte loss" \
   || fail "a short length is reported verbatim" "got '$GOT'"
 
-# 240 IS THE CAP, and it is passed through as-is rather than read as a verdict:
-# `message_length` is the length of the 240-char preview, so this means "240 or
-# more" and can never verify a real work order (all of which are longer).
+# Passed through as-is, never read as a verdict: this primitive does not know which
+# cmux produced the frame, and on a pre-0.65.0 one 240 is the preview's length.
 frames
 frame "{\"name\":\"workspace.prompt.submitted\",\"seq\":35,\"workspace_id\":\"$WS\",\"payload\":{\"message_length\":240}}"
 GOT=$(cmux_submit_lengths "$WS" 1 || true)
 [[ "$GOT" == "240" ]] \
-  && pass "a capped 240 is passed through unchanged, for the caller to read as 'at least 240'" \
-  || fail "a capped 240 is passed through unchanged" "got '$GOT'"
+  && pass "a 240 is passed through unchanged; interpreting it is the caller's job" \
+  || fail "a 240 is passed through unchanged" "got '$GOT'"
 
 frames
 frame "{\"name\":\"workspace.prompt.submitted\",\"seq\":32,\"workspace_id\":\"$WS\",\"payload\":{\"message_length\":20}}"
@@ -313,6 +316,36 @@ GOT=$(cmux_submit_lengths "$WS" 1 || true)
 [[ -z "$GOT" ]] \
   && pass "a submit in another workspace is not counted as ours" \
   || fail "a submit in another workspace is not counted as ours" "got '$GOT'"
+
+# --- 7a. The version gate and the measures primitive -------------------------
+for v_case in "0.65.0:0" "0.65.1:0" "0.66.0:0" "0.100.0:0" "1.0.0:0" "0.64.25:1" "0.9.9:1" "garbage:1" ":1"; do
+  v="${v_case%:*}"; want="${v_case##*:}"
+  GOT=$(CMUX_STUB_VERSION="$v" bash -c 'source "$1"; cmux_has_true_message_length; echo $?' _ "$LIB")
+  [[ "$GOT" == "$want" ]] \
+    && pass "version gate: '${v:-<empty>}' → exit $want" \
+    || fail "version gate: '${v:-<empty>}'" "want $want, got '$GOT'"
+done
+
+frames
+frame "{\"name\":\"workspace.prompt.submitted\",\"seq\":40,\"workspace_id\":\"$WS\",\"payload\":{\"message_length\":1260,\"message_preview\":\"abc…\"}}"
+GOT=$(cmux_submit_measures "$(printf '%s' "$WS" | tr 'a-z' 'A-Z')" 1 | jq -c . || true)
+[[ "$GOT" == '{"len":1260,"old_cap":false}' ]] \
+  && pass "measures: a length above the preview's is a true length (workspace id case-folded)" \
+  || fail "measures: a length above the preview's is a true length" "got '$GOT'"
+
+frames
+frame "{\"name\":\"workspace.prompt.submitted\",\"seq\":41,\"workspace_id\":\"$WS\",\"payload\":{\"message_length\":4,\"message_preview\":\"abc…\"}}"
+GOT=$(cmux_submit_measures "$WS" 1 | jq -c . || true)
+[[ "$GOT" == '{"len":4,"old_cap":true}' ]] \
+  && pass "measures: an ellipsized preview whose length IS message_length is flagged old_cap" \
+  || fail "measures: old_cap signature" "got '$GOT'"
+
+frames
+frame "{\"name\":\"workspace.prompt.submitted\",\"seq\":42,\"workspace_id\":\"$WS\",\"payload\":{\"message_length\":43,\"message_preview\":\"short\"}}"
+GOT=$(cmux_submit_measures "$WS" 1 | jq -c . || true)
+[[ "$GOT" == '{"len":43,"old_cap":false}' ]] \
+  && pass "measures: an unellipsized preview is never old_cap" \
+  || fail "measures: unellipsized preview" "got '$GOT'"
 
 # --- 7b. cmux_prompt_ingests: how many turns did the callee actually ingest? --
 # The COUNT is the answer here, and its attribution is the whole point:

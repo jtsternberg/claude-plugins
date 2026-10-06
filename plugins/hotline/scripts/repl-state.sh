@@ -356,24 +356,24 @@ cmux_wait_session_turn_end() {
 # only thing the extra wait buys, and the paste path confirms in well under a
 # second today. Do not raise it to a read-timeout-sized number.
 #
-# `message_length` IS CAPPED AT 240 — it is the length of the 240-char
-# `message_preview`, not of the message (events.md has the measurement: 21/21
-# submissions with message_length == preview length, 14 at exactly 240, none
-# above). So read a value as three-valued, never as an equality:
-# tripwire: claude-plugins-8ur4 — cmux#13687; if that is fixed, this cap and the
-# at-least-240 reading go away, and a real length check becomes worth having.
+# WHAT `message_length` MEANS DEPENDS ON THE cmux THAT PRODUCED THE FRAME. Before
+# cmux 0.65.0 it was the length of the 240-char `message_preview`, so it capped at
+# 240 (manaflow-ai/cmux#13687). From 0.65.0 it is the true submitted length, counted
+# in Swift characters (grapheme clusters); the preview stays capped at 240. The
+# retained buffer can hold frames from both, so on a cmux that fails
+# cmux_has_true_message_length read a value as three-valued, never as an equality:
 #   no lines        → nothing submitted; the text sits in the box and `send-key
 #                     Enter` is the fix (never a re-send, which appends).
 #   one line < 240  → exact; a value under what was sent is byte loss at the
 #                     transport.
-#   one line == 240 → "240 or more", and nothing more. Every real hotline work
-#                     order is longer than that, so a whole payload and a
-#                     truncated one report the same number — this field CANNOT
-#                     verify one. Use the nonce (a grep -F of the call id in the
-#                     callee's transcript), which is byte-definitive.
+#   one line == 240 → "240 or more", and nothing more. A whole payload and a
+#                     truncated one report the same number, so use the nonce (a
+#                     grep -F of the call id in the callee's transcript), which is
+#                     byte-definitive. On 0.65.0+ this is an exact length.
 #   several lines   → fragmentation; the payload arrived as multiple turns.
 # Do NOT length-check against agent.hook.UserPromptSubmit instead: its
-# tool_input_length counts claude's own wrapping (56 where this reported 43).
+# tool_input_length counts claude's own wrapping (56 where this reported 43) and
+# is not the true length on any cmux release measured (manaflow-ai/cmux#14024).
 #
 # NOR IS THE COUNT HERE ATTRIBUTABLE TO ONE REPL. `workspace.prompt.submitted`
 # carries no surface_id and no session_id (measured: 16/16 frames with a null
@@ -390,6 +390,39 @@ cmux_submit_lengths() {
   local ws="$1" timeout="${2:-2}"
   cmux_events_all "$timeout" 10 \
     "select(.workspace_id == \"$ws\") | .payload.message_length" \
+    workspace.prompt.submitted
+}
+
+# cmux_has_true_message_length — 0 iff the cmux on PATH is >= 0.65.0.
+# `cmux --version` is parsed once per process. Anything unparseable (a stub with no
+# --version, a build string that changes shape) reads as "old", which is the
+# behaviour before any length comparison existed: a comparison is only ever added.
+HOTLINE_CMUX_VERSION_CACHE=""
+cmux_has_true_message_length() {
+  if [[ -z "$HOTLINE_CMUX_VERSION_CACHE" ]]; then
+    local v maj min
+    HOTLINE_CMUX_VERSION_CACHE=old
+    v=$(cmux --version 2>/dev/null | head -1) || true
+    if [[ "$v" =~ ([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+      maj=${BASH_REMATCH[1]}; min=${BASH_REMATCH[2]}
+      (( 10#$maj > 0 || 10#$min >= 65 )) && HOTLINE_CMUX_VERSION_CACHE=new
+    fi
+  fi
+  [[ "$HOTLINE_CMUX_VERSION_CACHE" == "new" ]]
+}
+
+# cmux_submit_measures <workspace_id> <settle_seconds> — one {len, old_cap} object
+# per workspace.prompt.submitted frame in the window.
+# `old_cap` is the pre-0.65.0 signature: an ellipsized preview whose length IS the
+# message_length. It exists because the version gate reads the cmux CLI on PATH,
+# while the frame was produced by whichever cmux ran the hook — a CLI upgraded
+# under a still-running older app reports a capped 240 that is not a true length.
+# Workspace id is case-folded like cmux_prompt_ingests' surface id.
+cmux_submit_measures() {
+  local ws_lc timeout="${2:-2}"
+  ws_lc=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+  cmux_events_all "$timeout" 10 \
+    "select(((.workspace_id // \"\") | ascii_downcase) == \"$ws_lc\") | (.payload.message_preview // \"\") as \$p | {len: .payload.message_length, old_cap: ((\$p | endswith(\"…\")) and (.payload.message_length <= (\$p | length)))}" \
     workspace.prompt.submitted
 }
 

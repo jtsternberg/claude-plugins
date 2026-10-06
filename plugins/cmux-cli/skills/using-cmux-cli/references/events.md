@@ -119,8 +119,8 @@ Three traps, all verified:
 ## Recipe: did my message actually submit?
 
 `workspace.prompt.submitted` fires when a prompt is submitted into an agent REPL
-and carries a `message_preview` capped at 240 characters, plus a
-`message_length` that is **the length of that preview, not of the message**:
+and carries a `message_preview` capped at 240 characters (ellipsized with `…`
+when cut), plus a `message_length`:
 
 ```json
 {"name":"workspace.prompt.submitted","seq":647,
@@ -129,28 +129,30 @@ and carries a `message_preview` capped at 240 characters, plus a
             "redacted_fields":["message"],"workspace_id":"4C7FA894-…"}}
 ```
 
-<!-- tripwire: claude-plugins-8ur4 — cmux#13687; if that is fixed, this cap and the at-least-240 reading go away. -->
+**What `message_length` is depends on the cmux that produced the frame.**
+From cmux 0.65.0 it is the true length of the submitted message, in Swift
+characters (grapheme clusters, so it can be lower than a codepoint or byte count
+for non-ASCII text); the preview stays capped at 240. Before 0.65.0 it was the
+length of the preview, so it never exceeded 240 and could not verify a longer
+payload: on 0.64.25, 21 of 21 submissions in a 900-frame replay had
+`message_length == (message_preview | length)`, 14 of them at exactly 240. A
+retained replay can hold frames from both, since the fix lives in the cmux CLI
+that runs the hook, so a frame's meaning follows the version that produced it.
+On a frame whose producer is unknown, `message_length > (message_preview | length)`
+is a true length, and an ellipsized preview whose length equals `message_length`
+is the pre-0.65.0 cap.
 
-**`message_length` IS CAPPED AT 240 AND CANNOT VERIFY A LONGER PAYLOAD.** It
-equals the preview's own length in every frame, and no frame reports more than
-240. Measured on cmux 0.64.25 over a 900-frame replay: 21 submissions, all 21
-with `message_length == (message_preview | length)`, 14 of them at exactly 240,
-none above it, and those 14 were 6 distinct messages whose previews end
-mid-token. A shorter value is exact; 240 means "240 or more".
+What that gives you:
 
-An earlier reading of this field as character-exact came from checking it against
-two plaintexts of 119 and 43 characters — both under the cap, so both agreed.
-
-What that leaves:
-
-- **Fragmentation is measurable** → several `workspace.prompt.submitted` frames
-  for one send, and a count needs no length at all.
-- **Silent byte loss is measurable only under 240 characters.** For anything
-  longer, a whole payload and a truncated one both report 240, so use a nonce or
-  a transcript read instead.
+- **Fragmentation** → several `workspace.prompt.submitted` frames for one send. A
+  count needs no length.
+- **Silent byte loss** → on 0.65.0+, a `message_length` below the sent length. Under
+  240 characters this is exact on any version. Compare in grapheme clusters, not
+  bytes, and read it one-sided (reported below sent) — the frame is workspace-scoped,
+  so another REPL's submit in the same workspace can be mistaken for yours.
 
 ```bash
-MSG="…"; LEN=${#MSG}
+MSG="…"; LEN=${#MSG}   # characters in a UTF-8 locale; equals graphemes only for text without combining marks or joiners
 # NO --no-ack here: --snapshot prints only the ack, so the pair returns nothing.
 SEQ=$(cmux events --snapshot --no-heartbeat 2>/dev/null | jq -r '.resume.latest_seq')
 
@@ -158,8 +160,8 @@ cmux send     --workspace "$WS" --surface "$SID" "$MSG"
 sleep 0.2
 cmux send-key --workspace "$WS" --surface "$SID" Enter
 
-# Every submission since the send, for that workspace. `verdict` is deliberately
-# three-valued: an equality test would call every payload over 240 chars short.
+# Every submission since the send, for that workspace. `verdict` is three-valued
+# because before cmux 0.65.0 a value of 240 only means "240 or more".
 cmux events --after "$SEQ" --name workspace.prompt.submitted \
             --limit 5 --timeout 15 --no-ack --no-heartbeat 2>/dev/null \
   | jq -c --arg ws "$WS" --argjson len "$LEN" \
@@ -170,15 +172,19 @@ cmux events --after "$SEQ" --name workspace.prompt.submitted \
                     else "short" end)}'
 ```
 
+On cmux 0.65.0+ a `capped-unknown` verdict can be replaced by comparing
+`message_length` to `$len` directly.
+
 Count the lines this prints: more than one is fragmentation regardless of any
-length. `capped-unknown` on a long payload is the expected answer, not a
-failure — verify those with a nonce.
+length.
 
 No frame within the timeout means **nothing submitted** — the text is sitting in
 the input box, and `send-key Enter` is the fix (never a re-`send`, which appends).
-One frame is a clean submit; several are fragmentation. Treat a length of 240 as
-"unknown, at least 240" and fall back to the nonce-and-verify discipline in
-SKILL.md, which is what actually covers a long payload.
+One frame is a clean submit; several are fragmentation. Where the version is below
+0.65.0 or unknown, treat a length of 240 as "unknown, at least 240" and fall back to
+the nonce-and-verify discipline in SKILL.md, which is what covers a long payload
+there; the nonce sits at the head of a payload, so only a length comparison sees a
+lost tail.
 
 `agent.hook.UserPromptSubmit` corroborates per-surface with `session_id`,
 `surface_id` and `cwd`, but **do not length-check against it** — its
