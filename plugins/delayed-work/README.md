@@ -39,8 +39,8 @@ up rather than nothing.
 
 **Honest limits:**
 
-- The watcher **dies with the session**. If the session is gone at the target time,
-  nothing fires and there is no catch-up. Not cron, not a durable scheduler.
+- Claude watchers **die with the session**. Codex detached timers may outlive a turn,
+  but need a live queue receiver and existing thread at fire time. Neither is a durable scheduler.
 - **A sleeping machine freezes the loop.** No form of this wakes a Mac; a target that
   passes during system sleep fires on wake instead of on time. Add the opt-in
   `--caffeinate` invocation flag to hold the machine awake for the life of the watcher.
@@ -48,8 +48,10 @@ up rather than nothing.
 - Background tasks can be reaped on session handoff. `Monitor` is only a fallback when
   30 minutes or less remain; its accepted `persistent: true` field does not remove that
   cap in Claude Code 2.1.272.
-- Zero-token waiting is Claude-Code-specific. Codex's only in-session wait
-  blocks the turn, so it is honest there only for short horizons.
+- Codex CLI 0.160.1 supports a detached one-shot wall-clock timer calling
+  `codex queue` into the exact current thread. Detect capability before arming;
+  enqueue success is separate from observed delivery. See the skill for private
+  payload storage, cancellation, logs, and daemon/sleep limits.
 
 **Related:** the `patient-waiting` ladder (in the `maestro` plugin) with the
 clock as the watched condition. For timed delivery of a prompt *into another cmux

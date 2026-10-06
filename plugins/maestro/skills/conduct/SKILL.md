@@ -117,9 +117,15 @@ dependencies in the PR description, not just chat.
 
 - Report settled facts; hold variable interim state ("A thinks X but B might
   flip it") until it settles. Interim heartbeats are one line.
-- End every message with `Next for you: <the single action>` — or
-  `Next for you: nothing` when the machine is working. Never a menu. When the
-  action is a decision, the line carries three parts: the **answer tokens**, a
+- When the human has an action, end with `Next for you: <the single action>`.
+  Never a menu. Use `Next for you: nothing` only while implementation, review,
+  or waiting on an armed callback that will report is active: it means you are
+  still working and will relay when the human is needed. At a completed handoff,
+  state the outcome, any scheduled pending job, and that you are idle and ready
+  for the next instruction. A future timer can remain scheduled while you are
+  otherwise idle; name it separately rather than implying current work continues.
+  Completed responses need not end with `nothing`. When the action is a decision,
+  the line carries three parts: the **answer tokens**, a
   plain clause **naming the subject**, and the **ledger path plus its anchor as
   a separate token** (`… .md - #decide-92`) — a path fused to an anchor opens
   nothing. Answer tokens alone are the failure — `still owe "fold" or "defer"`
@@ -162,7 +168,7 @@ template, the naming and resolution rules, and worked `Next for you:` lines.
 | "Read the charter at /path" | Embed the text in the dispatch |
 | Re-dispatching to a slow or "interrupted" agent | Re-run the waiter; read the transcript |
 | Relaying a report unverified | Check the diff/PR/CI yourself first |
-| Ending with a menu of options | One `Next for you:` action (or "nothing") |
+| Ending with a menu of options | One action; "nothing" only for active work; completed handoffs state idle readiness |
 | `Next for you:` carrying only the answer tokens | Tokens + subject clause + ledger path, anchor separate |
 | Answer tokens with no alias | `` `ok` (k) `` — one keystroke answers |
 | Asking a decision, then writing it down later | Ledger section first, then the message |

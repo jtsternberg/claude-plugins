@@ -30,7 +30,7 @@ script.
 ## Read this first — the honest reliability envelope
 
 This is a **same-session, best-effort timer, not a durable scheduler.** It fires the delivery
-only if **this agent process and the Mac are still alive at the target time.** That boundary
+only if **the receiving session is available (with a live Codex queue receiver for Codex) and a cmux-resident agent can run the send at actual delivery time.** That boundary
 is not a limitation to fix later — it is forced by two hard constraints working together:
 
 - **The delivery must run from a process with cmux ancestry.** cmux's socket defaults to
@@ -38,10 +38,11 @@ is not a limitation to fix later — it is forced by two hard constraints workin
   Bash tool / Codex's exec cell) has that ancestry; a `launchd`/`cron` job or a cloud routine
   does **not** — cmux refuses them. So the thing that fires the send has to be *this* agent,
   in *this* pane.
-- **Nothing that outlives this process can wake this process in-pane.** An external timer
-  (launchd/cron) has no cmux ancestry, and a cloud-scheduled agent runs off-machine with no
-  socket at all. Both are excluded. So the only clock we can use is one that keeps *this*
-  session waiting.
+- **A timer may enqueue a wake, but the send still runs here.** Codex CLI
+  0.160.1 supports a detached timer calling `codex queue` into this exact thread;
+  it must queue an instruction for the cmux-resident agent, never drive cmux itself.
+  A live receiver and this pane's cmux ancestry are still required. Cloud agents
+  have no local socket.
 
 **Consequences to state plainly to the user before scheduling anything far out:**
 
@@ -49,8 +50,10 @@ is not a limitation to fix later — it is forced by two hard constraints workin
   sweet spot. An "at 9am tomorrow" ask cannot be made reliable here — say so and point at a
   durable OS/cloud scheduler if they truly need overnight delivery (accepting it then can't
   target a cmux surface for the ancestry reason above).
-- If the session is closed, the agent is interrupted, or the Mac sleeps through the target,
-  **nothing fires.** There is no catch-up.
+- Claude's active wait has no catch-up if the session dies or the wait is interrupted.
+  Codex's detached queue timer freezes during Mac sleep, then attempts one late enqueue
+  on wake; actual delivery may be late. Neither route wakes the Mac, and a closed or
+  unavailable receiving session can prevent delivery.
 - Delivery itself is **best-effort**, not verified (V1 has no nonce/transcript check). `cmux
   send` can sporadically fragment or drop bytes (not size-gated), a busy REPL silently
   enqueues the message, and a user-scrolled viewport hides it. The read-screen check is
@@ -95,8 +98,8 @@ You need three things:
 
 ## Step 2 — Wait inside this session (harness-native)
 
-Pick the wait that matches your harness. Both keep *this* process alive and cmux-resident;
-neither hands off to an external timer.
+Pick the wait that matches your harness. Both resume work in this cmux-resident session; a Codex timer only enqueues
+the wake instruction, leaving delivery to this agent.
 
 ### Claude Code — wake-from-background (preferred)
 
@@ -117,20 +120,22 @@ When it completes and you're re-invoked, go straight to Step 3.
   session, but the background until-loop has no such cap and is simpler. Reach for them only
   if you're already inside a `/loop`.
 
-### Codex (0.149.1) — blocking active-turn wait
+### Codex — capability-detected same-thread wake
 
-Codex has **no wake-from-idle** primitive that resumes in-pane. Its only in-session wait is
-`functions.wait` on a yielded exec cell — a **blocking** wait that occupies the turn until the
-cell finishes. Yield a blocking until-clock exec cell and wait on it:
+Use the Codex mechanism in the `until` skill (`delayed-work` plugin): detect
+`codex queue` (verified on CLI 0.160.1), capture this live thread's exact UUID,
+and arm its detached one-shot wall-clock timer. Queue a self-contained instruction
+to run Step 3 in this same cmux-resident session at fire time, naming the exact
+surface UUID and prompt-file path. The timer never calls cmux. Preserve the exact
+surface/no-fallback contract even if the receiver or surface disappears.
 
-```bash
-until [ "$(date +%s)" -ge "$target" ]; do sleep 20; done
-```
-
-Because this blocks the whole turn, keep Codex horizons short — a multi-hour block strains
-exec-cell limits and ties up the session. `current_time_reminder` only injects the current
-time into context; it is **not** an after-turn scheduler. A "persistent goal" is not a timer
-either. Do not lean on either as a clock.
+Follow `until` for private payload storage, cancellation/logging, sleep/wake,
+receiver availability and opt-in caffeinate limits. End the turn after arming;
+on the queued turn go straight to Step 3. Enqueue success is not observed wake or
+cmux delivery. If queue is unavailable, report that capability gap and offer a
+manual nudge or short blocking active-turn wait (`functions.wait` on a yielded
+exec cell); do not assume every Codex version
+requires a blocked turn. `current_time_reminder` and persistent goals are not timers.
 
 ## Step 3 — Deliver (fire time)
 
