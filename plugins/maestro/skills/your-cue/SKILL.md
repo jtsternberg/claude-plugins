@@ -26,7 +26,7 @@ session input all survive untouched. This run changes nothing, in either host.
 
 Read-only and safe:
 
-- **cmux** — `cmux tree --all --json`, `cmux sidebar-state`,
+- **cmux** — `cmux tree --all --json`, `cmux identify --json`, `cmux sidebar-state`,
   `cmux list-notifications`,
   `cmux read-screen --surface <id> --scrollback --lines <n>`.
 - **herdr** — `herdr agent list`, `herdr agent get|read`,
@@ -105,15 +105,39 @@ Terminal reads are the expensive, intrusive-feeling step: shortlist first, then
 `cmux read-screen --surface <id> --scrollback --lines <n>` (or
 `herdr agent read`) only for the rows whose state is still unclear.
 
-Every item the human sees uses a locator they can find on screen:
+Every item the human sees carries a locator they can follow with their eyes and
+keys. Build them with the bundled script — it joins each graveyard row to its
+exact surface, falls back to a title match only when that match is unique, and
+never joins on `cwd`, which many sessions share:
 
-- herdr: `<agent name>` in `<tab name>`, `<workspace name>`.
-- cmux: `<surface title>` in `<workspace title>`; add a window anchor only when
-  two workspaces share a title.
+Codex: this path resolves under Claude Code; substitute the directory containing
+this `SKILL.md`.
 
-Session UUIDs and pane ids are internal lookup keys, not output. When no
-visible name exists, say the agent is unnamed and include the smallest id that
-locates it.
+```bash
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+TMP="$(mktemp -d)"
+graveyard candidates --json --no-verdict > "$TMP/gy.json"
+bash "$SKILL_DIR/scripts/locate.sh" --graveyard "$TMP/gy.json" > "$TMP/loc.json"
+```
+
+Without graveyard, `locate.sh --herdr` lists every cmux surface and herdr pane.
+It reads one `cmux tree` snapshot plus `cmux identify` and the herdr `list`
+verbs — nothing else — and each row comes back with `locator`, `group`, and
+`item`:
+
+- cmux: `<tab title> — <window> › ⌘<n> <workspace> › <pane position>, tab <k>/<m>`.
+  cmux windows have no title, so a window is `this window` (the one this
+  briefing runs in) or `the "<workspace it is showing>" window`. `⌘<n>` and the
+  tab number are the keys the human presses; the pane position (`left`,
+  `middle`, `right › top`) comes from the workspace's split layout. The window
+  drops out when only one exists, the pane when the workspace has one, the tab
+  when the pane has one.
+- herdr: `<agent name> — <workspace label> (#<n>) › tab <tab label> (#<n>) › pane <k> of <m>`.
+
+A row with `located: false` renders as its `unlocated: <tab title>` locator plus
+the smallest id that finds it; `reason` says why (`ambiguous-title`,
+`no-match`, `cmux-unreachable`, `herdr-unreachable`). Never guess a position for
+it. Session UUIDs, refs, and pane ids are internal lookup keys, not output.
 
 ## 3. Nest the hotline callees
 
@@ -207,11 +231,23 @@ resume, clarify, close, bury) when the human has a move, or
 settled. "Nothing needed" is a
 conclusion you state, not a line you omit.
 
+**Group by where the human will look.** With two or more windows, open with
+`locate.sh`'s `legend` line so each window label has a referent. Within each
+section, sort by window and then workspace; when two or more items in a section
+share a `group`, print that group once as a sub-header and give each item only
+its `item` (`left pane, tab 3/5`) and title. `Next for you:` always carries the
+full `locator`, because it is the line read alone.
+
 ```text
 ## Your cue
 
+Windows: this window (showing "<workspace>") · the "<workspace>" window
+
 Waiting on you
 - <visible agent locator> — <current status>. Your cue: <specific action>.
+- <window> › ⌘<n> <workspace>
+  - <pane, tab k/m> "<tab title>" — <current status>. Your cue: <specific action>.
+  - <pane, tab k/m> "<tab title>" — <current status>. Your cue: <specific action>.
 
 Working
 - <visible agent locator> — <current task>. Your cue: nothing — it is still working.
@@ -273,7 +309,8 @@ to a later explicit request, and never runs `graveyard bury` itself.
 |---|---|
 | A list of running sessions | A cue per workstream |
 | Silently briefing one host | Stop and ask, then add `Coverage` |
-| Session UUIDs and pane ids in prose | Visible names the human can see |
+| Session UUIDs, refs, or a bare `pane 2` in prose | `locate.sh` locators: window › `⌘n` workspace › pane position, tab k/m |
+| `<tab> in <workspace>` with no window or position, or a title-joined guess | The script's locator; `unlocated` when it can't join exactly or uniquely |
 | Reading full transcripts into your context | `--window 8 --max-chars 8000`, cheaper model |
 | Nesting every registry row | Only callees present in the live inventory |
 | Burying, focusing, or notifying anything | Read-only; burial is a cue |
