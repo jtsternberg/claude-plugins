@@ -1151,6 +1151,12 @@ if [[ "\$1" == "close-surface" && -n "\${CMUX_REFUSE_CLOSE:-}" ]]; then
   echo 'not_found: Surface not found' >&2
   exit 1
 fi
+# CMUX_NEEDS_FORCE models cmux 0.65.0: a close of anything holding a live process
+# (the callee's REPL, always) is refused unless --force rides along.
+if [[ ( "\$1" == "close-surface" || "\$1" == "close-workspace" ) && -n "\${CMUX_NEEDS_FORCE:-}" && " \$* " != *" --force "* ]]; then
+  echo 'Error: confirmation_required: has a running process; retry with --force' >&2
+  exit 1
+fi
 exit 0
 STUB
   chmod +x "$sd/cmux"
@@ -1272,6 +1278,46 @@ else
   fail "…and on stderr, leaving stdout pure JSON" "$(cat "$CDN/stderr.txt" 2>/dev/null || echo NONE)"
 fi
 rm -rf "$HN" "$CDN" "$SDN"
+
+# --- cmux 0.65.0 refuses a live process: the captured response is the proof ---
+# Both placements are closed with --force, and ONLY after the response was captured.
+for _pl in side detached; do
+  CL=$(setup_cleanup_call "$_pl")
+  HF=${CL%%|*}; rF=${CL#*|}; CDF=${rF%%|*}; rFb=${rF#*|}; SDF=${rFb%%|*}; LOGF=${rFb#*|}
+  set +e
+  OUTF=$(HOME="$HF" PATH="$SDF:$PATH" CMUX_NEEDS_FORCE=1 \
+    bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDF" --timeout 20 --submit-deadline 6 2>/dev/null)
+  set -e
+  if [[ "$_pl" == "side" ]]; then _verb="close-surface --workspace WS-UUID-7 --surface $CLEAN_SURF --force"
+  else _verb="close-workspace --workspace WS-UUID-7 --force"; fi
+  if grep -qF -- "$_verb" "$LOGF" 2>/dev/null && [[ -z "$(printf '%s' "$OUTF" | jq -r '.cleanup_error // empty' 2>/dev/null)" ]] \
+     && [[ ! -s "$CDF/cleanup_err.txt" ]]; then
+    pass "a $_pl call closes with --force on a cmux that demands it, recording no failure"
+  else
+    fail "a $_pl call closes with --force on a cmux that demands it" \
+         "cmux calls: $(cat "$LOGF" 2>/dev/null || echo NONE) out=$OUTF"
+  fi
+  rm -rf "$HF" "$CDF" "$SDF"
+done
+
+# The same function closes after a TIMEOUT, where nothing was captured. That close
+# must never carry --force: it has no proof the callee is done, and a refusal here
+# is the right outcome.
+CL=$(setup_cleanup_call detached)
+HT=${CL%%|*}; rT=${CL#*|}; CDT=${rT%%|*}; rTb=${rT#*|}; SDT=${rTb%%|*}; LOGT=${rTb#*|}
+printf '%s\n' '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] finish up"}}' \
+  > "$HT/.claude/projects/-fake-callee-ws/sess-tcm.jsonl"
+set +e
+HOME="$HT" PATH="$SDT:$PATH" CMUX_NEEDS_FORCE=1 \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDT" --timeout 4 --submit-deadline 2 >/dev/null 2>&1
+RCT=$?
+set -e
+if [[ $RCT -ne 0 ]] && grep -q "close-workspace" "$LOGT" 2>/dev/null && ! grep -q -- "--force" "$LOGT" 2>/dev/null; then
+  pass "a timed-out call's close never carries --force"
+else
+  fail "a timed-out call's close never carries --force" "rc=$RCT cmux calls: $(cat "$LOGT" 2>/dev/null || echo NONE)"
+fi
+rm -rf "$HT" "$CDT" "$SDT"
 
 # ---- the when-to-read gate: cmux events instead of a 2s tick ---------------
 # Once the transcript has confirmed our message submitted, the only thing left to

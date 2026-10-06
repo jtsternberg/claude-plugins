@@ -1281,7 +1281,10 @@ cmux_workspace_current_surface() {
 }
 
 # --- Closing a surface: the container is not optional ------------------------
-# cmux_close_surface_scoped <what> <surface-handle>
+# cmux_close_surface_scoped <what> <surface-handle> [force]
+#
+# `force` adds --force, which skips cmux 0.65.0's refusal to close a surface with a
+# live process. Pass it only from a path that has already proven closing is safe.
 #
 # `cmux close-surface` resolves --surface INSIDE a workspace context that defaults
 # to the caller's inherited $CMUX_WORKSPACE_ID, so a surface UUID that read-screen
@@ -1309,7 +1312,8 @@ cmux_workspace_current_surface() {
 # as a discarded stream is the failure mode this replaces.
 CMUX_CLOSE_ERR=""
 cmux_close_surface_scoped() {
-  local what="$1" handle="${2:-}" addr ws surf out
+  local what="$1" handle="${2:-}" force="" addr ws surf out
+  [[ "${3:-}" == "force" ]] && force="--force"
   CMUX_CLOSE_ERR=""
   cmux_handle_ok "$what" "$handle" || { CMUX_CLOSE_ERR="empty surface handle"; return 1; }
   addr=$(cmux_surface_address "$handle")
@@ -1319,7 +1323,7 @@ cmux_close_surface_scoped() {
     *) CMUX_CLOSE_ERR="surface $handle is not in the cmux tree, so its workspace is unknown"; return 1 ;;
   esac
   ws="${addr%% *}"; surf="${addr##* }"
-  if ! out=$(cmux close-surface --workspace "$ws" --surface "$surf" 2>&1); then
+  if ! out=$(cmux close-surface --workspace "$ws" --surface "$surf" ${force:+"$force"} 2>&1); then
     CMUX_CLOSE_ERR="cmux close-surface --workspace $ws --surface $surf refused: $(printf '%s' "$out" | tr '\n\r\t' '   ' | cut -c1-140)"
     return 2
   fi
