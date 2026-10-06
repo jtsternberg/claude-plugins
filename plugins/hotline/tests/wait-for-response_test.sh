@@ -1292,6 +1292,31 @@ else
 fi
 rm -rf "$HN" "$CDN" "$SDN"
 
+# --- cmux 0.65.0 prints a deprecation banner BEFORE the real error ----------
+# The recorded error was cut to its first 140 chars, so the banner filled it and
+# `confirmation_required` never showed. Both closes must record the error itself,
+# and must set CMUX_QUIET=1 so a cmux that honors it never prints the banner.
+for _pl in side detached; do
+  CL=$(setup_cleanup_call "$_pl")
+  HB=${CL%%|*}; rB=${CL#*|}; CDB=${rB%%|*}; rBb=${rB#*|}; SDB=${rBb%%|*}; LOGB=${rBb#*|}
+  set +e
+  OUTB=$(HOME="$HB" PATH="$SDB:$PATH" CMUX_REFUSE_CONFIRM=1 \
+    bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDB" --timeout 20 --submit-deadline 6 2>/dev/null)
+  set -e
+  _rec=$(printf '%s' "$OUTB" | jq -r '.cleanup_error // empty' 2>/dev/null)
+  if [[ "$_rec" == *"confirmation_required"* && "$_rec" != *"is now an alias"* ]]; then
+    pass "a $_pl close refused behind the deprecation banner records confirmation_required, not the banner"
+  else
+    fail "a $_pl close refused behind the deprecation banner records confirmation_required" "cleanup_error=[$_rec]"
+  fi
+  if grep -qx "1" "$SDB/quiet.log" 2>/dev/null; then
+    pass "…and the $_pl close runs with CMUX_QUIET=1"
+  else
+    fail "…and the $_pl close runs with CMUX_QUIET=1" "quiet.log=$(cat "$SDB/quiet.log" 2>/dev/null || echo NONE)"
+  fi
+  rm -rf "$HB" "$CDB" "$SDB"
+done
+
 # --- cmux 0.65.0 refuses a live process: the captured response is the proof ---
 # Both placements are closed with --force, and ONLY after the response was captured.
 for _pl in side detached; do

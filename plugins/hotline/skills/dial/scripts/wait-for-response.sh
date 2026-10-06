@@ -821,8 +821,8 @@ if $CMUX_MODE; then
       # surface"), so closing the surface would leave the tab open forever
       # (claude-plugins-zaus). A follow-up arriving after this reads its cached
       # surface as gone and takes the existing `surface-reuse→fresh(...)` path.
-      if ! out=$(cmux close-workspace --workspace "$WS_CLOSE_REF" ${force:+"$force"} 2>&1); then
-        record_cleanup_failure "could not close workspace $WS_CLOSE_REF after the response: $(printf '%s' "$out" | tr '\n\r\t' '   ' | cut -c1-140)"
+      if ! out=$(CMUX_QUIET=1 cmux close-workspace --workspace "$WS_CLOSE_REF" ${force:+"$force"} 2>&1); then
+        record_cleanup_failure "could not close workspace $WS_CLOSE_REF after the response: $(cmux_err_text "$out")"
       fi
     fi
     return 0

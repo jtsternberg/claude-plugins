@@ -1311,6 +1311,17 @@ cmux_workspace_current_surface() {
 # the call dir instead of a swallowed stderr — a cleanup failure that only exists
 # as a discarded stream is the failure mode this replaces.
 CMUX_CLOSE_ERR=""
+
+# cmux_err_text <captured-output>
+# One line, 140 chars, with cmux's deprecation banner removed. 0.65.0 prints
+# "cmux: '<verb>' is now an alias for …" to stderr BEFORE the real error on every
+# aliased verb (close-workspace is one), so a bare `cut -c1-140` kept only the
+# banner and the refusal never showed. The close calls also set CMUX_QUIET=1,
+# which silences it on 0.65.0; this filter covers a cmux that ignores that.
+cmux_err_text() {
+  printf '%s\n' "$1" | sed "/^cmux: '[^']*' is now an alias for/d" | tr '\n\r\t' '   ' | cut -c1-140
+}
+
 cmux_close_surface_scoped() {
   local what="$1" handle="${2:-}" force="" addr ws surf out
   [[ "${3:-}" == "force" ]] && force="--force"
@@ -1323,8 +1334,8 @@ cmux_close_surface_scoped() {
     *) CMUX_CLOSE_ERR="surface $handle is not in the cmux tree, so its workspace is unknown"; return 1 ;;
   esac
   ws="${addr%% *}"; surf="${addr##* }"
-  if ! out=$(cmux close-surface --workspace "$ws" --surface "$surf" ${force:+"$force"} 2>&1); then
-    CMUX_CLOSE_ERR="cmux close-surface --workspace $ws --surface $surf refused: $(printf '%s' "$out" | tr '\n\r\t' '   ' | cut -c1-140)"
+  if ! out=$(CMUX_QUIET=1 cmux close-surface --workspace "$ws" --surface "$surf" ${force:+"$force"} 2>&1); then
+    CMUX_CLOSE_ERR="cmux close-surface --workspace $ws --surface $surf refused: $(cmux_err_text "$out")"
     return 2
   fi
   return 0
