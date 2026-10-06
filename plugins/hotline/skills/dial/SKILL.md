@@ -363,6 +363,11 @@ protocol noise doesn't land in their transcript. If the user's intent is clearly
 to *help that session* ("continue that conversation", "help it fix its bug"), add
 `--no-fork` to contribute to it directly. When in doubt, fork.
 
+A `--no-fork` dial of a session that is still live in a cmux surface is a follow-up
+into that surface, never a second REPL: hotline finds it from the session's last
+call and reports `live-session-adopted` in `fallbacks`. A busy or dirty input box
+refuses reuse exactly as a workspace follow-up does.
+
 `--fresh` contradicts a session-ID target and is refused: one says continue that
 conversation, the other says ignore what exists. Pass the workspace with `--fresh`
 to start new there.
