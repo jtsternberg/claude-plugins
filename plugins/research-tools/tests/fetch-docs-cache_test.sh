@@ -38,7 +38,8 @@ else
 fi
 
 # --- an expired cached file is refetched -------------------------------------
-touch -d '@1000000000' "$CACHED"
+# POSIX -t works with BSD and GNU touch; pin UTC so the fixture is unambiguous.
+TZ=UTC touch -t 200001010000 "$CACHED" || exit 1
 PATH="$BIN:$PATH" bash "$SCRIPT" --slug="$SLUG" "https://example.invalid/page" >/dev/null 2>&1
 if [ -f "$TMP/curl.log" ]; then
   pass "expired cache triggers a fetch"
