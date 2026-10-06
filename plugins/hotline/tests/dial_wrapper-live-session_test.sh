@@ -5,7 +5,7 @@
 #
 # The cache is keyed caller→workspace, so a later dial into the same workspace takes
 # the slot and the earlier session drops out of it while its REPL stays up.
-# `--target <id> --no-fork` then used to `claude --resume` a second REPL onto it.
+# `--target <id> --no-fork` must not `claude --resume` a second REPL onto it:
 # find-live-surface.sh recovers the surface from the call dirs, behind the same
 # nonce-in-scrollback proof the cleanup path demands.
 #
