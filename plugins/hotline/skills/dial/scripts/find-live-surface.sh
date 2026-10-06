@@ -20,6 +20,10 @@
 #   # → {"surface_ref": "...", "call_id": "...", "call_dir": "..."}   exit 0
 #   # → nothing, exit 1 (no call dir, no surface, unreadable, or nonce absent)
 #
+# Reach: the call dirs are swept after HOTLINE_CALL_SWEEP_DAYS (call-dir sweep), so a
+# session whose last exchange is older than about that +1 day has no call dir left to
+# find; it falls back to `claude --resume` in a new surface like any other miss.
+#
 # This proves the surface hosted the session's last exchange, not that the REPL is
 # idle. Idle/dirty-box gating stays with cmux-reuse-surface.sh.
 # =============================================================================

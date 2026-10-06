@@ -366,7 +366,12 @@ to *help that session* ("continue that conversation", "help it fix its bug"), ad
 A `--no-fork` dial of a session that is still live in a cmux surface is a follow-up
 into that surface, never a second REPL: hotline finds it from the session's last
 call and reports `live-session-adopted` in `fallbacks`. A busy or dirty input box
-refuses reuse exactly as a workspace follow-up does.
+refuses reuse, and for this path that is an `error` (stage `deliver`), not a fall
+back to a fresh surface: nothing is launched, because a fresh `--resume` would be
+the second REPL. Wait for the REPL to go idle, or type into the named surface, then
+re-dial. A delivery proven only by the screen (the REPL may have been `/resume`d or
+`/clear`ed into another session) is reported as an unconfirmed `deliver` error too —
+do not re-dial it.
 
 `--fresh` contradicts a session-ID target and is refused: one says continue that
 conversation, the other says ignore what exists. Pass the workspace with `--fresh`
