@@ -58,7 +58,7 @@ Harvested live from replays on cmux 0.64.25. **The retained buffer is a rolling 
 
 | category | names |
 |---|---|
-| `agent` | `agent.hook.SessionStart`, `agent.hook.UserPromptSubmit`, `agent.hook.PreToolUse`, `agent.hook.Stop`, `agent.hook.SubagentStop`, `agent.hook.SessionEnd`, `agent.hook.Notification`, `agent.notification.decision`, `agent.journal.unattributed` |
+| `agent` | `agent.hook.SessionStart`, `agent.hook.UserPromptSubmit`, `agent.hook.PreToolUse`, `agent.hook.PostToolUse`, `agent.hook.Stop`, `agent.hook.SubagentStop`, `agent.hook.SessionEnd`, `agent.hook.Notification`, `agent.notification.decision`, `agent.journal.unattributed` |
 | `surface` | `surface.created`, `surface.selected`, `surface.focused`, `surface.closed`, `surface.moved`, `surface.input_sent`, `surface.key_sent` |
 | `workspace` | `workspace.created`, `workspace.selected`, `workspace.closed`, `workspace.reordered`, `workspace.prompt.submitted` |
 | `pane` | `pane.created`, `pane.focused` |
