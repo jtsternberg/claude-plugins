@@ -168,6 +168,8 @@ segment above.
   cmux close-surface --surface <uuid> --workspace <workspace-uuid>
   ```
 
+  cmux 0.65.0 refuses to close a surface with a running process (`confirmation_required … retry with --force`); once the tree check above has shown the surface is the orphan, add `--force`.
+
   Close by UUID only, and keep your own surface out of the list — `cmux close-surface` echoes an `OK surface:N` that may already reflect post-close renumbering, so confirm from a fresh tree rather than from that echo.
 - **`dial.sh`'s own `.recovery` names this now**, on the `stage: "boot"` report this failure surfaces as: it says a surface may exist and points back here, instead of the generic "the callee's claude REPL never came up" (claude-plugins-yded) — that generic wording is true of the REPL and false of the surface, and reads as "nothing was created" when something plainly was.
 - **Two failures never reach this error**, because they auto-degrade: `could not resolve … from identify` (rc 2) and a `not_found` from cmux (rc 1) both mean the caller's own surface context is unusable, so the dial lands in a detached workspace and records `surface-context→detached` in `.fallbacks`. Side-by-side is the only placement needing that context; detached opens its own workspace. A side dial reporting `.placement: "detached"` with that fallback succeeded — read `.fallbacks` before re-dialing anything by hand.

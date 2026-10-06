@@ -263,7 +263,8 @@ WS="${ADDR%% *}"
 
 # cmux itself refuses to close the last surface in a workspace
 # ("invalid_state: Cannot close the last surface"), which bounds the worst case
-# of a wrong decision here to a no-op rather than a destroyed workspace.
+# of a wrong decision here to a no-op rather than a destroyed workspace. The
+# guard holds under --force too (verified live, cmux 0.65.0).
 #
 # --force: cmux 0.65.0 refuses to close a surface with a live process
 # (confirmation_required), and the callee's claude REPL always is one. Every gate
