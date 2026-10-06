@@ -92,8 +92,8 @@ watched the session, rewrite it.
 
 ## `Next for you:` lines
 
-Three parts, always: the answer tokens with their one-letter aliases, a plain
-clause naming the subject, and the ledger path followed by the anchor as a
+For a decision request, three parts: the answer tokens with their one-letter
+aliases, a plain clause naming the subject, and the ledger path followed by the anchor as a
 separate token.
 
 Bad — tokens with no subject, and a path fused to its anchor, which opens
@@ -122,8 +122,8 @@ to override item N
 (/tmp/maestro/decisions-c54f524f.md - #decide-2653-split)
 ```
 
-Nothing owed now, but the next step is already known — its token still carries
-its alias:
+Implementation is still active and nothing is owed now, but the next step is
+already known — its token still carries its alias:
 
 ```
 Next for you: nothing. After I confirm the edits, the next step is your `file` (F) on
@@ -141,3 +141,11 @@ belong in the handoff's next steps as one line each — tokens, clause, link —
 and the `Decided` list is the decision history a fresh agent needs, already
 written. Copying sections into the handoff forks them, and the copy is the one
 that goes stale.
+
+A completed handoff states the outcome, any scheduled pending job, and idle
+readiness instead of implying work continues:
+
+```text
+The edits are committed. The midnight job remains scheduled; I am idle and ready
+for your next instruction.
+```

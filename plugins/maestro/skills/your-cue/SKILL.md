@@ -223,14 +223,19 @@ Finished while you were away
 Coverage
 - <only when a host was unavailable, or a remote callee's host is not inventoried>
 
-Next for you: <the highest-priority non-nothing cue and visible locator, or "nothing" when
-every workstream's cue is nothing>.
+Next for you: <the highest-priority action and visible locator; "nothing" only while
+work remains active>.
+<If fully idle: outcome, any scheduled pending job, and readiness for the next instruction;
+omit the Next for you line when no action is needed>.
 ```
 
 `Next for you:` is one line, one action, never a menu — the single
 highest-priority non-nothing cue, carrying its visible locator so the human
-knows where to go. `Next for you: nothing` when every workstream is working or
-settled; say it rather than trailing off.
+knows where to go. Use `Next for you: nothing` only when no human action is
+needed and implementation, review, or waiting on an armed reporting callback is
+still active. When the work is finished, state the outcome, any scheduled pending
+job, and that you are idle and ready for the next instruction. A future timer
+alone does not imply current work; a completed briefing need not end with `nothing`.
 
 **A cue to answer or clarify carries its subject.** A briefing is read hours
 after the question was asked, so the answer tokens alone (`answer "fold" or
