@@ -16,7 +16,7 @@ installing.
 
 ### Claude Code
 
-Add the marketplace and install any of its 35 listed plugins:
+Add the marketplace and install any of its 36 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
@@ -50,7 +50,7 @@ installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
 
 To install one self-contained repository skill instead of a whole plugin, see
 [standalone Codex skills](docs/codex/standalone-skills.md). For commands,
-updates, catalog scope, and all 36 plugin names, see the
+updates, catalog scope, and all 37 plugin names, see the
 [compatibility guide](docs/compatibility.md).
 
 ---
@@ -59,7 +59,7 @@ updates, catalog scope, and all 36 plugin names, see the
 
 These are selected plugins and workflows. The
 [support matrix](docs/compatibility.md#plugin-support-matrix) is the complete
-36-name inventory and the authority for harness availability.
+37-name inventory and the authority for harness availability.
 
 ### Skills
 
@@ -161,6 +161,11 @@ Orchestration stance for a main agent overseeing delegated work. Ships `conduct`
 Hit the 5-hour session limit mid-task? Stop for now and have *this* session pick the work back up at the reset — context still loaded, zero tokens spent waiting, no resume note needed. Ships `until`: a `Monitor` polling the clock, so the notification wakes the current session, which runs the payload itself instead of handing it to a context-free headless or cloud run. Pairs with a budget watcher that reports a reset time — arm it at the warning, not at exhaustion, since a rate-limited request has no turn left to arm anything. Also covers the plain timed case: absolute times, relative delays, and queueing several spaced-out jobs. Not a durable scheduler — the watcher dies with the session, and the skill says so when it arms one. Rung 2 of [maestro](#-maestro)'s `patient-waiting` ladder with the clock as the watched condition.
 
 **Install:** `claude plugin install delayed-work@jtsternberg`
+
+#### 🛫 [runway](plugins/runway)
+Reads subscription quota and context-window headroom at session start and on prompts. Quota never stops work early: at `wrap_up`/`stop` it has the agent arm a `delayed-work:until` wake-up for the reset and keep going, so a 429 just puts the session to sleep until the refill. A full context window still hands off to a fresh session. `RUNWAY_STOP_WORK=1` pauses until the reset instead, with a restart scheduled in the same session. Hooks ship with the plugin. Claude Code only.
+
+**Install:** `claude plugin install runway@jtsternberg` (plus `delayed-work@jtsternberg`)
 
 ### Workflow skills
 

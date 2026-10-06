@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 15,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/runway/scripts/runway.py\" --brief --no-self-install"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 15,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/runway/scripts/runway.py\" --brief --throttle 900 --no-self-install"
+          }
+        ]
+      }
+    ],
+    "PostModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "timeout": 15,
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/runway/scripts/runway.py\" --record-model --no-self-install"
+          }
+        ]
+      }
+    ]
+  }
+}

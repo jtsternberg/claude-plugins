@@ -180,6 +180,11 @@
       "name": "delayed-work",
       "source": "./plugins/delayed-work",
       "description": "Hit a session limit mid-task? Stop for now and have this same session resume the work at the reset, with the context it already has and zero tokens spent waiting. Also plain timed work: run X at 9pm, or in 30 minutes."
+    },
+    {
+      "name": "runway",
+      "source": "./plugins/runway",
+      "description": "Reads subscription quota and context-window headroom at session start and on prompts. Keeps working through high quota and arms delayed-work:until at wrap_up/stop, so a later 429 just sleeps the session until the reset. RUNWAY_STOP_WORK=1 pauses until the reset instead."
     }
   ]
 }

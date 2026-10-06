@@ -294,6 +294,17 @@
       "category": "Coding"
     },
     {
+      "name": "runway",
+      "source": {
+        "source": "local",
+        "path": "./plugins/runway"
+      },
+      "category": "Coding",
+      "policy": {
+        "installation": "NOT_AVAILABLE"
+      }
+    },
+    {
       "name": "codex",
       "source": {
         "source": "local",

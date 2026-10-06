@@ -1,0 +1,9 @@
+{
+  "name": "runway",
+  "description": "Reads subscription quota and context-window headroom at session start and on prompts. Keeps working through high quota and arms delayed-work:until at wrap_up/stop, so a later 429 just sleeps the session until the reset. RUNWAY_STOP_WORK=1 pauses until the reset instead.",
+  "version": "0.1.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}

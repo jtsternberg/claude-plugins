@@ -10,7 +10,7 @@ catalogs, so install from the column that matches the client you are using.
 
 The clean probes confirmed that Claude Code and Codex resolve separate catalogs
 and that Codex offers only a subset. The matrix below is the current inventory —
-35 entries in the Claude Code catalog, 36 names across both. Recheck this guide
+36 entries in the Claude Code catalog, 37 names across both. Recheck this guide
 after a client upgrade or a catalog change.
 
 ## Install and invoke
@@ -150,6 +150,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | [watch-pr-then-action](../plugins/pr-workflow/watch-pr-then-action) | Available | Available | Requires GitHub CLI authentication; schedules a polling cron job. |
 | [publish-insights](../plugins/publish-insights) | Redirect | Not offered | Install from the separately maintained `jtsternberg/claude-usage-data` marketplace; it also requires Git, authenticated `gh`, and a Claude Code insights report. |
 | [research-tools](../plugins/research-tools) | Available | Not offered | Requires network access for source retrieval. A self-contained skill can instead be installed through the standalone guide. |
+| [runway](../plugins/runway) | Available | Not offered | Reads Claude Code quota and transcripts, and ships Claude Code session hooks; pairs with `delayed-work` for the 429 wake-up. |
 | [session-tools](../plugins/session-tools) | Available | Not offered | Operates on Claude Code session transcripts. |
 | [skill-tools](../plugins/skill-tools) | Available | Not offered | Some workflows require their documented local toolchain. |
 | [slack](../plugins/slack) | Available | Not offered | Requires Slack Web API credentials/configuration. |
