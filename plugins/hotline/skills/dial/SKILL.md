@@ -155,8 +155,10 @@ cmux reports for the submitted prompt with the payload's length. **`short: true`
 the callee may have received a truncated work order** — the nonce is at the head, so
 `.confirmed` cannot see a lost tail. Check the callee's transcript before relying on it,
 and never re-dial on it alone: the payload is already in the callee's queue. The field is
-absent wherever it could not be read cleanly: an older cmux, more than one submit in the
-workspace during the window, or text with combining or joined characters.
+absent wherever it could not be read cleanly: an older cmux, a first contact,
+`HOTLINE_PASTE_INGEST_WINDOW=0`, more than one submit in the workspace during the
+window, a frame from an older cmux app whose preview is ellipsized with a length equal to
+`message_length`, or text with combining or joined characters.
 
 `transport` means the backend the caller asked for is not usable here — herdr is not
 installed, or no herdr server answered. **It is never a degradation**: an explicit
