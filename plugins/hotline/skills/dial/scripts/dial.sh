@@ -1058,6 +1058,20 @@ PREV_SESSION_ID=""
 # The call dir of the exchange before this one, so step 5a can ask whether that
 # exchange is still in flight. See detached_exchange_still_waiting there.
 PREV_CALL_DIR=""
+# A --no-fork dial of a session id the cache no longer holds (a later dial into the
+# same workspace took the slot) may still name a session LIVE in a surface. Register
+# it as this target's cached callee so the lookup below sees an ordinary follow-up and
+# reuse applies its idle/dirty-box gates; a miss leaves today's resume untouched.
+if $NO_FORK && [[ -n "$RESUME_ARG" ]] && ! $FRESH && [[ "$TRANSPORT" == "cmux" && -z "$REMOTE_TARGET" ]] \
+   && [[ "$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" --caller-session "$MY_SESSION_ID" 2>/dev/null \
+            | jq -r '.session_id // empty' 2>/dev/null)" != "$RESUME_ARG" ]] \
+   && LIVE=$(bash "$DIAL_SCRIPTS/find-live-surface.sh" "$RESUME_ARG" 2>/dev/null); then
+  bash "$DIAL_SCRIPTS/session-cache.sh" set "$TARGET_PATH" \
+    --caller-session "$MY_SESSION_ID" --session "$RESUME_ARG" --mode "$MODE_TAG" \
+    --surface "$(jq -r '.surface_ref' <<<"$LIVE")" --call-id "$(jq -r '.call_id' <<<"$LIVE")" \
+    --call-dir "$(jq -r '.call_dir' <<<"$LIVE")" --transport cmux >/dev/null 2>&1
+  add_fallback "live-session-adopted($RESUME_ARG in surface $(jq -r '.surface_ref' <<<"$LIVE"); the cache had lost it)"
+fi
 if [[ -z "$RESUME_ARG" ]] || $NO_FORK; then
   if CACHED=$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" \
                 --caller-session "$MY_SESSION_ID" 2>/dev/null) && [[ -n "$CACHED" ]] \
