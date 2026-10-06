@@ -425,8 +425,8 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   equality test against a bare uuid can match and that must never be passed on to a
   caller. Capture a replay (`cmux events --after 0 … | jq`), build the fixtures from
   those frames, and re-check any field a doc calls "exact" AT and ABOVE its stated
-  cap — `message_length` is capped at 240 and had been generalized as
-  character-exact from two samples of 119 and 43. (claude-plugins-056z)
+  cap — before cmux 0.65.0 `message_length` was capped at 240 and had been
+  generalized as character-exact from two samples of 119 and 43. (claude-plugins-056z)
 - **A fixture has to model the state the bug destroys, not a milder version of it.** A
   "user has scrolled up" screen that still rendered the input box left every
   box-shaped gate working, so no test could have caught the reads that followed the

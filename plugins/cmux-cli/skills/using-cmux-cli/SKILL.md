@@ -214,7 +214,7 @@ Three questions events answer by fact, where the screen answers only by inferenc
 
 | Question | Event | Why it beats the screen |
 |---|---|---|
-| Did my message submit into that REPL? | `workspace.prompt.submitted` | Carries an **exact** `message_length` plus a 240-char `message_preview`, so a length mismatch *measures* the silent-byte-loss failure and a frame count measures fragmentation. |
+| Did my message submit into that REPL? | `workspace.prompt.submitted` | Carries a 240-char `message_preview` plus a `message_length` that is the true length from cmux 0.65.0 (before that, the preview's length, capped at 240), so on 0.65.0+ a length mismatch *measures* the silent-byte-loss failure; a frame count measures fragmentation on any version. |
 | Is that agent done? | `agent.hook.Stop` / `SubagentStop` / `SessionEnd` | A real turn boundary, not a spinner's elapsed-time parenthetical. |
 | Does the new surface exist yet? | `surface.created` | Reports the `surface_id` and `pane_id` outright. (Existing ≠ PTY attached — the [readiness probe](#default-principle-make-new-work-visible-to-the-user) is still required.) |
 
