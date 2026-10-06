@@ -1153,6 +1153,19 @@ if [[ "\$1" == "close-surface" && -n "\${CMUX_REFUSE_CLOSE:-}" ]]; then
 fi
 # CMUX_NEEDS_FORCE models cmux 0.65.0: a close of anything holding a live process
 # (the callee's REPL, always) is refused unless --force rides along.
+# CMUX_SCREEN_FILE feeds read-screen, for the paths that read the callee's box.
+if [[ "\$1" == "read-screen" && -n "\${CMUX_SCREEN_FILE:-}" ]]; then cat "\$CMUX_SCREEN_FILE"; fi
+# CMUX_REFUSE_CONFIRM: 0.65.0's refusal verbatim, preceded by the deprecation banner
+# the aliased verbs print, and refused even WITH --force so a failure can be forced.
+# CMUX_QUIET as seen by the close is logged so a test can pin that it is set.
+if [[ "\$1" == "close-surface" || "\$1" == "close-workspace" ]]; then
+  printf '%s\\n' "\${CMUX_QUIET:-unset}" >> '$sd/quiet.log'
+  if [[ -n "\${CMUX_REFUSE_CONFIRM:-}" ]]; then
+    echo "cmux: '\$1' is now an alias for 'cmux workspace close'. The legacy form keeps working indefinitely; set CMUX_QUIET=1 to silence this notice." >&2
+    echo 'Error: confirmation_required: Workspace has a running process; retry with --force' >&2
+    exit 1
+  fi
+fi
 if [[ ( "\$1" == "close-surface" || "\$1" == "close-workspace" ) && -n "\${CMUX_NEEDS_FORCE:-}" && " \$* " != *" --force "* ]]; then
   echo 'Error: confirmation_required: has a running process; retry with --force' >&2
   exit 1
@@ -1318,6 +1331,47 @@ else
   fail "a timed-out call's close never carries --force" "rc=$RCT cmux calls: $(cat "$LOGT" 2>/dev/null || echo NONE)"
 fi
 rm -rf "$HT" "$CDT" "$SDT"
+
+# The two OTHER exits that close without proof, pinned the same way: a mutation that
+# added `force` to either survived the suite. Both leave a callee that may well still
+# be working, so a refusal is the correct outcome there.
+# (a) Message parked UNSUBMITTED in the callee's box: the BOX_RC=0 fast-fail, exit 1.
+BOXSCREEN=$(mktemp)
+printf '%s\n' "$GLYPH do the thing" "────────────────────────────────────────" \
+  "${GLYPH}${NBSP}[Pasted text #2 +18 lines]" "────────────────────────────────────────" > "$BOXSCREEN"
+CL=$(setup_cleanup_call detached)
+HU=${CL%%|*}; rU=${CL#*|}; CDU=${rU%%|*}; rUb=${rU#*|}; SDU=${rUb%%|*}; LOGU=${rUb#*|}
+printf '%s\n' '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unrelated chatter"}}' \
+  > "$HU/.claude/projects/-fake-callee-ws/sess-tcm.jsonl"
+set +e
+ERRU=$(HOME="$HU" PATH="$SDU:$PATH" CMUX_NEEDS_FORCE=1 CMUX_SCREEN_FILE="$BOXSCREEN" \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDU" --timeout 60 --submit-deadline 4 2>&1 >/dev/null)
+RCU=$?
+set -e
+if [[ $RCU -eq 1 ]] && printf '%s' "$ERRU" | grep -q "still sitting UNSUBMITTED" \
+   && grep -q "close-workspace" "$LOGU" 2>/dev/null && ! grep -q -- "--force" "$LOGU" 2>/dev/null; then
+  pass "an unsubmitted-transport fast-fail's close never carries --force"
+else
+  fail "an unsubmitted-transport fast-fail's close never carries --force" "rc=$RCU err=$ERRU cmux calls: $(cat "$LOGU" 2>/dev/null || echo NONE)"
+fi
+rm -rf "$HU" "$CDU" "$SDU" "$BOXSCREEN"
+
+# (b) Scrape mode (no session id → no transcript) that never sees a STATUS: timeout, exit 1.
+CL=$(setup_cleanup_call detached)
+HV=${CL%%|*}; rV=${CL#*|}; CDV=${rV%%|*}; rVb=${rV#*|}; SDV=${rVb%%|*}; LOGV=${rVb#*|}
+rm -f "$CDV/session_id.txt"
+set +e
+ERRV=$(HOME="$HV" PATH="$SDV:$PATH" CMUX_NEEDS_FORCE=1 \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDV" --timeout 4 --submit-deadline 2 2>&1 >/dev/null)
+RCV=$?
+set -e
+if [[ $RCV -eq 1 ]] && printf '%s' "$ERRV" | grep -q "Timed out waiting for STATUS" \
+   && grep -q "close-workspace" "$LOGV" 2>/dev/null && ! grep -q -- "--force" "$LOGV" 2>/dev/null; then
+  pass "a scrape-mode timeout's close never carries --force"
+else
+  fail "a scrape-mode timeout's close never carries --force" "rc=$RCV err=$ERRV cmux calls: $(cat "$LOGV" 2>/dev/null || echo NONE)"
+fi
+rm -rf "$HV" "$CDV" "$SDV"
 
 # ---- the when-to-read gate: cmux events instead of a 2s tick ---------------
 # Once the transcript has confirmed our message submitted, the only thing left to
