@@ -449,9 +449,14 @@ DELIVERY_RETRIED=$(jq -r 'if .retried_enter == true then "true" else "false" end
 # delivery above it. A value above 1 means the payload landed as several turns —
 # delivered, but not as one.
 DELIVERY_FRAMES=$(jq -r '.submit_frames // empty' <<<"$DELIVERY_RESULT" 2>/dev/null) || DELIVERY_FRAMES=""
+# length_check travels as a unit and is omitted the same way: cmux-paste.sh reports it
+# only on cmux >= 0.65.0 where one attributable frame could be read.
+DELIVERY_LENGTH=$(jq -c '.length_check // empty' <<<"$DELIVERY_RESULT" 2>/dev/null) || DELIVERY_LENGTH=""
 jq -n --arg dir "$CALL_DIR" \
   --arg confirmed "$(jq -r '.confirmed // empty' <<<"$DELIVERY_RESULT" 2>/dev/null)" \
   --argjson retried "${DELIVERY_RETRIED:-false}" \
   --arg frames "${DELIVERY_FRAMES:-}" \
+  --arg length "${DELIVERY_LENGTH:-}" \
   '{call_dir: $dir, delivery: "paste", confirmed: $confirmed, retried_enter: $retried}
-   + (if $frames == "" then {} else {submit_frames: ($frames | tonumber)} end)'
+   + (if $frames == "" then {} else {submit_frames: ($frames | tonumber)} end)
+   + (if $length == "" then {} else {length_check: ($length | fromjson)} end)'

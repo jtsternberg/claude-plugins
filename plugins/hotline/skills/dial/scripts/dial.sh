@@ -1278,6 +1278,7 @@ emit_connected() {  # emit_connected <awaiting_response:true|false>
     --arg confirmed "$DELIVERY_CONFIRMED" \
     --arg retried "$DELIVERY_RETRIED" \
     --arg submit_frames "$DELIVERY_FRAMES" \
+    --arg length_check "$DELIVERY_LENGTH" \
     --argjson first_contact "$FIRST_CONTACT" \
     --argjson identity_stale "$IDENTITY_STALE" \
     --argjson awaiting "$1" \
@@ -1294,6 +1295,7 @@ emit_connected() {  # emit_connected <awaiting_response:true|false>
      + (if $confirmed == "" then {} else {confirmed:$confirmed} end)
      + (if $retried   == "" then {} else {retried_enter:($retried == "true")} end)
      + (if $submit_frames == "" then {} else {submit_frames:($submit_frames|tonumber)} end)
+     + (if $length_check == "" then {} else {length_check:($length_check|fromjson)} end)
      + (if $remote_target == "" then {} else {remote_target:$remote_target} end)
      + (if $remote_pane   == "" then {} else {remote_pane:$remote_pane} end)
      + (if $callee_env == "" then {}
@@ -1330,6 +1332,8 @@ DELIVERY_RETRIED=""
 # nonce arrived, not how many turns it arrived in. Absent rather than 0 wherever the
 # event stream could not answer (no cmux events, a herdr callee, an unread marker).
 DELIVERY_FRAMES=""
+# Present only on cmux >= 0.65.0 (see cmux-paste.sh): {sent, seen, short}.
+DELIVERY_LENGTH=""
 
 # ---------------------------------------------------------------------------
 # Step 5a — Follow-up into the surface the session already lives in.
@@ -1421,6 +1425,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
       DELIVERY_CONFIRMED=$(jq -r '.confirmed // empty' <<<"$REUSE" 2>/dev/null)
       DELIVERY_RETRIED=$(jq -r 'if has("retried_enter") then (.retried_enter|tostring) else "" end' <<<"$REUSE" 2>/dev/null)
       DELIVERY_FRAMES=$(jq -r '.submit_frames // empty' <<<"$REUSE" 2>/dev/null)
+      DELIVERY_LENGTH=$(jq -c '.length_check // empty' <<<"$REUSE" 2>/dev/null)
       [[ -s "$CALL_DIR/call_id.txt" ]] && CALL_ID_OUT=$(cat "$CALL_DIR/call_id.txt")
       # The reused surface is unchanged, but bump last_contact / exchange_count.
       # --call-dir moves with it: this reuse dir is what the NEXT follow-up's

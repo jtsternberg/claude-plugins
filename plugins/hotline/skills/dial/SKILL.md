@@ -150,6 +150,14 @@ a tally: a queued paste is counted when the queue flushes, so 1 is not itself pr
 a single clean turn. The field is absent, rather than 0, wherever the count could not
 be taken: a cmux with no event stream, a herdr callee, or a first contact.
 
+`.length_check` (`{sent, seen, short}`, cmux 0.65.0 and later only) compares the length
+cmux reports for the submitted prompt with the payload's length. **`short: true` means
+the callee may have received a truncated work order** — the nonce is at the head, so
+`.confirmed` cannot see a lost tail. Check the callee's transcript before relying on it,
+and never re-dial on it alone: the payload is already in the callee's queue. The field is
+absent wherever it could not be read cleanly: an older cmux, more than one submit in the
+workspace during the window, or text with combining or joined characters.
+
 `transport` means the backend the caller asked for is not usable here — herdr is not
 installed, or no herdr server answered. **It is never a degradation**: an explicit
 `--transport herdr` is an ask for a callee that survives a disconnect, and quietly
