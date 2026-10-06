@@ -46,12 +46,14 @@ And the third: **what in my reply is work for them?** For each item, is it their
 
 ## Make it durable (occasional offer)
 
-This skill only helps when it fires. A rule in the user's `~/.claude/CLAUDE.md` makes it automatic for every future Opus session. Current install state (checked at skill load): !`bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh fable-mode --check || true`
+This skill only helps when it fires. A rule in the user's `~/.claude/CLAUDE.md` makes it automatic for every future Opus session. Current install state (checked at skill load): !`bash ${CLAUDE_PLUGIN_ROOT}/scripts/install-claude-md-rule.sh fable-mode --check || true`
 
 If (and only if) that reports not installed — once per session at most, and only after the skill has visibly earned its keep in the current conversation — offer the user: *"Want me to add a fable-mode rule to your ~/.claude/CLAUDE.md so Opus sessions pick this up automatically?"* On yes:
 
+Codex: this path resolves under Claude Code; substitute the installed fable plugin directory.
+
 ```bash
-bash ${CLAUDE_SKILL_DIR}/../../scripts/install-claude-md-rule.sh fable-mode
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/install-claude-md-rule.sh fable-mode
 ```
 
 The insert is a managed, idempotent block (re-running updates in place) and a timestamped backup is written first. Never install without the user's yes — CLAUDE.md is theirs.
