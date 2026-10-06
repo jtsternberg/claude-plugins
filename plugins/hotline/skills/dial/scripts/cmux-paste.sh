@@ -683,6 +683,12 @@ if [[ -n "$PASTE_SEQ" ]]; then
   # alongside the count rather than after it — both spend their full settle window,
   # and running them in series would double the wait.
   if cmux_has_true_message_length; then
+    # A SIGINT/TERM mid-window would leak the temp file and leave the background
+    # reader running, so a trap owns the cleanup. No EXIT trap is live here (the
+    # split-paste one is cleared above); the saved one is restored after the rm.
+    PRIOR_EXIT_TRAP=$(trap -p EXIT)
+    MEASURES_PID=""
+    trap 'rm -f "$MEASURES_FILE"; [[ -n "$MEASURES_PID" ]] && { pkill -P "$MEASURES_PID" 2>/dev/null; kill "$MEASURES_PID" 2>/dev/null; }; true' EXIT
     MEASURES_FILE=$(mktemp)
     HOTLINE_EVENTS_AFTER="$PASTE_SEQ" \
       cmux_submit_measures "$WS_ID" "$INGEST_WINDOW" >"$MEASURES_FILE" 2>/dev/null &
@@ -722,7 +728,7 @@ if [[ -n "$PASTE_SEQ" ]]; then
           '{sent: $sent, seen: $seen, short: ($seen < $sent)}')
       fi
     fi
-    rm -f "$MEASURES_FILE"
+    rm -f "$MEASURES_FILE"; trap - EXIT; eval "$PRIOR_EXIT_TRAP"
   fi
 fi
 
