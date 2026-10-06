@@ -98,6 +98,7 @@ make_cmux() {
   cat > "$bindir/cmux" <<EOF
 #!/usr/bin/env bash
 case "\$1" in
+  --version)   [[ -n "\${CMUX_STUB_VERSION:-}" ]] && echo "cmux \$CMUX_STUB_VERSION (108) [dda24fbd2]"; exit 0 ;;
   read-screen) cat "$screen"; exit 0 ;;
   send-key)    exit 0 ;;
   events)
@@ -255,6 +256,114 @@ check "HOTLINE_PASTE_INGEST_WINDOW=0 omits the field" $? "out=$out"
 [[ ! -s "$d/sock/requests.log.events" ]]
 check "…and spends no event query at all doing it" $? \
   "events calls: $(cat "$d/sock/requests.log.events" 2>/dev/null)"
+
+# --- 8. The length check: cmux >= 0.65.0 only, one-sided, additive ----------
+# run_case's payload is 5 lines; its stripped length is what a whole delivery reports.
+LEN_CID="lenchk0000000001"
+SENT_LEN=$(printf '[CALL_ID: %s]\nline one\nline two\nline three\nline four' "$LEN_CID" | wc -c | tr -d ' ')
+
+# submitted_frame <seq> <workspace> <message_length> [preview]
+# Shape of a live 0.65.0 capture: no surface_id, no session_id, message null.
+submitted_frame() {
+  printf '{"name":"workspace.prompt.submitted","seq":%s,"workspace_id":"%s","payload":{"message":null,"message_length":%s,"message_preview":"%s","redacted_fields":["message"],"workspace_id":"%s"}}\n' \
+    "$1" "$2" "$3" "${4:-x}" "$2"
+}
+f_len_whole() { ingest_frame $((BASE_SEQ+1)) "$SURF_UUID" "$SESS_UUID" completed
+                submitted_frame $((BASE_SEQ+2)) "$WS_UUID" "$SENT_LEN"; }
+f_len_short() { ingest_frame $((BASE_SEQ+1)) "$SURF_UUID" "$SESS_UUID" completed
+                submitted_frame $((BASE_SEQ+2)) "$WS_UUID" $((SENT_LEN - 20)); }
+
+d="$STUBROOT/lenwhole"; out=$(run_case "$d" "$LEN_CID" f_len_whole CMUX_STUB_VERSION=0.65.0)
+jq -e --argjson n "$SENT_LEN" '.length_check == {sent: $n, seen: $n, short: false}' <<<"$out" >/dev/null 2>&1
+check "0.65.0, reported length == sent length → length_check.short:false" $? "out=$out"
+
+d="$STUBROOT/lenshort"; out=$(run_case "$d" "$LEN_CID" f_len_short CMUX_STUB_VERSION=0.65.0)
+jq -e --argjson n "$SENT_LEN" '.length_check == {sent: $n, seen: ($n - 20), short: true}' <<<"$out" >/dev/null 2>&1
+check "0.65.0, reported length below sent → length_check.short:true (byte loss)" $? "out=$out"
+# A suspected loss is a payload IN the queue; reporting it undelivered invites a resend.
+jq -e '.delivered == true and .sent == true and .confirmed == "transcript" and .submit_frames == 1' <<<"$out" >/dev/null 2>&1
+check "…and suspected loss does NOT change delivered/sent/confirmed or the frame count" $? "out=$out"
+
+# Below 0.65.0 message_length is the preview's length: no length field, today's output.
+d="$STUBROOT/lenold"; out=$(run_case "$d" "$LEN_CID" f_len_short CMUX_STUB_VERSION=0.64.25)
+jq -e 'has("length_check") | not' <<<"$out" >/dev/null 2>&1
+check "0.64.25 → no length_check, however short the frame reads" $? "out=$out"
+jq -e '.submit_frames == 1 and .confirmed == "transcript"' <<<"$out" >/dev/null 2>&1
+check "…and the rest of the result is unchanged" $? "out=$out"
+
+# A cmux whose --version prints nothing (every stub before this one) reads as old.
+d="$STUBROOT/lenunknown"; out=$(run_case "$d" "$LEN_CID" f_len_short)
+jq -e 'has("length_check") | not' <<<"$out" >/dev/null 2>&1
+check "unknown version → no length_check" $? "out=$out"
+
+# 0.100.0 is newer than 0.65.0; a string compare would say otherwise.
+d="$STUBROOT/lennumeric"; out=$(run_case "$d" "$LEN_CID" f_len_whole CMUX_STUB_VERSION=0.100.0)
+jq -e 'has("length_check")' <<<"$out" >/dev/null 2>&1
+check "versions compare numerically (0.100.0 >= 0.65.0)" $? "out=$out"
+
+# Attribution. The workspace event cannot say whose submit it was, so a second
+# workspace frame (another REPL, or fragmentation) leaves the length unread.
+f_len_two_frames() { f_len_whole; submitted_frame $((BASE_SEQ+3)) "$WS_UUID" 17; }
+d="$STUBROOT/lentwo"; out=$(run_case "$d" "$LEN_CID" f_len_two_frames CMUX_STUB_VERSION=0.65.0)
+jq -e 'has("length_check") | not' <<<"$out" >/dev/null 2>&1
+check "two workspace frames → ambiguous, length_check omitted" $? "out=$out"
+
+# A frame from another workspace is not ours, and absence is not a reading.
+f_len_other_ws() { ingest_frame $((BASE_SEQ+1)) "$SURF_UUID" "$SESS_UUID" completed
+                   submitted_frame $((BASE_SEQ+2)) "DDDD0000-4444-4444-8444-444444444444" 5; }
+d="$STUBROOT/lenotherws"; out=$(run_case "$d" "$LEN_CID" f_len_other_ws CMUX_STUB_VERSION=0.65.0)
+jq -e 'has("length_check") | not' <<<"$out" >/dev/null 2>&1
+check "a frame from another workspace → omitted, not a fake 0" $? "out=$out"
+
+# A workspace frame with no ingest of ours beside it is somebody else's submit.
+f_len_no_ingest() { submitted_frame $((BASE_SEQ+2)) "$WS_UUID" 5; }
+d="$STUBROOT/lennoingest"; out=$(run_case "$d" "$LEN_CID" f_len_no_ingest CMUX_STUB_VERSION=0.65.0)
+jq -e 'has("length_check") | not' <<<"$out" >/dev/null 2>&1
+check "no ingest of ours in the window → length not attributed, omitted" $? "out=$out"
+
+# A new CLI on PATH over a not-yet-restarted old app still emits capped frames: an
+# ellipsized preview whose length IS the message_length. That is not a measurement.
+CAPPED="$(printf 'a%.0s' {1..239})…"
+f_len_oldapp() { ingest_frame $((BASE_SEQ+1)) "$SURF_UUID" "$SESS_UUID" completed
+                 submitted_frame $((BASE_SEQ+2)) "$WS_UUID" 240 "$CAPPED"; }
+d="$STUBROOT/lenoldapp"; out=$(run_case "$d" "$LEN_CID" f_len_oldapp CMUX_STUB_VERSION=0.65.0)
+jq -e 'has("length_check") | not' <<<"$out" >/dev/null 2>&1
+check "a capped 240 with an ellipsized preview is not read as a true length" $? "out=$out"
+
+# The same preview with a LONGER message_length is the fixed shape.
+f_len_long() { ingest_frame $((BASE_SEQ+1)) "$SURF_UUID" "$SESS_UUID" completed
+               submitted_frame $((BASE_SEQ+2)) "$WS_UUID" 1260 "$CAPPED"; }
+d="$STUBROOT/len1260"; out=$(run_case "$d" "$LEN_CID" f_len_long CMUX_STUB_VERSION=0.65.0)
+jq -e '.length_check.seen == 1260 and .length_check.short == false' <<<"$out" >/dev/null 2>&1
+check "an ellipsized preview with a longer message_length is the fixed shape → read" $? "out=$out"
+
+d="$STUBROOT/lengated"; out=$(run_case "$d" "$LEN_CID" f_len_whole CMUX_STUB_VERSION=0.65.0 HOTLINE_PASTE_INGEST_WINDOW=0)
+jq -e 'has("length_check") | not' <<<"$out" >/dev/null 2>&1
+check "HOTLINE_PASTE_INGEST_WINDOW=0 omits length_check too" $? "out=$out"
+
+# --- 9. payload-graphemes.py: never a false byte-loss on non-ASCII -----------
+G="$HOTLINE_DIR/scripts/payload-graphemes.py"
+t="$STUBROOT/g"; mkdir -p "$t"
+printf 'caf\xc3\xa9 \xe2\x80\x94 \xe2\x9c\x85\n' > "$t/plain"   # é, em dash, ✅ — one codepoint each
+got=$("$REAL_PYTHON3" "$G" "$t/plain")
+[[ "$got" == "8" ]]
+check "single-codepoint non-ASCII counts once each (not as bytes)" $? "got '$got'"
+printf 'e\xcc\x81x' > "$t/combining"                           # e + U+0301: one cluster, two codepoints
+[[ -z "$("$REAL_PYTHON3" "$G" "$t/combining")" ]]
+check "a combining sequence is declined (codepoints would over-count clusters)" $?
+printf '\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9' > "$t/zwj"
+[[ -z "$("$REAL_PYTHON3" "$G" "$t/zwj")" ]]
+check "a ZWJ sequence is declined" $?
+printf 'a\r\nb' > "$t/crlf"
+[[ -z "$("$REAL_PYTHON3" "$G" "$t/crlf")" ]]
+check "CRLF is declined (one cluster, two codepoints)" $?
+printf '\n\n  hello  \n\n' > "$t/ws"
+got=$("$REAL_PYTHON3" "$G" "$t/ws")
+[[ "$got" == "5" ]]
+check "surrounding whitespace is stripped from the sent length" $? "got '$got'"
+printf '\xff\xfe' > "$t/bad"
+[[ -z "$("$REAL_PYTHON3" "$G" "$t/bad")" ]]
+check "invalid UTF-8 is declined, not guessed" $?
 
 echo
 echo "cmux-paste-fragmentation: $PASS passed, $FAIL failed"

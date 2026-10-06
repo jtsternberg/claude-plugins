@@ -660,10 +660,6 @@ else
 fi
 
 # --- How many turns did it land as? -----------------------------------------
-# tripwire: claude-plugins-8ur4 — cmux#13687; a COUNT is all this can be while
-# message_length caps at 240. If that is fixed, add the length check back here
-# (it is the only thing that catches byte loss the head-anchored nonce cannot)
-# and keep this count.
 # Counted only on the confirmed path, and only when the marker above was read.
 # cmux_events_all cannot return early, so this spends its whole settle window on
 # every call, against a ladder that confirms in well under a second —
@@ -680,7 +676,18 @@ fi
 # a window of 0. A `0` there would assert the callee ingested nothing, which is
 # exactly what a confirmed delivery has just disproved.
 SUBMIT_FRAMES=""
+LENGTH_CHECK=""
+MEASURES_FILE=""
 if [[ -n "$PASTE_SEQ" ]]; then
+  # The length check (cmux >= 0.65.0 only) reads a SECOND event, so it runs
+  # alongside the count rather than after it — both spend their full settle window,
+  # and running them in series would double the wait.
+  if cmux_has_true_message_length; then
+    MEASURES_FILE=$(mktemp)
+    HOTLINE_EVENTS_AFTER="$PASTE_SEQ" \
+      cmux_submit_measures "$WS_ID" "$INGEST_WINDOW" >"$MEASURES_FILE" 2>/dev/null &
+    MEASURES_PID=$!
+  fi
   # HOTLINE_EVENTS_AFTER is how the primitives take a --after marker. A prefix
   # assignment on a FUNCTION call persists past the call in bash, unlike on an
   # external command — the command substitution's subshell is what actually keeps
@@ -688,9 +695,39 @@ if [[ -n "$PASTE_SEQ" ]]; then
   SUBMIT_FRAMES=$(HOTLINE_EVENTS_AFTER="$PASTE_SEQ" \
     cmux_prompt_ingests "$SURF_ID" "$SESSION_ID" "$INGEST_WINDOW" 2>/dev/null \
     | grep -c . || true)
+  if [[ -n "$MEASURES_FILE" ]]; then
+    wait "$MEASURES_PID" 2>/dev/null || true
+    # BYTE LOSS MID-PAYLOAD is what this is for: the nonce sits at the head of the
+    # payload, so a payload truncated after it still carries the nonce and the
+    # ladder above confirms it. Only the length shows the tail went missing.
+    #
+    # ONE-SIDED, and only when it can be attributed. `workspace.prompt.submitted`
+    # carries no surface_id or session_id, so a frame in a shared workspace may be
+    # another REPL's. The per-surface count above is the cross-check: the length is
+    # read only when exactly one workspace frame AND exactly one of OUR ingests
+    # landed in the window. Anything else (fragmentation, a queued paste, an
+    # operator typing in the caller's pane) leaves the field out rather than guess.
+    #
+    # Compared as "reported < sent". The sent length is the payload's grapheme count
+    # with surrounding whitespace stripped (payload-graphemes.py declines text whose
+    # clusters it cannot count), so a trimmed prompt or a multi-codepoint character
+    # never reads as loss. Whether the hook sees any other rewrite of the pasted
+    # text is unmeasured, which is why this is `short`, a suspicion, and never a
+    # branch: delivered/confirmed stay as the ladder set them.
+    if [[ "$SUBMIT_FRAMES" == "1" ]] && [[ "$(grep -c . "$MEASURES_FILE")" == "1" ]]; then
+      _seen=$(jq -r 'select(.old_cap | not) | .len | select(type == "number")' "$MEASURES_FILE" 2>/dev/null || true)
+      _sent=$(python3 "$HOTLINE_SCRIPTS/payload-graphemes.py" "$PAYLOAD_FILE" 2>/dev/null || true)
+      if [[ "$_seen" =~ ^[0-9]+$ && "$_sent" =~ ^[0-9]+$ ]]; then
+        LENGTH_CHECK=$(jq -nc --argjson sent "$_sent" --argjson seen "$_seen" \
+          '{sent: $sent, seen: $seen, short: ($seen < $sent)}')
+      fi
+    fi
+    rm -f "$MEASURES_FILE"
+  fi
 fi
 
 jq -nc --arg c "$CONFIRMED" --arg w "$WS_ID" --arg s "$SURF_ID" --argjson r "$RETRIED_ENTER" \
-  --arg sf "$SUBMIT_FRAMES" \
+  --arg sf "$SUBMIT_FRAMES" --arg lc "$LENGTH_CHECK" \
   '{delivered: true, sent: true, confirmed: $c, retried_enter: $r, workspace: $w, surface: $s}
-   + (if $sf == "" then {} else {submit_frames: ($sf | tonumber)} end)'
+   + (if $sf == "" then {} else {submit_frames: ($sf | tonumber)} end)
+   + (if $lc == "" then {} else {length_check: ($lc | fromjson)} end)'
