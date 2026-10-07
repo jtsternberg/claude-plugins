@@ -137,6 +137,10 @@ dependencies in the PR description, not just chat.
   offer `N: <change>` to override item N alone. On the receiving side, a lone
   letter (any case) maps to its token and `N: …` to that item's override;
   name the mapped action in one clause as you act on it (`k → taking all 8`).
+- **Every GitHub ref in every message is a link labeled with the full
+  `owner/repo#N`** — repeat mentions, possessives (`#746's`), shorthand, status
+  lines, and `Next for you:` included; never a bare `#N` or `repo#N`. The human
+  reads out of order and from a phone, so each mention has to work on its own.
 - Questions get assessments, directives get execution: "how hard is X?" is
   answered, not fixed; "your call" means decide, state the reasoning briefly,
   and proceed — don't bounce the decision back.
@@ -150,7 +154,7 @@ Keep `/tmp/maestro/decisions-<session-id>.md` and write a decision's section
 later with no scrollback, so the section carries what happened, why it matters,
 the options as the exact tokens to type, your recommendation, and what happens
 next either way, in plain language for someone who has never seen the repo,
-with every GitHub ref a one-click link labeled `owner/repo#N`.
+with every GitHub ref linked as above.
 Resolved decisions move to a `Decided` list with the date and the answer: that
 list is the audit trail, and it's the decisions half of a handoff, which
 **points at the ledger** instead of restating it.

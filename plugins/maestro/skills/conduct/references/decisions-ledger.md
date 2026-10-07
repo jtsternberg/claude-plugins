@@ -82,7 +82,8 @@ watched the session, rewrite it.
 - **Resolve in the same turn you act on the answer:** move the section to
   `Decided` with the date and what was chosen. A ledger whose `Open` list is
   stale is worse than none, because it re-asks settled questions.
-- **Every GitHub ref is a link labeled with the full `owner/repo#N`:**
+- **Every GitHub ref is a link labeled with the full `owner/repo#N`** — the
+  same rule as every message to the human (see `SKILL.md`, "The human"):
   `[acme/app#92](https://github.com/acme/app/pull/92)` (`/issues/N` works too;
   GitHub redirects between them), never a bare `#92` or `app#92`. The human
   opens the ledger hours later from a `Next for you:` line with no scrollback,
