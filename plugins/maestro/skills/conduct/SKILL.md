@@ -86,6 +86,9 @@ edit site outlives a tracker entry nobody re-reads).
 - "Interrupted/reassigned" is a hypothesis, not a fact: read the callee's
   transcript before any re-send. False preempts are common, and a blind
   re-dispatch runs the work order twice.
+- A callee the human has typed into is theirs now — `your-cue` briefs it as a
+  `human-driven hotline callee`. Ask the human before sending it any further
+  work order.
 - Turn-complete ≠ work-complete: a completion report with a background
   checker still running means hold the phase open until its consequences (a
   follow-up push) land.

@@ -172,6 +172,13 @@ has "reads the registry's remote field" '`remote`'
 has "keeps a remote callee instead of dropping it as stale" 'remote callee on <host>, not inventoried here'
 has "cues a remote callee as not inventoried" 'Your cue: nothing — remote host not inventoried'
 has "names the remote host under Coverage" 'Coverage. line naming that host'
+# The registry misses live callees (no matching row, or a dead caller), and only
+# the transcript shows the human took one over.
+has "a hotline-titled tab counts as a callee" 'tab title starts `hotline:`'
+has "an unmatched callee is its own workstream, not dropped" 'hotline callee, caller not live'
+has "takeover is judged per hotline callee" 'TAKEOVER: yes'
+has "caller follow-ups are not counted as takeovers" '\[FOLLOW_UP\]'
+has "a takeover renders as human-driven" 'human-driven hotline callee'
 
 # --- bounded catch-up --------------------------------------------------------
 
@@ -186,7 +193,13 @@ has "enforces the character ceiling with the real flag" '\-\-max-chars[= ]8000'
 # newest turns, the ones that say where the agent stopped.
 lacks "never byte-cuts the digest output" 'head -c'
 has "states that sessions-catch-up is model-invocable" 'is model-invocable'
-has "dispatches one cheap subagent per shortlisted row" 'one cheap subagent per shortlisted row'
+# A hard cap on summaries left most finished rows unverified, which made burial
+# cues unreachable fleet-wide. Batching keeps cost bounded without the cap.
+has "batches the catch-up list and dispatches every batch at once" 'dispatch every batch in one message'
+has "asks before a very large dispatch" 'ask before\s*$|ask before dispatching'
+has "each summary reports a completion STATE" 'STATE: COMPLETE \| PARTIAL \| BLOCKED \| WAITING_ON_HUMAN'
+# The digest's Tail state misses a question followed by laid-out options.
+has "work order overrides Tail state for an A/B/C question" 'A/B/C list'
 # Rule zero promises the run changes nothing, and sessions-catch-up's own steps
 # would break that: Step 4 writes the nudge ledger and Step 3 offers `--deep`.
 has "work order skips the nudge bump so the briefing stays read-only" 'nudge\.mjs bump'
@@ -198,8 +211,8 @@ lacks "no hedge about being unable to route to sessions-catch-up" 'explicitly.in
 has "delegates the summary to a cheaper model under Claude Code" 'model: "(haiku|sonnet)"'
 has "tells Codex to invoke it inline when it has no subagent" '\-\-max-chars[= ]8000`? inline'
 has "the main agent never reads the full transcript itself" 'never see the transcript'
-has "stops after five summaries" '\*\*Stop after five summaries\.\*\*'
-has "lists the remainder by visible locator" 'the remainder'
+lacks "no hard five-summary cap" 'Stop after five summaries'
+has "a missing report stays unverified with a clarify cue" 'never came back stays unverified'
 
 # --- rendering contract ------------------------------------------------------
 
@@ -232,8 +245,8 @@ has "offers bury this session" 'bury this session'
 has "offers bury this plot" 'bury this plot'
 has "burial stays text; execution needs a later explicit request" 'leaves execution to'
 has "an unverified transcript downgrades to review, never to burial" '[Uu]nverified is not failed'
-# The verb itself, not just the paragraph: the five-summary cap means most
-# finished rows never had their transcript read, so this is the common branch.
+# The verb itself, not just the paragraph: a declined dispatch or a lost report
+# leaves finished rows with their transcript unread.
 has "the unverified branch names the review and close verb" 'Your cue: review and close'
 has "defines one workstream for cue purposes" 'One workstream is one session'
 has "a session that dialed nobody is still a workstream" 'workstream of one'

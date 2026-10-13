@@ -158,6 +158,15 @@ inventory from step 2, *and* its caller is in that inventory too. Every other
 row is stale — ignore it silently, and never mention a caller or callee the
 human cannot currently see.
 
+**The tab title finds callees the registry misses.** Hotline titles every tab it
+dials into `hotline: … (<mode>)`, and live callees routinely have no registry row
+that matches, or a row whose caller is no longer live. Every live inventory row
+whose tab title starts `hotline:`, or that the registry names as a callee, is a
+**hotline callee**. When it cannot nest under a live caller, it becomes its own
+workstream, rendered `hotline callee, caller not live` — never dropped, and the
+dead caller stays unnamed. Every hotline callee goes on step 4's catch-up list,
+because only its transcript says whether the human took it over.
+
 **A remote callee is off-box, not stale.** `remote` carries the SSH target when
 the callee runs on another machine, so its `callee_session_id` and `host_handle`
 belong to that box and can never appear in a step-2 inventory built from local
@@ -177,36 +186,58 @@ liveness authority.
 
 ## 4. Catch up only where needed
 
-Native status plus a recent-output read answers most rows. When they don't — the
-agent is idle mid-task and the screen doesn't say what task — shortlist the row
-for a bounded transcript summary. `sessions-catch-up` is model-invocable, so
-route to it yourself; never pull a raw transcript into your own context instead.
+A host reporting the agent as working settles the row. Every other row goes on
+the catch-up list: idle or finished agents, rows whose screen doesn't say what
+task they were on, and every hotline callee from step 3. Burial cues need a
+transcript check, so an idle row left off the list can never earn one.
+`sessions-catch-up` is model-invocable, so route to it yourself; never pull a
+raw transcript into your own context instead.
 
-**Stop after five summaries.** Shortlist at most five unclear rows before
-dispatching anything, and list the remainder — every still-unclear workstream —
-by its visible locator with `Your cue: clarify`. An exhaustive briefing that
-arrives late has failed at the one thing it was for.
+**Batch the list, then dispatch every batch in one message so they run
+concurrently.** About five sessions per subagent; 41 sessions in 8 batches has
+finished in about 80 seconds. Above about 60 listed sessions, ask before
+dispatching: list the rows by visible locator, say how many batches it would
+take, and wait. Under Claude Code each batch is one Agent call with
+`model: "haiku"` — `model: "sonnet"` when the transcripts are tangled. Every
+work order is the same, naming its batch's session ids and marking which are
+hotline callees:
 
-**Then dispatch one cheap subagent per shortlisted row, all of them in one
-message so they run concurrently.** Under Claude Code that is the Agent tool with
-`model: "haiku"` — `model: "sonnet"` when the transcript is tangled. Every work
-order is the same:
-
-> Invoke
+> For each session id below, invoke
 > `/session-tools:sessions-catch-up <session-id> --window 8 --max-chars 8000`.
 > Perform only that skill's digest and briefing steps: skip its `--deep` offer
 > and skip its `nudge.mjs bump`, both of which write state this briefing must
-> not touch. Report three sentences: what it was doing, where it stopped, what
-> it needs.
+> not touch. A session whose last turn asks the human to choose — options laid
+> out after the question, an A/B/C list — is `WAITING_ON_HUMAN` even when the
+> digest's Tail state says it is not blocked.
+>
+> Report per session, nothing else:
+>
+> ```text
+> <session-id>
+> <three sentences: what it was doing, where it stopped, what it needs>
+> STATE: COMPLETE | PARTIAL | BLOCKED | WAITING_ON_HUMAN
+> TAKEOVER: yes "<the human's last typed prompt, at most 15 words>" | no | unknown
+> ```
+>
+> `TAKEOVER` only for sessions marked hotline callee. The work order and every
+> later caller message are not typed by the human: a user turn that begins
+> `[CALL_ID:`, or is a `/hotline:hotline-ringing` command (`[FOLLOW_UP]`
+> included). Harness-injected turns — task notifications, hook output, system
+> reminders — are not typed either. Any other user turn is the human typing
+> into the callee: `yes`. `unknown` when the digest's turns don't reach back to
+> the work order and none of them is typed.
 
-Those three sentences are all that reaches you. You never run the digest and
+That report is all that reaches you. You never run the digest and
 never see the transcript.
 
 Under Codex, use its subagent mechanism the same way when one is available. With
 none, invoke
 `$session-tools:sessions-catch-up <session-id> --window 8 --max-chars 8000` inline
-— same two skips — and keep only the three-sentence conclusion in your working
-notes.
+for each listed session — same two skips, same report — and keep only the report
+in your working notes.
+
+A session whose report never came back stays unverified: list it by its visible
+locator with `Your cue: clarify`.
 
 Both bounds are real flags on the digest command, and both degrade gracefully:
 
@@ -237,6 +268,17 @@ section, sort by window and then workspace; when two or more items in a section
 share a `group`, print that group once as a sub-header and give each item only
 its `item` (`left pane, tab 3/5`) and title. `Next for you:` always carries the
 full `locator`, because it is the line read alone.
+
+**Step 4's `STATE` picks the section.** `WAITING_ON_HUMAN` and `BLOCKED` go
+under `Waiting on you`, `COMPLETE` under `Finished while you were away`. A
+`PARTIAL` row the host reports idle has stopped short of done: it goes under
+`Waiting on you` with `resume` or `clarify`.
+
+**A taken-over callee is the human's now.** A `TAKEOVER: yes` row renders as
+`human-driven hotline callee — last typed: "<prompt>"`. It is no longer a
+delegated worker: an orchestrator sends it work only after asking the human. Its
+cue comes from its `STATE` like any other row. `TAKEOVER: unknown` renders as
+`hotline callee, takeover unverified`.
 
 ```text
 ## Your cue
@@ -286,15 +328,18 @@ what the orchestrator will accept as the answer.
 
 ### Burial cues
 
-`Your cue: bury this session` requires both halves: the transcript shows the
-work finished with no substantive follow-up left, **and** graveyard reports
-`buryable: true` for that `session_id`. One half alone is not a burial cue.
+`Your cue: bury this session` requires both halves: step 4 reported
+`STATE: COMPLETE` with no substantive follow-up in its three sentences, **and**
+graveyard reports `buryable: true` for that `session_id`. One half alone is not
+a burial cue. A human-driven callee needs a third: its last typed prompt was
+answered, not left open.
 
-**Unverified is not failed.** Step 4 caps transcript reads at five, so for most
-finished rows the transcript half was never checked. When completion is not
-established from the transcript, render `Your cue: review and close` — or
-`Your cue: nothing — <reason>` where that fits — never a burial cue. A burial
-cue is only ever emitted after the transcript check actually happened.
+**Unverified is not failed.** A row whose step 4 report never came back, or
+never ran because the human declined a large dispatch, had its transcript half
+unchecked. When completion is not established from the transcript, render
+`Your cue: review and close` — or `Your cue: nothing — <reason>` where that
+fits — never a burial cue. A burial cue is only ever emitted after the
+transcript check actually happened.
 
 `Your cue: bury this plot` requires every `targetable` session sharing that
 `workspace_title` to be finished and `buryable`. One live sibling downgrades it
@@ -313,6 +358,9 @@ to a later explicit request, and never runs `graveyard bury` itself.
 | `<tab> in <workspace>` with no window or position, or a title-joined guess | The script's locator; `unlocated` when it can't join exactly or uniquely |
 | Reading full transcripts into your context | `--window 8 --max-chars 8000`, cheaper model |
 | Nesting every registry row | Only callees present in the live inventory |
+| Dropping a `hotline:` tab the registry can't match | Its own workstream: `hotline callee, caller not live` |
+| Briefing a callee the human typed into as a delegated worker | `human-driven hotline callee`, with the last typed prompt |
+| Summarizing the first few unclear rows and listing the rest | Batch every listed row, dispatch all batches at once |
 | Burying, focusing, or notifying anything | Read-only; burial is a cue |
 | Ending with a menu | One `Next for you:` |
 | An `answer`/`clarify` cue that is only answer tokens | Add the subject clause, and the ledger path plus separate anchor when one exists |
