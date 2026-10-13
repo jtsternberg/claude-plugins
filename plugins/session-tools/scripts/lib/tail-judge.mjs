@@ -40,8 +40,11 @@ export async function askTev1(text, { url, fetchImpl = globalThis.fetch, model =
 	if (!/^https?:\/\//.test(base)) base = `http://${base}`; // OLLAMA_HOST is often bare host:port
 	base = base.replace(/\/$/, '');
 	try {
-		// A missing model must cost one fast local read, not a pull or a failed decision call.
-		const tags = await withTimeout(fetchImpl, `${base}/api/tags`, {}, 500);
+		// A missing model must cost one local read, not a pull or a failed decision call.
+		// 5s, not 500ms: on a loaded box (load avg 350+, 2026-10-13) this read alone
+		// passed 500ms and the judge was silently skipped. Absent Ollama still fails
+		// at once with a refused connection.
+		const tags = await withTimeout(fetchImpl, `${base}/api/tags`, {}, 5000);
 		if (!tags.ok) return null;
 		const names = ((await tags.json()).models || []).map(m => m.name);
 		if (!names.includes(model)) return null;
