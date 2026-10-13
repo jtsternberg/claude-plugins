@@ -209,6 +209,14 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   than from `format.mjs`. Label each fact with the file that proves it, and read the
   implementation for any fact an implementer will build a bound or a guarantee on.
   (fe785d3, fac5f2b, 88461ff)
+- **Check a local model is present before calling it, and size every timeout around
+  it from a measured cold load on a busy machine.** Availability is a question the
+  host answers outright (`ollama list`, `/api/tags`); inferring it from a timeout
+  costs the whole wait when the model is absent, and a timeout tuned on an idle box
+  fires on a loaded one. A silent fallback hides both, so probe with the model
+  renamed to a missing one and again under load before trusting it. (698c6c2,
+  c1791b3: a 500ms list read skipped the tev1 judge at load average 350; a cold
+  tev1:4b load took 38.8s)
 
 ## Code shape
 
