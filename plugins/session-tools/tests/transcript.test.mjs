@@ -122,6 +122,26 @@ test('tail state: trailing question, user-spoke-last, and not-blocked', () => {
 	assert.equal(deriveTailState([]).state, 'empty');
 });
 
+test('tail state: a question followed by an option list reads as blocked', () => {
+	const menu = 'Two ways to go.\n\nWhich do you want?\n\nA) fold it in\nB) defer it\nC) drop it';
+	const t = deriveTailState(mergeConversation([parseLine(asst(menu))].filter(Boolean)));
+	assert.equal(t.state, 'blocked');
+	assert.match(t.question, /^Which do you want\?/);
+
+	const bold = 'Pick the shape?\n\n**A** — one file\n**B** — two files';
+	assert.equal(deriveTailState(mergeConversation([parseLine(asst(bold))].filter(Boolean))).state, 'blocked');
+
+	// Bold after the question mark, as agents often close: "…posting?**".
+	const boldQ = 'Saved the review. **Want me to post it?**';
+	assert.equal(deriveTailState(mergeConversation([parseLine(asst(boldQ))].filter(Boolean))).state, 'blocked');
+
+	// A finished report that happens to end in a list is not a question.
+	const report = 'Done. Changed:\n- a.mjs\n- b.mjs';
+	const r = deriveTailState(mergeConversation([parseLine(asst(report))].filter(Boolean)));
+	assert.equal(r.state, 'idle-after-agent');
+	assert.equal(r.closing, report, 'idle tail carries the closing text for the tev1 judge');
+});
+
 test('extracts the last TodoWrite state', () => {
 	const entries = [
 		parseLine(asst('', [{ name: 'TodoWrite', input: { todos: [{ content: 'old', status: 'pending' }] } }])),

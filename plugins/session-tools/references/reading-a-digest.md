@@ -23,15 +23,23 @@ to the current cwd. Ambiguity is **reported, never guessed**. On a non-zero exit
 
 ## Tail state is the most important line
 
-`## ⏳ Tail state` is the first thing to read and the first thing to report. The four
+`## ⏳ Tail state` is the first thing to read and the first thing to report. The five
 states mean different things and must not be blurred together:
 
 | State | Meaning |
 |---|---|
 | `BLOCKED ON YOU` | It asked a question, or hit `AskUserQuestion`/`ExitPlanMode`, and stopped. Someone owes it an answer. |
 | `YOUR MESSAGE MAY BE UNANSWERED` | The user's message was the last record. It may never have been picked up at all. |
+| `MAY BE WAITING ON YOU` | A local model couldn't tell whether the closing message asks the user something. Read the quoted lines and decide. |
 | `INTERRUPTED MID-TURN` | Stopped during a tool call. Work may be half-applied — check the repo, don't trust the narrative. |
 | `Not blocked` | The agent spoke last and nothing is explicitly pending. |
+
+`BLOCKED ON YOU` comes from the closing message: a trailing question, a question
+followed by a list of options, or an ask/plan tool. When none of those match and
+Ollama is serving `tev1:4b`, the digest also asks that local model whether the
+message requests a decision; its detail line then names tev1 and the probability.
+Nothing leaves the machine. `--no-judge` or `SESSION_TOOLS_JUDGE=off` skips it; `SESSION_TOOLS_JUDGE_MODEL`
+names a different Ollama decision model.
 
 ## Other signals, and what to trust
 

@@ -539,6 +539,23 @@ export function deriveSignals(entries, subagents = []) {
  * for something: an AskUserQuestion/ExitPlanMode tool_use with no result after
  * it, or a final assistant turn ending in a question.
  */
+// An option line: "A) …", "(b) …", "1. …", "- …", "**C** — …". The A/B/C menu an
+// agent ends on puts the question mark above the options, not at the end.
+const OPTION_LINE = /^\s*(?:[-*•]\s+|\(?\**[A-Za-z0-9]\**[).:]\**\s+|\**[A-Z]\**\s+[—–-]\s+|\**[A-Z]\*\*\s+)/;
+
+/** Offset of the question line when the text is a question followed only by options; else -1. */
+function questionBeforeOptions(t) {
+	const lines = t.split('\n');
+	let i = lines.length - 1, options = 0;
+	for (; i >= 0; i--) {
+		if (!lines[i].trim()) continue;
+		if (!OPTION_LINE.test(lines[i])) break;
+		options++;
+	}
+	if (options < 2 || i < 0 || !lines[i].replace(/[*_`'")\]\s]+$/, '').endsWith('?')) return -1;
+	return lines.slice(0, i).join('\n').length + (i ? 1 : 0);
+}
+
 export function deriveTailState(convo) {
 	if (!convo || !convo.length) return { state: 'empty', detail: null };
 	const last = convo[convo.length - 1];
@@ -554,13 +571,20 @@ export function deriveTailState(convo) {
 			};
 		}
 		const t = (last.text || '').trim();
-		if (t.endsWith('?')) {
+		// Trailing markdown ("…posting?**") hides the question mark from endsWith.
+		if (t.replace(/[*_`'")\]\s]+$/, '').endsWith('?')) {
 			return { state: 'blocked', detail: 'last turn ended in a question', question: t.slice(-300) };
+		}
+		const optionsAt = questionBeforeOptions(t);
+		if (optionsAt >= 0) {
+			return { state: 'blocked', detail: 'last turn asked a question, then listed options', question: t.slice(optionsAt).slice(0, 300) };
 		}
 		if (last.stopReason === 'tool_use') {
 			return { state: 'mid-turn', detail: 'stopped mid tool-use — may have been interrupted' };
 		}
-		return { state: 'idle-after-agent', detail: 'agent spoke last; nothing explicitly pending' };
+		// `closing` is what tail-judge.mjs asks a local model about; the regexes above
+		// only see a question that sits at the very end.
+		return { state: 'idle-after-agent', detail: 'agent spoke last; nothing explicitly pending', closing: t.slice(-1500) };
 	}
 
 	return { state: 'user-spoke-last', detail: 'your message was the last thing in the session — it may never have been answered' };

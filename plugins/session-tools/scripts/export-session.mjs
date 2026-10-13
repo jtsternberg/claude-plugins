@@ -23,6 +23,7 @@
 //   --truncate N                   per-turn char cap in a digest (default 2000)
 //   --fast                         smaller window / tighter per-turn caps
 //   --no-beads                     skip the `bd show` lookup (saves ~0.5s)
+//   --no-judge                     skip the local tev1 tail-state check (digest only)
 //   --compaction-full              lift the 8,000-char compaction-summary cap
 //       (--max-chars still shrinks it when the budget binds)
 //   --out PATH                     also write to PATH
@@ -36,9 +37,10 @@ import { execFileSync } from 'node:child_process';
 import { parseTranscript, deriveSignals, humanIdle } from './lib/transcript.mjs';
 import { resolve, loadIndex, rankCandidates, AmbiguousTarget, NoMatch } from './lib/session-index.mjs';
 import { formatDigest, formatMd, formatText, formatJson } from './lib/format.mjs';
+import { judgeTail } from './lib/tail-judge.mjs';
 
 function parseArgs(argv) {
-	const o = { format: 'digest', beads: true, fast: false };
+	const o = { format: 'digest', beads: true, fast: false, judge: true };
 	const rest = [];
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
@@ -51,6 +53,7 @@ function parseArgs(argv) {
 		else if (a === '--fast') o.fast = true;
 		else if (a === '--compaction-full') o.compactionCap = Infinity;
 		else if (a === '--no-beads') o.beads = false;
+		else if (a === '--no-judge') o.judge = false;
 		else if (a === '--list') o.list = true;
 		else if (a === '-h' || a === '--help') o.help = true;
 		else if (a.startsWith('--')) { /* ignore unknown */ }
@@ -107,9 +110,9 @@ function listSessions(cwd) {
 
 const HELP = `export-session.mjs <session-id|prefix|slug|title> [--format md|json|text|digest]
                           [--window N] [--max-chars N] [--truncate N]
-                          [--fast] [--no-beads] [--out PATH] [--cwd PATH] [--list]`;
+                          [--fast] [--no-beads] [--no-judge] [--out PATH] [--cwd PATH] [--list]`;
 
-function main() {
+async function main() {
 	const o = parseArgs(process.argv.slice(2));
 	if (o.help) { process.stdout.write(HELP + '\n'); return; }
 	const cwd = o.cwd || process.cwd();
@@ -134,6 +137,9 @@ function main() {
 	const data = { meta: parsed.meta, entries: parsed.entries, signals };
 
 	const resolvedBeads = o.beads ? resolveBeads(signals.beadIds) : {};
+	// Digest only: it is the shape a person reads for "what's waiting on me". text
+	// feeds weekly-recap over many sessions, where a model call per session adds up.
+	if (o.format === 'digest' && o.judge) signals.tail = await judgeTail(signals.tail);
 
 	let out;
 	switch (o.format) {
@@ -159,4 +165,4 @@ function main() {
 	process.stdout.write(out.endsWith('\n') ? out : out + '\n');
 }
 
-main();
+await main();

@@ -154,7 +154,9 @@ node $SCRIPTS/export-session.mjs <id> --format json                 # structured
 node $SCRIPTS/export-session.mjs --list                             # id · idle · slug · cwd
 ```
 
-Other flags: `--fast`, `--window N`, `--max-chars N` (a hard ceiling), `--truncate N`, `--compaction-full`, `--no-beads`, `--out PATH`, `--cwd PATH`.
+Other flags: `--fast`, `--window N`, `--max-chars N` (a hard ceiling), `--truncate N`, `--compaction-full`, `--no-beads`, `--no-judge`, `--out PATH`, `--cwd PATH`.
+
+When Ollama is serving `tev1:4b`, the digest asks it whether a closing message that no rule flagged is still waiting on you (a decision question to the local `/v1/systemone` endpoint: ~0.15s with the model loaded, up to ~40s to load it cold). It's used automatically when present, skipped silently when not, `--no-judge` turns it off, and `SESSION_TOOLS_JUDGE_MODEL` swaps the model.
 
 Resolution order is exact id → id prefix → slug/title, disambiguated by proximity to your cwd. **Ambiguity is reported, never guessed** — you get a candidate list, same posture as `graveyard peek`.
 

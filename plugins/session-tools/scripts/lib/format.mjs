@@ -192,6 +192,7 @@ export function formatDigest(data, opts = {}) {
 		L.push('## ⏳ Tail state');
 		const flag = tail.state === 'blocked' ? '**BLOCKED ON YOU**'
 			: tail.state === 'user-spoke-last' ? '**YOUR MESSAGE MAY BE UNANSWERED**'
+			: tail.state === 'maybe-blocked' ? '**MAY BE WAITING ON YOU**'
 			: tail.state === 'mid-turn' ? '**INTERRUPTED MID-TURN**'
 			: 'Not blocked';
 		L.push(`${flag} — ${tail.detail || ''}`);
