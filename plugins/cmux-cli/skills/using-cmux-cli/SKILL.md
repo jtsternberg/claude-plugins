@@ -306,6 +306,41 @@ cmux rename-workspace --workspace <ws-uuid> "lindris frontend"   # if you create
 
 **If the names themselves aren't distinguishing, that's still a failure.** A title or workspace name that is generic (`workspace`, `zsh`, `test`) or duplicated across several tabs is not a locator. Fix it rather than reporting it: rename the surface, rename the workspace too if you created it, or — if it's a pre-existing workspace you shouldn't rename — give the user a concrete visible anchor instead ("the tab immediately right of the one you're in, in the window showing *cmb security*"). Verify with `cmux tree --workspace <ws-uuid>` that the title you intended is the title that's actually there before you report it.
 
+### Point the user at a surface that already exists: mark it
+
+A text locator ("the *cmb security* workspace, left pane, tab 2/3") still makes the user scan a sidebar full of similar names. When you send the user to a specific existing workspace or tab (a session waiting on them, the one a question is about), **mark it so they can find it by sight**, and put the marker's wording in your message ("the orange workspace with the 👉 pill"). The marker goes with the locator; it doesn't replace it.
+
+```bash
+WS=<workspace-uuid>; SURF=<surface-uuid>; WIN=<window-uuid>   # all from one tree --id-format both snapshot
+PRIOR=$(cmux sidebar-state --workspace "$WS" --window "$WIN" | sed -n 's/^color=//p')   # "none" or "#RRGGBB": save it to restore later
+cmux workspace-action --action set-color --color Orange --workspace "$WS" --window "$WIN"
+cmux set-status cue_pointer "👉 <what they need to do>" --icon hand.point.right.fill \
+  --color "#E67E22" --priority 100 --workspace "$WS" --window "$WIN"
+cmux trigger-flash --workspace "$WS" --surface "$SURF" --window "$WIN"                   # flashes the exact pane
+```
+
+- **Workspace color** is what stands out most in the sidebar. It replaces any color the user already gave the workspace, which is why you read `PRIOR` first.
+- **Status pill**: use the fixed key `cue_pointer` so you only ever clear your own pill. The label says what the user needs to do there, not the session's name. The workspace row already shows the name.
+- **Flash** picks out the right pane once the user switches to that workspace. It's temporary, and it leaves notifications and unread state alone.
+- **Don't rename the tab to mark it** (e.g. a `$`/`👉` prefix). Renaming replaces the title the user and the agent's own title updates rely on, and `tab-action --action clear-name` can only restore it if the tab had no custom name before. Only add a prefix to a tab you created and named yourself.
+
+**Unmark once the user has acted** (they answered, or took over the session), or before you mark a different target. Two pointers at once defeat the point:
+
+```bash
+[ "$PRIOR" = none ] && cmux workspace-action --action clear-color --workspace "$WS" --window "$WIN" \
+                    || cmux workspace-action --action set-color --color "$PRIOR" --workspace "$WS" --window "$WIN"
+cmux clear-status cue_pointer --workspace "$WS" --window "$WIN"
+```
+
+Don't move the user's focus to the target unless they ask. Their next keystrokes would go into that session. When they do ask ("take me there", or a `jump` answer), one call does the whole trip: it switches windows, selects the workspace even if it wasn't selected, and selects the tab inside its pane.
+
+```bash
+cmux focus-panel --panel <surface-uuid> --workspace <ws-uuid> --window <window-uuid>
+cmux identify --json --id-format both | jq -c '.focused | {window_id, workspace_id, surface_id}'   # confirm it landed
+```
+
+Pass `--workspace` and `--window`. Without them cmux searches only the caller's workspace, returns `not_found: Surface not found`, and doesn't move focus. Use `focus-panel`, not `focus-pane`: `focus-pane` reaches the pane but shows whichever tab that pane already had selected.
+
 ### When to break the default (escape hatches)
 
 Flip to a separate-workspace path **only** when the user explicitly asks for it. Trigger phrases:

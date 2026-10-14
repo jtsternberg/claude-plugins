@@ -133,6 +133,18 @@ dependencies in the PR description, not just chat.
   a separate token** (`… .md - #decide-92`) — a path fused to an anchor opens
   nothing. Answer tokens alone are the failure — `still owe "fold" or "defer"`
   means nothing to a human who left four hours ago.
+- **When `Next for you:` sends the human to a session, mark that session.**
+  Session IDs and refs mean nothing to them, and a window › workspace › tab
+  path still makes them scan for it. For a cmux session, color its workspace,
+  add a `cue_pointer` pill, and flash its pane (the cmux-cli skill's "Point the
+  user at a surface that already exists" recipe), then name the marker in the
+  line. Record the prior color in that session's ledger section, and unmark once
+  the human acts on it. When that session is in a different workspace from the
+  human's focus, also offer `` `jump` (j) ``. A `j` reply is the human asking to
+  be taken there, so run the cmux-cli skill's `focus-panel` call against the
+  target's surface, workspace and window UUIDs. Confirm with `identify` that it
+  landed, and say where they are now. `j` is reserved for jump: give other
+  tokens other letters.
 - **Every answer token carries a one-letter alias** in parentheses, so the
   human can answer with one keystroke: `` `file` (F) ``, `` `ok` (k) ``. The
   alias is a letter from its token — the first letter when free — and unique

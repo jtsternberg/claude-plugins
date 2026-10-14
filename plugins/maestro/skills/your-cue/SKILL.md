@@ -22,7 +22,8 @@ Takes no arguments. Invoked as `/maestro:your-cue` (Codex:
 ## Rule zero — read only, start to finish
 
 Discovery and inspection only: pane focus, seen state, notifications, and
-session input all survive untouched. This run changes nothing, in either host.
+session input all survive untouched. This run changes nothing, in either host,
+except the one sidebar marker described below.
 
 Read-only and safe:
 
@@ -35,14 +36,37 @@ Read-only and safe:
 
 Never run, even to "just check":
 
-- **cmux** `focus-pane` (moves the human's focus, so their next keystrokes go
-  into the pane), `send-key` (lands in a live REPL and can destroy an in-flight
+- **cmux** `focus-pane` and `focus-panel` (they move the human's focus, so
+  their next keystrokes go into the pane; `focus-panel` runs only on a `j`
+  reply after the briefing, below), `send-key` (lands in a live REPL and can destroy an in-flight
   tool call), `clear-notifications` and `clear-history` (both destroy state the
   briefing is reporting on).
 - **herdr** `prompt` and `send-keys` (submit input to the agent), `focus`
   (steals focus), `rename`, `start`, `attach`, and every `pane`/`tab`/
   `workspace` verb outside the read list above.
 - **graveyard** `bury` — burial is a *cue* in this briefing, never an action.
+
+**The one write: mark the `Next for you:` target.** When that line points at a
+cmux row, color its workspace and add a `cue_pointer` status pill, and flash its
+pane, following the cmux-cli skill's "Point the user at a surface that already
+exists" recipe. Name the marker in the line (`… — the orange workspace with the
+👉 pill`). Mark only that one target, clear any `cue_pointer` pill an earlier
+briefing left on a different workspace, and record the prior color so it can be
+restored. Focus, notifications, and session input still stay untouched. herdr
+rows get no mark, so their locator has to do the work alone.
+
+**Jumping is how the human gets to a session the briefing names.** Number every
+rendered item, in render order across all sections, and tag each item that has
+a `jump` target in `locate.sh`'s row with `j<n>`. `Next for you:` carries a bare
+`j` for its own target. The briefing itself never moves focus. A `j` or `j<n>`
+reply is the human asking to be taken there, so run the cmux-cli skill's
+`focus-panel` call with that row's `jump.surface_id`, `jump.workspace_id`, and
+`jump.window_id`. Then confirm with `identify` that it landed and say where they
+are. Keep the numbered rows from the briefing's own `locate.sh` run so the
+numbers mean what the human saw. If that surface is gone, say so and re-run
+`locate.sh` rather than jumping by title. An item with no `jump` (herdr, or
+`unlocated`) gets no tag. `j` is reserved for jumping, so give answer tokens
+other letters.
 
 `herdr agent read` with `--source recent` is the enrich read; bare
 `cmux read-screen` without `--scrollback` returns the human's scrolled
@@ -286,23 +310,23 @@ cue comes from its `STATE` like any other row. `TAKEOVER: unknown` renders as
 Windows: this window (showing "<workspace>") · the "<workspace>" window
 
 Waiting on you
-- <visible agent locator> — <current status>. Your cue: <specific action>.
+1. <visible agent locator> — <current status>. Your cue: <specific action>. `j1`
 - <window> › ⌘<n> <workspace>
-  - <pane, tab k/m> "<tab title>" — <current status>. Your cue: <specific action>.
-  - <pane, tab k/m> "<tab title>" — <current status>. Your cue: <specific action>.
+  2. <pane, tab k/m> "<tab title>" — <current status>. Your cue: <specific action>. `j2`
+  3. <pane, tab k/m> "<tab title>" — <current status>. Your cue: <specific action>. `j3`
 
 Working
-- <visible agent locator> — <current task>. Your cue: nothing — it is still working.
+4. <visible agent locator> — <current task>. Your cue: nothing — it is still working. `j4`
 
 Finished while you were away
-- <visible agent locator> — <outcome and verification caveat>. Your cue: <review, close,
-  continue, bury this session/plot, or nothing with reason>.
+5. <visible agent locator> — <outcome and verification caveat>. Your cue: <review, close,
+   continue, bury this session/plot, or nothing with reason>. `j5`
 
 Coverage
 - <only when a host was unavailable, or a remote callee's host is not inventoried>
 
-Next for you: <the highest-priority action and visible locator; "nothing" only while
-work remains active>.
+Next for you: <the highest-priority action and visible locator, naming the sidebar mark;
+`jump` (j) when it has a jump target; "nothing" only while work remains active>.
 <If fully idle: outcome, any scheduled pending job, and readiness for the next instruction;
 omit the Next for you line when no action is needed>.
 ```
@@ -362,5 +386,7 @@ to a later explicit request, and never runs `graveyard bury` itself.
 | Briefing a callee the human typed into as a delegated worker | `human-driven hotline callee`, with the last typed prompt |
 | Summarizing the first few unclear rows and listing the rest | Batch every listed row, dispatch all batches at once |
 | Burying, focusing, or notifying anything | Read-only; burial is a cue |
+| Marking every waiting row, or leaving a stale mark | Mark only the `Next for you:` target; clear the previous `cue_pointer` |
+| Jumping during the briefing, or by title | Jump only on a `j`/`j<n>` reply, by that row's `jump` UUIDs |
 | Ending with a menu | One `Next for you:` |
 | An `answer`/`clarify` cue that is only answer tokens | Add the subject clause, and the ledger path plus separate anchor when one exists |

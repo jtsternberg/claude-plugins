@@ -9,7 +9,8 @@
 #
 # Prints {legend, windows[], rows[]}. Each row: session_id, transport, title,
 # workspace_title, located, join ("surface"|"title"|null), reason, locator,
-# group (window › workspace), item (pane, tab).
+# group (window › workspace), item (pane, tab), jump ({surface_id, workspace_id,
+# window_id} for a located cmux row, else null; the triple `focus-panel` needs).
 #
 # Read-only by contract (your-cue rule zero): the only verbs issued are
 # `cmux tree`, `cmux identify`, and herdr `workspace|tab|pane list`. Every cmux
@@ -116,7 +117,8 @@ def positions($path):
          (if $tabs > 1 then "tab \($s.index_in_pane + 1)/\($tabs)" else empty end) ]
        | if length > 0 then join(", ") else null end) as $item
     | { transport: "cmux", surface_id: $s.id, surface_ref: $s.ref, title: $s.title,
-        workspace_title: $ws.title, group: $group, item: $item } ] as $cmux
+        workspace_title: $ws.title, group: $group, item: $item,
+        jump: {surface_id: $s.id, workspace_id: $ws.id, window_id: $w.id} } ] as $cmux
 
 | ($hws[0].result.workspaces // null) as $hw
 | ($hpanes[0].result.panes // null) as $hp
@@ -188,6 +190,6 @@ def positions($path):
                                 ($windows[] | select(.label != "this window") | .label) ] | join(" · "))
              else null end),
     windows: [ $windows[] | {window_id: .id, label, showing} ],
-    rows: [ $rows[] | {session_id, transport, title, workspace_title, located, join, reason, locator, group, item} ]
+    rows: [ $rows[] | {session_id, transport, title, workspace_title, located, join, reason, locator, group, item, jump: (.jump // null)} ]
   }
 '

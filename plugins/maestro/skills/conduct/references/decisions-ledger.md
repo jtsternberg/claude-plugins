@@ -123,6 +123,16 @@ to override item N
 (/tmp/maestro/decisions-c54f524f.md - #decide-2653-split)
 ```
 
+The decision lives in another session, in a workspace the human isn't looking
+at: name the sidebar mark and offer `jump` (j):
+
+```
+Next for you: answer "enough" (E) or "scan" (S) in the "Get cli browser login merged"
+workspace (orange, 👉 pill) — whether the review-gating audit needs a full scan,
+or `jump` (j) to go there
+(/tmp/maestro/decisions-cf20f278.md - #decide-review-gating-scan)
+```
+
 Implementation is still active and nothing is owed now, but the next step is
 already known — its token still carries its alias:
 

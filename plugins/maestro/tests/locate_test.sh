@@ -200,6 +200,15 @@ eq "legend names every window; this window first" \
   'Windows: this window (showing "your cue") · the "agentic-dev" window (with "stack") · the "agentic-dev" window (with "cmux theme")' \
   "$(jq -r .legend "$TMP/out.json")"
 
+# jump carries the UUID triple `focus-panel` needs. Without --workspace and
+# --window it searches only the caller's workspace and fails "Surface not found".
+eq "cmux row carries its jump target" 'S-DRAFT WS-ANN W-A' \
+  "$(row sid-exact '"\(.jump.surface_id) \(.jump.workspace_id) \(.jump.window_id)"')"
+eq "jump target names the row's own window, not the caller's" 'S-FABLE WS-AD W-B' \
+  "$(row sid-title '"\(.jump.surface_id) \(.jump.workspace_id) \(.jump.window_id)"')"
+eq "unlocated row has no jump target" null "$(row sid-dupe .jump)"
+eq "herdr row has no jump target" null "$(row sid-hexact .jump)"
+
 # --- rule zero: one snapshot, read verbs only --------------------------------
 
 eq "one tree snapshot per run" 1 "$(grep -c '^cmux tree' "$LOG")"

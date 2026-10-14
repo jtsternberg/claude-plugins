@@ -236,6 +236,13 @@ else
   fail "rendering block matches the spec's canonical \`## Your cue\` fence verbatim"
 fi
 
+# --- jump and sidebar mark ---------------------------------------------------
+
+has "items carry numbered jump tokens" '`j<n>`'
+has "jump runs focus-panel by the row's jump UUIDs" 'jump\.surface_id'
+has "jump only on a j reply, never during the briefing" 'runs only on a `j`'
+has "Next for you target gets a sidebar mark" 'cue_pointer'
+
 # --- burial cues -------------------------------------------------------------
 
 has "native host status outranks graveyard busy" '[Nn]ative status outranks'
