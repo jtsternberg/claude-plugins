@@ -170,12 +170,16 @@ later with no scrollback, so the section carries what happened, why it matters,
 the options as the exact tokens to type, your recommendation, and what happens
 next either way, in plain language for someone who has never seen the repo,
 with every GitHub ref linked as above.
-Resolved decisions move to a `Decided` list with the date and the answer: that
-list is the audit trail, and it's the decisions half of a handoff, which
-**points at the ledger** instead of restating it.
+When a decision resolves, its section leaves `Open` and becomes a one-line
+`Decided` entry with the date and the answer. That list is the audit trail and
+the decisions half of a handoff, which **points at the ledger** instead of
+restating it.
 
-**Read `${CLAUDE_SKILL_DIR}/references/decisions-ledger.md`** for the section
-template, the naming and resolution rules, and worked `Next for you:` lines.
+**Read `${CLAUDE_SKILL_DIR}/references/decisions-ledger.md`** before writing
+the ledger's first section and again before resolving a decision. It holds the
+section template, the exact resolve procedure (what to delete, what to add,
+how to record a split or superseded decision), and worked `Next for you:`
+lines.
 (Codex: substitute the directory containing this `SKILL.md`.)
 
 ## Anti-patterns

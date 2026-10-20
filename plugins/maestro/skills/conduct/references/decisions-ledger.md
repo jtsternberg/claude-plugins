@@ -29,7 +29,7 @@ storage: nothing secret, nothing you'd mind losing once the work lands.
 # Decisions in play — <what this session is doing>
 
 Plain-language context for every question the orchestrator has asked <human>.
-One section per decision. Resolved ones move to the bottom with the answer.
+One section per open decision. Resolved ones collapse to a line at the bottom.
 
 ## Open
 
@@ -52,8 +52,8 @@ knows what they're starting.
 
 ## Decided
 
-- <YYYY-MM-DD> — <subject>: **<answer>**. (<one clause of why, if it wasn't the
-  recommendation or if the reasoning binds future work>)
+- <YYYY-MM-DD> — decide-<slug> — <subject>: **<answer>**. (<one clause of why,
+  if it wasn't the recommendation or if the reasoning binds future work>)
 ```
 
 Write it for a sharp reader who has never seen this repo: no jargon, no bare
@@ -79,9 +79,17 @@ watched the session, rewrite it.
   to reply with one token, or one letter, and nothing else. A decision that
   bundles numbered recommendations also accepts `N: <change>`, overriding
   item N alone.
-- **Resolve in the same turn you act on the answer:** move the section to
-  `Decided` with the date and what was chosen. A ledger whose `Open` list is
-  stale is worse than none, because it re-asks settled questions.
+- **Resolve in the same turn you act on the answer, as one edit:** delete the
+  `### decide-<slug>` section from `Open` and add its `Decided` bullet, keeping
+  the same `decide-<slug>` so a search from an old `Next for you:` line lands
+  on the answer. Adding the bullet without deleting the section is the common
+  miss: the file then shows every settled question as still open. A ledger
+  whose `Open` list is stale is worse than none, because it re-asks settled
+  questions. After resolving, `Open` holds exactly the questions still waiting.
+- **A decision split, superseded, or withdrawn is resolved too.** Its bullet
+  says so and names the slug that replaces it, if any:
+  `… — decide-agent-plugins — Plugins: **maestro + fable**; dotfiles split out
+  to decide-dotfiles.`
 - **Every GitHub ref is a link labeled with the full `owner/repo#N`** — the
   same rule as every message to the human (see `SKILL.md`, "The human"):
   `[acme/app#92](https://github.com/acme/app/pull/92)` (`/issues/N` works too;
