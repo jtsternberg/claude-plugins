@@ -220,7 +220,7 @@ Three questions events answer by fact, where the screen answers only by inferenc
 
 Exit code is `0` on a match and `1` on `--timeout`, with the timeout message on stderr. Scripted use is always `--no-ack --no-heartbeat 2>/dev/null` — the ack frame has no `.name` and will break a naive `jq` filter.
 
-The full catalog (33 event names), the payload shapes, the `agent.hook.*` double-fire, and the verification recipes are in **[references/events.md](references/events.md)**. Read it before building anything that waits.
+The full catalog (38 event names), the payload shapes, the `agent.hook.*` double-fire, and the verification recipes are in **[references/events.md](references/events.md)**. Read it before building anything that waits.
 
 ---
 

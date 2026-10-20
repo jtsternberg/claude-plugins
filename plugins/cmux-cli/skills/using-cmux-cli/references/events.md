@@ -53,12 +53,12 @@ absence is not even evidence of recent absence. To ask about the present, watch
 the live stream or resume from `--cursor-file`; use `--after` only to read a
 range you have already bounded.
 
-Harvested live from replays on cmux 0.64.25. **The retained buffer is a rolling window**, so no single replay contains every name — `surface.input_sent` and `agent.hook.Notification` appear in one replay and are gone from the next taken minutes later. Treat a name's absence from a replay as "nothing did that recently", never as "this event does not exist". cmux may also add names; re-harvest with
+Harvested live from replays on cmux 0.64.25 and 0.65.1. **The retained buffer is a rolling window**, so no single replay contains every name — `surface.input_sent` and `agent.hook.Notification` appear in one replay and are gone from the next taken minutes later. Treat a name's absence from a replay as "nothing did that recently", never as "this event does not exist". cmux may also add names; re-harvest with
 `cmux events --after 0 --no-ack --no-heartbeat --limit 900 --timeout 10 2>/dev/null | jq -r '[.category,.name]|@tsv' | sort -u`.
 
 | category | names |
 |---|---|
-| `agent` | `agent.hook.SessionStart`, `agent.hook.UserPromptSubmit`, `agent.hook.PreToolUse`, `agent.hook.PostToolUse`, `agent.hook.Stop`, `agent.hook.SubagentStop`, `agent.hook.SessionEnd`, `agent.hook.Notification`, `agent.notification.decision`, `agent.journal.unattributed` |
+| `agent` | `agent.hook.SessionStart`, `agent.hook.UserPromptSubmit`, `agent.hook.PreToolUse`, `agent.hook.PostToolUse`, `agent.hook.Stop`, `agent.hook.SubagentStop`, `agent.hook.SessionEnd`, `agent.hook.Notification`, `agent.hook.AskUserQuestion`, `agent.notification.decision`, `agent.journal.unattributed`, `agent.journal.apply_skipped` |
 | `surface` | `surface.created`, `surface.selected`, `surface.focused`, `surface.closed`, `surface.moved`, `surface.input_sent`, `surface.key_sent` |
 | `workspace` | `workspace.created`, `workspace.selected`, `workspace.closed`, `workspace.reordered`, `workspace.prompt.submitted` |
 | `pane` | `pane.created`, `pane.focused` |
@@ -66,26 +66,65 @@ Harvested live from replays on cmux 0.64.25. **The retained buffer is a rolling 
 | `notification` | `notification.created`, `notification.read`, `notification.cleared`, `notification.clear_requested`, `notification.removed` |
 | `feed` | `feed.item.received`, `feed.item.completed` |
 | `sidebar` | `sidebar.metadata.updated` |
+| `terminal` | `program_status.changed` (seen on cmux 0.65.1) |
+
+### `program_status.changed` — a program's self-reported status
+
+`source` is `terminal.program_status`, and each frame carries the `surface_id`
+whose status changed (`pane_id` and `window_id` come back `null`). The payload,
+from 182 frames captured on cmux 0.65.1:
+
+```json
+{"event":"report","id":null,
+ "record":{"id":"","kind":"none","progress":null,"state":"working","updated_seq":9},
+ "records":[ /* the same record */ ],"records_total":1,
+ "snapshot_count":1,"snapshot_id":"<uuid>","snapshot_index":0}
+```
+
+- `payload.event` is `report` (a status was set), `dismissed`, `removed` or
+  `clear`. The last three carry `record: null` and an empty `records`.
+- `record.state` was observed as `working`, `done`, `idle` or `blocked`.
+  `record.kind` was `none`, with one `question` (paired with `blocked`).
+  `progress` was always `null`.
+
+On a Claude Code surface, `report`/`working` fired in the same second as
+`agent.hook.UserPromptSubmit`, and `report`/`done` came about 4s **after**
+`agent.hook.Stop`. Which program emits these, and what causes `dismissed`, is
+unverified. So for "is that agent done?" keep waiting on `agent.hook.Stop`,
+which is the real turn boundary and arrives first. Use this event for the
+`blocked`/`question` state, which no `agent.hook.*` name reports as a state.
 
 ### Observed, shape not yet captured
 
-<!-- tripwire: claude-plugins-6r0d — capture a real frame for each of these, then move them into the table above and delete this section. Do not guess a shape. -->
+<!-- tripwire: claude-plugins-6r0d — capture a real frame for surface.action, then move it into the table above and delete this section. Do not guess a shape. -->
 
-`agent.hook.AskUserQuestion` and `surface.action` are real — the catalog guard saw
-both on cmux 0.64.25 — and their payloads are **not** documented here, because the
-rolling buffer had dropped them before either could be read. They are listed so the
-catalog is honest about the event surface, not because anything is known about their
-contents. Do not guess a shape for them; capture one the next time either appears:
+`surface.action` is real (the catalog guard saw it on cmux 0.64.25), and its
+payload is **not** documented here, because the rolling buffer had dropped it
+before it could be read. It is listed so the catalog is honest about the event
+surface. Do not guess a shape for it; capture one the next time it appears:
 
 ```bash
-cmux events --name agent.hook.AskUserQuestion --name surface.action \
+cmux events --name surface.action \
             --after 0 --no-ack --no-heartbeat --limit 900 --timeout 10 2>/dev/null | jq
 ```
 
-`agent.hook.AskUserQuestion` is presumably the hook pair for Claude Code's
-question tool, and so presumably carries the same `phase` double-fire and
-`session_id` / `cwd` fields as every other `agent.hook.*` — presumably, which is
-exactly why it is in this section and not in the table above.
+### `agent.hook.AskUserQuestion` and `agent.journal.apply_skipped`
+
+`agent.hook.AskUserQuestion` fires for Claude Code's question tool. It has
+the same `phase` double-fire, `session_id` / `cwd` / `surface_id` fields and
+redaction as every other `agent.hook.*`, plus `tool_name: "AskUserQuestion"`
+and a `tool_input_length` (the questions themselves are in `redacted_fields`).
+The `completed` frame adds `result: {item_id, status}`; the one captured on
+cmux 0.65.1 read `status: "timed_out"`. On that surface a
+`program_status.changed` `report` with `state: "blocked"`, `kind: "question"`
+landed in the same second.
+
+`agent.journal.apply_skipped` (`source: "journal"`) carries only
+`{agent_key, reason}`; every frame captured on 0.65.1 was
+`{"agent_key":"claude_code","reason":"panelGone"}`, with the top-level
+`surface_id` set and `workspace_id` null. The surfaces it named were ones that
+had since closed, so it reads as cmux skipping a journal write for a dead
+panel. Nothing here waits on it.
 
 ## Frame shape and how to target one surface
 

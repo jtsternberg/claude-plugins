@@ -12,8 +12,8 @@
 #      The recipes pass --no-ack/--no-heartbeat/--timeout/--after for stated
 #      reasons; if any of those stop existing, the recipes are wrong.
 #   3. Every event name cmux actually emits is one we document. This direction
-#      is deliberate: a live replay on a quiet machine will not contain all 30
-#      names, so "documented ⊆ observed" would fail spuriously. "observed ⊆
+#      is deliberate: a live replay on a quiet machine will not contain every
+#      name, so "documented ⊆ observed" would fail spuriously. "observed ⊆
 #      documented" instead catches cmux ADDING a name we haven't written up.
 #
 # Parts 2 and 3 need real cmux and self-skip without it. Part 1 is pure text
