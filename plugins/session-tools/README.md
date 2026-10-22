@@ -208,6 +208,15 @@ plan, scaffold, or start work — because the work you're about to do may have n
 with the session you just read. That's the whole point: catching up is what makes the
 session useful for whatever comes next, related or not.
 
+The exception is a fork called *for* a task. Words after the id, or work already under way
+in this conversation, mean the forked session is evidence for that task — so it reports
+what changes and keeps going, pausing only for a real blocker such as the source session
+still editing the same repo:
+
+```
+/sessions-fork e3028c10 this session says otherwise
+```
+
 The most valuable thing it surfaces is **dead ends** — what was already tried and
 abandoned, so it isn't retried. Since `thinking` blocks are empty on disk, it says "the
 transcript doesn't say why" rather than inventing a rationale.

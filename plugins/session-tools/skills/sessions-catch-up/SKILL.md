@@ -31,7 +31,8 @@ immediately. Phase 2 is optional and only happens if the user wants the longer a
 > REPL would append a turn to the target.
 >
 > This constrains the *session*, not the repo. Doing new work informed by what you read is
-> fine — if that's the goal, `sessions-fork` loads the context and hands back to the user.
+> fine — if that's the goal, `sessions-fork` loads the context and either carries on with the
+> task it was loaded for or hands back to the user.
 
 ## Arguments
 
