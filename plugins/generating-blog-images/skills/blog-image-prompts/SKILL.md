@@ -115,4 +115,4 @@ After writing the file, confirm the file path to the user so they can open it fo
 
 - **High freedom**: Image count, exact placement, style interpretation
 - **Medium freedom**: Output format structure (maintain organization, adapt sections)
-- **Low freedom**: Five prompt elements (always include all five), validation checks
+- **Low freedom**: Six prompt elements (always include all six), validation checks
