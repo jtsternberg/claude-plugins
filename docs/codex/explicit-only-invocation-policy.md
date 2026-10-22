@@ -38,12 +38,12 @@ node scripts/audit-explicit-invocation-policy.mjs
 
 Current summary:
 
-- Explicit-only skills: 34
-- Codex explicit-only policies: 34
+- Explicit-only skills: 33
+- Codex explicit-only policies: 33
 - coordination-side-effect: 1
 - external-side-effect: 4
 - local-side-effect: 19
-- read-only-or-advisory: 10
+- read-only-or-advisory: 9
 
 | Skill | Side-effect risk | Policy |
 | --- | --- | --- |
@@ -53,7 +53,6 @@ Current summary:
 | `beads-workflow:tackle-epic` | local-side-effect | explicit-only in both harnesses |
 | `bible:bible-nlt-lookup` | read-only-or-advisory | explicit-only in both harnesses |
 | `export-presentation:export-presentation` | local-side-effect | explicit-only in both harnesses |
-| `generating-blog-images:blog-image-prompts` | read-only-or-advisory | explicit-only in both harnesses |
 | `git-commits:commit-staged` | local-side-effect | explicit-only in both harnesses |
 | `git-commits:commit-unstaged` | local-side-effect | explicit-only in both harnesses |
 | `git-tree:create-git-tree` | local-side-effect | explicit-only in both harnesses |

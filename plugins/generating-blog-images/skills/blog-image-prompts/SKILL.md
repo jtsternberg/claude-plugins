@@ -1,7 +1,6 @@
 ---
 name: blog-image-prompts
 description: "Generate AI image prompts and placement points for a blog post."
-disable-model-invocation: true
 ---
 
 # Blog Post Image Prompt Generator
