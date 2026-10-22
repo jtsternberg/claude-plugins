@@ -498,8 +498,15 @@ def read_journal(args):
 
 
 def append_journal(args, entry):
-    write_journal(args, (read_journal(args) + [entry])[-journal_limit():])
+    """Untrimmed: trimming here would evict the oldest entry even if this write then fails."""
+    write_journal(args, read_journal(args) + [entry])
     return entry["undo_id"]
+
+
+def trim_journal(args):
+    entries = read_journal(args)
+    if len(entries) > journal_limit():
+        write_journal(args, entries[-journal_limit():])
 
 
 def drop_journal_entry(args, undo_id):
@@ -607,7 +614,9 @@ def guarded_update(args, path, conn, m, note, values, action):
         finally:
             rw.close()
     finally:
-        if not committed:
+        if committed:
+            trim_journal(args)
+        else:
             drop_journal_entry(args, plan["undo_id"])
 
     check = read_note(connect_ro(path), note["id"])

@@ -433,6 +433,22 @@ class WriteTests(Base):
                 self.assertEqual(self.write(eid, f"v{i}")[0], 0)
         self.assertEqual([e["row"]["content"] for e in self.journal()], ["v1", "v2", "v3"])
 
+    def test_failed_write_on_full_journal_keeps_oldest_entry(self):
+        eid = self.ids["standup"]
+        with mock.patch.dict(os.environ, {"FORESIGHT_UNDO_LIMIT": "3"}):
+            for i in range(3):
+                self.assertEqual(self.write(eid, f"v{i}")[0], 0)
+            before = self.journal()
+            hold = sqlite3.connect(self.db, isolation_level=None)
+            hold.execute("BEGIN IMMEDIATE")
+            with mock.patch.object(fs, "BUSY_TIMEOUT_SECONDS", 0.05):
+                self.assertEqual(self.write(eid, "lost")[0], 5)
+            hold.execute("ROLLBACK")
+            hold.close()
+            self.assertEqual(self.journal(), before)
+            self.assertEqual(self.write(eid, "v3")[0], 0)
+        self.assertEqual([e["row"]["content"] for e in self.journal()], ["v0", "v1", "v2"])
+
     def test_journal_limit_env_must_be_positive_int(self):
         for bad in ("0", "-2", "ten"):
             with mock.patch.dict(os.environ, {"FORESIGHT_UNDO_LIMIT": bad}):
