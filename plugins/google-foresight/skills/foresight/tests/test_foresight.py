@@ -15,6 +15,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -88,6 +89,13 @@ def build_db(path, schema=SCHEMA):
     conn.commit()
     conn.close()
     return {"standup": standup, "cal": cal, "empty": empty, "orphan": orphan}
+
+
+def fs_main_quiet(*argv):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = fs.main(list(argv))
+    return code, out.getvalue(), err.getvalue()
 
 
 class Base(unittest.TestCase):
@@ -258,6 +266,28 @@ class SchemaTests(Base):
         self.assertEqual(code, 3)
         self.assertIn("transcript format changed", err)
 
+    def set_user_version(self, v):
+        conn = sqlite3.connect(self.db)
+        conn.execute(f"PRAGMA user_version = {v}")
+        conn.close()
+        self.idle()
+
+    def test_untested_user_version_refuses_writes_and_restores(self):
+        eid = self.ids["standup"]
+        f = Path(self.tmp.name) / "d.md"
+        f.write_text("x")
+        self.set_user_version(6)
+        for argv in (["write-notes", eid, "--file", str(f)], ["restore", eid]):
+            code, _, err = self.run_cli(*argv, "--expect-sha256", sha("- widget release"))
+            self.assertEqual(code, 5, argv)
+            self.assertIn("--allow-untested-schema", err)
+        code, _, err = self.run_cli("write-notes", eid, "--file", str(f), "--expect-sha256",
+                                    sha("- widget release"), "--allow-untested-schema")
+        self.assertEqual(code, 0, err)
+        self.idle()
+        code, _, err = self.run_cli("restore", eid, "--expect-sha256", sha("x"), "--allow-untested-schema")
+        self.assertEqual(code, 0, err)
+
     def test_untested_user_version_warns_but_works(self):
         conn = sqlite3.connect(self.db)
         conn.execute("PRAGMA user_version = 6")
@@ -265,6 +295,15 @@ class SchemaTests(Base):
         code, _, err = self.run_cli("meetings")
         self.assertEqual(code, 0)
         self.assertIn("untested", err)
+
+    def test_locked_database_read_says_retry(self):
+        hold = sqlite3.connect(self.db, isolation_level=None)
+        hold.execute("BEGIN EXCLUSIVE")
+        self.addCleanup(hold.close)
+        with mock.patch.object(fs, "BUSY_TIMEOUT_SECONDS", 0.05):
+            code, _, err = self.run_cli("meetings")
+        self.assertEqual(code, 1)
+        self.assertIn("retry", err)
 
     def test_missing_database(self):
         self.db.unlink()
@@ -387,9 +426,77 @@ class WriteTests(Base):
         self.assertEqual(len(entries), fs.JOURNAL_KEPT)
         self.assertEqual(entries[-1]["row"]["content"], f"v{fs.JOURNAL_KEPT + 3}")
 
+    def test_journal_limit_env_override(self):
+        eid = self.ids["standup"]
+        with mock.patch.dict(os.environ, {"FORESIGHT_UNDO_LIMIT": "3"}):
+            for i in range(5):
+                self.assertEqual(self.write(eid, f"v{i}")[0], 0)
+        self.assertEqual([e["row"]["content"] for e in self.journal()], ["v1", "v2", "v3"])
+
+    def test_journal_limit_env_must_be_positive_int(self):
+        for bad in ("0", "-2", "ten"):
+            with mock.patch.dict(os.environ, {"FORESIGHT_UNDO_LIMIT": bad}):
+                code, _, err = self.write(self.ids["standup"], "x")
+            self.assertEqual(code, 2, bad)
+            self.assertIn("FORESIGHT_UNDO_LIMIT", err)
+        self.assertEqual(self.content(self.ids["standup"]), "- widget release")
+        self.assertEqual(self.journal(), [])
+
     def test_journal_is_private(self):
         self.write(self.ids["standup"], "x")
         self.assertEqual((self.state / "undo.jsonl").stat().st_mode & 0o777, 0o600)
+
+    def test_state_dir_and_full_backups_are_private_even_if_dir_preexisted(self):
+        (self.state / "full-backups").mkdir(parents=True)
+        os.chmod(self.state, 0o755)
+        os.chmod(self.state / "full-backups", 0o755)
+        old = self.state / "full-backups" / "database-old.sqlite"
+        old.write_text("")
+        os.chmod(old, 0o644)
+        code, out, err = self.write(self.ids["standup"], "x", "--full-backup", "--json")
+        self.assertEqual(code, 0, err)
+        mode = lambda p: p.stat().st_mode & 0o777
+        self.assertEqual(mode(self.state), 0o700)
+        self.assertEqual(mode(self.state / "full-backups"), 0o700)
+        self.assertEqual(mode(Path(json.loads(out)["full_backup"])), 0o600)
+        self.assertEqual(mode(old), 0o600)
+
+    def test_missing_file_exits_cleanly(self):
+        code, _, err = self.run_cli("write-notes", self.ids["standup"], "--file", "/nonexistent/draft.md",
+                                    "--expect-sha256", sha("- widget release"))
+        self.assertEqual(code, 2)
+        self.assertIn("/nonexistent/draft.md", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_busy_database_refuses_says_nothing_written_and_leaves_no_undo_entry(self):
+        hold = sqlite3.connect(self.db, isolation_level=None)
+        hold.execute("BEGIN IMMEDIATE")
+        self.addCleanup(hold.close)
+        with mock.patch.object(fs, "BUSY_TIMEOUT_SECONDS", 0.05):
+            code, _, err = self.write(self.ids["standup"], "x")
+        self.assertEqual(code, 5)
+        self.assertIn("nothing written", err)
+        hold.execute("ROLLBACK")
+        self.assertEqual(self.content(self.ids["standup"]), "- widget release")
+        self.assertEqual(self.journal(), [])
+
+    def test_change_inside_transaction_leaves_no_undo_entry(self):
+        real = fs.check_app_quiet
+
+        def edit_then_check(args, path):
+            conn = sqlite3.connect(self.db)
+            conn.execute("UPDATE notes_table SET content = 'app edit' WHERE id = ?", (f"note_{self.ids['standup']}",))
+            conn.commit()
+            conn.close()
+            self.idle()
+            return real(args, path)
+
+        with mock.patch.object(fs, "check_app_quiet", side_effect=edit_then_check):
+            code, _, err = self.write(self.ids["standup"], "x")
+        self.assertEqual(code, 5)
+        self.assertIn("nothing written", err)
+        self.assertEqual(self.content(self.ids["standup"]), "app edit")
+        self.assertEqual(self.journal(), [])
 
 
 class RestoreTests(Base):
@@ -407,13 +514,75 @@ class RestoreTests(Base):
         self.assertEqual([h["action"] for h in history], ["replace", "restore"])
         self.assertEqual(history[-1]["prior_sha256"], sha("draft one"))
 
-    def test_restore_specific_undo_id(self):
+    def test_restore_steps_back_one_entry_at_a_time(self):
         eid = self.ids["standup"]
         self.write(eid, "one")
         self.write(eid, "two")
         first = self.json_cli("history", eid)[0]["undo_id"]
+        self.assertEqual(self.restore(eid)[0], 0)
+        self.assertEqual(self.content(eid), "one")
         self.assertEqual(self.restore(eid, "--undo-id", first)[0], 0)
         self.assertEqual(self.content(eid), "- widget release")
+
+    def test_restore_jumping_past_a_later_write_needs_force(self):
+        eid = self.ids["standup"]
+        self.write(eid, "one")
+        self.write(eid, "two")
+        first = self.json_cli("history", eid)[0]["undo_id"]
+        code, _, err = self.restore(eid, "--undo-id", first)
+        self.assertEqual(code, 5)
+        self.assertIn("--force", err)
+        self.assertEqual(self.content(eid), "two")
+        self.assertEqual(self.restore(eid, "--undo-id", first, "--force")[0], 0)
+        self.assertEqual(self.content(eid), "- widget release")
+
+    def test_restore_refuses_when_notes_edited_since_the_write(self):
+        eid = self.ids["standup"]
+        self.write(eid, "one")
+        conn = sqlite3.connect(self.db)
+        conn.execute("UPDATE notes_table SET content = 'user typed more' WHERE id = ?", (f"note_{eid}",))
+        conn.commit()
+        conn.close()
+        code, _, err = self.restore(eid)
+        self.assertEqual(code, 5)
+        self.assertIn("--force", err)
+        self.assertEqual(self.content(eid), "user typed more")
+
+    def test_restore_refuses_entry_whose_write_never_landed(self):
+        eid = self.ids["standup"]
+        args = fs.build_parser().parse_args(["history", eid])
+        fs.append_journal(args, {"undo_id": "1-crash", "saved_at": "x", "action": "replace",
+                                 "db": os.path.realpath(self.db), "event_id": eid,
+                                 "row": {"id": f"note_{eid}", "content": "older", "timestamp": 1,
+                                         "last_manual_edit": None},
+                                 "replaced_by_sha256": sha("never committed")})
+        code, _, err = self.restore(eid)
+        self.assertEqual(code, 5)
+        self.assertEqual(self.content(eid), "- widget release")
+
+    def test_history_and_restore_ignore_entries_from_another_database(self):
+        eid = self.ids["standup"]
+        copy = Path(self.tmp.name) / "copy.sqlite"
+        shutil.copy(self.db, copy)
+        past = time.time() - 3600
+        os.utime(copy, (past, past))
+        f = Path(self.tmp.name) / "d.md"
+        f.write_text("copy content")
+        code, _, err = fs_main_quiet("--db", str(copy), "write-notes", eid, "--file", str(f),
+                                     "--expect-sha256", sha("- widget release"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.json_cli("history", eid), [])
+        self.assertEqual(self.restore(eid)[0], 4)
+        self.assertEqual(self.content(eid), "- widget release")
+
+    def test_journal_matches_database_through_a_symlink(self):
+        eid = self.ids["standup"]
+        self.write(eid, "one")
+        link = Path(self.tmp.name) / "link.sqlite"
+        link.symlink_to(self.db)
+        code, out, err = fs_main_quiet("--db", str(link), "history", eid, "--json")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(json.loads(out)), 1)
 
     def test_restore_leaves_enhanced_content_alone(self):
         eid = self.ids["standup"]

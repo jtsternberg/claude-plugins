@@ -8,8 +8,9 @@ the mismatch spelled out rather than guessing.
 Reads open the database with mode=ro. The only writes are `write-notes` and `restore`,
 which update notes_table.content for one meeting behind a compare-and-swap hash, an
 app-activity check, and a read-back verification. Before each write the note's prior
-row goes to a small undo journal (JSONL, last 50 entries); a whole-database copy is
-made only with --full-backup.
+row goes to a small undo journal (JSONL, last 50 writes across all meetings, or
+$FORESIGHT_UNDO_LIMIT); a
+whole-database copy is made only with --full-backup.
 
 Exit codes: 0 ok, 1 runtime error, 2 usage, 3 schema mismatch, 4 meeting not found
 or ambiguous, 5 write refused by a guard, 6 write did not verify.
@@ -34,6 +35,7 @@ JOURNAL_KEPT = 50
 # PRAGMA user_version of the database these commands were checked against (app build 1.0.0.28).
 TESTED_USER_VERSION = 5
 QUIET_SECONDS_DEFAULT = 60
+BUSY_TIMEOUT_SECONDS = 5
 
 REQUIRED_COLUMNS = {
     "event_transcript_table": [
@@ -67,7 +69,7 @@ def db_path(args):
 def connect_ro(path):
     if not path.is_file():
         raise CliError(f"Foresight database not found at {path} (is the app installed and opened once?)")
-    conn = sqlite3.connect(f"file:{pathname2url(str(path))}?mode=ro", uri=True, timeout=5)
+    conn = sqlite3.connect(f"file:{pathname2url(str(path))}?mode=ro", uri=True, timeout=BUSY_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     OPEN_CONNECTIONS.append(conn)
     return conn
@@ -86,7 +88,7 @@ def schema_problems(conn):
     return problems
 
 
-def check_schema(conn):
+def check_schema(conn, args=None):
     problems = schema_problems(conn)
     if problems:
         raise CliError(
@@ -96,6 +98,10 @@ def check_schema(conn):
             EXIT_SCHEMA,
         )
     version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version != TESTED_USER_VERSION and args is not None and not args.allow_untested_schema:
+        raise CliError(f"database user_version {version} is untested (tested: {TESTED_USER_VERSION}), so the app "
+                       "may have changed how it stores notes; refusing to write. Reads still work. Pass "
+                       "--allow-untested-schema only after confirming with the user", EXIT_REFUSED)
     if version != TESTED_USER_VERSION:
         print(f"warning: database user_version {version} is untested (tested: {TESTED_USER_VERSION}); "
               "required columns are present, continuing", file=sys.stderr)
@@ -459,8 +465,22 @@ def state_dir(args):
                 or DEFAULT_STATE_DIR).expanduser()
 
 
+def journal_limit():
+    raw = os.environ.get("FORESIGHT_UNDO_LIMIT", str(JOURNAL_KEPT))
+    if not raw.isdigit() or int(raw) < 1:
+        raise CliError(f"FORESIGHT_UNDO_LIMIT must be a positive integer, got {raw!r}", 2)
+    return int(raw)
+
+
 def journal_path(args):
     return state_dir(args) / "undo.jsonl"
+
+
+def private_dir(path):
+    """chmod on every call, not just at creation, so a dir made by an older version gets tightened too."""
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+    return path
 
 
 def read_journal(args):
@@ -478,22 +498,34 @@ def read_journal(args):
 
 
 def append_journal(args, entry):
+    write_journal(args, (read_journal(args) + [entry])[-journal_limit():])
+    return entry["undo_id"]
+
+
+def drop_journal_entry(args, undo_id):
+    write_journal(args, [e for e in read_journal(args) if e.get("undo_id") != undo_id])
+
+
+def write_journal(args, entries):
     """Rewrites the whole file through a temp + rename so a crash never leaves a torn journal."""
     path = journal_path(args)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    entries = (read_journal(args) + [entry])[-JOURNAL_KEPT:]
+    private_dir(path.parent)
     tmp = path.with_suffix(".jsonl.tmp")
     tmp.write_text("".join(json.dumps(e, ensure_ascii=False) + "\n" for e in entries), encoding="utf-8")
     os.chmod(tmp, 0o600)
     tmp.replace(path)
-    return entry["undo_id"]
 
 
 def full_backup(conn, args, event_id):
-    backup_dir = state_dir(args) / "full-backups"
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    private_dir(state_dir(args))
+    backup_dir = private_dir(state_dir(args) / "full-backups")
+    for old in backup_dir.iterdir():
+        os.chmod(old, 0o600)
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
     dest_path = backup_dir / f"database-{event_id}-{stamp}.sqlite"
+    # Created empty at 0600 first; sqlite3.connect would create it world-readable, and SQLite
+    # gives its own journal files the main file's mode.
+    os.close(os.open(dest_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
     dest = sqlite3.connect(dest_path)
     with dest:
         conn.backup(dest)
@@ -536,32 +568,47 @@ def guarded_update(args, path, conn, m, note, values, action):
         emit(args, plan, "dry run, nothing written:\n" + "\n".join(f"  {k}: {v}" for k, v in plan.items()))
         return 0
 
+    # The entry is journaled before the commit so a crash mid-write still leaves the prior row on
+    # disk; any failure short of COMMIT drops it again. An entry a crash strands is caught by
+    # restore's replaced_by_sha256 check, since that content never landed.
     plan["undo_id"] = append_journal(args, {
         "undo_id": f"{int(time.time() * 1000)}-{note['id']}",
         "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "action": action, "db": str(path), "event_id": m["event_id"],
+        "action": action, "db": os.path.realpath(path), "event_id": m["event_id"],
         "row": {k: note[k] for k in note.keys()},
         "replaced_by_sha256": plan["new_sha256"],
     })
-    if args.full_backup:
-        plan["full_backup"] = str(full_backup(conn, args, m["event_id"]))
-    conn.close()
-
-    rw = sqlite3.connect(f"file:{pathname2url(str(path))}?mode=rw", uri=True, timeout=5, isolation_level=None)
+    committed = False
     try:
-        rw.execute("BEGIN IMMEDIATE")
-        (again,) = rw.execute("SELECT content FROM notes_table WHERE id = ?", (note["id"],)).fetchone()
-        if sha256(again) != plan["previous_sha256"]:
-            rw.execute("ROLLBACK")
-            raise CliError("notes changed between the check and the write; nothing written", EXIT_REFUSED)
-        cols = ", ".join(f"{k} = ?" for k in values)
-        cur = rw.execute(f"UPDATE notes_table SET {cols} WHERE id = ?", (*values.values(), note["id"]))
-        if cur.rowcount != 1:
-            rw.execute("ROLLBACK")
-            raise CliError(f"update touched {cur.rowcount} rows; rolled back", EXIT_RUNTIME)
-        rw.execute("COMMIT")
+        if args.full_backup:
+            plan["full_backup"] = str(full_backup(conn, args, m["event_id"]))
+        conn.close()
+
+        rw = sqlite3.connect(f"file:{pathname2url(str(path))}?mode=rw", uri=True,
+                             timeout=BUSY_TIMEOUT_SECONDS, isolation_level=None)
+        try:
+            rw.execute("BEGIN IMMEDIATE")
+            (again,) = rw.execute("SELECT content FROM notes_table WHERE id = ?", (note["id"],)).fetchone()
+            if sha256(again) != plan["previous_sha256"]:
+                rw.execute("ROLLBACK")
+                raise CliError("notes changed between the check and the write; nothing written", EXIT_REFUSED)
+            cols = ", ".join(f"{k} = ?" for k in values)
+            cur = rw.execute(f"UPDATE notes_table SET {cols} WHERE id = ?", (*values.values(), note["id"]))
+            if cur.rowcount != 1:
+                rw.execute("ROLLBACK")
+                raise CliError(f"update touched {cur.rowcount} rows; rolled back, nothing written", EXIT_RUNTIME)
+            rw.execute("COMMIT")
+            committed = True
+        except sqlite3.OperationalError as exc:
+            if not is_locked(exc):
+                raise
+            raise CliError(f"the database is locked ({exc}): Foresight is writing to it; nothing written, "
+                           "retry once the app is idle", EXIT_REFUSED)
+        finally:
+            rw.close()
     finally:
-        rw.close()
+        if not committed:
+            drop_journal_entry(args, plan["undo_id"])
 
     check = read_note(connect_ro(path), note["id"])
     if check is None or any(check[k] != v for k, v in values.items()):
@@ -573,10 +620,15 @@ def guarded_update(args, path, conn, m, note, values, action):
     return 0
 
 
+def is_locked(exc):
+    return "locked" in str(exc) or "busy" in str(exc)
+
+
 def open_for_write(args):
+    journal_limit()  # a bad override fails here, before any guard runs
     path = db_path(args)
     conn = connect_ro(path)
-    check_schema(conn)
+    check_schema(conn, args)
     m = resolve(conn, args.ref)
     note = read_note(conn, m["note_id"])
     if note is None:
@@ -588,7 +640,10 @@ def open_for_write(args):
 def cmd_write_notes(args):
     path, conn, m, note = open_for_write(args)
     current = note["content"] or ""
-    incoming = Path(args.file).read_text(encoding="utf-8") if args.file != "-" else sys.stdin.read()
+    try:
+        incoming = Path(args.file).read_text(encoding="utf-8") if args.file != "-" else sys.stdin.read()
+    except OSError as exc:
+        raise CliError(f"cannot read --file {args.file}: {exc.strerror}", 2)
     new = (current.rstrip() + "\n\n" + incoming) if args.append and current.strip() else incoming
     if not new.strip():
         raise CliError("refusing to write empty notes", EXIT_REFUSED)
@@ -599,15 +654,19 @@ def cmd_write_notes(args):
                           "append" if args.append else "replace")
 
 
-def journal_for(args, note_id):
-    return [e for e in read_journal(args) if e.get("row", {}).get("id") == note_id]
+def journal_for(args, path, note_id):
+    """Copies of the database share note ids, so an entry only counts for the file it was written to."""
+    db = os.path.realpath(path)
+    return [e for e in read_journal(args)
+            if e.get("row", {}).get("id") == note_id and e.get("db") and os.path.realpath(e["db"]) == db]
 
 
 def cmd_history(args):
-    conn = connect_ro(db_path(args))
+    path = db_path(args)
+    conn = connect_ro(path)
     check_schema(conn)
     m = resolve(conn, args.ref)
-    entries = journal_for(args, m["note_id"])
+    entries = journal_for(args, path, m["note_id"])
     out = [{"undo_id": e["undo_id"], "saved_at": e["saved_at"], "action": e["action"],
             "prior_sha256": sha256(e["row"].get("content")), "prior_chars": len(e["row"].get("content") or ""),
             "replaced_by_sha256": e.get("replaced_by_sha256")} for e in entries]
@@ -618,13 +677,19 @@ def cmd_history(args):
 
 def cmd_restore(args):
     path, conn, m, note = open_for_write(args)
-    entries = journal_for(args, note["id"])
+    entries = journal_for(args, path, note["id"])
     if args.undo_id:
         entries = [e for e in entries if e["undo_id"] == args.undo_id]
     if not entries:
         raise CliError(f"no undo entry for {m['event_id']}" + (f" with id {args.undo_id}" if args.undo_id else "")
                        + "; run `history` to list them", EXIT_NOT_FOUND)
-    row = entries[-1]["row"]
+    entry = entries[-1]
+    current = sha256(note["content"])
+    if current != entry.get("replaced_by_sha256") and not args.force:
+        raise CliError(f"notes for {m['event_id']} are not what undo entry {entry['undo_id']} wrote (current sha256 "
+                       f"{current}): they were edited since, a later write replaced them, or that write never "
+                       "landed. Restore newer entries first, or confirm with the user and pass --force", EXIT_REFUSED)
+    row = entry["row"]
     # Only the columns write-notes touches go back; enhanced_content belongs to the app's
     # enhancer and may have been regenerated since, so the journal keeps it for reference only.
     values = {"content": row.get("content") or "", "timestamp": row.get("timestamp"),
@@ -680,6 +745,8 @@ def build_parser():
                         help="skip the recently-written-database check")
     guards.add_argument("--full-backup", action="store_true",
                         help="also copy the whole database (tens of MB) to the state dir first")
+    guards.add_argument("--allow-untested-schema", action="store_true",
+                        help=f"write even though PRAGMA user_version is not {TESTED_USER_VERSION}")
     state = argparse.ArgumentParser(add_help=False)
     state.add_argument("--state-dir", help=f"undo journal location (default: $FORESIGHT_STATE_DIR or {DEFAULT_STATE_DIR})")
 
@@ -694,6 +761,8 @@ def build_parser():
     s = sub.add_parser("restore", parents=[common, guards, state], help="put a journaled prior version back")
     s.add_argument("ref")
     s.add_argument("--undo-id", help="entry from `history` (default: the most recent for this note)")
+    s.add_argument("--force", action="store_true",
+                   help="restore even though the notes are no longer what that entry's write left")
     s.set_defaults(fn=cmd_restore)
     return p
 
@@ -706,7 +775,8 @@ def main(argv=None):
         print(f"foresight: {exc}", file=sys.stderr)
         return exc.code
     except sqlite3.Error as exc:
-        print(f"foresight: sqlite error: {exc}", file=sys.stderr)
+        hint = "; Foresight is writing to the database, retry in a few seconds" if is_locked(exc) else ""
+        print(f"foresight: sqlite error: {exc}{hint}", file=sys.stderr)
         return EXIT_RUNTIME
     finally:
         while OPEN_CONNECTIONS:

@@ -28,7 +28,7 @@ Requires macOS, the Foresight app, and `python3` (stdlib only).
 | `notes REF [--enhanced]` | the notes pane (or the app's enhanced notes) plus `content_sha256` |
 | `search QUERY [window flags]` | substring search over titles, transcripts, summaries, notes |
 | `write-notes REF --file F --expect-sha256 S [--append]` | guarded write to the notes pane |
-| `history REF` / `restore REF [--undo-id ID] --expect-sha256 S` | undo journal |
+| `history REF` / `restore REF [--undo-id ID] [--force] --expect-sha256 S` | undo journal |
 
 `REF` is an `event_id`, a note id (`note_<event_id>`), or a unique title substring.
 
@@ -47,8 +47,9 @@ ambiguous, 5 write refused by a guard, 6 write did not verify.
 - No audio is kept; transcripts are text only.
 
 The schema is an undocumented app internal. Each run checks the columns it uses and
-exits 3 naming what is missing; `doctor` warns when `PRAGMA user_version` differs from
-the tested value (5, app build 1.0.0.28).
+exits 3 naming what is missing. When `PRAGMA user_version` differs from the tested
+value (5, app build 1.0.0.28), reads warn and `write-notes`/`restore` refuse (exit 5)
+unless passed `--allow-untested-schema`.
 
 ## Writes and their risk
 
@@ -62,9 +63,17 @@ Reads open the database read-only. `write-notes` and `restore` update one row's
    the database must be untouched for 60 seconds (`FORESIGHT_QUIET_SECONDS`), since
    the app's `ForesightHelper` process outlives the app window.
 3. **Undo journal** — the prior row is appended to
-   `~/.local/state/google-foresight/undo.jsonl` (`FORESIGHT_STATE_DIR`; last 50
-   entries, mode 600). A whole-database copy is made only with `--full-backup`.
+   `~/.local/state/google-foresight/undo.jsonl` (`FORESIGHT_STATE_DIR`; the last 50
+   writes across all meetings, not per meeting — `FORESIGHT_UNDO_LIMIT` overrides
+   the 50 with any positive integer; file 600, directory 700) before the
+   commit, and removed again if the write does not commit. Each entry records the
+   database file it belongs to; `history`/`restore` ignore other copies. A
+   whole-database copy (mode 600) is made only with `--full-backup`.
 4. **Read-back** — the write is re-read and compared before it reports success.
+
+If the app holds a write lock, the write refuses with exit 5 and nothing written.
+`restore` also refuses unless the notes are exactly what the chosen entry's write left
+(edited since, a later write, or a write that never landed); `--force` overrides.
 
 Verified: a write appears in the running app after navigating back to the meeting.
 **Untested:** whether the app overwrites a write from memory when that note is open or

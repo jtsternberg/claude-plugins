@@ -138,13 +138,23 @@ database has been quiet for 60 seconds (the app's helper process can outlive the
 
 Refusals (exit 5) say which guard fired and what to do; follow that rather than adding
 override flags. `--ignore-recent-activity` is for a user who has confirmed the app is
-idle; never pass it on your own.
+idle; never pass it on your own. A "database is locked" refusal means the app was
+writing at that moment and nothing was written — wait and retry.
+
+Writes and restores also refuse when the database's `PRAGMA user_version` is not the
+tested one (`doctor` shows both): the app was updated and may store notes differently.
+Reads only warn. Tell the user; pass `--allow-untested-schema` only if they decide to
+write anyway.
 
 ### Undo
 
 Before every write the note's prior row goes to an undo journal
-(`~/.local/state/google-foresight/undo.jsonl`, last 50 writes, mode 600). It holds note
-text, so it is as private as the app's own data.
+(`~/.local/state/google-foresight/undo.jsonl`, mode 600, in a 700 directory). It keeps
+the **last 50 writes across all meetings**, not 50 per meeting, so an old meeting's
+entry ages out once 50 later writes happen anywhere. `FORESIGHT_UNDO_LIMIT=<n>`
+(positive integer) changes the 50. It holds note text, so it is as
+private as the app's own data. Entries are tied to the database file they were written
+to; `history` and `restore` ignore entries from any other copy.
 
 Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
 
@@ -156,9 +166,13 @@ python3 "$SKILL_DIR/scripts/foresight.py" restore <ref> --undo-id <id> --expect-
 
 `restore` goes through the same guards and journals the version it replaces, so a
 restore can itself be undone. Without `--undo-id` it takes the newest entry for that
-note — after a restore, that newest entry is the version the restore just replaced, so
-pass `--undo-id` when stepping back more than once. It restores `content`, `timestamp`,
-and `last_manual_edit`; enhanced notes stay as the app has them.
+note. It refuses (exit 5) unless the notes are exactly what that entry's write left —
+so it will not clobber edits made since, or skip past a later write. To step back
+more than once, restore one entry at a time, newest first: after a restore, the newest
+entry is the version the restore just replaced, so pass `--undo-id` for the next older
+one. `--force` overrides the check; use it only when the user wants to discard the
+newer edits. It restores `content`, `timestamp`, and `last_manual_edit`; enhanced
+notes stay as the app has them.
 
-`--full-backup` additionally copies the whole database (tens of MB) under the state dir
-before writing. Use it only when the user asks.
+`--full-backup` additionally copies the whole database (tens of MB, mode 600) under the
+state dir before writing. Use it only when the user asks.
