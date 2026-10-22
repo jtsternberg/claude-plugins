@@ -185,6 +185,11 @@
       "name": "runway",
       "source": "./plugins/runway",
       "description": "Reads subscription quota and context-window headroom at session start and on prompts. Keeps working through high quota and arms delayed-work:until at wrap_up/stop, so a later 429 just sleeps the session until the reset. RUNWAY_STOP_WORK=1 pauses until the reset instead."
+    },
+    {
+      "name": "google-foresight",
+      "source": "./plugins/google-foresight",
+      "description": "Read Google AI Edge Foresight meeting transcripts, summaries, attendees, and notes from the macOS app's local database, draft meeting notes from them, and write notes back into the app behind compare-and-swap, app-activity, and read-back guards with an undo journal."
     }
   ]
 }

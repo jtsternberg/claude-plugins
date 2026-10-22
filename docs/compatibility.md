@@ -10,7 +10,7 @@ catalogs, so install from the column that matches the client you are using.
 
 The clean probes confirmed that Claude Code and Codex resolve separate catalogs
 and that Codex offers only a subset. The matrix below is the current inventory —
-36 entries in the Claude Code catalog, 37 names across both. Recheck this guide
+37 entries in the Claude Code catalog, 38 names across both. Recheck this guide
 after a client upgrade or a catalog change.
 
 ## Install and invoke
@@ -134,6 +134,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | [git-commits](../plugins/git-commits) | Available | Not offered | Both workflows support [standalone skill installation](codex/standalone-skills.md); requires a Git working tree. |
 | [git-tree](../plugins/git-tree) | Available | Not offered | Requires Git and local worktree prerequisites. |
 | [gws](../plugins/gws) | Available | Not offered | Requires the Google Workspace CLI and its authentication/setup. |
+| [google-foresight](../plugins/google-foresight) | Available | Not offered | macOS only; reads the Foresight app's local SQLite database with `python3`. The schema is an app internal and is checked on every run. |
 | [handoff](../plugins/handoff) | Available | Not offered | Uses local session/Beads context as described by the plugin. |
 | [headline-refiner](../plugins/headline-refiner) | Available | Not offered | No extra platform requirement documented. |
 | [hotline](../plugins/hotline) | Available | Available | Codex can place calls; the current launch transport starts Claude Code receivers. `cmux` is optional/preferred on macOS; calls need reachable local workspaces and a working Claude launcher. |

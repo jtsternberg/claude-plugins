@@ -1,0 +1,9 @@
+{
+  "name": "google-foresight",
+  "description": "Read Google AI Edge Foresight meeting transcripts, summaries, attendees, and notes from the macOS app's local database, draft meeting notes from them, and write notes back into the app behind compare-and-swap, app-activity, and read-back guards with an undo journal.",
+  "version": "0.1.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}

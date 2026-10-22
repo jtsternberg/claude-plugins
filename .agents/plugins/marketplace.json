@@ -305,6 +305,14 @@
       }
     },
     {
+      "name": "google-foresight",
+      "source": {
+        "source": "local",
+        "path": "./plugins/google-foresight"
+      },
+      "category": "Coding"
+    },
+    {
       "name": "codex",
       "source": {
         "source": "local",
