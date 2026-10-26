@@ -32,6 +32,11 @@
       "description": "Generates AI image prompts for blog posts by analyzing content, identifying optimal placement points, and crafting detailed prompts. Use when the user asks for image prompts, illustrations, or visual suggestions for blog content, or mentions AI image generators like Midjourney, DALL-E, Imagen, or Nano Banana."
     },
     {
+      "name": "gauntlet",
+      "source": "./plugins/gauntlet",
+      "description": "The Gauntlet Loop as a skill: build a piece, capture the real output, have a fresh harsh critic judge it blind against a reference that is already excellent, and loop until it wins. Builders and critics are fresh hotline callees on herdr; every round is a commit on a gauntlet branch."
+    },
+    {
       "name": "git-commits",
       "source": "./plugins/git-commits",
       "description": "Skills for creating git commits from staged or unstaged files with AI-generated commit messages."

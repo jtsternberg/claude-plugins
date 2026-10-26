@@ -48,6 +48,14 @@
       "category": "Coding"
     },
     {
+      "name": "gauntlet",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gauntlet"
+      },
+      "category": "Coding"
+    },
+    {
       "name": "git-commits",
       "source": {
         "source": "local",

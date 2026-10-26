@@ -10,7 +10,7 @@ catalogs, so install from the column that matches the client you are using.
 
 The clean probes confirmed that Claude Code and Codex resolve separate catalogs
 and that Codex offers only a subset. The matrix below is the current inventory —
-38 entries in the Claude Code catalog, 39 names across both. Recheck this guide
+39 entries in the Claude Code catalog, 40 names across both. Recheck this guide
 after a client upgrade or a catalog change.
 
 ## Install and invoke
@@ -130,6 +130,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | [delayed-work](../plugins/delayed-work) | Available | Available | Zero-token waiting uses Claude Code's `Monitor`; Codex's only in-session wait blocks the turn, so it is honest there for short horizons only. Nothing here survives the session closing. |
 | [export-presentation](../plugins/export-presentation) | Available | Not offered | Requires browser automation dependencies. |
 | [fable](../plugins/fable) | Available | Not offered | Claude Code plugin; the Codex-native `codex` plugin carries its separate A/B skills. |
+| [gauntlet](../plugins/gauntlet) | Available | Available | Requires `hotline` with its herdr transport, `herdr`, `git`, and Node. Either harness can lead a run; builders and critics are Claude Code callees on herdr. |
 | [generating-blog-images](../plugins/generating-blog-images) | Available | Not offered | Produces prompts; use of an image provider is a separate choice. |
 | [git-commits](../plugins/git-commits) | Available | Not offered | Both workflows support [standalone skill installation](codex/standalone-skills.md); requires a Git working tree. |
 | [git-tree](../plugins/git-tree) | Available | Not offered | Requires Git and local worktree prerequisites. |
