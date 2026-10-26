@@ -87,8 +87,11 @@ Its last output line is JSON. Act on `last.action`:
   a failed delivery, so it could still be working in the worktree. Tell the user which
   agent to look at (the status lines name it, with the `herdr agent attach` command
   and, for a builder, the `herdr pane close` command) and end the turn. They continue
-  with `--resume`, which re-waits the call once; a builder that still has no answer is
-  then recorded as a failed build. A callee parked on AWAITING_REVIEW gets one
+  with `--resume`, which re-waits the call once. A builder or smoother that still has
+  no answer is recorded as failed (`repeated_wait_failure`) and the run stays paused:
+  it may be slow but alive, so no new builder starts beside it. The user either lets it
+  finish or closes it with the named `herdr pane close`; each `--resume` checks
+  `herdr agent get` and continues only once that agent is gone. A callee parked on AWAITING_REVIEW gets one
   follow-up on that resume telling it the conductor is unattended and to finish; if
   it pauses again, the user answers it in its pane and runs `--resume`.
 - **`stop`**. Show the status table, the branch, and the `progress.html` path, and

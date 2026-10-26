@@ -95,6 +95,33 @@ for (const rc of [1, 3]) {
   });
 }
 
+test('a second wait failure with budget left dials no builder beside it until --resume finds its agent gone', () => {
+  const fx = makeFixture({ env: { FAKE_WAIT_RC_BUILDER: '1' } });
+  initAndSplit(fx);
+  cli(fx, ['loop', '--run', fx.runDir]);
+  cli(fx, ['resume', '--run', fx.runDir]);
+  assert.equal(cli(fx, ['loop', '--run', fx.runDir]).json.last.action, 'paused');
+  const [e] = events(fx, 'build_error');
+  assert.equal(e.reason, 'repeated_wait_failure');
+  assert.equal(e.agent_name, 'agent-1');
+  assert.equal(e.close, 'herdr pane close w1:p1');
+  assert.match(e.message, /--resume continues only once that agent is gone/);
+  // Still live: resume checks and stays paused.
+  cli(fx, ['resume', '--run', fx.runDir]);
+  assert.equal(cli(fx, ['loop', '--run', fx.runDir]).json.last.action, 'paused');
+  assert.equal(dials(fx, 'builder').length, 1);
+  assert.equal(events(fx, 'released').length, 0);
+  assert.match(readFileSync(join(fx.T, 'herdr.log'), 'utf8'), /^agent get agent-1$/m);
+  // Gone: the next build dials fresh.
+  cli(fx, ['resume', '--run', fx.runDir], { FAKE_HERDR_GONE: '1' });
+  assert.equal(events(fx, 'released').length, 1);
+  cli(fx, ['loop', '--run', fx.runDir], { FAKE_WAIT_RC_BUILDER: '0' });
+  const b = dials(fx, 'builder');
+  assert.ok(b.length >= 2);
+  assert.ok(b[1].argv.includes('--fresh'));
+  assert.equal(events(fx, 'built')[0].call_dir.split('/').pop(), 'call-2');
+});
+
 test('resume nudges a builder parked on AWAITING_REVIEW once, then the build counts', () => {
   const fx = makeFixture({ env: { FAKE_WAIT_RC_BUILDER: '4' }, spec: { budget: { max_rounds_total: 1 } } });
   initAndSplit(fx);

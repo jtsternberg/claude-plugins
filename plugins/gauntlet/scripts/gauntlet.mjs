@@ -157,6 +157,7 @@ const cmds = {
     rmSync(join(dir, 'STOP'), { force: true });
     const run = new Run(dir);
     run.record({ event: 'resumed' });
+    run.release();
     out({ ok: true, next: run.next() });
   },
 

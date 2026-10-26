@@ -5,10 +5,10 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { blind, discard, unblind } from './blind.mjs';
 import { beadClose, commitRunDir, commitWithTrailer, isAncestor } from './git.mjs';
-import { calleeHandle, dial, hotlineEnv, locateHotline, wait } from './hotline.mjs';
+import { agentGone, calleeHandle, dial, hotlineEnv, locateHotline, wait } from './hotline.mjs';
 import { append, readLedger } from './ledger.mjs';
 import { renderProgress } from './progress.mjs';
-import { decide, fold, passesFor } from './rules.mjs';
+import { decide, fold, passesFor, STRANDED } from './rules.mjs';
 import { loadSpec } from './spec.mjs';
 import { parseVerdict, tally } from './verdict.mjs';
 
@@ -86,6 +86,24 @@ export class Run {
     beadClose(this.st.init.workspace, this.st.init.bead, `gauntlet stopped: ${a.reason}`);
   }
 
+  // --resume's check on callees stranded by a repeated wait failure. Panes are never
+  // closed here: a slow builder may still be doing useful work, and the human decides.
+  release() {
+    for (const c of [...this.st.stranded.values()]) {
+      if (!c.agent_name || agentGone(c.agent_name)) this.record({ event: 'released', call_dir: c.call_dir, role: c.role, piece: c.piece, agent_name: c.agent_name });
+    }
+  }
+
+  // A second wait failure: the call is over, the callee maybe not.
+  stranded(call, event, rc) {
+    const { pane } = calleeHandle(call.call_dir);
+    const close = pane ? `herdr pane close ${pane}` : null;
+    return this.record({
+      event, piece: call.piece, round: call.round, wave: call.wave, call_dir: call.call_dir, wait_rc: rc, reason: STRANDED, agent_name: call.agent_name, close,
+      message: `${call.role} ${call.agent_name ?? '(unknown agent)'} failed its wait twice and may still be working in the worktree. --resume continues only once that agent is gone${close ? `: ${close}` : ''}.`,
+    });
+  }
+
   piece(id) { return this.st.pieces.get(id); }
   refFile(id) { const r = this.piece(id).def.ref; return join(this.runDir, (this.spec.bar.find((b) => b.id === r) ?? this.spec.bar[0]).file); }
 
@@ -152,7 +170,7 @@ export class Run {
     if (rc === 4 || rc === 5) return this.pause(call, rc);
     if (rc !== 0) {
       if (!call.failPaused) return this.pause(call, rc, rc === 3 ? 'preempted' : 'wait_failed');
-      return this.record({ event: 'build_error', piece, round, wave, call_dir, wait_rc: rc, reason: rc === 3 ? 'preempted' : 'wait failed' });
+      return this.stranded(call, 'build_error', rc);
     }
     const commit = commitWithTrailer(this.worktree, call.trailer);
     if (!commit) return this.record({ event: 'build_error', piece, round, wave, call_dir, wait_rc: rc, reason: `no commit carries "${call.trailer}"` });
@@ -296,7 +314,7 @@ export class Run {
   completeSmoother(call, { rc }) {
     if (rc === 4 || rc === 5) return this.pause(call, rc);
     if (rc !== 0 && !call.failPaused) return this.pause(call, rc, rc === 3 ? 'preempted' : 'wait_failed');
-    if (rc !== 0) return this.record({ event: 'smooth_error', wave: call.wave, call_dir: call.call_dir, wait_rc: rc, reason: rc === 3 ? 'preempted' : 'wait failed' });
+    if (rc !== 0) return this.stranded(call, 'smooth_error', rc);
     // No commit is a legitimate answer: nothing needed smoothing, so nothing is re-judged.
     return this.record({ event: 'smoothed', wave: call.wave, call_dir: call.call_dir, wait_rc: rc, final: !!call.final, commit: commitWithTrailer(this.worktree, call.trailer) });
   }

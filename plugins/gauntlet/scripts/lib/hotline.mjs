@@ -65,6 +65,12 @@ export function answerTrustDialog(callDir) {
   return !TRUST_PATTERNS.test(herdr(['agent', 'read', agent, '--source', 'visible']).stdout ?? '');
 }
 
+// Gone only on herdr's own agent_not_found: a herdr that cannot answer leaves the
+// agent presumed live.
+export function agentGone(agent) {
+  return /"agent_not_found"/.test(herdr(['agent', 'get', agent]).stdout ?? '');
+}
+
 // The herdr agent and pane a call dir names, for a human to attach to or close.
 export function calleeHandle(callDir) {
   const read = (f) => { try { return readFileSync(join(callDir, f), 'utf8').trim() || null; } catch { return null; } };

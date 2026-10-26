@@ -6,6 +6,9 @@ const CALL_TERMINAL = new Set(['built', 'build_error', 'verdict', 'verdict_malfo
 // re-waits it once; a second failure is recorded as one, the human having been told
 // to close its pane.
 const FAIL_PAUSES = new Set(['wait_failed', 'preempted', 'delivery_unconfirmed']);
+// That second failure ends the call but not the callee: it may still be working in the
+// worktree, so the run stays paused until --resume finds its herdr agent gone.
+export const STRANDED = 'repeated_wait_failure';
 // Failed rechecks (capture or critic error) a closed piece survives before it plateaus.
 export const RECHECK_ATTEMPTS = 2;
 
@@ -23,7 +26,7 @@ function judgeSlot(w, piece, round, recheck) {
 export function fold(events, spec) {
   const st = {
     init: null, stopped: null, split: false, pieces: new Map(), order: [],
-    wave: 0, waves: new Map(), calls: new Map(),
+    wave: 0, waves: new Map(), calls: new Map(), stranded: new Map(),
     totalRounds: 0, lastCommit: null, buildsSinceSmooth: 0, events: events.length,
   };
   const piece = (id) => st.pieces.get(id);
@@ -31,6 +34,7 @@ export function fold(events, spec) {
     const w = e.wave !== undefined ? st.waves.get(e.wave) : undefined;
     const call = e.call_dir ? st.calls.get(e.call_dir) : undefined;
     if (call && CALL_TERMINAL.has(e.event)) call.done = true;
+    if (e.reason === STRANDED && call) st.stranded.set(e.call_dir, { ...call, close: e.close ?? call.close ?? null });
     switch (e.event) {
       case 'init': st.init = e; break;
       case 'split':
@@ -100,6 +104,7 @@ export function fold(events, spec) {
         }
         break;
       case 'smooth_error': if (w) w.smoothed = true; break;
+      case 'released': st.stranded.delete(e.call_dir); break;
       case 'stopped': st.stopped = e; break;
     }
     capCheck(st, spec);
@@ -158,6 +163,7 @@ export function decide(st, spec, ctx) {
   const open = [...st.calls.values()].filter((c) => !c.done);
   const paused = open.filter((c) => c.paused);
   if (paused.length) return { action: 'paused', calls: paused.map(callSummary) };
+  if (st.stranded.size) return { action: 'paused', reason: STRANDED, calls: [...st.stranded.values()].map(callSummary) };
   if (open.length) return { action: 'await', calls: open.map(callSummary) };
 
   if (!st.split) return { action: 'split' };

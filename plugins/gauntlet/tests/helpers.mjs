@@ -43,6 +43,7 @@ echo "$*" >> "${T}/herdr.log"
 case "$1 $2" in
   "agent read") if [[ -f "${T}/trust-cleared" ]]; then echo "> ready"; else printf 'Do you trust the files in this folder?\\n1. No, exit\\n2. Yes, I trust this folder\\n'; fi ;;
   "agent send-keys") : > "${T}/trust-cleared" ;;
+  "agent get") if [[ -n "$FAKE_HERDR_GONE" ]]; then echo '{"error":{"code":"agent_not_found","message":"agent target $3 not found"}}'; exit 1; fi; echo '{"agent":"'"$3"'"}' ;;
 esac
 `);
   for (const f of ['bd', 'herdr']) chmodSync(join(bin, f), 0o755);
