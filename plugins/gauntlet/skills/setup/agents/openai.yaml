@@ -1,0 +1,3 @@
+interface:
+  display_name: Gauntlet Setup
+  short_description: Define a Gauntlet Loop's goal, reference bar, criteria and harness.

@@ -13,7 +13,8 @@
 //   stop --run <dir> | resume --run <dir>      write / clear the STOP file
 //   progress --run <dir>                       re-render progress.html
 //
-// --run takes the run dir (<worktree>/.gauntlet/<run-id>) or its gauntlet.json.
+// --run takes the run dir (<worktree>/.gauntlet/<run-id>), its gauntlet.json, or the
+// setup copy at <workspace>/.gauntlet/<run-id>/ (exit 3 if that run is not initialized).
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -45,7 +46,13 @@ function runDirOf(flags) {
   const p = resolve(flags.run);
   const dir = existsSync(p) && statSync(p).isFile() ? dirname(p) : p;
   if (!existsSync(join(dir, 'gauntlet.json'))) die(`${dir} has no gauntlet.json`, 2);
-  return dir;
+  if (existsSync(join(dir, 'ledger.jsonl'))) return dir;
+  // The setup copy in the workspace stands for the run dir in the run's worktree.
+  const { spec, errors } = loadSpec(join(dir, 'gauntlet.json'));
+  if (errors.length) die(`${dir}/gauntlet.json is invalid: ${errors.join('; ')}`, 2);
+  const runDir = join(spec.git.worktree, '.gauntlet', spec.run_id);
+  if (!existsSync(join(runDir, 'ledger.jsonl'))) die(`run ${spec.run_id} is not initialized; run: gauntlet.mjs init ${join(dir, 'gauntlet.json')}`, 3);
+  return runDir;
 }
 
 function specOrDie(path) {

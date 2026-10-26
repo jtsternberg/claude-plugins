@@ -38,6 +38,9 @@ export class Run {
   }
 
   next() {
+    // budget and stop are the two fields a human may raise mid-run.
+    const fresh = loadSpec(join(this.runDir, 'gauntlet.json'));
+    if (fresh.errors.length === 0) Object.assign(this.spec, { budget: fresh.spec.budget, stop: fresh.spec.stop });
     return decide(this.st, this.spec, {
       now: Date.now(),
       stopFile: existsSync(join(this.runDir, 'STOP')),

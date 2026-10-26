@@ -78,3 +78,14 @@ test('one bd task per run in the target project, closed on stop; no .beads → n
   assert.ok(!existsSync(join(bare.T, 'bd.log')));
   assert.equal(events(bare, 'init')[0].bead, null);
 });
+
+test('--run accepts the setup copy in the workspace and maps it to the worktree run dir', () => {
+  const fx = makeFixture();
+  const before = cli(fx, ['status', '--run', fx.specPath]);
+  assert.equal(before.rc, 3);
+  assert.match(before.stderr, /not initialized/);
+  initAndSplit(fx);
+  const r = cli(fx, ['next', '--run', fx.specPath]);
+  assert.equal(r.rc, 0, r.stderr);
+  assert.equal(r.json.action, 'wave');
+});
