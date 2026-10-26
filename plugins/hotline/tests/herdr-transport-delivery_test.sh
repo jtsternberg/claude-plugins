@@ -1065,4 +1065,26 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
 check "idle with growing subagent transcripts is not quiet-stalled" $? \
   "rc=$rc error=$(cat "$cd_path/error.txt" 2>/dev/null)"
 
+# A flapping callee: the gate settles `idle` on an API-error row every tick, but the
+# confirming read finds it `working`, so every settle is refuted. The settle is
+# charged to the budget: at 2s tick + 1 charged settle tick, a 30s budget is 10
+# gate waits; uncharged, it would be 15.
+t=$(new_env)
+NONCE="5ta11ed0000aaa10"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-10 "herdr-sess" "$NONCE" "$t/target"
+tf="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$tf" "$NONCE" "" "committed the spec"
+printf '%s\n' "$API_ERR_ROW" >> "$tf"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=working \
+      HERDR_STUB_WAIT_STATUS=idle \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_HERDR_STALL_SETTLE=0.1 \
+      HOTLINE_STALL_SECONDS=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 30 2>"$t/err.txt"); rc=$?
+waits=$(grep -c '^agent wait ' "$t/herdr.log")
+[[ $rc -eq 1 && $waits -le 10 ]] && grep -q 'Timed out' "$cd_path/error.txt"
+check "refuted API-error settles are charged to the budget (flapping callee still times out on time)" $? \
+  "rc=$rc waits=$waits error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
 herdr_suite_finish

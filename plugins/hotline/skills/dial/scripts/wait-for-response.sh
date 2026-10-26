@@ -35,9 +35,10 @@
 #   0/3/4 contract, plus two outcomes only a lifecycle can report: exit 5 when the
 #   agent settles `blocked` with no STATUS for our nonce (it is waiting on a human,
 #   not on time), and exit 6 when it settles `idle`/`done` with no STATUS and the
-#   transcript says its turn ended (see exit 6 below). There is NO screen-scrape tier: a claude REPL runs on the
-#   terminal's alternate screen, whose rows never enter herdr's scrollback, so an
-#   unconfirmable herdr call is reported as unconfirmable rather than scraped.
+#   transcript says its turn ended (see exit 6 below). There is NO screen-scrape
+#   tier: a claude REPL runs on the terminal's alternate screen, whose rows never
+#   enter herdr's scrollback, so an unconfirmable herdr call is reported as
+#   unconfirmable rather than scraped.
 #   Nothing is closed afterwards — outliving disconnects is the point of herdr.
 #
 # Output (stdout, every mode):
@@ -189,6 +190,10 @@ POLL_SLEEP="${HOTLINE_POLL_SLEEP:-$POLL_INTERVAL}"
 PREEMPT_GRACE="${HOTLINE_PREEMPT_GRACE:-180}"
 STALL_SECONDS="${HOTLINE_STALL_SECONDS:-600}"
 STALL_SETTLE="${HOTLINE_HERDR_STALL_SETTLE:-5}"
+# The least the settle is charged to the budget, in whole ticks: `date +%s` reads a
+# sub-second sleep as 0s, and an uncharged settle lets a flapping callee stretch
+# the wait far past --timeout.
+STALL_SETTLE_TICKS=$(awk -v s="$STALL_SETTLE" 'BEGIN { c = int(s); if (c < s) c++; print c }')
 # Transcript mode: how long to wait for the transcript to show ANY evidence the
 # nonce reached the callee (user record, queued-command injection, enqueue, or a
 # STATUS naming our call_id — see transcript-extract.sh) before asking the input
@@ -557,7 +562,10 @@ if $HERDR_MODE; then
   # or tool_result 0.2–3s later, no user row between), so the first read alone can
   # land inside a turn that is still going.
   api_stall_confirmed() {  # <transcript> <size at the first read>
+    local t0; t0=$(date +%s)
     sleep "$STALL_SETTLE"
+    SETTLE_SECONDS=$(( $(date +%s) - t0 ))
+    [[ $SETTLE_SECONDS -lt $STALL_SETTLE_TICKS ]] && SETTLE_SECONDS=$STALL_SETTLE_TICKS
     herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"
     [[ "$LAST_STATUS" == "idle" || "$LAST_STATUS" == "done" ]] || return 1
     [[ "$(wc -c < "$1" 2>/dev/null | tr -d '[:space:]')" == "$2" ]] || return 1
@@ -768,6 +776,7 @@ if $HERDR_MODE; then
     [[ $GATE_SECONDS -lt 0 ]] && GATE_SECONDS=0
 
     # --- Settled with our prompt submitted: did the turn end without us? -----
+    SETTLE_SECONDS=0
     if $H_SUBMITTED && [[ -n "$LIVE_TRANSCRIPT" ]] \
        && [[ "$GATE_STATE" == "idle" || "$GATE_STATE" == "done" ]]; then
       T_SIZE=$(wc -c < "$LIVE_TRANSCRIPT" 2>/dev/null | tr -d '[:space:]') || T_SIZE=0
@@ -792,7 +801,8 @@ if $HERDR_MODE; then
     sleep "$POLL_SLEEP"
     # The gate's real wall time is charged to the budget alongside the tick, or a
     # 30s block would cost 2s of a 1800s budget and this loop would run for hours.
-    H_ELAPSED=$((H_ELAPSED + POLL_INTERVAL + GATE_SECONDS))
+    # A refuted API-error settle is charged too (QUIET_SINCE runs on this clock).
+    H_ELAPSED=$((H_ELAPSED + POLL_INTERVAL + GATE_SECONDS + SETTLE_SECONDS))
   done
 
   # The budget ran out on the same iteration the gate settled `blocked`, so the loop
