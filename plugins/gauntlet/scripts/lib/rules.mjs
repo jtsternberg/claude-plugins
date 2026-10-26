@@ -1,7 +1,7 @@
 // The ledger fold and the stop rules. Pure: no fs, no git, no clock of its own, so
 // every rule is testable from a fixture ledger.
 
-const CALL_TERMINAL = new Set(['built', 'build_error', 'verdict', 'verdict_malformed', 'judge_error', 'smoothed', 'smooth_error']);
+const CALL_TERMINAL = new Set(['built', 'build_error', 'verdict', 'verdict_malformed', 'judge_error', 'smoothed', 'smooth_error', 'nudged']);
 // A builder pause for a callee that may still be live after a failure. --resume
 // re-waits it once; a second failure is recorded as one, the human having been told
 // to close its pane.
@@ -43,7 +43,10 @@ export function fold(events, spec) {
       case 'wave': st.wave = e.wave; st.waves.set(e.wave, newWave(e)); break;
       case 'dispatched': st.calls.set(e.call_dir, { ...e, done: false, paused: false }); break;
       case 'paused':
-        if (call) Object.assign(call, { paused: true, close: e.close ?? null, failPaused: call.failPaused || FAIL_PAUSES.has(e.reason) });
+        if (call) {
+          Object.assign(call, { paused: true, close: e.close ?? null, failPaused: call.failPaused || FAIL_PAUSES.has(e.reason) });
+          if (e.reason === 'awaiting_review') call.reviewPaused = true;
+        }
         break;
       case 'resumed':
         for (const c of st.calls.values()) c.paused = false;

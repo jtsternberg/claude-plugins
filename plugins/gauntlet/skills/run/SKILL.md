@@ -88,7 +88,9 @@ Its last output line is JSON. Act on `last.action`:
   agent to look at (the status lines name it, with the `herdr agent attach` command
   and, for a builder, the `herdr pane close` command) and end the turn. They continue
   with `--resume`, which re-waits the call once; a builder that still has no answer is
-  then recorded as a failed build.
+  then recorded as a failed build. A callee parked on AWAITING_REVIEW gets one
+  follow-up on that resume telling it the conductor is unattended and to finish; if
+  it pauses again, the user answers it in its pane and runs `--resume`.
 - **`stop`**. Show the status table, the branch, and the `progress.html` path, and
   end. `human` means a STOP file: say `--resume` continues. Every other reason is
   final for this run (`all_closed`, `plateau_all`, `budget:*`, `history_rewritten`).

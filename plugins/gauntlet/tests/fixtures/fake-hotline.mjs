@@ -4,6 +4,7 @@
 //   FAKE_BUILDER   commit (default) | nocommit
 //   FAKE_SMOOTHER  nocommit (default) | commit
 //   FAKE_WAIT_RC_BUILDER / FAKE_WAIT_RC_CRITIC   the waiter's exit code (default 0)
+//   FAKE_WAIT_RC_NUDGE   the exit code for a call whose prompt is the unattended nudge
 //   FAKE_TRUST=1   the first dial fails at deliver with a trust dialog on screen
 //   FAKE_DIAL_FAIL=builder|critic   that role's dial errors outright
 //   FAKE_DIAL_SENT=builder   that role's dial fails at deliver with sent:true (the order may have landed)
@@ -31,7 +32,7 @@ if (mode === 'dial') {
   log({ kind: 'dial', n, argv, cwd: process.cwd(), role, piece: calleeEnv.GAUNTLET_PIECE, prompt,
     beside: role === 'critic' ? readdirSync(join(process.cwd(), '..')).sort() : null,
     env: Object.fromEntries(['HOTLINE_CALLEE_ENV', 'HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS', 'HOTLINE_CLAUDE_MODEL', 'HOTLINE_HERDR_PLACEMENT', 'HOTLINE_HERDR_WORKSPACE'].map((k) => [k, pick(k) ?? null])) });
-  writeFileSync(join(cd, 'meta.json'), JSON.stringify({ role, target, fresh, prompt }));
+  writeFileSync(join(cd, 'meta.json'), JSON.stringify({ role, target, fresh, prompt, nudge: prompt.includes('conductor is unattended') }));
   writeFileSync(join(cd, 'herdr_agent.txt'), `agent-${n}\n`);
   writeFileSync(join(cd, 'herdr_pane.txt'), `w1:p${n}\n`);
   // Pretty-printed, as the real dial.sh prints it (captured live from hotline 0.39.1).
@@ -60,6 +61,7 @@ if (mode === 'wait') {
   let response = 'done\nSTATUS: WORK_COMPLETE call_id=x';
   if (meta.role === 'critic') response = critic(meta);
   writeFileSync(join(cd, 'response.json'), JSON.stringify({ session_id: 's', response }));
+  if (meta.nudge && env.FAKE_WAIT_RC_NUDGE !== undefined) process.exit(Number(env.FAKE_WAIT_RC_NUDGE));
   process.exit(Number(meta.role === 'critic' ? env.FAKE_WAIT_RC_CRITIC ?? 0 : env.FAKE_WAIT_RC_BUILDER ?? 0));
 }
 

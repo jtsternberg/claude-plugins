@@ -95,6 +95,32 @@ for (const rc of [1, 3]) {
   });
 }
 
+test('resume nudges a builder parked on AWAITING_REVIEW once, then the build counts', () => {
+  const fx = makeFixture({ env: { FAKE_WAIT_RC_BUILDER: '4' }, spec: { budget: { max_rounds_total: 1 } } });
+  initAndSplit(fx);
+  assert.equal(cli(fx, ['loop', '--run', fx.runDir]).json.last.action, 'paused');
+  cli(fx, ['resume', '--run', fx.runDir]);
+  cli(fx, ['loop', '--run', fx.runDir], { FAKE_WAIT_RC_NUDGE: '0' });
+  const b = dials(fx, 'builder');
+  assert.equal(b.length, 2);
+  assert.ok(!b[1].argv.includes('--fresh'), 'the nudge is a follow-up into the same callee');
+  assert.match(b[1].prompt, /conductor is unattended.*STATUS: WORK_COMPLETE/s);
+  assert.equal(events(fx, 'nudged').length, 1);
+  assert.equal(events(fx, 'built').length, 1);
+});
+
+test('a callee that answers the nudge with AWAITING_REVIEW again stays paused, with no second nudge', () => {
+  const fx = makeFixture({ env: { FAKE_WAIT_RC_BUILDER: '4' }, spec: { budget: { max_rounds_total: 1 } } });
+  initAndSplit(fx);
+  cli(fx, ['loop', '--run', fx.runDir]);
+  for (let i = 0; i < 2; i++) {
+    cli(fx, ['resume', '--run', fx.runDir]);
+    assert.equal(cli(fx, ['loop', '--run', fx.runDir]).json.last.action, 'paused');
+  }
+  assert.equal(events(fx, 'nudged').length, 1);
+  assert.equal(dials(fx, 'builder').length, 2);
+});
+
 test('a builder dial whose deliver failed with sent:true is recorded live and paused, never re-dialed', () => {
   const fx = makeFixture({ env: { FAKE_DIAL_SENT: 'builder' }, spec: { budget: { max_rounds_total: 1 } } });
   initAndSplit(fx);

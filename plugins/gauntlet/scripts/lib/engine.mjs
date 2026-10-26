@@ -16,6 +16,8 @@ export const REFS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'r
 const ref = (name) => readFileSync(join(REFS, name), 'utf8');
 const fill = (tpl, vars) => tpl.replace(/\{\{([A-Z_]+)\}\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+const NUDGE = 'The conductor is unattended: nobody will review this checkpoint. Finish the work order as written and end with STATUS: WORK_COMPLETE.\n';
+const CALL_STATE = new Set(['event', 'ts', 'call_dir', 'agent_name', 'callee_session_id', 'done', 'paused', 'reviewPaused', 'failPaused', 'close', 'delivery_unconfirmed']);
 const criteriaList = (spec) => spec.criteria.map((c) => `- **${c.id}**: ${c.ask}`).join('\n');
 
 export class Run {
@@ -299,6 +301,19 @@ export class Run {
     return this.record({ event: 'smoothed', wave: call.wave, call_dir: call.call_dir, wait_rc: rc, final: !!call.final, commit: commitWithTrailer(this.worktree, call.trailer) });
   }
 
+  // A re-wait on a callee parked at AWAITING_REVIEW re-reads the same turn and exits 4
+  // again, so after a --resume it gets one follow-up telling it to finish. A second
+  // AWAITING_REVIEW pauses for good: the human answers it in the pane.
+  nudge(call) {
+    const fields = Object.fromEntries(Object.entries(call).filter(([k]) => !CALL_STATE.has(k)));
+    const promptFile = this.writeOrder(`nudge-${call.call_dir.split('/').pop()}.md`, NUDGE);
+    const target = call.role === 'critic' ? call.blind_dir : this.worktree;
+    const r = this.dispatch({ role: call.role === 'smoother' ? 'builder' : call.role, piece: call.piece, label: `${call.label} nudge`, target, promptFile, fresh: false, model: call.role === 'critic' ? this.spec.judge.model : this.spec.builder.model });
+    if (!r.ok) return null;
+    this.record({ event: 'nudged', call_dir: call.call_dir, role: call.role, piece: call.piece });
+    return this.dispatched(r, { ...fields, nudge: true });
+  }
+
   // ---- waiting -----------------------------------------------------------
   // Waits on every call in parallel and records each outcome; a critic retry
   // returns a new call, which is waited on in turn.
@@ -308,6 +323,10 @@ export class Run {
       const results = await Promise.all(pending.map((c) => wait(this.hotline(), c.call_dir, this.spec.budget.call_timeout_s)));
       const more = [];
       pending.forEach((c, i) => {
+        if (results[i].rc === 4 && c.reviewPaused && !c.nudge) {
+          const n = this.nudge(c);
+          if (n) { more.push(n); return; }
+        }
         if (c.role === 'builder') this.completeBuilder(c, results[i]);
         else if (c.role === 'smoother') this.completeSmoother(c, results[i]);
         else { const n = this.completeCritic(c, results[i]); if (n) more.push(n); }
