@@ -94,10 +94,12 @@ export function wait(root, callDir, timeoutS) {
   });
 }
 
+// A critic gets its role and nothing else: the run and piece would point it at the
+// ledger, which says which side is ours.
 export function hotlineEnv({ role, runId, piece, model }) {
   const env = {
     HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS: '1',
-    HOTLINE_CALLEE_ENV: `GAUNTLET_ROLE=${role} GAUNTLET_RUN=${runId} GAUNTLET_PIECE=${piece}`,
+    HOTLINE_CALLEE_ENV: role === 'critic' ? 'GAUNTLET_ROLE=critic' : `GAUNTLET_ROLE=${role} GAUNTLET_RUN=${runId} GAUNTLET_PIECE=${piece}`,
     HOTLINE_HERDR_PLACEMENT: 'workspace',
     HOTLINE_HERDR_WORKSPACE: `gauntlet-${runId}`,
   };

@@ -12,7 +12,8 @@ import { lastJsonFence, parseVerdict, tally } from '../scripts/lib/verdict.mjs';
 const src = scratch();
 writeFileSync(join(src, 'ours.txt'), '  OURS body \n\n');
 writeFileSync(join(src, 'ref.txt'), 'REF body');
-const mk = (extra = {}) => blind({ ours: join(src, 'ours.txt'), ref: join(src, 'ref.txt'), ext: 'txt', medium: 'text', mode: 'blind-pairwise', seed: 'run:hero:1:1', ...extra });
+let keys = 0;
+const mk = (extra = {}) => blind({ ours: join(src, 'ours.txt'), ref: join(src, 'ref.txt'), ext: 'txt', medium: 'text', mode: 'blind-pairwise', seed: 'run:hero:1:1', keyFile: join(src, 'keys', `k${++keys}.json`), ...extra });
 
 test('the seeded assignment is deterministic and pass 2 swaps it', () => {
   assert.equal(oursLabel('s1'), oursLabel('s1'));
@@ -21,13 +22,13 @@ test('the seeded assignment is deterministic and pass 2 swaps it', () => {
   assert.deepEqual([...seen].sort(), ['A', 'B']);
 });
 
-test('the blind dir holds exactly A and B; the key sits outside it, outside any repo', () => {
+test('the blind dir holds exactly A and B, outside any repo; the key is not under its base', () => {
   const b = mk();
   assert.deepEqual(readdirSync(b.dir).sort(), ['A.txt', 'B.txt']);
-  assert.ok(existsSync(join(b.base, 'key.json')));
+  assert.deepEqual(readdirSync(b.base), ['blind'], 'nothing beside the blind dir names the sides');
   assert.equal(dirname(b.dir), b.base);
   assert.notEqual(spawnSync('git', ['rev-parse', '--git-dir'], { cwd: b.dir }).status, 0, 'blind dir must not be inside a git repo');
-  const key = JSON.parse(readFileSync(join(b.base, 'key.json'), 'utf8'));
+  const key = JSON.parse(readFileSync(b.keyFile, 'utf8'));
   assert.equal(readFileSync(join(b.dir, `${key.ours}.txt`), 'utf8'), 'OURS body\n', 'text is whitespace-trimmed, nothing else');
   discard(b.base);
   assert.ok(!existsSync(b.base));
@@ -36,9 +37,9 @@ test('the blind dir holds exactly A and B; the key sits outside it, outside any 
 test('unblind maps A/B back to ours/ref, including the swapped pass', () => {
   for (const pass of [1, 2]) {
     const b = mk({ pass });
-    const o = JSON.parse(readFileSync(join(b.base, 'key.json'), 'utf8')).ours;
+    const o = JSON.parse(readFileSync(b.keyFile, 'utf8')).ours;
     const r = o === 'A' ? 'B' : 'A';
-    const v = unblind(b.base, { winner: o, criteria: { clarity: r, cta: 'tie' }, biggest_gap: 'x', confidence: 3 });
+    const v = unblind(b.keyFile, { winner: o, criteria: { clarity: r, cta: 'tie' }, biggest_gap: 'x', confidence: 3 });
     assert.equal(v.winner, 'ours');
     assert.deepEqual(v.criteria, { clarity: 'ref', cta: 'tie' });
     assert.equal(v.biggest_gap, `[${o === 'A' ? 'A = ours, B = reference' : 'A = reference, B = ours'}] x`, 'the gap carries its key');

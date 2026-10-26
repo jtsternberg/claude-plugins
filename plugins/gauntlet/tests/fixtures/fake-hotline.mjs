@@ -28,6 +28,7 @@ if (mode === 'dial') {
   const fresh = argv.includes('--fresh');
   const pick = (k) => env[k];
   log({ kind: 'dial', n, argv, cwd: process.cwd(), role, piece: calleeEnv.GAUNTLET_PIECE, prompt,
+    beside: role === 'critic' ? readdirSync(join(process.cwd(), '..')).sort() : null,
     env: Object.fromEntries(['HOTLINE_CALLEE_ENV', 'HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS', 'HOTLINE_CLAUDE_MODEL', 'HOTLINE_HERDR_PLACEMENT', 'HOTLINE_HERDR_WORKSPACE'].map((k) => [k, pick(k) ?? null])) });
   writeFileSync(join(cd, 'meta.json'), JSON.stringify({ role, target, fresh, prompt }));
   writeFileSync(join(cd, 'herdr_agent.txt'), `agent-${n}\n`);

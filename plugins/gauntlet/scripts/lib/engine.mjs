@@ -192,6 +192,7 @@ export class Run {
     const b = blind({
       ours: join(this.runDir, file), ref: this.refFile(piece), ext: spec.capture.ext, medium: spec.medium,
       mode, seed: `${spec.run_id}:${piece}:${round}:${wave}`, pass,
+      keyFile: join(this.runDir, 'keys', `${piece}-r${round}-w${wave}-p${pass}.json`),
     });
     const schema = mode === 'rubric'
       ? { scores: Object.fromEntries(spec.criteria.map((c) => [c.id, '1-10'])), biggest_gap: 'one sentence', confidence: '1-5' }
@@ -210,7 +211,7 @@ export class Run {
     const r = this.dispatch({ role: 'critic', piece, label, target: b.dir, promptFile, model: spec.judge.model });
     const fields = { piece, round, wave, pass, ...(recheck ? { recheck: true } : {}) };
     if (!r.ok) { discard(b.base); this.record({ event: 'judge_error', ...fields, reason: `dial failed: ${r.error}` }); return null; }
-    return this.dispatched(r, { role: 'critic', ...fields, label, blind_base: b.base, blind_dir: b.dir, mode });
+    return this.dispatched(r, { role: 'critic', ...fields, label, blind_base: b.base, blind_dir: b.dir, key_file: b.keyFile, mode });
   }
 
   completeCritic(call, { rc, response }) {
@@ -219,7 +220,7 @@ export class Run {
     if (rc !== 0) { discard(call.blind_base); this.record({ event: 'judge_error', ...fields, wait_rc: rc, reason: rc === 3 ? 'preempted' : 'wait failed' }); return null; }
     const parsed = parseVerdict(response, this.spec);
     if (parsed.ok) {
-      const v = unblind(call.blind_base, parsed.verdict);
+      const v = unblind(call.key_file, parsed.verdict);
       discard(call.blind_base);
       this.record({ event: 'verdict', ...fields, mode: call.mode, ...v });
       return null;
@@ -236,8 +237,8 @@ export class Run {
     const label = `${call.label} retry`;
     const r = this.dispatch({ role: 'critic', piece: call.piece, label, target: call.blind_dir, promptFile, fresh: false, model: this.spec.judge.model });
     if (!r.ok) { discard(call.blind_base); this.record({ event: 'judge_error', ...fields, reason: `retry dial failed: ${r.error}` }); return null; }
-    const { piece, round, wave, pass, recheck, blind_base, blind_dir, mode } = call;
-    return this.dispatched(r, { role: 'critic', piece, round, wave, pass, ...(recheck ? { recheck: true } : {}), label, blind_base, blind_dir, mode, retry: true });
+    const { piece, round, wave, pass, recheck, blind_base, blind_dir, key_file, mode } = call;
+    return this.dispatched(r, { role: 'critic', piece, round, wave, pass, ...(recheck ? { recheck: true } : {}), label, blind_base, blind_dir, key_file, mode, retry: true });
   }
 
   tallyPiece(wave, piece, round, recheck, passes) {

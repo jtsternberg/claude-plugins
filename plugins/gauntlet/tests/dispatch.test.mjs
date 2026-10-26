@@ -27,7 +27,7 @@ test('builder and critic dials: herdr, detached, fresh, work_order, labelled, sk
   assert.equal(b.env.HOTLINE_CALLEE_ENV, 'GAUNTLET_ROLE=builder GAUNTLET_RUN=demo GAUNTLET_PIECE=hero');
   assert.equal(b.env.HOTLINE_CLAUDE_MODEL, 'claude-sonnet-5-5');
   assert.equal(argOf(c.argv, '--label'), 'judge hero r1');
-  assert.equal(c.env.HOTLINE_CALLEE_ENV, 'GAUNTLET_ROLE=critic GAUNTLET_RUN=demo GAUNTLET_PIECE=hero');
+  assert.equal(c.env.HOTLINE_CALLEE_ENV, 'GAUNTLET_ROLE=critic', 'no run or piece in the critic env');
   assert.equal(c.env.HOTLINE_CLAUDE_MODEL, 'claude-opus-5-5');
 });
 
@@ -40,6 +40,7 @@ test('the critic is dialed from its blind dir and its prompt carries no project,
   for (const c of critics) {
     assert.equal(c.cwd, argOf(c.argv, '--target'), 'cwd = target = the blind dir');
     assert.ok(!c.cwd.startsWith(fx.ws) && !c.cwd.startsWith(fx.worktree));
+    assert.deepEqual(c.beside, ['blind', 'prompt.md'], 'no key beside the blind dir');
     assert.ok(!c.prompt.includes(fx.ws), 'no project path');
     assert.ok(!c.prompt.includes('gap seen by critic'), 'no gap history');
     assert.ok(!c.prompt.includes('"event"'), 'no ledger text');

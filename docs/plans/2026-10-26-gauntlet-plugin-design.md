@@ -244,10 +244,11 @@ re-waits on them.
 - `blind` makes a fresh `mkdtemp` dir under `$TMPDIR` holding `blind/A.<ext>` and
   `blind/B.<ext>` (a plain copy; `text` is whitespace-trimmed). The assignment is a
   coin flip seeded by run, piece, round, and wave, so a resumed run re-blinds the same
-  way. `key.json` and the prompt sit beside `blind/`, not in it.
+  way. The prompt sits beside `blind/`; the key goes to the run dir's `keys/`, so
+  nothing in the critic's reach says which side is ours.
 - **The critic is a hotline callee** dialed with cwd and `--target` set to the blind
   dir, `--fresh`, `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1`,
-  `HOTLINE_CALLEE_ENV="GAUNTLET_ROLE=critic …"`, and `HOTLINE_CLAUDE_MODEL=<judge.model>`.
+  `HOTLINE_CALLEE_ENV="GAUNTLET_ROLE=critic"` (no run or piece id), and `HOTLINE_CLAUDE_MODEL=<judge.model>`.
   Its prompt carries the stance, goal, criteria, and the two file names, and tells it
   to read only those. No ledger text, gap history, or project path. That is the whole
   critic lockdown: a fresh session, a dir with two files, and an instruction.
