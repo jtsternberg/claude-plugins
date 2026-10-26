@@ -140,3 +140,43 @@ test('double judging asks for two passes', () => {
   const ev = [...base(), wave(1, ['hero']), { event: 'built', piece: 'hero', round: 1, wave: 1, commit: 'c' }, { event: 'captured', piece: 'hero', round: 1, wave: 1, file: 'f' }];
   assert.equal(next(ev, spec).passes, 2);
 });
+
+test('a recheck that keeps failing spends round budget and plateaus the piece (recheck_failed)', () => {
+  const spec = mkSpec({ stop: { wins_to_close: 1, smoothing_after_wave_changes: 1 } });
+  const ev = [...base(), wave(1, ['hero']), ...round('hero', 1, 1, 'won'), { event: 'smoothed', wave: 1, final: true, commit: 's1' }];
+  const trail = [];
+  for (let i = 0; i < 10; i++) {
+    const a = next(ev, spec);
+    trail.push(a.action === 'wave' ? `wave:${a.wave}` : a.action);
+    if (a.action === 'wave') ev.push(wave(a.wave, a.builds, a.rechecks));
+    else if (a.action === 'judge') {
+      const w = fold(ev, spec).wave;
+      // Alternate the two failure shapes: the capture fails, or the critic errors.
+      if (w === 2) ev.push({ event: 'capture_error', piece: 'hero', round: 1, wave: w, recheck: true, reason: 'exit 1' });
+      else ev.push({ event: 'captured', piece: 'hero', round: 1, wave: w, recheck: true, file: 'f' },
+        { event: 'judge_error', piece: 'hero', round: 1, wave: w, pass: 1, recheck: true },
+        { event: 'judged', piece: 'hero', round: 1, wave: w, recheck: true, result: 'error' });
+    } else break;
+  }
+  assert.deepEqual(trail, ['wave:2', 'judge', 'wave:3', 'judge', 'stop']);
+  const st = fold(ev, spec);
+  assert.equal(st.pieces.get('hero').status, 'plateaued');
+  assert.equal(st.pieces.get('hero').reason, 'recheck_failed');
+  assert.equal(st.totalRounds, 3, 'one build plus two failed rechecks');
+  assert.deepEqual(next(ev, spec), { action: 'stop', reason: 'plateau_all' });
+});
+
+test('a failed recheck counts toward max_rounds_total', () => {
+  const spec = mkSpec({ budget: { max_rounds_total: 2 }, stop: { wins_to_close: 1, smoothing_after_wave_changes: 1 } });
+  const ev = [...base(), wave(1, ['hero']), ...round('hero', 1, 1, 'won'), { event: 'smoothed', wave: 1, final: true, commit: 's1' },
+    wave(2, [], ['hero']), { event: 'capture_error', piece: 'hero', round: 1, wave: 2, recheck: true, reason: 'exit 1' }];
+  assert.deepEqual(next(ev, spec), { action: 'stop', reason: 'budget:max_rounds_total' });
+});
+
+test('a tie breaks a loss streak: lost/tie/lost/tie/lost does not plateau', () => {
+  const ev = [...base()];
+  ['lost', 'tie', 'lost', 'tie', 'lost'].forEach((r, i) => ev.push(wave(i + 1, ['hero']), ...round('hero', i + 1, i + 1, r)));
+  const p = fold(ev, mkSpec({ stop: { smoothing_after_wave_changes: 9 } })).pieces.get('hero');
+  assert.equal(p.status, 'open');
+  assert.equal(p.losses, 1);
+});

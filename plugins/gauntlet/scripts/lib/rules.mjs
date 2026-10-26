@@ -2,6 +2,8 @@
 // every rule is testable from a fixture ledger.
 
 const CALL_TERMINAL = new Set(['built', 'build_error', 'verdict', 'verdict_malformed', 'judge_error', 'smoothed', 'smooth_error']);
+// Failed rechecks (capture or critic error) a closed piece survives before it plateaus.
+export const RECHECK_ATTEMPTS = 2;
 
 export const passesFor = (spec) => (spec.judge.mode === 'blind-pairwise' && spec.judge.double ? 2 : 1);
 
@@ -30,7 +32,7 @@ export function fold(events, spec) {
       case 'split':
         st.split = true;
         for (const p of e.pieces) {
-          st.pieces.set(p.id, { id: p.id, def: p, status: 'open', reason: null, rounds: 0, wins: 0, losses: 0, lastGap: null, lastResult: null, lastCapture: null, pending: false });
+          st.pieces.set(p.id, { id: p.id, def: p, status: 'open', reason: null, rounds: 0, wins: 0, losses: 0, recheckFails: 0, lastGap: null, lastResult: null, lastCapture: null, pending: false });
           st.order.push(p.id);
         }
         break;
@@ -64,7 +66,8 @@ export function fold(events, spec) {
       }
       case 'capture_error': {
         const p = piece(e.piece);
-        if (!e.recheck) p.pending = false;
+        if (e.recheck) recheckFailed(st, p);
+        else p.pending = false;
         if (w) judgeSlot(w, e.piece, e.round, e.recheck).resolved = true;
         break;
       }
@@ -75,7 +78,8 @@ export function fold(events, spec) {
       case 'judged': {
         const p = piece(e.piece);
         if (w) judgeSlot(w, e.piece, e.round, e.recheck).resolved = true;
-        applyResult(p, e, spec);
+        if (e.recheck && e.result === 'error') recheckFailed(st, p);
+        else applyResult(p, e, spec);
         break;
       }
       case 'smoothed':
@@ -94,11 +98,20 @@ export function fold(events, spec) {
   return st;
 }
 
+// A failed recheck spends round budget, so max_rounds_total still bounds a smoother
+// that breaks the capture; after RECHECK_ATTEMPTS the piece stops being rechecked.
+// p.rounds is left alone: it numbers builds, and the recheck re-judges the last one.
+function recheckFailed(st, p) {
+  st.totalRounds++;
+  if (++p.recheckFails >= RECHECK_ATTEMPTS) Object.assign(p, { status: 'plateaued', reason: 'recheck_failed' });
+}
+
 function applyResult(p, e, spec) {
   if (e.biggest_gap) p.lastGap = e.biggest_gap;
-  if (e.result === 'error') { if (!e.recheck) p.pending = false; return; }
+  if (e.result === 'error') { p.pending = false; return; }
   p.lastResult = e.result;
   if (e.recheck) {
+    p.recheckFails = 0;
     // A loss after smoothing reopens the piece; a win or a tie keeps it closed.
     if (e.result === 'lost') Object.assign(p, { status: 'open', reason: 'reopened', wins: 0, losses: 1 });
     else p.status = 'closed';
@@ -107,7 +120,7 @@ function applyResult(p, e, spec) {
   p.pending = false;
   if (e.result === 'won') { p.wins++; p.losses = 0; }
   else if (e.result === 'lost') { p.losses++; p.wins = 0; }
-  else p.wins = 0;
+  else { p.wins = 0; p.losses = 0; }
   if (p.wins >= spec.stop.wins_to_close) Object.assign(p, { status: 'closed', reason: 'wins_to_close' });
   else if (p.losses >= spec.stop.plateau_rounds) Object.assign(p, { status: 'plateaued', reason: 'plateau' });
 }
