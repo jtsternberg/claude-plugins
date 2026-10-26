@@ -83,6 +83,18 @@
 #       error.txt says what to look at; the agent is left live. RESUMABLE: once a
 #       human has unblocked it, re-running on the same call_dir opens a fresh budget
 #       and reads the answer (see WAITER_TIMEOUT_MARKER).
+#   6 — STALLED (herdr only): the callee's turn ENDED without a terminal STATUS for
+#       this nonce — herdr settled it `idle`/`done` and either the transcript's last
+#       assistant row after our prompt is an API-error row (`isApiErrorMessage`), or
+#       the transcript has not grown for HOTLINE_STALL_SECONDS while settled. Nothing
+#       is coming without a nudge, so error.txt names the condition and the resume
+#       move: a follow-up dial into the same target re-targets the same agent and
+#       continues its session. Left live and marked RESUMABLE like 5.
+#
+# Why 6 exists: a callee whose turn died on `API Error: Connection lost
+# mid-response` sat `idle` with no STATUS, and the waiter spent its whole 4-hour
+# budget on it before reporting "may simply be slower than the budget" — a turn
+# that had ended four hours earlier. (claude-plugins-vw0f)
 #
 # Why 5 exists: herdr reports this state natively, and before this the waiter could
 # only spend its whole 30-minute budget on a callee that was never going to answer
@@ -128,6 +140,12 @@
 #     REDIRECT the same work order looks identical to one who reassigns the session;
 #     only the callee's next STATUS tells them apart, so the waiter waits for it.
 #     Tests set it small. (claude-plugins-mrpi)
+#   HOTLINE_STALL_SECONDS — herdr only: how long (default 600, same tick accounting
+#     as --timeout) a callee may sit settled `idle`/`done` with an unchanging
+#     transcript and no terminal STATUS before the wait exits 6. 0 disables this
+#     quiet-window check; the API-error-row check is always on. A callee that ended
+#     its turn to wait on its own background work looks the same from outside,
+#     which is why 6 is resumable rather than a verdict. (claude-plugins-vw0f)
 # =============================================================================
 set -euo pipefail
 
@@ -160,6 +178,7 @@ POLL_SLEEP="${HOTLINE_POLL_SLEEP:-$POLL_INTERVAL}"
 # integer tick accounting as TIMEOUT, so the suite can collapse it too.
 # (claude-plugins-mrpi)
 PREEMPT_GRACE="${HOTLINE_PREEMPT_GRACE:-180}"
+STALL_SECONDS="${HOTLINE_STALL_SECONDS:-600}"
 # Transcript mode: how long to wait for the transcript to show ANY evidence the
 # nonce reached the callee (user record, queued-command injection, enqueue, or a
 # STATUS naming our call_id — see transcript-extract.sh) before asking the input
@@ -492,6 +511,37 @@ if $HERDR_MODE; then
     exit 5
   }
 
+  # A turn that ENDED without our STATUS. herdr settles a callee `idle` whether it
+  # finished properly or its turn died, so the settle alone means nothing — the
+  # transcript says which. Claude Code writes a synthetic assistant row flagged
+  # `isApiErrorMessage` when a turn dies on an API error and then goes idle; that
+  # row coming after our prompt (or after our last WORK_IN_PROGRESS) is the turn's
+  # last word. Only user/assistant rows are matched for the nonce: api-request-blob
+  # rows replay the whole conversation, nonce included.
+  turn_ended_on_api_error() {  # <transcript>
+    jq -Rn --arg n "$CALL_ID" '
+      [inputs | fromjson? | select(type == "object" and .isSidechain != true
+                                   and (.type == "user" or .type == "assistant"))] as $r
+      | ([range(0; $r | length) | select(($r[.] | tostring) | contains($n))] | last) as $i
+      | if $i == null then false
+        else ([$r[$i + 1:][] | select(.type == "assistant")] | last | .isApiErrorMessage == true)
+        end' "$1" 2>/dev/null | grep -qx true
+  }
+
+  report_stalled() {  # report_stalled <condition sentence>
+    local target
+    target=$(cat "$CALL_DIR/cwd.txt" 2>/dev/null || echo "<the same target>")
+    {
+      echo "herdr agent $AGENT is STALLED: $1 Its transcript carries no terminal STATUS for call_id=$CALL_ID, so no answer is coming without a nudge — this is not a timeout."
+      echo "Resume: send a follow-up dial to the same target ($target). hotline re-targets agent $AGENT and the callee continues its session with its context intact — tell it its last turn ended early and to finish and emit its STATUS."
+      echo "Look first: \`${HERDR_HOP}herdr agent attach $AGENT\` · transcript $TRANSCRIPT_PATH. Nothing was sent by this script; if the callee is only idle waiting on its own background work, re-run this script on the same call_dir to keep waiting with a fresh ${TIMEOUT}s budget."
+    } > "$CALL_DIR/error.txt"
+    record_waiter_timeout "mode=herdr settle=stalled"
+    touch "$CALL_DIR/done"
+    cat "$CALL_DIR/error.txt" >&2
+    exit 6
+  }
+
   # The gate's per-iteration budget. `agent wait` blocks until the agent settles,
   # so a slice bounds how long we go without re-reading the transcript: a callee
   # that emits its terminal STATUS mid-turn and keeps working would otherwise not
@@ -509,6 +559,12 @@ if $HERDR_MODE; then
   # terminal STATUS and then block (on the next thing it wants to do), and an answer
   # on disk outranks the lifecycle every time.
   BLOCKED_SETTLE=false
+  # Quiet-window state: the transcript size last seen, and the H_ELAPSED at which
+  # the callee was last either growing its transcript or not settled. API_CHECKED_SIZE
+  # keeps the API-error scan to once per transcript change.
+  LAST_SIZE=-1
+  QUIET_SINCE=0
+  API_CHECKED_SIZE=-1
   while [[ $H_ELAPSED -lt $TIMEOUT ]]; do
     # --- The transcript FIRST, every iteration. -----------------------------
     # Before the gate, deliberately: the answer may already be on disk (the callee
@@ -674,6 +730,23 @@ if $HERDR_MODE; then
     [[ "$GATE_STATE" == "blocked" ]] && BLOCKED_SETTLE=true
     GATE_SECONDS=$(( $(date +%s) - GATE_START ))
     [[ $GATE_SECONDS -lt 0 ]] && GATE_SECONDS=0
+
+    # --- Settled with our prompt submitted: did the turn end without us? -----
+    if $H_SUBMITTED && [[ -n "$LIVE_TRANSCRIPT" ]] \
+       && [[ "$GATE_STATE" == "idle" || "$GATE_STATE" == "done" ]]; then
+      T_SIZE=$(wc -c < "$LIVE_TRANSCRIPT" 2>/dev/null | tr -d '[:space:]') || T_SIZE=0
+      if [[ "$T_SIZE" != "$LAST_SIZE" ]]; then LAST_SIZE="$T_SIZE"; QUIET_SINCE=$H_ELAPSED; fi
+      if [[ "$T_SIZE" != "$API_CHECKED_SIZE" ]]; then
+        API_CHECKED_SIZE="$T_SIZE"
+        turn_ended_on_api_error "$LIVE_TRANSCRIPT" \
+          && report_stalled "its last turn ended on an API error (a synthetic \`isApiErrorMessage\` row, e.g. \"API Error: Connection lost mid-response\") and herdr reports it '$GATE_STATE'."
+      fi
+      if [[ "$STALL_SECONDS" -gt 0 && $((H_ELAPSED - QUIET_SINCE)) -ge "$STALL_SECONDS" ]]; then
+        report_stalled "herdr has reported it '$GATE_STATE' with an unchanged transcript for $((H_ELAPSED - QUIET_SINCE))s (HOTLINE_STALL_SECONDS=$STALL_SECONDS)."
+      fi
+    else
+      QUIET_SINCE=$H_ELAPSED
+    fi
 
     sleep "$POLL_SLEEP"
     # The gate's real wall time is charged to the budget alongside the tick, or a
