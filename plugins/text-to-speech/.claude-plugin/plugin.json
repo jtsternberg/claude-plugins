@@ -1,0 +1,9 @@
+{
+  "name": "text-to-speech",
+  "description": "Speaks text aloud or saves it as audio on macOS with local text-to-speech models. Ships a Phonon skill for Ollama that picks a voice from a description like \"cheery female British\", only offers voices the installed model actually has, applies speed with pitch-preserving ffmpeg, and plays or writes WAV/MP3.",
+  "version": "0.1.0",
+  "author": {
+    "name": "JT Sternberg",
+    "url": "https://github.com/jtsternberg"
+  }
+}

@@ -16,7 +16,7 @@ installing.
 
 ### Claude Code
 
-Add the marketplace and install any of its 37 listed plugins:
+Add the marketplace and install any of its 38 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
@@ -50,7 +50,7 @@ installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
 
 To install one self-contained repository skill instead of a whole plugin, see
 [standalone Codex skills](docs/codex/standalone-skills.md). For commands,
-updates, catalog scope, and all 38 plugin names, see the
+updates, catalog scope, and all 39 plugin names, see the
 [compatibility guide](docs/compatibility.md).
 
 ---
@@ -59,7 +59,7 @@ updates, catalog scope, and all 38 plugin names, see the
 
 These are selected plugins and workflows. The
 [support matrix](docs/compatibility.md#plugin-support-matrix) is the complete
-38-name inventory and the authority for harness availability.
+39-name inventory and the authority for harness availability.
 
 ### Skills
 
@@ -126,6 +126,11 @@ Tools for managing Claude Code session transcripts — recaps, cleanup, retitlin
 Turn audio and video into text on macOS. Bundles a [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper) CLI wrapper (local file transcription) and a yt-dlp skill (YouTube/Vimeo/URL — captions, description, chapters, or audio download as a transcription fallback). Subs-first for URLs, so a TLDR doesn't require downloading 20 MB of audio.
 
 **Install:** `claude plugin install work-with-media@jtsternberg`
+
+#### 🔊 [text-to-speech](plugins/text-to-speech)
+Speaks text aloud, or saves it as WAV/MP3, with Ollama's local Phonon model. Describe the voice you want ("cheery female British, a bit faster") and it matches the description to a voice the installed model actually has. Speed is applied with ffmpeg because Phonon has no speed setting of its own.
+
+**Install:** `claude plugin install text-to-speech@jtsternberg`
 
 #### 🗓️ [google-foresight](plugins/google-foresight)
 Reads meeting transcripts, summaries, attendees, and notes from the Google AI Edge Foresight macOS app (on-device meeting transcription), so an agent can review today's meetings and draft notes. Writing notes back into the app is opt-in and guarded: compare-and-swap on the current notes, a check that the app is idle, read-back verification, and a 50-entry undo journal with `restore`. macOS only.

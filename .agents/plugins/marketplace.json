@@ -305,6 +305,14 @@
       }
     },
     {
+      "name": "text-to-speech",
+      "source": {
+        "source": "local",
+        "path": "./plugins/text-to-speech"
+      },
+      "category": "Coding"
+    },
+    {
       "name": "google-foresight",
       "source": {
         "source": "local",

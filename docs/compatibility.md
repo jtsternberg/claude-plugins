@@ -10,7 +10,7 @@ catalogs, so install from the column that matches the client you are using.
 
 The clean probes confirmed that Claude Code and Codex resolve separate catalogs
 and that Codex offers only a subset. The matrix below is the current inventory —
-37 entries in the Claude Code catalog, 38 names across both. Recheck this guide
+38 entries in the Claude Code catalog, 39 names across both. Recheck this guide
 after a client upgrade or a catalog change.
 
 ## Install and invoke
@@ -156,6 +156,7 @@ state, or user configuration. Those constraints are noted in the last column.
 | [skill-tools](../plugins/skill-tools) | Available | Not offered | Some workflows require their documented local toolchain. |
 | [slack](../plugins/slack) | Available | Not offered | Requires Slack Web API credentials/configuration. |
 | [slides-presentation](../plugins/slides-presentation) | Available | Not offered | Requires its documented browser/image-generation tooling as needed. |
+| [text-to-speech](../plugins/text-to-speech) | Available | Not offered | macOS playback via `afplay`; requires a running Ollama with a Phonon tag pulled, and `ffmpeg` for speed changes or MP3/M4A output. |
 | [thinking-tools](../plugins/thinking-tools) | Available | Not offered | No extra platform requirement documented. |
 | [work-with-media](../plugins/work-with-media) | Available | Not offered | macOS support is required for MacWhisper; `yt-dlp` covers supported URL workflows. |
 | [workspace-status](../plugins/workspace-status) | Manual setup | Not offered | Configure Claude Code's `statusLine` manually as documented; requires PHP (and Git for repository status). |
