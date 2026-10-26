@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { cli, events, initAndSplit, makeFixture, PLUGIN } from './helpers.mjs';
+import { cli, events, initAndSplit, makeFixture, PLUGIN, scratch } from './helpers.mjs';
 
 test('capture tokens are substituted shell-quoted, piece capture keys included', () => {
   const fx = makeFixture({ spec: { capture: { command: 'printf "%s|%s|%s" {piece} {round} {label} > {out}', ext: 'txt' }, budget: { max_rounds_total: 1 } } });
@@ -31,7 +31,7 @@ test('try-capture dry-runs the harness in the workspace', () => {
 });
 
 test('the text reference harness copies one heading section', () => {
-  const d = mkdtempSync(join(tmpdir(), 'gauntlet-cap-'));
+  const d = scratch();
   writeFileSync(join(d, 'doc.md'), '# Title\nintro\n## Install\nstep one\n### Detail\nmore\n## Usage\nlater\n');
   const r = spawnSync('node', [join(PLUGIN, 'references/capture-text.mjs'), '--file', join(d, 'doc.md'), '--heading', 'Install', '--out', join(d, 'o.md')], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
@@ -39,7 +39,7 @@ test('the text reference harness copies one heading section', () => {
 });
 
 test('the image reference harness refuses cleanly without playwright', () => {
-  const d = mkdtempSync(join(tmpdir(), 'gauntlet-cap-'));
+  const d = scratch();
   const r = spawnSync('node', [join(PLUGIN, 'references/capture-image.mjs'), '--url', 'http://localhost:1/', '--out', join(d, 'o.png')], { cwd: d, encoding: 'utf8' });
   if (r.status === 3) assert.match(r.stderr, /playwright is not installed/);
   else assert.notEqual(r.status, 0, 'with playwright present, an unreachable URL still fails');

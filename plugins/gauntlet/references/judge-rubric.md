@@ -3,7 +3,8 @@
 ## The scoring
 
 Two files are in your current directory: `{{REFERENCE}}` is the reference bar, and
-`{{CANDIDATE}}` is the candidate. Read both. Read nothing else.
+`{{CANDIDATE}}` is the candidate. Read both. Read nothing else. The reference may be
+about a different product or subject; it sets the bar for craft, not for content.
 
 **The goal the candidate serves:**
 

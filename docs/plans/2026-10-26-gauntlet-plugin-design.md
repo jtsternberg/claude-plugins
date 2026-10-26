@@ -229,8 +229,11 @@ judged. Judging is safe to parallelize, so the sequential part costs build time 
 startup trust dialog and hotline fails the dial at `deliver`/`boot`/`fire`. The
 engine reads the callee's screen, sends `down enter`, waits for idle, and re-dials
 the same target without `--fresh`, once (logic copied from agentic-dev's
-`dial-phase.sh`). Critic dirs are not git repos and are never gated; a worktree of a
-trusted repo is not gated either.
+`dial-phase.sh`). That needs the failed call dir to name its herdr agent. A live run
+against a fresh `git init` on hotline 0.39.1 failed at `boot` ("blocked during
+startup") with no agent left to read, so that failure is recorded with a hint to run
+`claude` once in the workspace and trust it. Critic dirs are not git repos and are
+never gated; a worktree of a trusted repo is not gated either, which is the normal case.
 
 **Quota.** On a `runway` wrap-up notice the lead lets the current step finish and
 hands off to `delayed-work:until`. Callees keep running in their panes; `--resume`

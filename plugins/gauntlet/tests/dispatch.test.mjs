@@ -157,7 +157,7 @@ test('a failed dial is recorded, not thrown', () => {
   const fx = makeFixture({ env: { FAKE_DIAL_FAIL: 'builder' }, spec: { budget: { max_rounds_total: 1 } } });
   initAndSplit(fx);
   cli(fx, ['loop', '--run', fx.runDir]);
-  assert.match(events(fx, 'build_error')[0].reason, /dial failed: boot: boom/);
+  assert.match(events(fx, 'build_error')[0].reason, /dial failed: boot: .*blocked during startup.*run `claude` once in the workspace/s);
 });
 
 test('no herdr-capable hotline → a one-line refusal', () => {

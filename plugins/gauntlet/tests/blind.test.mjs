@@ -6,9 +6,10 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { blind, discard, oursLabel, unblind } from '../scripts/lib/blind.mjs';
 import { validateSpec } from '../scripts/lib/spec.mjs';
+import { scratch } from './helpers.mjs';
 import { lastJsonFence, parseVerdict, tally } from '../scripts/lib/verdict.mjs';
 
-const src = mkdtempSync(join(tmpdir(), 'gauntlet-blind-src-'));
+const src = scratch();
 writeFileSync(join(src, 'ours.txt'), '  OURS body \n\n');
 writeFileSync(join(src, 'ref.txt'), 'REF body');
 const mk = (extra = {}) => blind({ ours: join(src, 'ours.txt'), ref: join(src, 'ref.txt'), ext: 'txt', medium: 'text', mode: 'blind-pairwise', seed: 'run:hero:1:1', ...extra });

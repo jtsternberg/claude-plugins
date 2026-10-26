@@ -2,7 +2,7 @@
 // fake herdr-capable hotline root, and PATH stubs for bd and herdr. Nothing here
 // reaches a model, the network, herdr, or a browser.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,15 @@ export const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const CLI = join(PLUGIN, 'scripts', 'gauntlet.mjs');
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-hotline.mjs');
 
+// Every dir a suite makes comes from here and is removed when the suite's process exits.
+const made = [];
+process.on('exit', () => { for (const d of made) rmSync(d, { recursive: true, force: true }); });
+export function scratch(prefix = 'gauntlet-test-') {
+  const d = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  made.push(d);
+  return d;
+}
+
 export function sh(cwd, cmd, env) {
   const r = spawnSync('sh', ['-c', cmd], { cwd, env, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`${cmd}: ${r.stderr}`);
@@ -18,7 +27,7 @@ export function sh(cwd, cmd, env) {
 }
 
 export function makeFixture(opts = {}) {
-  const T = realpathSync(mkdtempSync(join(tmpdir(), 'gauntlet-test-')));
+  const T = scratch();
   const ws = join(T, 'site');
   const bin = join(T, 'bin');
   const hl = join(T, 'hotline');

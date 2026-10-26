@@ -29,7 +29,9 @@ export function locateHotline(env = process.env) {
   return null;
 }
 
+// dial.sh prints one pretty-printed JSON object; anything else on stdout is chatter.
 function parseLastJson(out) {
+  try { return JSON.parse(out ?? ''); } catch { /* fall through */ }
   const lines = (out ?? '').trim().split('\n').reverse();
   for (const l of lines) { try { return JSON.parse(l); } catch { /* keep looking */ } }
   return null;
@@ -72,7 +74,9 @@ export function dial(opts) {
     r = dialOnce({ ...opts, fresh: false });
   }
   if (r.rc !== 0 || r.json?.status !== 'connected' || !r.json?.call_dir) {
-    return { ok: false, json: r.json, error: r.json ? `${r.json.stage ?? r.json.status}: ${r.json.detail ?? ''}`.trim() : (r.stderr || `dial.sh exited ${r.rc}`).trim() };
+    let error = r.json ? `${r.json.stage ?? r.json.status}: ${r.json.detail ?? ''}`.trim() : (r.stderr || `dial.sh exited ${r.rc}`).trim();
+    if (/blocked during startup/.test(error)) error += ' (a repo Claude Code has never trusted parks on its startup trust dialog: run `claude` once in the workspace and trust it, then --resume)';
+    return { ok: false, json: r.json, error };
   }
   return { ok: true, json: r.json };
 }

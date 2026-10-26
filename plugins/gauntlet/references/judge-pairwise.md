@@ -2,10 +2,14 @@
 
 ## The comparison
 
-Two candidates for the same goal are in your current directory: `{{FILE_A}}` and
-`{{FILE_B}}`. Read both. Read nothing else.
+Two candidates are in your current directory: `{{FILE_A}}` and `{{FILE_B}}`. Read
+both. Read nothing else.
 
-**The goal they both serve:**
+They may be about different products or subjects. That is expected: judge each as an
+example of the kind of artifact the goal describes, on how well it does what the
+criteria ask for its own subject. Never mark one down for being about something else.
+
+**The kind of artifact being judged:**
 
 ```text
 {{GOAL}}

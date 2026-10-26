@@ -9,6 +9,14 @@ The method is three things: fresh context for every builder and critic, a harsh
 critic prompt, and two unlabeled files. The plugin bakes that in so nobody has to
 paste a prompt or remember the rules.
 
+## Install
+
+```bash
+claude plugin install gauntlet@jtsternberg
+```
+
+It pulls in `hotline` as a dependency.
+
 ## Skills
 
 | Skill | Claude Code | Codex | What it does |
