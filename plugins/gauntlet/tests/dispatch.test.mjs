@@ -203,6 +203,17 @@ test('double judging dials twice with the assignment swapped', () => {
   assert.equal(events(fx, 'judged')[0].swap_agreed, true);
 });
 
+test('a custom judge.prompt is filled with the documented placeholders', () => {
+  const fx = makeFixture({ spec: { judge: { prompt: 'my-judge.md' }, budget: { max_rounds_total: 1 } } });
+  writeFileSync(join(fx.specPath, '..', 'my-judge.md'), 'CUSTOM {{FILE_A}} vs {{FILE_B}}\n{{GOAL}}\n{{CRITERIA}}\n{{SCHEMA}}\n{{STANCE}}\n');
+  initAndSplit(fx);
+  cli(fx, ['loop', '--run', fx.runDir]);
+  const p = dials(fx, 'critic')[0].prompt;
+  assert.match(p, /^CUSTOM A\.txt vs B\.txt/);
+  assert.ok(!/\{\{[A-Z_]+\}\}/.test(p), 'every documented placeholder is filled');
+  assert.equal(events(fx, 'judged')[0].result, 'won');
+});
+
 test('rubric mode shows a labeled pair and wins at 7+', () => {
   const fx = makeFixture({ env: { FAKE_CRITIC: 'rubric-high' }, spec: { judge: { mode: 'rubric' }, budget: { max_rounds_total: 1 } } });
   initAndSplit(fx);

@@ -60,6 +60,13 @@ turns.) Skip any the request already answered.
 5. **Judging.** `blind-pairwise` (default) or `rubric`. Recommend rubric only when a
    reference is so recognizable that the critic would know which file is which.
    `judge.double: true` judges twice with A/B swapped; it doubles critic calls.
+   A custom `judge.prompt` template must name the files and carry the answer shape:
+   `{{FILE_A}}` and `{{FILE_B}}` (pairwise) or `{{REFERENCE}}` and `{{CANDIDATE}}`
+   (rubric), `{{CRITERIA}}`, and `{{SCHEMA}}`. `{{STANCE}}` and `{{GOAL}}` are
+   optional. Copy `${CLAUDE_PLUGIN_ROOT}/references/judge-pairwise.md` (or
+   `judge-rubric.md` beside it) into the run dir and edit that.
+
+   Codex: substitute the installed gauntlet plugin directory for the path above.
 6. **Git.** Check whether the remote is public:
 
    ```bash

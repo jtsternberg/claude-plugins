@@ -71,9 +71,10 @@ export function calleeHandle(callDir) {
   return { agent: callDir ? read('herdr_agent.txt') : null, pane: callDir ? read('herdr_pane.txt') : null };
 }
 
-// Returns { ok, json, error }. On a trust-dialog failure: answer it, then re-dial the
-// same target WITHOUT --fresh so hotline re-targets the agent it just cached rather
-// than starting a second one beside it. Tried once.
+// Returns { ok, json, error }. On a trust-dialog failure: answer it, then re-dial once.
+// The re-dial starts a NEW callee even without --fresh: dial.sh forgets the cache
+// entry when a first contact fails at deliver. The answered agent never got the
+// order, so it sits idle in its pane; nothing runs twice.
 export function dial(opts) {
   let r = dialOnce(opts);
   // Never after `sent: true`: that callee may hold the order, and a re-dial runs it twice.
