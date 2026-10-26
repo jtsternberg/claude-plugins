@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { blind, discard, unblind } from './blind.mjs';
 import { beadClose, commitRunDir, commitWithTrailer, isAncestor } from './git.mjs';
-import { dial, hotlineEnv, locateHotline, wait } from './hotline.mjs';
+import { calleeHandle, dial, hotlineEnv, locateHotline, wait } from './hotline.mjs';
 import { append, readLedger } from './ledger.mjs';
 import { renderProgress } from './progress.mjs';
 import { decide, fold, passesFor } from './rules.mjs';
@@ -105,8 +105,19 @@ export class Run {
   dispatched(r, fields) {
     return this.record({
       event: 'dispatched', ...fields, call_dir: r.json.call_dir,
-      agent_name: r.json.surface_ref ?? null, callee_session_id: r.json.remote_session_id ?? null,
+      agent_name: r.json.surface_ref ?? calleeHandle(r.json.call_dir).agent, callee_session_id: r.json.remote_session_id ?? null,
     });
+  }
+
+  // A worktree dial that failed. dial.sh's `sent: true` means the callee may have the
+  // order after all, so it is recorded as a live call and paused: a second builder must
+  // never start beside it. Otherwise the error keeps the handle of whatever booted.
+  dialFailed(r, fields, errorEvent) {
+    if (r.json?.sent === true && r.json.call_dir) {
+      return this.pause(this.dispatched(r, { ...fields, delivery_unconfirmed: true }), null, 'delivery_unconfirmed');
+    }
+    const h = calleeHandle(r.json?.call_dir);
+    return this.record({ event: errorEvent, piece: fields.piece, round: fields.round, wave: fields.wave, call_dir: r.json?.call_dir ?? null, agent_name: h.agent, reason: `dial failed: ${r.error}` });
   }
 
   // ---- build -------------------------------------------------------------
@@ -128,15 +139,19 @@ export class Run {
     const promptFile = this.writeOrder(`build-${piece}-r${round}.md`, order);
     const label = `build ${piece} r${round}`;
     const r = this.dispatch({ role: 'builder', piece, label, target: this.worktree, promptFile, model: this.spec.builder.model });
-    if (!r.ok) { this.record({ event: 'build_error', piece, round, wave, reason: `dial failed: ${r.error}` }); return; }
-    const call = this.dispatched(r, { role: 'builder', piece, round, wave, label, trailer });
+    const fields = { role: 'builder', piece, round, wave, label, trailer };
+    if (!r.ok) { this.dialFailed(r, fields, 'build_error'); return; }
+    const call = this.dispatched(r, fields);
     await this.settle([call]);
   }
 
   completeBuilder(call, { rc }) {
     const { piece, round, wave, call_dir } = call;
     if (rc === 4 || rc === 5) return this.pause(call, rc);
-    if (rc !== 0) return this.record({ event: 'build_error', piece, round, wave, call_dir, wait_rc: rc, reason: rc === 3 ? 'preempted' : 'wait failed' });
+    if (rc !== 0) {
+      if (!call.failPaused) return this.pause(call, rc, rc === 3 ? 'preempted' : 'wait_failed');
+      return this.record({ event: 'build_error', piece, round, wave, call_dir, wait_rc: rc, reason: rc === 3 ? 'preempted' : 'wait failed' });
+    }
     const commit = commitWithTrailer(this.worktree, call.trailer);
     if (!commit) return this.record({ event: 'build_error', piece, round, wave, call_dir, wait_rc: rc, reason: `no commit carries "${call.trailer}"` });
     this.record({ event: 'built', piece, round, wave, call_dir, wait_rc: rc, commit });
@@ -144,8 +159,14 @@ export class Run {
     this.capture(piece, round, wave, false);
   }
 
-  pause(call, rc) {
-    return this.record({ event: 'paused', call_dir: call.call_dir, role: call.role, piece: call.piece, wait_rc: rc, agent_name: call.agent_name, reason: rc === 4 ? 'awaiting_review' : 'blocked' });
+  // Timeout, preemption and an unconfirmed delivery pause only a worktree callee
+  // (builder, smoother): a stranded critic works in a temp dir and harms nothing.
+  pause(call, rc, reason = rc === 4 ? 'awaiting_review' : 'blocked') {
+    const { pane } = calleeHandle(call.call_dir);
+    return this.record({
+      event: 'paused', call_dir: call.call_dir, role: call.role, piece: call.piece, wait_rc: rc, agent_name: call.agent_name, reason,
+      close: pane ? `herdr pane close ${pane}` : null,
+    });
   }
 
   // ---- capture -----------------------------------------------------------
@@ -264,13 +285,15 @@ export class Run {
     const promptFile = this.writeOrder(`smooth-w${a.wave}.md`, order);
     const label = `smooth w${a.wave}`;
     const r = this.dispatch({ role: 'builder', piece: `smooth-w${a.wave}`, label, target: this.worktree, promptFile, model: this.spec.builder.model });
-    if (!r.ok) { this.record({ event: 'smooth_error', wave: a.wave, reason: `dial failed: ${r.error}` }); return; }
-    const call = this.dispatched(r, { role: 'smoother', piece: '*', round: a.wave, wave: a.wave, label, trailer, final: a.final });
+    const fields = { role: 'smoother', piece: '*', round: a.wave, wave: a.wave, label, trailer, final: a.final };
+    if (!r.ok) { this.dialFailed(r, fields, 'smooth_error'); return; }
+    const call = this.dispatched(r, fields);
     await this.settle([call]);
   }
 
   completeSmoother(call, { rc }) {
     if (rc === 4 || rc === 5) return this.pause(call, rc);
+    if (rc !== 0 && !call.failPaused) return this.pause(call, rc, rc === 3 ? 'preempted' : 'wait_failed');
     if (rc !== 0) return this.record({ event: 'smooth_error', wave: call.wave, call_dir: call.call_dir, wait_rc: rc, reason: rc === 3 ? 'preempted' : 'wait failed' });
     // No commit is a legitimate answer: nothing needed smoothing, so nothing is re-judged.
     return this.record({ event: 'smoothed', wave: call.wave, call_dir: call.call_dir, wait_rc: rc, final: !!call.final, commit: commitWithTrailer(this.worktree, call.trailer) });

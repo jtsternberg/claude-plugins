@@ -2,6 +2,10 @@
 // every rule is testable from a fixture ledger.
 
 const CALL_TERMINAL = new Set(['built', 'build_error', 'verdict', 'verdict_malformed', 'judge_error', 'smoothed', 'smooth_error']);
+// A builder pause for a callee that may still be live after a failure. --resume
+// re-waits it once; a second failure is recorded as one, the human having been told
+// to close its pane.
+const FAIL_PAUSES = new Set(['wait_failed', 'preempted', 'delivery_unconfirmed']);
 // Failed rechecks (capture or critic error) a closed piece survives before it plateaus.
 export const RECHECK_ATTEMPTS = 2;
 
@@ -38,7 +42,9 @@ export function fold(events, spec) {
         break;
       case 'wave': st.wave = e.wave; st.waves.set(e.wave, newWave(e)); break;
       case 'dispatched': st.calls.set(e.call_dir, { ...e, done: false, paused: false }); break;
-      case 'paused': if (call) call.paused = true; break;
+      case 'paused':
+        if (call) Object.assign(call, { paused: true, close: e.close ?? null, failPaused: call.failPaused || FAIL_PAUSES.has(e.reason) });
+        break;
       case 'resumed':
         for (const c of st.calls.values()) c.paused = false;
         st.stopped = null;
@@ -187,5 +193,5 @@ export function decide(st, spec, ctx) {
 }
 
 function callSummary(c) {
-  return { role: c.role, piece: c.piece, round: c.round, pass: c.pass, call_dir: c.call_dir, agent_name: c.agent_name };
+  return { role: c.role, piece: c.piece, round: c.round, pass: c.pass, call_dir: c.call_dir, agent_name: c.agent_name, ...(c.close ? { close: c.close } : {}) };
 }

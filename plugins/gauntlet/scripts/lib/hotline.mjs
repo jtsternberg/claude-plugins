@@ -65,12 +65,19 @@ export function answerTrustDialog(callDir) {
   return !TRUST_PATTERNS.test(herdr(['agent', 'read', agent, '--source', 'visible']).stdout ?? '');
 }
 
+// The herdr agent and pane a call dir names, for a human to attach to or close.
+export function calleeHandle(callDir) {
+  const read = (f) => { try { return readFileSync(join(callDir, f), 'utf8').trim() || null; } catch { return null; } };
+  return { agent: callDir ? read('herdr_agent.txt') : null, pane: callDir ? read('herdr_pane.txt') : null };
+}
+
 // Returns { ok, json, error }. On a trust-dialog failure: answer it, then re-dial the
 // same target WITHOUT --fresh so hotline re-targets the agent it just cached rather
 // than starting a second one beside it. Tried once.
 export function dial(opts) {
   let r = dialOnce(opts);
-  if (r.rc !== 0 && ['deliver', 'boot', 'fire'].includes(r.json?.stage) && answerTrustDialog(r.json?.call_dir)) {
+  // Never after `sent: true`: that callee may hold the order, and a re-dial runs it twice.
+  if (r.rc !== 0 && r.json?.sent !== true && ['deliver', 'boot', 'fire'].includes(r.json?.stage) && answerTrustDialog(r.json?.call_dir)) {
     r = dialOnce({ ...opts, fresh: false });
   }
   if (r.rc !== 0 || r.json?.status !== 'connected' || !r.json?.call_dir) {

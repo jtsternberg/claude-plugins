@@ -6,6 +6,7 @@
 //   FAKE_WAIT_RC_BUILDER / FAKE_WAIT_RC_CRITIC   the waiter's exit code (default 0)
 //   FAKE_TRUST=1   the first dial fails at deliver with a trust dialog on screen
 //   FAKE_DIAL_FAIL=builder|critic   that role's dial errors outright
+//   FAKE_DIAL_SENT=builder   that role's dial fails at deliver with sent:true (the order may have landed)
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,6 +33,7 @@ if (mode === 'dial') {
     env: Object.fromEntries(['HOTLINE_CALLEE_ENV', 'HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS', 'HOTLINE_CLAUDE_MODEL', 'HOTLINE_HERDR_PLACEMENT', 'HOTLINE_HERDR_WORKSPACE'].map((k) => [k, pick(k) ?? null])) });
   writeFileSync(join(cd, 'meta.json'), JSON.stringify({ role, target, fresh, prompt }));
   writeFileSync(join(cd, 'herdr_agent.txt'), `agent-${n}\n`);
+  writeFileSync(join(cd, 'herdr_pane.txt'), `w1:p${n}\n`);
   // Pretty-printed, as the real dial.sh prints it (captured live from hotline 0.39.1).
   const out = (o, rc) => { process.stdout.write(JSON.stringify(o, null, 2) + '\n'); process.exit(rc); };
   if (env.FAKE_TRUST && !existsSync(`${env.FAKE_STATE}-trusted`)) {
@@ -39,6 +41,7 @@ if (mode === 'dial') {
     out({ status: 'error', stage: 'deliver', detail: "Claude Code's startup TRUST DIALOG is on screen", call_dir: cd }, 1);
   }
   if (env.FAKE_DIAL_FAIL === role) out({ status: 'error', stage: 'boot', detail: '{\n  "error": "agent_not_ready: agent x is blocked during startup and is not ready for prompts"\n}', call_dir: cd }, 1);
+  if (env.FAKE_DIAL_SENT === role) out({ status: 'error', stage: 'deliver', detail: 'the herdr callee booted but the prompt never landed in it', call_dir: cd, sent: true }, 1);
   const trailer = prompt.match(/^ {4}(Gauntlet: .+)$/m)?.[1];
   const commits = role === 'builder' && (calleeEnv.GAUNTLET_PIECE.startsWith('smooth-') ? env.FAKE_SMOOTHER === 'commit' : env.FAKE_BUILDER !== 'nocommit');
   if (commits && trailer) {

@@ -82,9 +82,13 @@ Its last output line is JSON. Act on `last.action`:
   node "$PLUGIN_ROOT/scripts/gauntlet.mjs" split --run <path> --pieces '[{"id":"hero","note":"headline, subhead, primary CTA","capture":{"selector":"#hero"}}]'
   ```
 
-- **`paused`**. A callee ended on AWAITING_REVIEW or is blocked waiting on a human.
-  Tell the user which agent to look at (the status lines name it, with the
-  `herdr agent attach` command) and end the turn. They continue with `--resume`.
+- **`paused`**. A callee ended on AWAITING_REVIEW, is blocked waiting on a human, or
+  is a builder that timed out, was preempted, or may have received its order despite
+  a failed delivery, so it could still be working in the worktree. Tell the user which
+  agent to look at (the status lines name it, with the `herdr agent attach` command
+  and, for a builder, the `herdr pane close` command) and end the turn. They continue
+  with `--resume`, which re-waits the call once; a builder that still has no answer is
+  then recorded as a failed build.
 - **`stop`**. Show the status table, the branch, and the `progress.html` path, and
   end. `human` means a STOP file: say `--resume` continues. Every other reason is
   final for this run (`all_closed`, `plateau_all`, `budget:*`, `history_rewritten`).

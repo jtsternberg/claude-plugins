@@ -182,7 +182,7 @@ function statusText(run) {
     const p = st.pieces.get(id);
     lines.push(`${id.padEnd(16)} ${p.status.padEnd(10)} ${String(p.rounds).padEnd(7)} ${String(p.wins).padEnd(5)} ${String(p.losses).padEnd(7)} ${(p.lastResult ?? '-').padEnd(6)} ${(p.lastGap ?? '').slice(0, 80)}`);
   }
-  if (next.calls) for (const c of next.calls) lines.push(`  ${next.action}: ${c.role} ${c.piece} r${c.round} agent=${c.agent_name ?? '?'} (herdr agent attach ${c.agent_name ?? '<agent>'})`);
+  if (next.calls) for (const c of next.calls) lines.push(`  ${next.action}: ${c.role} ${c.piece} r${c.round} agent=${c.agent_name ?? '?'} (herdr agent attach ${c.agent_name ?? '<agent>'}${c.close ? `; to clear it: ${c.close}` : ''})`);
   lines.push(`progress: ${join(run.runDir, 'progress.html')}`);
   return lines.join('\n');
 }

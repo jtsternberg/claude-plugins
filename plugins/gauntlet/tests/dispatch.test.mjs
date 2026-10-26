@@ -64,20 +64,54 @@ test('after a win the next builder is told there is no gap, not handed the refer
   assert.match(b[1].prompt, /your piece won, so there is no gap to close/);
 });
 
-for (const [rc, expect] of [[4, 'paused'], [5, 'paused'], [3, 'build_error'], [1, 'build_error']]) {
-  test(`builder wait exit ${rc} → ${expect}`, () => {
+for (const [rc, reason] of [[4, 'awaiting_review'], [5, 'blocked'], [3, 'preempted'], [1, 'wait_failed']]) {
+  test(`builder wait exit ${rc} → paused (${reason})`, () => {
     const fx = makeFixture({ env: { FAKE_WAIT_RC_BUILDER: String(rc) } });
     initAndSplit(fx);
     const r = cli(fx, ['loop', '--run', fx.runDir, '--once']);
     assert.equal(r.rc, 0, r.stderr);
     cli(fx, ['loop', '--run', fx.runDir, '--once']);
-    assert.equal(events(fx, expect).length >= 1, true, `expected ${expect}: ${r.stdout}`);
-    if (expect === 'paused') {
-      assert.equal(events(fx, 'paused')[0].wait_rc, rc);
-      assert.equal(cli(fx, ['next', '--run', fx.runDir]).json.action, 'paused');
-    } else assert.equal(events(fx, 'build_error')[0].wait_rc, rc);
+    const [p] = events(fx, 'paused');
+    assert.equal(p?.wait_rc, rc, r.stdout);
+    assert.equal(p.reason, reason);
+    assert.equal(p.agent_name, 'agent-1');
+    assert.equal(p.close, 'herdr pane close w1:p1');
+    assert.equal(cli(fx, ['next', '--run', fx.runDir]).json.action, 'paused');
+    assert.match(cli(fx, ['status', '--run', fx.runDir]).stdout, /to clear it: herdr pane close w1:p1/);
   });
 }
+
+for (const rc of [1, 3]) {
+  test(`a builder that failed (wait exit ${rc}) blocks the next build until a resume re-waits it once`, () => {
+    const fx = makeFixture({ env: { FAKE_WAIT_RC_BUILDER: String(rc) }, spec: { budget: { max_rounds_total: 1 } } });
+    initAndSplit(fx);
+    cli(fx, ['loop', '--run', fx.runDir]);
+    assert.equal(cli(fx, ['loop', '--run', fx.runDir]).json.last.action, 'paused', 'no second builder while the first may be live');
+    assert.equal(dials(fx, 'builder').length, 1);
+    cli(fx, ['resume', '--run', fx.runDir]);
+    cli(fx, ['loop', '--run', fx.runDir]);
+    assert.equal(events(fx, 'build_error')[0].wait_rc, rc, 'the second failure is recorded as one');
+    assert.equal(dials(fx, 'builder').length, 1);
+  });
+}
+
+test('a builder dial whose deliver failed with sent:true is recorded live and paused, never re-dialed', () => {
+  const fx = makeFixture({ env: { FAKE_DIAL_SENT: 'builder' }, spec: { budget: { max_rounds_total: 1 } } });
+  initAndSplit(fx);
+  const r = cli(fx, ['loop', '--run', fx.runDir]);
+  assert.equal(r.json.last.action, 'paused');
+  const [d] = events(fx, 'dispatched');
+  assert.equal(d.delivery_unconfirmed, true);
+  assert.equal(d.agent_name, 'agent-1');
+  assert.ok(d.call_dir);
+  assert.equal(events(fx, 'paused')[0].reason, 'delivery_unconfirmed');
+  assert.equal(events(fx, 'build_error').length, 0);
+  // Resume re-waits that call dir; the order did land, so the build counts.
+  cli(fx, ['resume', '--run', fx.runDir]);
+  cli(fx, ['loop', '--run', fx.runDir], { FAKE_DIAL_SENT: '' });
+  assert.equal(dials(fx, 'builder').length, 1);
+  assert.equal(events(fx, 'built').length + events(fx, 'build_error').length, 1);
+});
 
 test('critic wait exit 5 (blocked) pauses the run instead of reading as done', () => {
   const fx = makeFixture({ env: { FAKE_WAIT_RC_CRITIC: '5' } });
