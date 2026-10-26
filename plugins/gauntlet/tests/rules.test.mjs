@@ -43,15 +43,23 @@ test('builds go one piece at a time, then all judges together', () => {
   assert.equal(j.passes, 1);
 });
 
-test('wins_to_close consecutive wins close a piece; the last gap is handed to the next build', () => {
+test('wins_to_close consecutive wins close a piece; a win hands the next build no gap', () => {
   const ev = [...base(), wave(1, ['hero']), ...round('hero', 1, 1, 'won')];
   const st = fold(ev, mkSpec());
   assert.equal(st.pieces.get('hero').status, 'open');
   const b = next([...ev, wave(2, ['hero'])]);
-  assert.equal(b.gap, 'gap 1');
+  assert.equal(b.gap, null, "after a win the gap describes the reference's flaw");
+  assert.equal(b.last, 'won');
   assert.equal(b.round, 2);
   ev.push(wave(2, ['hero']), ...round('hero', 2, 2, 'won'));
   assert.equal(fold(ev, mkSpec()).pieces.get('hero').status, 'closed');
+});
+
+test('a loss hands its gap to the next build; a later tie clears it', () => {
+  const ev = [...base(), wave(1, ['hero']), ...round('hero', 1, 1, 'lost')];
+  assert.equal(next([...ev, wave(2, ['hero'])]).gap, 'gap 1');
+  ev.push(wave(2, ['hero']), ...round('hero', 2, 2, 'tie'), wave(3, ['hero']));
+  assert.equal(next(ev).gap, null);
 });
 
 test('a tie breaks the win streak', () => {

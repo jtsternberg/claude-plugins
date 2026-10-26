@@ -47,10 +47,20 @@ test('the critic is dialed from its blind dir and its prompt carries no project,
     assert.match(c.prompt, /A page that explains the service/);
     assert.match(c.prompt, /\*\*clarity\*\*/);
   }
-  // The builder of round 2 is handed round 1's gap.
-  assert.match(dials(fx, 'builder')[1].prompt, /gap seen by critic ref/);
+  // The builder of round 2 is handed round 1's lost gap, with the A/B key.
+  assert.match(dials(fx, 'builder')[1].prompt, /\[A = (ours|reference), B = (reference|ours)\] gap seen by critic ref/);
   assert.equal(events(fx, 'judged').at(-1).result, 'lost');
   assert.ok(!existsSync(critics[0].cwd), 'the blind dir is discarded after the verdict');
+});
+
+test('after a win the next builder is told there is no gap, not handed the reference\'s flaw', () => {
+  const fx = makeFixture({ spec: { budget: { max_rounds_total: 2 } } });
+  initAndSplit(fx);
+  cli(fx, ['loop', '--run', fx.runDir]);
+  const b = dials(fx, 'builder').filter((d) => d.piece === 'hero');
+  assert.equal(b.length, 2);
+  assert.ok(!b[1].prompt.includes('gap seen by critic'));
+  assert.match(b[1].prompt, /your piece won, so there is no gap to close/);
 });
 
 for (const [rc, expect] of [[4, 'paused'], [5, 'paused'], [3, 'build_error'], [1, 'build_error']]) {

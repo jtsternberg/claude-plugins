@@ -41,6 +41,7 @@ test('unblind maps A/B back to ours/ref, including the swapped pass', () => {
     const v = unblind(b.base, { winner: o, criteria: { clarity: r, cta: 'tie' }, biggest_gap: 'x', confidence: 3 });
     assert.equal(v.winner, 'ours');
     assert.deepEqual(v.criteria, { clarity: 'ref', cta: 'tie' });
+    assert.equal(v.biggest_gap, `[${o === 'A' ? 'A = ours, B = reference' : 'A = reference, B = ours'}] x`, 'the gap carries its key');
     discard(b.base);
   }
 });

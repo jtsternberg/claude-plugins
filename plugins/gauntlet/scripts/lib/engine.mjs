@@ -120,7 +120,9 @@ export class Run {
       CAPTURE_COMMAND: this.spec.capture.command, CAPTURE_ARGS: JSON.stringify(p.def.capture ?? {}),
       CRITERIA: criteriaList(this.spec), REF_FILE: this.refFile(piece),
       LAST_CAPTURE: p.lastCapture ? `\`${join(this.runDir, p.lastCapture)}\`` : 'none yet (first round)',
-      GAP: a.gap || 'First round: no verdict yet. Build the strongest version of this piece you can.',
+      GAP: a.gap || (a.last
+        ? `Last round's verdict: ${a.last === 'won' ? 'your piece won' : 'a tie'}, so there is no gap to close. Keep what holds up and push the criteria further.`
+        : 'First round: no verdict yet. Build the strongest version of this piece you can.'),
       TRAILER: trailer,
     });
     const promptFile = this.writeOrder(`build-${piece}-r${round}.md`, order);

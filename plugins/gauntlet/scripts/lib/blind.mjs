@@ -42,11 +42,14 @@ export function blind({ ours, ref, ext, medium, mode, seed, pass = 1 }) {
 const side = (v, o) => (v === 'tie' ? 'tie' : v === o ? 'ours' : 'ref');
 
 // Maps a pairwise verdict's A/B back to ours/ref. Rubric verdicts pass through.
+// The gap is free prose ("B's CTA…", "A stronger hero…"), so it is keyed rather than
+// rewritten: replacing letters in prose would corrupt the article "A".
 export function unblind(base, verdict) {
   const key = JSON.parse(readFileSync(join(base, 'key.json'), 'utf8'));
   if (key.mode === 'rubric') return { ...verdict };
   const criteria = Object.fromEntries(Object.entries(verdict.criteria).map(([k, v]) => [k, side(v, key.ours)]));
-  return { ...verdict, ours: key.ours, winner: side(verdict.winner, key.ours), criteria };
+  const legend = key.ours === 'A' ? 'A = ours, B = reference' : 'A = reference, B = ours';
+  return { ...verdict, ours: key.ours, winner: side(verdict.winner, key.ours), criteria, biggest_gap: `[${legend}] ${verdict.biggest_gap}` };
 }
 
 export function discard(base) {

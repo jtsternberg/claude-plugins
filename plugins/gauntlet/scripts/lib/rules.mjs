@@ -107,8 +107,9 @@ function recheckFailed(st, p) {
 }
 
 function applyResult(p, e, spec) {
-  if (e.biggest_gap) p.lastGap = e.biggest_gap;
   if (e.result === 'error') { p.pending = false; return; }
+  // The gap names what the loser must change: only after a loss is that our piece.
+  p.lastGap = e.result === 'lost' ? e.biggest_gap ?? null : null;
   p.lastResult = e.result;
   if (e.recheck) {
     p.recheckFails = 0;
@@ -160,7 +161,7 @@ export function decide(st, spec, ctx) {
         const p = st.pieces.get(id);
         if (p.status !== 'open' || w.attempted.has(id)) continue;
         if (st.lastCommit && !ctx.isAncestor(st.lastCommit)) return { action: 'stop', reason: 'history_rewritten' };
-        return { action: 'build', wave: w.n, piece: id, round: p.rounds + 1, gap: p.lastGap };
+        return { action: 'build', wave: w.n, piece: id, round: p.rounds + 1, gap: p.lastGap, last: p.lastResult };
       }
     }
     const pending = [];
