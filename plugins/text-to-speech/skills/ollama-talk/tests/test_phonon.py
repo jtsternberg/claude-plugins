@@ -218,6 +218,24 @@ class Say(unittest.TestCase):
         self.assertEqual(code, 3)
 
 
+class TmpOutputs(unittest.TestCase):
+    def test_reaps_only_old_phonon_files(self):
+        with TemporaryDirectory() as tmp, mock.patch.object(ph, "TMP_DIR", Path(tmp)):
+            old, fresh, other = (Path(tmp) / n for n in
+                                 ("phonon-1-1.wav", "phonon-2-2.wav", "keep-me.wav"))
+            for f in (old, fresh, other):
+                f.write_bytes(b"x")
+            day_ago = ph.time.time() - ph.REAP_AFTER_SECONDS - 60
+            ph.os.utime(old, (day_ago, day_ago))
+            ph.os.utime(other, (day_ago, day_ago))
+            ph.reap_old_outputs()
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()),
+                             ["keep-me.wav", "phonon-2-2.wav"])
+
+    def test_default_name_carries_pid(self):
+        self.assertTrue(ph.default_out().stem.endswith(f"-{ph.os.getpid()}"))
+
+
 class BaseUrl(unittest.TestCase):
     def test_host_forms(self):
         cases = {"": "http://localhost:11434", "0.0.0.0": "http://localhost:11434",

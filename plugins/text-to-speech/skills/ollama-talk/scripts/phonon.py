@@ -207,8 +207,24 @@ def wav_seconds(path):
         return w.getnframes() / float(w.getframerate())
 
 
+TMP_DIR = Path("/tmp")
+REAP_AFTER_SECONDS = 24 * 3600
+
+
 def default_out():
-    return Path("/tmp") / f"phonon-{int(time.time())}.wav"
+    # The pid keeps two sessions speaking in the same second from sharing a name.
+    return TMP_DIR / f"phonon-{int(time.time())}-{os.getpid()}.wav"
+
+
+def reap_old_outputs(now=None):
+    """Playback copies pile up in a machine-wide dir; drop ones older than a day."""
+    cutoff = (now or time.time()) - REAP_AFTER_SECONDS
+    for path in TMP_DIR.glob("phonon-*.wav"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError:
+            pass
 
 
 def ffmpeg_cmd(src, dst, speed):
@@ -266,7 +282,11 @@ def cmd_say(args):
         raise Fail("Text is empty")
     tag = resolve_tag(args.tag)
     voice = match_voice(args.voice, tag_voices(tag))
-    out = Path(args.out).expanduser() if args.out else default_out()
+    if args.out:
+        out = Path(args.out).expanduser()
+    else:
+        reap_old_outputs()
+        out = default_out()
     play = args.play or not args.out
     needs_ffmpeg = args.speed != 1 or out.suffix.lower() != ".wav"
     if needs_ffmpeg and not shutil.which("ffmpeg"):

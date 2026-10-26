@@ -46,7 +46,7 @@ this tag lacks. Never pass a voice that is not in the plain (non-`--all`) list.
 
 Choose the one voice whose description best fits the vibe, and tell the user which
 voice you picked and why in a few words. If nothing fits well, say so and name the
-closest. The English tag also carries 12 character voices (`--locale characters`:
+closest. The English tag also carries character voices (`--locale characters`:
 "Captain Silas Blackwater", "The Snow Queen", ...) for storytelling requests; they
 have no gender or age in the catalog, so a `--gender` filter drops them. Names can
 contain spaces, so always quote `--voice`.
@@ -62,7 +62,8 @@ SKILL_DIR="${CLAUDE_SKILL_DIR}"
 python3 "$SKILL_DIR/scripts/phonon.py" say --voice "Maeve" --speed 1.25 "Text to read."
 ```
 
-- **Playback vs. file.** Without `--out` it plays and keeps `/tmp/phonon-<epoch>.wav`.
+- **Playback vs. file.** Without `--out` it plays and keeps `/tmp/phonon-<epoch>-<pid>.wav`
+  (copies older than a day are cleaned up on the next run).
   With `--out path.wav|.mp3|.m4a` it only writes; add `--play` to do both.
 - **Speed.** Phonon has no speed control of its own, so `--speed` re-times the WAV with
   ffmpeg's `atempo` (pitch preserved). Map words to numbers: "a bit faster" 1.15–1.25,

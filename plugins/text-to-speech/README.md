@@ -18,7 +18,7 @@ claude plugin install text-to-speech@jtsternberg
 ## Prerequisites
 
 - **[Ollama](https://ollama.com)** 0.40.9 or later, running.
-- `ollama pull phonon`. This is the 31M English model (Apache 2.0) with 37 named voices plus `default`. The `:de`, `:es`, `:fr`, `:pt`, `:multilingual` and `:40m-en` tags are 40M models under CC BY-NC, so non-commercial use only. `phonon:en` carries only the `default` voice.
+- `ollama pull phonon`. This is the 31M English model (Apache 2.0) and the one with named voices; `phonon.py voices` lists them. The `:de`, `:es`, `:fr`, `:pt`, `:multilingual` and `:40m-en` tags are 40M models under CC BY-NC, so non-commercial use only. `phonon:en` carries only the `default` voice.
 - `ffmpeg`, needed only for speed changes and MP3/M4A output: `brew install ffmpeg`.
 - macOS `afplay` for playback. On other systems, write a file with `--out`.
 
@@ -31,7 +31,7 @@ python3 skills/ollama-talk/scripts/phonon.py say --voice "Imogen" --speed 1.25 "
 python3 skills/ollama-talk/scripts/phonon.py say --voice "The Snow Queen" --file story.txt --out story.mp3
 ```
 
-Without `--out`, `say` plays the audio and keeps a copy at `/tmp/phonon-<epoch>.wav`.
+Without `--out`, `say` plays the audio and keeps a copy at `/tmp/phonon-<epoch>-<pid>.wav`. Copies older than a day are removed on the next run.
 
 ## Structure
 
@@ -42,7 +42,7 @@ plugins/text-to-speech/
 └── skills/
     └── ollama-talk/
         ├── SKILL.md
-        ├── references/voices.jsonl   ← Gradium voice catalog (102 voices)
+        ├── references/voices.jsonl   ← Gradium voice catalog
         ├── scripts/phonon.py          ← stdlib-only CLI over the Ollama API
         └── tests/test_phonon.py
 ```
