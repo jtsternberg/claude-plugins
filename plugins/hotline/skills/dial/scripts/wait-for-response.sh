@@ -32,9 +32,10 @@
 #   herdr reports native lifecycle states, so `herdr agent wait` replaces the 2s
 #   screen poll as the when-to-read gate, and transcript-extract.sh then decides
 #   what the transcript MEANS exactly as above — same nonce/STATUS bracketing, same
-#   0/3/4 contract, plus one outcome only a lifecycle can report: exit 5 when the
+#   0/3/4 contract, plus two outcomes only a lifecycle can report: exit 5 when the
 #   agent settles `blocked` with no STATUS for our nonce (it is waiting on a human,
-#   not on time). There is NO screen-scrape tier: a claude REPL runs on the
+#   not on time), and exit 6 when it settles `idle`/`done` with no STATUS and the
+#   transcript says its turn ended (see exit 6 below). There is NO screen-scrape tier: a claude REPL runs on the
 #   terminal's alternate screen, whose rows never enter herdr's scrollback, so an
 #   unconfirmable herdr call is reported as unconfirmable rather than scraped.
 #   Nothing is closed afterwards — outliving disconnects is the point of herdr.
@@ -145,7 +146,15 @@
 #     transcript and no terminal STATUS before the wait exits 6. 0 disables this
 #     quiet-window check; the API-error-row check is always on. A callee that ended
 #     its turn to wait on its own background work looks the same from outside,
-#     which is why 6 is resumable rather than a verdict. (claude-plugins-vw0f)
+#     which is why 6 is resumable rather than a verdict. Growth in the session's
+#     subagent transcripts (<session>/subagents/*.jsonl) counts as activity, so a
+#     callee waiting on its own Agent subagents is not quiet; a REMOTE call reads
+#     only the main-transcript mirror and does not see them. (claude-plugins-vw0f)
+#   HOTLINE_HERDR_STALL_SETTLE — herdr only: seconds between the two settled reads
+#     that must both find the turn ended on an API error before the wait exits 6
+#     (default 5). Claude Code sometimes auto-continues after an error row, writing
+#     the next assistant row or tool_result seconds later with no user row between;
+#     one read inside that gap is not a verdict. (claude-plugins-vw0f)
 # =============================================================================
 set -euo pipefail
 
@@ -179,6 +188,7 @@ POLL_SLEEP="${HOTLINE_POLL_SLEEP:-$POLL_INTERVAL}"
 # (claude-plugins-mrpi)
 PREEMPT_GRACE="${HOTLINE_PREEMPT_GRACE:-180}"
 STALL_SECONDS="${HOTLINE_STALL_SECONDS:-600}"
+STALL_SETTLE="${HOTLINE_HERDR_STALL_SETTLE:-5}"
 # Transcript mode: how long to wait for the transcript to show ANY evidence the
 # nonce reached the callee (user record, queued-command injection, enqueue, or a
 # STATUS naming our call_id — see transcript-extract.sh) before asking the input
@@ -528,6 +538,32 @@ if $HERDR_MODE; then
         end' "$1" 2>/dev/null | grep -qx true
   }
 
+  # The bytes the callee has written: its transcript plus, locally, its subagents'
+  # transcripts beside it. A callee that ended its turn to wait on its own Agent
+  # subagents sits `idle` with a flat main transcript while they work; only their
+  # files show it. A remote call has only the main-transcript mirror.
+  activity_size() {  # <transcript>
+    {
+      wc -c < "$1"
+      local d="${1%.jsonl}/subagents"
+      if ! hotline_remote_active && [[ -d "$d" ]]; then
+        find "$d" -maxdepth 1 -type f -name '*.jsonl' -exec wc -c {} + || true
+      fi
+    } 2>/dev/null | awk '$2 != "total" { s += $1 } END { print s + 0 }'
+  }
+
+  # The API-error verdict must survive a second settled read with the transcript
+  # unchanged: Claude Code can auto-continue after the error row (an assistant row
+  # or tool_result 0.2–3s later, no user row between), so the first read alone can
+  # land inside a turn that is still going.
+  api_stall_confirmed() {  # <transcript> <size at the first read>
+    sleep "$STALL_SETTLE"
+    herdr_agent_status "$AGENT"; LAST_STATUS="$HERDR_AGENT_STATUS"
+    [[ "$LAST_STATUS" == "idle" || "$LAST_STATUS" == "done" ]] || return 1
+    [[ "$(wc -c < "$1" 2>/dev/null | tr -d '[:space:]')" == "$2" ]] || return 1
+    turn_ended_on_api_error "$1"
+  }
+
   report_stalled() {  # report_stalled <condition sentence>
     local target
     target=$(cat "$CALL_DIR/cwd.txt" 2>/dev/null || echo "<the same target>")
@@ -559,8 +595,8 @@ if $HERDR_MODE; then
   # terminal STATUS and then block (on the next thing it wants to do), and an answer
   # on disk outranks the lifecycle every time.
   BLOCKED_SETTLE=false
-  # Quiet-window state: the transcript size last seen, and the H_ELAPSED at which
-  # the callee was last either growing its transcript or not settled. API_CHECKED_SIZE
+  # Quiet-window state: the activity size last seen (activity_size), and the
+  # H_ELAPSED at which the callee was last either growing it or not settled. API_CHECKED_SIZE
   # keeps the API-error scan to once per transcript change.
   LAST_SIZE=-1
   QUIET_SINCE=0
@@ -735,11 +771,16 @@ if $HERDR_MODE; then
     if $H_SUBMITTED && [[ -n "$LIVE_TRANSCRIPT" ]] \
        && [[ "$GATE_STATE" == "idle" || "$GATE_STATE" == "done" ]]; then
       T_SIZE=$(wc -c < "$LIVE_TRANSCRIPT" 2>/dev/null | tr -d '[:space:]') || T_SIZE=0
-      if [[ "$T_SIZE" != "$LAST_SIZE" ]]; then LAST_SIZE="$T_SIZE"; QUIET_SINCE=$H_ELAPSED; fi
+      A_SIZE=$(activity_size "$LIVE_TRANSCRIPT")
+      if [[ "$A_SIZE" != "$LAST_SIZE" ]]; then LAST_SIZE="$A_SIZE"; QUIET_SINCE=$H_ELAPSED; fi
       if [[ "$T_SIZE" != "$API_CHECKED_SIZE" ]]; then
         API_CHECKED_SIZE="$T_SIZE"
-        turn_ended_on_api_error "$LIVE_TRANSCRIPT" \
-          && report_stalled "its last turn ended on an API error (a synthetic \`isApiErrorMessage\` row, e.g. \"API Error: Connection lost mid-response\") and herdr reports it '$GATE_STATE'."
+        if turn_ended_on_api_error "$LIVE_TRANSCRIPT"; then
+          api_stall_confirmed "$LIVE_TRANSCRIPT" "$T_SIZE" \
+            && report_stalled "its last turn ended on an API error (a synthetic \`isApiErrorMessage\` row, e.g. \"API Error: Connection lost mid-response\") and herdr reports it '$LAST_STATUS' on two settled reads."
+          # Refuted: the next settled iteration scans again, size changed or not.
+          API_CHECKED_SIZE=-1
+        fi
       fi
       if [[ "$STALL_SECONDS" -gt 0 && $((H_ELAPSED - QUIET_SINCE)) -ge "$STALL_SECONDS" ]]; then
         report_stalled "herdr has reported it '$GATE_STATE' with an unchanged transcript for $((H_ELAPSED - QUIET_SINCE))s (HOTLINE_STALL_SECONDS=$STALL_SECONDS)."

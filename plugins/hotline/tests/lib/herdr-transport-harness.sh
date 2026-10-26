@@ -196,6 +196,10 @@ trap cleanup EXIT
 #                             split delivery is only confirmable if both halves
 #                             arrived, which is the point
 #   HERDR_STUB_WAIT_RC        exit code for `agent wait` (default 0)
+#   HERDR_STUB_GET_HOOK       shell command run on every `agent get`, with
+#                             HERDR_STUB_CALL_N set to that call's 1-based count —
+#                             the callee writing to disk BETWEEN two reads of it
+#   HERDR_STUB_WAIT_HOOK      the same, run on every `agent wait`
 #   HERDR_STUB_FOCUS_FAIL=1   `agent focus` returns a server error — a conference
 #                             whose pane could not be focused is still a live call
 # ---------------------------------------------------------------------------
@@ -331,6 +335,11 @@ case "$1 ${2:-}" in
 
   "agent get")
     NAME="$3"
+    if [[ -n "${HERDR_STUB_GET_HOOK:-}" ]]; then
+      N=0; [[ -f "$ST/get_hooks" ]] && N=$(cat "$ST/get_hooks")
+      N=$((N + 1)); echo "$N" > "$ST/get_hooks"
+      HERDR_STUB_CALL_N=$N bash -c "$HERDR_STUB_GET_HOOK"
+    fi
     [[ "${HERDR_STUB_AGENT_GONE:-}" == "1" ]] && err agent_not_found "agent target $NAME not found"
     for _gone in ${HERDR_STUB_GONE_NAMES:-}; do
       [[ "$NAME" == "$_gone" ]] && err agent_not_found "agent target $NAME not found"
@@ -425,6 +434,11 @@ case "$1 ${2:-}" in
     exit 0 ;;
 
   "agent wait")
+    if [[ -n "${HERDR_STUB_WAIT_HOOK:-}" ]]; then
+      N=0; [[ -f "$ST/wait_hooks" ]] && N=$(cat "$ST/wait_hooks")
+      N=$((N + 1)); echo "$N" > "$ST/wait_hooks"
+      HERDR_STUB_CALL_N=$N bash -c "$HERDR_STUB_WAIT_HOOK"
+    fi
     jq -nc --arg s "${HERDR_STUB_WAIT_STATUS:-${HERDR_STUB_STATUS:-done}}" \
       '{id:"cli:agent:wait",result:{agent:{agent_status:$s}}}'
     exit "${HERDR_STUB_WAIT_RC:-0}" ;;

@@ -482,14 +482,18 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
 - Not a timeout. herdr settled the callee `idle`/`done` and its transcript has no
   terminal STATUS for the nonce, so its turn ended without answering. `error.txt`
   names which signal fired: its last assistant row after your prompt is an API-error
-  row (`isApiErrorMessage`, e.g. `API Error: Connection lost mid-response`), or the
-  transcript has not grown for `HOTLINE_STALL_SECONDS` (default 600) while settled.
+  row (`isApiErrorMessage`, e.g. `API Error: Connection lost mid-response`) on two
+  settled reads `HOTLINE_HERDR_STALL_SETTLE` apart, or the transcript has not grown
+  for `HOTLINE_STALL_SECONDS` (default 600) while settled.
 - **Resume with a follow-up dial to the same target.** hotline re-targets the same
   agent (name in `<call_dir>/herdr_agent.txt`) and the session continues with its
   context intact. Say its last turn ended early and ask it to finish and emit its
   STATUS. Do not re-dial `--fresh`: that starts a callee with none of the work.
 - A callee idle on purpose — it ended its turn to wait on its own background agents
-  or commands — looks the same from outside. The call is marked resumable, so
+  or commands — looks the same from outside. On a local call, growth in its Agent
+  subagents' transcripts (`<session>/subagents/*.jsonl`) counts as activity; a
+  `--remote` call sees only the main transcript, and background Bash work is
+  invisible to both. The call is marked resumable, so
   re-running `wait-for-response.sh` on the same call_dir keeps waiting with a fresh
   budget and sends nothing. Raise `HOTLINE_STALL_SECONDS` (or set `0`) for callees
   that work that way.

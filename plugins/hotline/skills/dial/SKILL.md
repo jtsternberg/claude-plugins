@@ -503,8 +503,9 @@ Exit codes that are not failures:
   permissions knob bypasses. See § Environment knobs.)
 - **Exit 6 — the callee's turn ended without answering** (herdr calls only). herdr
   settled it `idle`/`done`, no STATUS for your nonce, and either its last turn ended
-  on an API error (`API Error: Connection lost mid-response` and the like) or its
-  transcript sat unchanged for `HOTLINE_STALL_SECONDS` (default 600). It will not
+  on an API error (`API Error: Connection lost mid-response` and the like, seen on
+  two settled reads) or its transcript — and, locally, its subagents' transcripts —
+  sat unchanged for `HOTLINE_STALL_SECONDS` (default 600). It will not
   answer on its own. **Resume with a follow-up dial to the same target** — hotline
   re-targets the same agent and the session continues with its context; tell it the
   last turn ended early and to finish. If it was only idle waiting on its own
@@ -686,8 +687,13 @@ above still does that:
   before the response wait re-reads the transcript (default 30000).
 - **`HOTLINE_STALL_SECONDS=<seconds>`** — how long a herdr callee may sit settled
   `idle`/`done` with an unchanging transcript and no STATUS before the response wait
-  exits 6 (default 600; `0` turns this window off). The API-error check that also
+  exits 6 (default 600; `0` turns this window off). Growth in the session's
+  `subagents/*.jsonl` counts as activity on a local call; a `--remote` call reads
+  only the main transcript and does not see them. The API-error check that also
   exits 6 is always on.
+- **`HOTLINE_HERDR_STALL_SETTLE=<seconds>`** — pause between the two settled reads
+  that must both find the turn ended on an API error before the wait exits 6
+  (default 5). Claude Code can auto-continue seconds after an error row.
 - **`HOTLINE_HERDR_KEEP_FAILED_PANE=1`** — keep the pane after a failed launch. Off
   by default (a failed dial should leak nothing); on, the pane's scrollback is the
   only evidence of a launch that died before the agent was detected.
