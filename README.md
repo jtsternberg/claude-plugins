@@ -16,7 +16,7 @@ installing.
 
 ### Claude Code
 
-Add the marketplace and install any of its 38 listed plugins:
+Add the marketplace and install any of its 39 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
