@@ -60,6 +60,79 @@ for bad in "NOEQUALS" "1BAD=x" "BAD-KEY=x" "=x" "EMPTY=" "K=a K=b"; do
   check "'$bad' is refused, with a reason" $? "rc=$rc err=$CALLEE_ENV_ERR"
 done
 
+# ---------------------------------------------------------------------------
+# HOTLINE_CALLEE_ENV_FORWARD: copied by name from the dialer's own environment, so
+# a value may be empty or hold spaces — the grammar above cannot carry either.
+# ---------------------------------------------------------------------------
+unset HOTLINE_CALLEE_ENV_FORWARD HOTLINE_CALLEE_GIT_CONFIG
+json=$(FWD_A="has spaces" FWD_B="" HOTLINE_CALLEE_ENV_FORWARD="FWD_A FWD_B FWD_ABSENT" \
+  callee_env_settings_json)
+[[ "$json" == '{"env":{"FWD_A":"has spaces","FWD_B":""}}' ]]
+check "forward: set names are copied verbatim (spaces, empty), unset names skipped" $? "json=$json"
+
+json=$(FWD_A=fwd HOTLINE_CALLEE_ENV_FORWARD="FWD_A" HOTLINE_CALLEE_ENV="FWD_A=explicit" \
+  callee_env_settings_json)
+[[ "$json" == '{"env":{"FWD_A":"explicit"}}' ]]
+check "forward: an explicit HOTLINE_CALLEE_ENV pair wins over a forwarded value" $? "json=$json"
+
+[[ -z "$(HOTLINE_CALLEE_ENV_FORWARD="NOT_SET_ANYWHERE" callee_env_settings_json)" ]]
+check "forward: only absent names → no env block at all" $? ""
+
+HOTLINE_CALLEE_ENV_FORWARD="OK BAD-NAME" callee_env_validate
+rc=$?
+[[ $rc -ne 0 && "$CALLEE_ENV_ERR" == *"HOTLINE_CALLEE_ENV_FORWARD"*"BAD-NAME"* ]]
+check "forward: a non-variable name is refused, naming the knob and the name" $? \
+  "rc=$rc err=$CALLEE_ENV_ERR"
+
+# ---------------------------------------------------------------------------
+# HOTLINE_CALLEE_GIT_CONFIG: the dialer's GIT_CONFIG_* entries whose key matches a
+# glob, renumbered from 0 — and ident config mirrored into GIT_AUTHOR_*/COMMITTER_*.
+# The fixture is a GitHub App agent's own entries with a second tool's block after.
+# ---------------------------------------------------------------------------
+git_fixture() {
+  env GIT_CONFIG_COUNT=6 \
+    GIT_CONFIG_KEY_0=credential.https://github.com.helper GIT_CONFIG_VALUE_0= \
+    GIT_CONFIG_KEY_1=credential.https://github.com.helper \
+    GIT_CONFIG_VALUE_1='!/home/u/bin/gh-app-token git-credential' \
+    GIT_CONFIG_KEY_2=author.name GIT_CONFIG_VALUE_2='app[bot]' \
+    GIT_CONFIG_KEY_3=committer.email GIT_CONFIG_VALUE_3='1+app[bot]@users.noreply.github.com' \
+    GIT_CONFIG_KEY_4=user.name GIT_CONFIG_VALUE_4='Other Tool' \
+    GIT_CONFIG_KEY_5=nostr.keyfile GIT_CONFIG_VALUE_5=/tmp/x/.key \
+    "$@"
+}
+json=$(git_fixture HOTLINE_CALLEE_GIT_CONFIG="credential.https://github.com.helper author.* committer.*" \
+  bash -c "source '$HOTLINE_DIR/scripts/callee-env.sh'; callee_env_settings_json")
+jq -e '.env == {
+    GIT_CONFIG_COUNT:"4",
+    GIT_CONFIG_KEY_0:"credential.https://github.com.helper", GIT_CONFIG_VALUE_0:"",
+    GIT_CONFIG_KEY_1:"credential.https://github.com.helper",
+    GIT_CONFIG_VALUE_1:"!/home/u/bin/gh-app-token git-credential",
+    GIT_CONFIG_KEY_2:"author.name", GIT_CONFIG_VALUE_2:"app[bot]",
+    GIT_CONFIG_KEY_3:"committer.email", GIT_CONFIG_VALUE_3:"1+app[bot]@users.noreply.github.com",
+    GIT_AUTHOR_NAME:"app[bot]", GIT_COMMITTER_EMAIL:"1+app[bot]@users.noreply.github.com"
+  }' <<<"$json" >/dev/null 2>&1
+check "git config: matching entries kept in order and renumbered, the rest dropped, ident mirrored" $? \
+  "json=$json"
+
+json=$(git_fixture HOTLINE_CALLEE_GIT_CONFIG="core.*" \
+  bash -c "source '$HOTLINE_DIR/scripts/callee-env.sh'; callee_env_settings_json")
+[[ -z "$json" ]]
+check "git config: no entry matches → nothing (never a GIT_CONFIG_COUNT=0 that wipes the host's)" $? \
+  "json=$json"
+
+[[ -z "$(HOTLINE_CALLEE_GIT_CONFIG="author.*" callee_env_settings_json)" ]]
+check "git config: a dialer with no GIT_CONFIG_COUNT forwards nothing" $? ""
+
+GIT_CONFIG_COUNT=two HOTLINE_CALLEE_GIT_CONFIG="author.*" callee_env_validate
+rc=$?
+[[ $rc -ne 0 && "$CALLEE_ENV_ERR" == *"GIT_CONFIG_COUNT"* ]]
+check "git config: a non-numeric GIT_CONFIG_COUNT is refused" $? "rc=$rc err=$CALLEE_ENV_ERR"
+
+GIT_CONFIG_COUNT=1 HOTLINE_CALLEE_GIT_CONFIG="author.*" callee_env_validate
+rc=$?
+[[ $rc -ne 0 && "$CALLEE_ENV_ERR" == *"GIT_CONFIG_KEY_0"* ]]
+check "git config: a COUNT naming a missing GIT_CONFIG_KEY_n is refused" $? "rc=$rc err=$CALLEE_ENV_ERR"
+
 # ===========================================================================
 # Args stage: refused before anything is resolved or launched.
 # ===========================================================================
@@ -133,6 +206,27 @@ call_dir2=$(jq -r '.call_dir // empty' <<<"$out2" 2>/dev/null)
    && "$(jq -r .callee_env_note <<<"$out2")" == *"live callee"* ]]
 check "live-surface follow-up: callee_env=not-redelivered, with the note saying why" $? \
   "out2=$out2 stderr=$(cat "$t/err2.txt")"
+
+# The typed launch line %q-quotes the block; a forwarded value with a space and a
+# leading `!` must come out of that quoting unchanged.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\nClaude Code v2.1.221\n' > "$t/screen.txt"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-ce-6" HOTLINE_PENDING_DIR="$t/pending" \
+  FWD_HELPER='!/home/u/bin/gh-app-token git-credential' FWD_EMPTY="" \
+  HOTLINE_CALLEE_ENV_FORWARD="FWD_HELPER FWD_EMPTY" \
+  bash "$DIAL" --target "$t/target" --mode work_order --placement detached \
+    --label "probe label" --prompt "first contact" --boot-timeout 8 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" > "$t/launch.sh"
+argv_claude "$t/runbin" "$t/argv.log"
+PATH="$t/runbin:$PATH" bash "$t/launch.sh" >/dev/null 2>&1
+jq -e '.env == {FWD_HELPER:"!/home/u/bin/gh-app-token git-credential", FWD_EMPTY:""}' \
+  <<<"$(settings_of "$t/argv.log")" >/dev/null 2>&1
+check "cmux: forwarded values with a space, a '!' and an empty string survive the launch script" $? \
+  "out=$out launch=$(cat "$t/launch.sh") argv=$(cat "$t/argv.log" 2>/dev/null)"
 
 # ===========================================================================
 # cmux conference: cmux-call.sh's own launch script carries it too.

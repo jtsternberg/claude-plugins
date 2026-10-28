@@ -597,6 +597,20 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   set it on those follow-ups too). Values ride the callee's argv, where `ps` shows
   them: use it for markers such as a pipeline role or run id, never secrets. Unset,
   no flag is passed and the payload has no `callee_env` key.
+- **`HOTLINE_CALLEE_ENV_FORWARD="NAME NAME2"`** — copy these variables from *your
+  own* environment into that same block, values verbatim (empty and spaced values
+  included). A name you don't have set is skipped, so one global setting serves
+  dialers with and without it — e.g. `GH_APP_ID GH_APP_INSTALLATION_ID
+  GH_APP_KEY_FILE` hands a callee its dialer's GitHub App. Same argv exposure: never
+  name a variable holding a secret's *value*.
+- **`HOTLINE_CALLEE_GIT_CONFIG="<key-glob> ..."`** — forward your `GIT_CONFIG_KEY_n`/
+  `GIT_CONFIG_VALUE_n` entries whose key matches a glob, in order, renumbered with
+  their own `GIT_CONFIG_COUNT`; the rest are dropped (another tool's block — a
+  signing key in a per-process `/tmp` dir — must not follow you). Matched
+  `author.*`/`committer.*` name and email are also set as `GIT_AUTHOR_*`/
+  `GIT_COMMITTER_*`, because git ranks those env vars above config and a callee's
+  host (a herdr server unit) may set them to a fallback identity. No match forwards
+  nothing. Precedence, last wins: forwarded, git config, then `HOTLINE_CALLEE_ENV`.
 - **`HOTLINE_CALLER_SESSION_ID=<id>`** — supply the caller identity directly.
   Skips the fingerprint dance entirely, so `replay` never happens. This is the
   escape hatch when identity discovery fails.

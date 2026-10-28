@@ -727,6 +727,29 @@ jq -e '.env == {AGENTIC_DEV_ROLE:"builder", AGENTIC_DEV_RUN:"42"}' \
 check "HOTLINE_CALLEE_ENV reaches \`agent start\` as --settings with that env block" $? \
   "out=$out herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
 
+# The shape a GitHub App agent's dial takes: its App vars forwarded, its own git
+# config kept and another tool's entry dropped, and the ident mirrored into env so
+# the herdr server's GIT_AUTHOR_* fallback cannot outrank it.
+t=$(new_env)
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_PANE_ID="w1:p1" \
+      GH_APP_ID=123 GIT_AUTHOR_NAME=fallback-bot \
+      GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=credential.https://github.com.helper \
+      GIT_CONFIG_VALUE_0='!/home/u/bin/gh-app-token git-credential' \
+      GIT_CONFIG_KEY_1=author.name GIT_CONFIG_VALUE_1='app[bot]' \
+      GIT_CONFIG_KEY_2=nostr.keyfile GIT_CONFIG_VALUE_2=/tmp/x/.key \
+      HOTLINE_CALLEE_ENV_FORWARD="GH_APP_ID" \
+      HOTLINE_CALLEE_GIT_CONFIG="credential.https://github.com.helper author.*" \
+      bash "$HERDR_ASYNC" --cwd "$t/target" --prompt "hi" 2>/dev/null)
+jq -e '.env == {GH_APP_ID:"123", GIT_CONFIG_COUNT:"2",
+    GIT_CONFIG_KEY_0:"credential.https://github.com.helper",
+    GIT_CONFIG_VALUE_0:"!/home/u/bin/gh-app-token git-credential",
+    GIT_CONFIG_KEY_1:"author.name", GIT_CONFIG_VALUE_1:"app[bot]",
+    GIT_AUTHOR_NAME:"app[bot]"}' \
+  <<<"$(settings_from_herdr_log "$t/herdr.log")" >/dev/null 2>&1
+check "forward + git-config knobs reach \`agent start\` as one --settings env block" $? \
+  "out=$out settings=$(settings_from_herdr_log "$t/herdr.log")"
+
 t=$(new_env)
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
       HERDR_STATE="$t/state" HERDR_PANE_ID="w1:p1" \

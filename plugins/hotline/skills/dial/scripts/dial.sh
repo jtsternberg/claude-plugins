@@ -340,8 +340,15 @@ fi
 # Refused here, before anything is resolved or launched: every launcher re-checks,
 # but a malformed value caught there would fail a dial that already did the work of
 # resolving and picking a transport.
-callee_env_validate || emit_error args "HOTLINE_CALLEE_ENV: $CALLEE_ENV_ERR" \
-  "Set HOTLINE_CALLEE_ENV to space-separated KEY=VALUE pairs — variable-name keys, non-empty values with no spaces, each key once — e.g. HOTLINE_CALLEE_ENV=\"AGENTIC_DEV_ROLE=builder AGENTIC_DEV_RUN=42\". Or unset it."
+# The FORWARD and GIT_CONFIG knobs report under their own names in CALLEE_ENV_ERR.
+if ! callee_env_validate; then
+  case "$CALLEE_ENV_ERR" in
+    HOTLINE_CALLEE_*) emit_error args "$CALLEE_ENV_ERR" \
+      "HOTLINE_CALLEE_ENV_FORWARD takes space-separated variable names; HOTLINE_CALLEE_GIT_CONFIG takes git key globs and needs the dialer's own GIT_CONFIG_COUNT/KEY_n to be well-formed. Fix the named one, or unset it." ;;
+    *) emit_error args "HOTLINE_CALLEE_ENV: $CALLEE_ENV_ERR" \
+      "Set HOTLINE_CALLEE_ENV to space-separated KEY=VALUE pairs — variable-name keys, non-empty values with no spaces, each key once — e.g. HOTLINE_CALLEE_ENV=\"AGENTIC_DEV_ROLE=builder AGENTIC_DEV_RUN=42\". Or unset it. A value with a space or an empty one: export it and name it in HOTLINE_CALLEE_ENV_FORWARD." ;;
+  esac
+fi
 
 case "$PLACEMENT" in
   side|detached) ;;
@@ -807,8 +814,9 @@ if $REFRESH_IDENTITY; then
   # The callee's system-prompt override is for the user's delegated work, not for
   # hotline's own identity plumbing — this pickup is a throwaway internal call, so
   # unset the knob for it rather than steering a mechanical /hotline-pickup. Same for
-  # HOTLINE_CALLEE_ENV: its markers label delegated work, and this is not that.
+  # the HOTLINE_CALLEE_* env knobs: they equip delegated work, and this is not that.
   if HOTLINE_CLAUDE_APPEND_SYSTEM_PROMPT_FILE= HOTLINE_CALLEE_ENV= \
+     HOTLINE_CALLEE_ENV_FORWARD= HOTLINE_CALLEE_GIT_CONFIG= \
      bash "$DIAL_SCRIPTS/headless-call.sh" --cwd "$TARGET_PATH" \
        --prompt "/hotline:hotline-pickup --fresh" >/dev/null 2>"$ERR_FILE"; then
     add_fallback "identity→refreshed"
@@ -1321,7 +1329,7 @@ emit_connected() {  # emit_connected <awaiting_response:true|false>
      + (if $remote_pane   == "" then {} else {remote_pane:$remote_pane} end)
      + (if $callee_env == "" then {}
         elif $callee_env == "not-redelivered" then {callee_env:$callee_env,
-          callee_env_note:"follow-up into a live callee: its environment was fixed when it launched, so HOTLINE_CALLEE_ENV was not delivered this turn"}
+          callee_env_note:"follow-up into a live callee: its environment was fixed when it launched, so the HOTLINE_CALLEE_* env knobs were not delivered this turn"}
         else {callee_env:$callee_env} end)'
   exit 0
 }
