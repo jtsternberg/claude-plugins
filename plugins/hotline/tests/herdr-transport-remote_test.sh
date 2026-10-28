@@ -877,4 +877,19 @@ jq -e '.env == {AGENTIC_DEV_ROLE:"builder", AGENTIC_DEV_RUN:"42"}' <<<"$settings
 check "HOTLINE_CALLEE_ENV crosses the ssh hop intact as the remote \`agent start\`'s --settings" $? \
   "out=$out settings=$settings herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
 
+# Forwarded values carry what the KEY=VALUE grammar cannot — a space, a leading
+# `!`, an empty string — and those are the bytes a re-parse on the far side breaks.
+t=$(remote_env)
+out=$(rcheck "$t" HERDR_PANE_ID="w1:p1" FWD_HELPER='!/home/u/bin/gh-app-token git-credential' \
+      FWD_EMPTY="" HOTLINE_CALLEE_ENV_FORWARD="FWD_HELPER FWD_EMPTY" \
+      -- "$HERDR_ASYNC" --cwd "$t/target" --prompt "hi")
+line=$(grep 'agent start' "$t/herdr.log" 2>/dev/null | tail -1)
+settings=""; prev=""
+eval "argv=($line)"
+for a in ${argv[@]+"${argv[@]}"}; do [[ "$prev" == "--settings" ]] && settings="$a"; prev="$a"; done
+jq -e '.env == {FWD_HELPER:"!/home/u/bin/gh-app-token git-credential", FWD_EMPTY:""}' \
+  <<<"$settings" >/dev/null 2>&1
+check "forwarded values with a space, a '!' and an empty string cross the ssh hop intact" $? \
+  "out=$out settings=$settings herdr calls: $(cat "$t/herdr.log" 2>/dev/null)"
+
 herdr_suite_finish
