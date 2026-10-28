@@ -407,8 +407,8 @@ test('explicit-only inventory has mirrored Codex policy and risk classification'
 	// `maestro:your-cue` can route to it itself; `generating-blog-images:blog-image-prompts`
 	// is model-invocable so a publishing agent can generate featured-image prompts. Update the number *and*
 	// regenerate docs/codex/explicit-only-invocation-policy.md when this changes.
-	assert.equal(report.explicitOnly.length, 33);
-	assert.equal(report.codexExplicitOnly.length, 33);
+	assert.equal(report.explicitOnly.length, 34);
+	assert.equal(report.codexExplicitOnly.length, 34);
 });
 
 test('explicit-only policy doc agrees with the auditor it summarizes', () => {

@@ -16,7 +16,7 @@ installing.
 
 ### Claude Code
 
-Add the marketplace and install any of its 38 listed plugins:
+Add the marketplace and install any of its 39 listed plugins:
 
 ```bash
 claude plugin marketplace add jtsternberg/claude-plugins
@@ -50,7 +50,7 @@ installation, then mention a skill as `$<plugin>:<skill-name>`; for example,
 
 To install one self-contained repository skill instead of a whole plugin, see
 [standalone Codex skills](docs/codex/standalone-skills.md). For commands,
-updates, catalog scope, and all 39 plugin names, see the
+updates, catalog scope, and all 40 plugin names, see the
 [compatibility guide](docs/compatibility.md).
 
 ---
@@ -59,7 +59,7 @@ updates, catalog scope, and all 39 plugin names, see the
 
 These are selected plugins and workflows. The
 [support matrix](docs/compatibility.md#plugin-support-matrix) is the complete
-39-name inventory and the authority for harness availability.
+40-name inventory and the authority for harness availability.
 
 ### Skills
 
@@ -106,6 +106,11 @@ Creates self-contained HTML slide presentations from talk prompts, outlines, or 
 Exports HTML slide presentations to PDF or PNG screenshots using browser automation. Companion to [slides-presentation](#-slides-presentation).
 
 **Install:** `claude plugin install export-presentation@jtsternberg`
+
+#### 🥊 [gauntlet](plugins/gauntlet)
+The Gauntlet Loop as a skill: build a piece, capture what it really produces, put it next to a reference that is already excellent, and let a fresh, harsh critic pick the better one without knowing which is which. The one gap it names goes to the next builder, and the loop repeats until the piece wins. `setup` writes the run's spec (goal, bar, criteria, capture harness); `run` drives it, with `--status`, `--stop` and `--resume`. Builders and critics are fresh hotline callees on herdr, and every round is a commit on a `gauntlet/<run-id>` branch. Requires `hotline` and `herdr`.
+
+**Install:** `claude plugin install gauntlet@jtsternberg`
 
 #### 📞 [hotline](plugins/hotline)
 Cross-workspace communication for agent sessions — dial another workspace to ask questions, delegate work, or collaborate. Claude Code and Codex can place calls; the current launch transport starts Claude Code receivers. Caller identity comes from Claude Code's native `CLAUDE_CODE_SESSION_ID` (or Codex's thread ID), with a [bundled fingerprint fallback](plugins/hotline/SESSION-ID-DISCOVERY.md) for older clients.

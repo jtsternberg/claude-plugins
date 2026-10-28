@@ -11,6 +11,7 @@ export const RISK_BY_SKILL = new Map([
 	['beads-workflow:tackle-epic', ['local-side-effect', 'Claims and closes Beads work, edits files, commits, and prepares PRs.']],
 	['bible:bible-nlt-lookup', ['read-only-or-advisory', 'Reads scripture references from the NLT API.']],
 	['export-presentation:export-presentation', ['local-side-effect', 'Runs browser export flows and writes PDF/PNG artifacts.']],
+	['gauntlet:run', ['local-side-effect', 'Dials builder and critic agents that commit to a local run branch; never pushes.']],
 	['git-commits:commit-staged', ['local-side-effect', 'Creates local Git commits from staged changes.']],
 	['git-commits:commit-unstaged', ['local-side-effect', 'Stages files and creates local Git commits.']],
 	['git-tree:create-git-tree', ['local-side-effect', 'Creates worktrees and symlinks in the local filesystem.']],
