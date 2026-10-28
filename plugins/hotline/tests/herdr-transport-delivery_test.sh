@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # herdr transport regression tests: delivery (herdr-prompt.sh), the waiters' herdr
-# branch, and blocked-state reporting (sections 3, 4, 7).
+# branch, blocked-state reporting, and stalled turns (sections 3, 4, 7, 8).
 #
 # One shard of the herdr-transport suite. What the suite pins, the stubs and
 # their knobs live in lib/herdr-transport-harness.sh; the sibling
@@ -887,5 +887,204 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
 [[ $rc -eq 1 ]] && grep -q 'Timed out' "$cd_path/error.txt"
 check "a blocked settle the confirming probe does not reproduce keeps waiting" $? \
   "rc=$rc error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
+# ===========================================================================
+echo ""
+echo "8. Stalled turns — idle, no STATUS, and nothing coming (claude-plugins-vw0f):"
+# ===========================================================================
+# A callee whose turn dies on an API error settles `idle` with no STATUS. The
+# waiter used to spend its whole budget on that and call it "slower than the
+# budget". The transcript says the turn ended; exit 6 says so and names the resume.
+
+API_ERR_ROW='{"type":"assistant","isSidechain":false,"isApiErrorMessage":true,"error":"server_error","message":{"model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"API Error: Connection lost mid-response. The response above may be incomplete."}]}}'
+
+t=$(new_env)
+NONCE="5ta11ed00000aaa1"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-1 "herdr-sess" "$NONCE" "$t/target"
+tf="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$tf" "$NONCE" "" "committed the spec"
+printf '%s\n' "$API_ERR_ROW" >> "$tf"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=idle \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_HERDR_STALL_SETTLE=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 14400 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 6 ]] && grep -q 'two settled reads' "$cd_path/error.txt" 
+check "idle after an API-error row on two settled reads, no STATUS → exit 6 at once, not the 14400s budget" $? \
+  "rc=$rc stderr=$(cat "$t/err.txt")"
+grep -q 'API error' "$cd_path/error.txt" && grep -q 'follow-up dial' "$cd_path/error.txt" \
+  && grep -q "$t/target" "$cd_path/error.txt" && grep -q 'hotline-stl-1' "$cd_path/error.txt"
+check "…error.txt names the condition and the resume move (follow-up dial, same target, same agent)" $? \
+  "error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+! grep -qi 'timed out\|slower than the budget' "$cd_path/error.txt"
+check "…and never calls it a timeout" $? "error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+grep -q 'settle=stalled' "$cd_path/waiter_timeout.txt" 2>/dev/null
+check "…marked RESUMABLE (re-running reads a later answer instead of replaying this)" $? \
+  "marker=$(cat "$cd_path/waiter_timeout.txt" 2>/dev/null)"
+
+# An API error from a PREVIOUS turn is not this turn's verdict: the row must come
+# after our nonce. Quiet window off, so only the budget can end this wait.
+t=$(new_env)
+NONCE="5ta11ed00000aaa2"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-2 "herdr-sess" "$NONCE" "$t/target"
+tf="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$t/pre.jsonl" "$NONCE" "" "working on it"
+mkdir -p "$(dirname "$tf")"
+{ printf '%s\n' "$API_ERR_ROW"; cat "$t/pre.jsonl"; } > "$tf"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=idle \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_STALL_SECONDS=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 30 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 1 ]] && grep -q 'Timed out' "$cd_path/error.txt"
+check "an API-error row BEFORE our nonce does not stall this call" $? \
+  "rc=$rc error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
+# The quiet window: settled idle, transcript unchanged, no API error row.
+t=$(new_env)
+NONCE="5ta11ed00000aaa3"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-3 "herdr-sess" "$NONCE" "$t/target"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "$NONCE" "" "ended the turn without a STATUS"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=idle \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_STALL_SECONDS=20 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 600 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 6 ]] && grep -q 'unchanged transcript' "$cd_path/error.txt" \
+  && grep -q 'HOTLINE_STALL_SECONDS=20' "$cd_path/error.txt"
+check "idle with an unchanged transcript past HOTLINE_STALL_SECONDS → exit 6 naming the window" $? \
+  "rc=$rc error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
+# HOTLINE_STALL_SECONDS=0 disables the quiet window: the old timeout path is intact.
+t=$(new_env)
+NONCE="5ta11ed00000aaa4"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-4 "herdr-sess" "$NONCE" "$t/target"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "$NONCE" "" "still going"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=idle \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_STALL_SECONDS=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 60 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 1 ]] && grep -q 'Timed out' "$cd_path/error.txt"
+check "HOTLINE_STALL_SECONDS=0 turns the quiet window off (exit 1 timeout, as before)" $? \
+  "rc=$rc error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
+# A WORKING callee is never quiet-stalled, however long its transcript sits still
+# (one long tool call writes nothing until it returns).
+t=$(new_env)
+NONCE="5ta11ed00000aaa5"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-5 "herdr-sess" "$NONCE" "$t/target"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "$NONCE" "" "running a long build"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=working \
+      HERDR_STUB_WAIT_STATUS=working \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_STALL_SECONDS=20 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 60 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 1 ]] && grep -q 'Timed out' "$cd_path/error.txt"
+check "a 'working' callee with a still transcript is not stalled (only settled states count)" $? \
+  "rc=$rc error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
+# Exit 6 is resumable: a STATUS written after it is read by a re-run on the same
+# call_dir, not replayed as the stall.
+t=$(new_env)
+NONCE="5ta11ed00000aaa6"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-6 "herdr-sess" "$NONCE" "$t/target"
+tf="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$tf" "$NONCE" "" "committed the spec"
+printf '%s\n' "$API_ERR_ROW" >> "$tf"
+stall_env=(PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log"
+           HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=idle
+           HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_HERDR_STALL_SETTLE=0)
+env "${stall_env[@]}" bash "$WAIT_RESPONSE" "$cd_path" --timeout 600 >/dev/null 2>&1; rc1=$?
+printf '{"type":"assistant","isSidechain":false,"sessionId":"herdr-sess","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id=%s\\nfinished after the nudge\\nSTATUS: WORK_COMPLETE call_id=%s"}]}}\n' \
+  "$NONCE" "$NONCE" >> "$tf"
+out=$(env "${stall_env[@]}" bash "$WAIT_RESPONSE" "$cd_path" --timeout 600 2>"$t/err.txt"); rc=$?
+[[ $rc1 -eq 6 && $rc -eq 0 ]] && grep -q 'finished after the nudge' <<<"$out"
+check "re-run on the same call_dir after exit 6 reads a later STATUS → exit 0" $? \
+  "rc1=$rc1 rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+
+# One API-error read is not a verdict: Claude Code can auto-continue seconds after
+# the error row. Here the callee writes its answer between the two settled reads
+# (the stub's first `agent get` after an `agent wait` is the confirming read).
+t=$(new_env)
+NONCE="5ta11ed00000aaa7"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-7 "herdr-sess" "$NONCE" "$t/target"
+tf="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$tf" "$NONCE" "" "committed the spec"
+printf '%s\n' "$API_ERR_ROW" >> "$tf"
+printf '{"type":"assistant","isSidechain":false,"sessionId":"herdr-sess","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id=%s\\nauto-continued past the error\\nSTATUS: WORK_COMPLETE call_id=%s"}]}}\n' \
+  "$NONCE" "$NONCE" > "$t/continued.jsonl"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=idle \
+      HERDR_STUB_WAIT_HOOK='touch "$HERDR_STATE/waited"' \
+      HERDR_STUB_GET_HOOK="[[ -f \"\$HERDR_STATE/waited\" && ! -f \"\$HERDR_STATE/grew\" ]] && { touch \"\$HERDR_STATE/grew\"; cat '$t/continued.jsonl' >> '$tf'; }; true" \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_HERDR_STALL_SETTLE=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 600 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 0 ]] && grep -q 'auto-continued past the error' <<<"$out" && [[ -f "$t/state/grew" ]]
+check "an API-error row the turn continues past before the second settled read does not exit 6" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt") error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
+# Idle, but the transcript grows between reads: not quiet, so only the budget ends it.
+t=$(new_env)
+NONCE="5ta11ed00000aaa8"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-8 "herdr-sess" "$NONCE" "$t/target"
+tf="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$tf" "$NONCE" "" "working through it"
+printf '{"type":"attachment","isSidechain":false}\n' > "$t/row.jsonl"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=idle \
+      HERDR_STUB_WAIT_HOOK="cat '$t/row.jsonl' >> '$tf'" \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_STALL_SECONDS=20 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 60 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 1 ]] && grep -q 'Timed out' "$cd_path/error.txt"
+check "idle with a GROWING transcript is not quiet-stalled (growth resets the window)" $? \
+  "rc=$rc error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
+# Idle, main transcript flat, but its Agent subagents' transcripts growing: the
+# callee ended its turn to wait on them, and that is activity.
+t=$(new_env)
+NONCE="5ta11ed00000aaa9"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-9 "herdr-sess" "$NONCE" "$t/target"
+tf="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$tf" "$NONCE" "" "waiting on my subagents"
+mkdir -p "${tf%.jsonl}/subagents"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=idle \
+      HERDR_STUB_WAIT_HOOK="echo '{}' >> '${tf%.jsonl}/subagents/agent-a1.jsonl'" \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_STALL_SECONDS=20 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 60 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 1 ]] && grep -q 'Timed out' "$cd_path/error.txt"
+check "idle with growing subagent transcripts is not quiet-stalled" $? \
+  "rc=$rc error=$(cat "$cd_path/error.txt" 2>/dev/null)"
+
+# A flapping callee: the gate settles `idle` on an API-error row every tick, but the
+# confirming read finds it `working`, so every settle is refuted. The settle is
+# charged to the budget: at 2s tick + 1 charged settle tick, a 30s budget is 10
+# gate waits; uncharged, it would be 15.
+t=$(new_env)
+NONCE="5ta11ed0000aaa10"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-stl-10 "herdr-sess" "$NONCE" "$t/target"
+tf="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$tf" "$NONCE" "" "committed the spec"
+printf '%s\n' "$API_ERR_ROW" >> "$tf"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=working \
+      HERDR_STUB_WAIT_STATUS=idle \
+      HOTLINE_POLL_SLEEP=0 HOTLINE_HERDR_WAIT_SLICE_MS=50 HOTLINE_HERDR_STALL_SETTLE=0.1 \
+      HOTLINE_STALL_SECONDS=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 30 2>"$t/err.txt"); rc=$?
+waits=$(grep -c '^agent wait ' "$t/herdr.log")
+[[ $rc -eq 1 && $waits -le 10 ]] && grep -q 'Timed out' "$cd_path/error.txt"
+check "refuted API-error settles are charged to the budget (flapping callee still times out on time)" $? \
+  "rc=$rc waits=$waits error=$(cat "$cd_path/error.txt" 2>/dev/null)"
 
 herdr_suite_finish
