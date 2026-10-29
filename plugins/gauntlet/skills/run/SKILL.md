@@ -82,8 +82,9 @@ Its last output line is JSON. Act on `last.action`:
   node "$PLUGIN_ROOT/scripts/gauntlet.mjs" split --run <path> --pieces '[{"id":"hero","note":"headline, subhead, primary CTA","capture":{"selector":"#hero"}}]'
   ```
 
-- **`paused`**. A callee ended on AWAITING_REVIEW, is blocked waiting on a human, or
-  is a builder that timed out, was preempted, or may have received its order despite
+- **`paused`**. A callee ended on AWAITING_REVIEW, is blocked waiting on a human,
+  ended its turn on a question (its `paused` event in the ledger carries it as
+  `question`), or is a builder that timed out, was preempted, or may have received its order despite
   a failed delivery, so it could still be working in the worktree. Tell the user which
   agent to look at (the status lines name it, with the `herdr agent attach` command
   and, for a builder, the `herdr pane close` command) and end the turn. They continue

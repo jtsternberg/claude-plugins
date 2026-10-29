@@ -96,7 +96,7 @@ export function dial(opts) {
 }
 
 // Resolves { rc, response } once wait-for-response.sh exits.
-// 0 done · 4 awaiting review · 3 preempted · 5 blocked · 1 failed
+// 0 done · 4 awaiting review · 3 preempted · 5 blocked · 7 blocked question · 1 failed
 export function wait(root, callDir, timeoutS) {
   return new Promise((resolve) => {
     const p = spawn('bash', [join(root, WAIT), callDir, '--timeout', String(timeoutS)], { stdio: 'ignore' });

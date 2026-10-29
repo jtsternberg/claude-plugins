@@ -64,9 +64,9 @@ test('after a win the next builder is told there is no gap, not handed the refer
   assert.match(b[1].prompt, /your piece won, so there is no gap to close/);
 });
 
-for (const [rc, reason] of [[4, 'awaiting_review'], [5, 'blocked'], [3, 'preempted'], [1, 'wait_failed']]) {
+for (const [rc, reason] of [[4, 'awaiting_review'], [5, 'blocked'], [7, 'blocked'], [3, 'preempted'], [1, 'wait_failed']]) {
   test(`builder wait exit ${rc} → paused (${reason})`, () => {
-    const fx = makeFixture({ env: { FAKE_WAIT_RC_BUILDER: String(rc) } });
+    const fx = makeFixture({ env: { FAKE_WAIT_RC_BUILDER: String(rc), FAKE_WAIT_RESPONSE: 'which schema should it target?' } });
     initAndSplit(fx);
     const r = cli(fx, ['loop', '--run', fx.runDir, '--once']);
     assert.equal(r.rc, 0, r.stderr);
@@ -74,6 +74,8 @@ for (const [rc, reason] of [[4, 'awaiting_review'], [5, 'blocked'], [3, 'preempt
     const [p] = events(fx, 'paused');
     assert.equal(p?.wait_rc, rc, r.stdout);
     assert.equal(p.reason, reason);
+    // Exit 7 carries the callee's own question; exit 5 is a gate with no answer.
+    assert.equal(p.question, rc === 7 ? 'which schema should it target?' : undefined);
     assert.equal(p.agent_name, 'agent-1');
     assert.equal(p.close, 'herdr pane close w1:p1');
     assert.equal(cli(fx, ['next', '--run', fx.runDir]).json.action, 'paused');
@@ -178,6 +180,18 @@ test('critic wait exit 5 (blocked) pauses the run instead of reading as done', (
   const r2 = cli(fx, ['loop', '--run', fx.runDir, '--once'], { FAKE_WAIT_RC_CRITIC: '0' });
   assert.equal(r2.json.last.action, 'await');
   assert.equal(events(fx, 'verdict').length, 1);
+});
+
+test('critic wait exit 7 (blocked question) pauses with the question, not judge_error', () => {
+  const fx = makeFixture({ env: { FAKE_WAIT_RC_CRITIC: '7', FAKE_WAIT_RESPONSE: 'which criteria apply?' } });
+  initAndSplit(fx);
+  const r = cli(fx, ['loop', '--run', fx.runDir]);
+  assert.equal(r.json.last.action, 'paused');
+  assert.equal(events(fx, 'judge_error').length, 0);
+  const [p] = events(fx, 'paused');
+  assert.equal(p.role, 'critic');
+  assert.equal(p.reason, 'blocked');
+  assert.equal(p.question, 'which criteria apply?');
 });
 
 test('a malformed verdict gets one non-fresh follow-up, then judge_error', () => {
