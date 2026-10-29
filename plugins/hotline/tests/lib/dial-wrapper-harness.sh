@@ -155,7 +155,9 @@ paste_count() { grep -cF '"terminal.paste"' "$OK_REQUESTS" 2>/dev/null || true; 
 capability_count() { grep -cF '"system.capabilities"' "$OK_REQUESTS" 2>/dev/null || true; }
 # Keep the confirmation polls short: the transcript tier legitimately misses in
 # this suite (no callee is writing one), and the screen tier answers immediately.
+# First contact has its own, wider budget (cmux-paste.sh --first-contact).
 export HOTLINE_PASTE_CONFIRM_TRIES=2
+export HOTLINE_CMUX_FIRST_CONFIRM_TRIES=2
 export HOTLINE_PASTE_CONFIRM_SLEEP=0.05
 export HOTLINE_PASTE_BOX_TIMEOUT=3
 # The cmux stub answers surface-ready.sh's probe by default, so detached and window
@@ -358,6 +360,26 @@ new_env() {   # echoes a fresh scratch root with bin/, home/, target/, work/
 }
 
 note_leak() { LEAKED+=("$@"); }
+
+# A copy of the plugin whose cmux-paste.sh records its argv, one line per call, to
+# <scratch>/paste_args, then runs the real one. dial.sh and cmux-call.sh resolve
+# cmux-paste.sh from their own directory, so a copied tree is the only way to see
+# the flags they hand it without a test-only knob in product code. Echoes the
+# copy's dial.sh.
+make_paste_recorder() {  # make_paste_recorder <scratch>
+  local root="$1/plugin" d
+  mkdir -p "$root"
+  cp -R "$HOTLINE_DIR/scripts" "$HOTLINE_DIR/skills" "$root/"
+  d="$root/skills/dial/scripts"
+  mv "$d/cmux-paste.sh" "$d/cmux-paste.real.sh"
+  cat > "$d/cmux-paste.sh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$1/paste_args"
+exec bash "$d/cmux-paste.real.sh" "\$@"
+EOF
+  chmod +x "$d/cmux-paste.sh"
+  echo "$d/dial.sh"
+}
 
 # printf %q quoting turns every space in the prompt into `\ `. Drop the
 # backslashes so assertions can match the prompt as the receiver will read it.

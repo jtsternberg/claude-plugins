@@ -3,6 +3,7 @@ name: hotline-ringing
 description: "Prime this agent to handle an incoming hotline call — protocol, isolation rules, response format."
 argument-hint: "[MODE: mode] [CALLER: path] [SESSION: id] task..."
 disable-model-invocation: true
+allowed-tools: "Bash(bash ${CLAUDE_SKILL_DIR}/scripts/notify-caller.sh *) SendMessage"
 ---
 
 # Hotline: Ringing — Incoming Call Protocol
@@ -158,6 +159,20 @@ So pick by what is true of *this turn*, not of the whole job:
 You can still re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` mid-response as a step marker: the caller resets its body buffer on every WORK_IN_PROGRESS, so only the content after the LAST one counts as the response.
 
 **Interrupted or redirected mid-call? Re-ack before you resume.** If the user interrupts you or types a correction and you are continuing the *same* work order, re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` before doing anything else. From the caller's side an interjection is indistinguishable from being handed a different job; that re-ack is the only signal that the order is still yours, and without it the caller stops waiting and never receives your answer.
+
+## Tell the Caller You're Done (Claude Code only)
+
+The caller hears your answer only if something on its side is waiting for it, and sometimes nothing is. So when a turn will end on `DONE`, `WORK_COMPLETE`, `OUT_OF_SCOPE`, `AWAITING_REVIEW` or `BLOCKED`, and the prompt carried both `CALL_ID` and `SESSION`, check whether to push a short notice into the caller's session. Do it just before your final reply text, so your terminal STATUS line still comes last:
+
+Codex: skip this section — Codex has no `SendMessage`.
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/notify-caller.sh --caller-session "<SESSION>" --call-id "<CALL_ID>" --status "<the STATUS you will end on>"
+```
+
+Run it exactly as written, on one line: the `allowed-tools` rule covers this command text, so a launcher that grants Bash only through this skill still runs it without a prompt. Quoting the path, or setting a variable on a line of its own, makes it a command the rule no longer matches.
+
+It prints one JSON line. On `"send":true`, call `SendMessage` once: `to` is the printed `to`, `message` is the printed `message` followed by a blank line and the first three to five lines of your answer, and `summary` is `hotline <CALL_ID> <STATUS>`. On `"send":false`, send nothing: the caller already has a waiter, isn't a live session here, or was already told. If `SendMessage` errors, leave it there — don't retry, and add a `HOTLINE_NOTE` to your reply. The script lives in your own plugin and reads only hotline's shared state under `~/.agents-hotline`, so running it doesn't break Workspace Isolation.
 
 ## Logging — Already Handled
 

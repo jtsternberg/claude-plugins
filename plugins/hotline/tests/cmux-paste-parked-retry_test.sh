@@ -199,8 +199,10 @@ run_case() {
   HOME="$home" HOTLINE_TEST_NONCE="$cid" PATH="$bin:$PATH" CMUX_SOCKET_PATH="$sock" \
     bash "$SCRIPT_UNDER_TEST" --surface "$SURF_UUID" --workspace "$WS_UUID" \
       --payload-file "$dir/payload.md" --call-id "$cid" \
-      ${tx_args[@]+"${tx_args[@]}"} --wait-box 3 2>/dev/null
+      ${tx_args[@]+"${tx_args[@]}"} --wait-box 3 \
+      ${RUN_CASE_EXTRA[@]+"${RUN_CASE_EXTRA[@]}"} 2>/dev/null
 }
+RUN_CASE_EXTRA=()
 
 echo "cmux-paste.sh parked-payload retry:"
 
@@ -371,6 +373,45 @@ OUT15=$(run_case "$c15" "$N15" "$(empty_box)" "{\"type\":\"user\",\"nonce\":\"$N
 [[ "$(jq -r '.delivered' <<<"$OUT15" 2>/dev/null)" == "true" ]]
 check "an ANSWERED trust dialog above a live box does not refuse the delivery" $? \
   "out=$OUT15"
+
+# 16. FIRST CONTACT waits for a transcript that does not EXIST yet. A follow-up's
+#     proof is one append to a file on disk; first contact needs Claude Code to create
+#     the session's .jsonl, which landed ~1.4s after the paste in a live dial whose
+#     3s window then reported the delivery lost. The transcript here appears well
+#     after the follow-up budget (2 × 0.05s per tier) runs out; the box is empty and
+#     the baseline clean, so neither the parked check nor the screen tier can answer.
+#     Same screens, same delay: --first-contact confirms it, a follow-up does not.
+late_transcript_case() { # <dir> <call-id> [extra cmux-paste args...]
+  local dir="$1" cid="$2"; shift 2
+  local home="$dir/home" proj
+  mkdir -p "$dir/cwd" "$home"
+  proj=$(HOME="$home" bash "$HOTLINE_DIR/scripts/transcript-path.sh" --cwd "$dir/cwd" --session "sess-$cid" 2>/dev/null)
+  mkdir -p "$(dirname "$proj")"
+  # Keyed to the paste request, not to wall clock from launch, so a slow box wait
+  # cannot eat the delay.
+  ( for _ in $(seq 1 200); do
+      grep -qF 'terminal.paste' "$dir/sock/requests.log" 2>/dev/null && break
+      sleep 0.05
+    done
+    sleep 1.5
+    printf '{"type":"user","nonce":"%s"}\n' "$cid" > "$proj" ) &
+  RUN_CASE_EXTRA=("$@")
+  run_case "$dir" "$cid" "$(empty_box)" "" no
+  RUN_CASE_EXTRA=()
+  wait
+}
+c16="$STUBROOT/first-late"; N16="park0000000000d1"
+OUT16=$(HOTLINE_CMUX_FIRST_CONFIRM_TRIES=80 late_transcript_case "$c16" "$N16" --first-contact)
+[[ "$(jq -r '.delivered' <<<"$OUT16" 2>/dev/null)" == "true" \
+   && "$(jq -r '.confirmed' <<<"$OUT16" 2>/dev/null)" == "transcript" ]]
+check "first contact: a transcript created after the follow-up budget is still confirmed" $? \
+  "out=$OUT16"
+c17="$STUBROOT/followup-late"; N17="park0000000000d2"
+OUT17=$(HOTLINE_CMUX_FIRST_CONFIRM_TRIES=80 late_transcript_case "$c17" "$N17")
+[[ "$(jq -r '.delivered' <<<"$OUT17" 2>/dev/null)" == "false" \
+   && "$(jq -r '.sent' <<<"$OUT17" 2>/dev/null)" == "true" ]]
+check "follow-up: the same late transcript is reported lost (budget unchanged)" $? \
+  "out=$OUT17"
 
 [[ ! -s "$POISON_LOG" ]]
 check "no test reached the real cmux or control socket" $? "$(cat "$POISON_LOG" 2>/dev/null)"

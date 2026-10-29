@@ -25,6 +25,7 @@
 #   cmux-call.sh --cwd <path> [--prompt <text> | --prompt-file <path>]
 #                [--resume <session-id>] [--name <name>] [--fork-session]
 #                [--tools <tools>] [--detached | --window <name|ref>]
+#                [--first-contact]
 #
 # Outputs: {"workspace_ref"|"surface_ref", "surface_id", "placement", "cwd",
 #           "session_id", "call_id"}
@@ -34,7 +35,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
-  echo "Usage: cmux-call.sh --cwd <path> [--prompt <text>] [--resume <session-id>] [--name <name>] [--label <text>] [--fork-session] [--tools <tools>]"
+  echo "Usage: cmux-call.sh --cwd <path> [--prompt <text>] [--resume <session-id>] [--name <name>] [--label <text>] [--fork-session] [--tools <tools>] [--first-contact]"
   echo ""
   echo "Opens a workspace in CMUX and launches Claude."
   echo "Outputs: {\"workspace_id\": \"...\", \"cwd\": \"...\", \"session_id\": \"...\"}"
@@ -68,6 +69,11 @@ WINDOW_REF=""
 # --boot-timeout, else the shared default) and passes it in; the fallback chain here
 # is for direct callers only.
 BOX_TIMEOUT=""
+# Forwarded to cmux-paste.sh, which then waits long enough for Claude Code to CREATE
+# the callee's transcript. Told by the caller, never inferred: this script also
+# serves --resume, and a transcript file that already exists says nothing about
+# whether this delivery is the session's first.
+FIRST_CONTACT=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -82,6 +88,7 @@ while [[ $# -gt 0 ]]; do
     --detached|--new-workspace) PLACEMENT="detached"; shift ;;
     --window) PLACEMENT="window"; WINDOW_REF="$2"; shift 2 ;;
     --box-timeout) BOX_TIMEOUT="$2"; shift 2 ;;
+    --first-contact) FIRST_CONTACT=true; shift ;;
     *) shift ;;
   esac
 done
@@ -379,6 +386,7 @@ if [[ -n "$PROMPT" ]]; then
                    --wait-box "$BOX_TIMEOUT")
   [[ -n "$PASTE_WORKSPACE"    ]] && CONF_PASTE_ARGS+=(--workspace "$PASTE_WORKSPACE")
   [[ -n "$SESSION_ID_PRESET"  ]] && CONF_PASTE_ARGS+=(--session "$SESSION_ID_PRESET")
+  $FIRST_CONTACT && CONF_PASTE_ARGS+=(--first-contact)
   CONF_DELIVERY=$(bash "$SCRIPT_DIR/cmux-paste.sh" "${CONF_PASTE_ARGS[@]}" 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$CONF_DELIVERY" 2>/dev/null)" != "true" ]]; then
     # The surface stays open: its REPL is live, and the prompt stays in the call dir

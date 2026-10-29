@@ -521,6 +521,16 @@ Exit codes that are not failures:
   callee's own words. On headless there is no live surface; the follow-up resumes the
   session. A BLOCKED the callee later worked past (a later WORK_IN_PROGRESS or
   terminal STATUS) does not count, and neither does one written mid-turn.
+- **Exit 8 — your own follow-up superseded this call.** You dialed a follow-up
+  into the same session before this call resolved, and the callee has started on it
+  (the follow-up's prompt reached it, or it emitted a STATUS under the follow-up's
+  nonce), so its answer arrives under that nonce. Stderr names the follow-up's call
+  dir, also in `$CALL_DIR/superseded_by.json` (`call_dir`, `call_id`): **wait on that
+  call dir instead.** Nothing is closed — the follow-up is running in the same
+  surface. While the follow-up is only queued behind the busy old turn, the wait goes
+  on: that turn can still answer this call's nonce, and that answer resolves it as
+  usual (exit 0/4/7). A follow-up from a different caller session, or a human typing
+  into the surface, still reads as exit 3.
 
 Leave the call dir where it is when the exchange is done; cleanup is the
 wrapper's job, not yours. Every dial starts by reaping call dirs older than
@@ -704,6 +714,9 @@ above still does that:
   for a FIRST delivery (default 40, four times the follow-up budget). First contact
   waits on the callee's transcript being *created*, not appended, so the follow-up
   budget reported landed payloads as unconfirmed under load.
+- **`HOTLINE_CMUX_FIRST_CONFIRM_TRIES=<n>`** — the same first-contact transcript budget
+  for the cmux transport (default 40, at `HOTLINE_PASTE_CONFIRM_SLEEP`'s cadence).
+  Follow-ups keep `HOTLINE_PASTE_CONFIRM_TRIES`.
 - **`HOTLINE_HERDR_BLOCKED_SETTLE=<seconds>`** — pause between the two reads that
   confirm a follow-up's cached agent is really `blocked` (default 1). That state
   fails the dial, so a blink must not be acted on.

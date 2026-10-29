@@ -1413,6 +1413,20 @@ detached_exchange_still_waiting() {
   [[ ! -f "$PREV_CALL_DIR/done" ]]
 }
 
+# A follow-up delivered into the same live session SUPERSEDES this caller's
+# previous exchange there if that one is still unresolved (no `done`): its waiter
+# would otherwise read this follow-up's ringing prompt as a human reassigning the
+# callee, sit out the preempt grace and exit 3 naming our own follow-up. The marker
+# turns that into wait-for-response.sh's exit 8, pointing at this call dir. The
+# cache is keyed by caller session, so PREV_CALL_DIR is always this caller's own —
+# another caller's dial, or a human typing, never writes one and still preempts.
+mark_prev_superseded() {
+  [[ -n "$PREV_CALL_DIR" && -d "$PREV_CALL_DIR" && "$PREV_CALL_DIR" != "$CALL_DIR" ]] || return 0
+  [[ -f "$PREV_CALL_DIR/done" ]] && return 0
+  jq -n --arg call_dir "$CALL_DIR" --arg call_id "$CALL_ID_OUT" \
+    '{call_dir:$call_dir, call_id:$call_id}' > "$PREV_CALL_DIR/superseded_by.json" 2>/dev/null || true
+}
+
 if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
   if [[ -z "$SURFACE_REF" ]]; then
     # A headless first contact leaves no surface to reuse, and a prior follow-up
@@ -1475,6 +1489,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
       bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
         --caller-session "$MY_SESSION_ID" --surface "$SURFACE_REF" \
         ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} --call-dir "$CALL_DIR" >/dev/null 2>&1
+      mark_prev_superseded
       [[ -n "$CALLEE_ENV_PATH" ]] && CALLEE_ENV_PATH="not-redelivered"
       emit_connected true
     fi
@@ -1560,10 +1575,12 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
       DELIVERY_CONFIRMED=$(jq -r '.confirmed // empty' <<<"$REUSE" 2>/dev/null)
       [[ -s "$CALL_DIR/call_id.txt" ]] && CALL_ID_OUT=$(cat "$CALL_DIR/call_id.txt")
       # The agent is unchanged (that is the point), but bump last_contact /
-      # exchange_count and record this turn's nonce.
+      # exchange_count and record this turn's nonce and call dir — the dir is what
+      # the NEXT follow-up marks superseded.
       bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
         --caller-session "$MY_SESSION_ID" --surface "$SURFACE_REF" \
-        ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} >/dev/null 2>&1
+        ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} --call-dir "$CALL_DIR" >/dev/null 2>&1
+      mark_prev_superseded
       [[ -n "$CALLEE_ENV_PATH" ]] && CALLEE_ENV_PATH="not-redelivered"
       emit_connected true
     fi
@@ -1597,6 +1614,8 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
   $DO_FORK && CONF_ARGS+=(--fork-session)
   [[ -n "$TOOLS" ]] && CONF_ARGS+=(--tools "$TOOLS")
   CONF_ARGS+=(--box-timeout "$PASTE_BOX_TIMEOUT")
+  # cmux-call.sh cannot tell a first contact from a --resume on its own; see 6b.
+  $FIRST_CONTACT && CONF_ARGS+=(--first-contact)
   # The file, never argv: conference was the last hotline path handing a whole
   # payload to `claude` on a command line (claude-plugins-92s5).
   CONF_ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
@@ -1910,6 +1929,7 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
                 --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID"
                 --wait-box "$PASTE_BOX_TIMEOUT")
   [[ -n "$DELIVER_WORKSPACE" ]] && DELIVER_ARGS+=(--workspace "$DELIVER_WORKSPACE")
+  [[ "$FIRST_CONTACT" == "true" ]] && DELIVER_ARGS+=(--first-contact)
   DELIVERY=$(bash "$DIAL_SCRIPTS/cmux-paste.sh" "${DELIVER_ARGS[@]}" 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then
     emit_error deliver "the callee's REPL booted but the prompt never landed in it: $(reason_full "$DELIVERY")" \

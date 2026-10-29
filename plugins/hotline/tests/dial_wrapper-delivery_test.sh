@@ -549,4 +549,89 @@ call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 check "an interactive follow-up escapes it the same way" $? \
   "pasted=$(last_paste) out=$out stderr=$(cat "$t/err.txt")"
 
+# ===========================================================================
+# First contact widens cmux-paste.sh's transcript budget; a follow-up does not.
+#
+# First contact waits for Claude Code to CREATE the callee's transcript, which a live
+# dial saw land ~1.4s after the paste, so the follow-up budget reported landed
+# payloads as stage `deliver`. Both first-contact delivery sites must say so: step 6b
+# directly, and conference through cmux-call.sh, which also serves --resume and so
+# has to be told rather than guess. A follow-up that falls through to a fresh launch
+# `--resume`s a transcript already on disk and keeps the follow-up budget.
+#
+# Each follow-up case also asserts the paste HAPPENED, so a path that stopped
+# reaching cmux-paste.sh cannot pass as "flag absent".
+# ===========================================================================
+paste_args_have_flag() { grep -qE '(^| )--first-contact( |$)' "$1/paste_args" 2>/dev/null; }
+paste_calls() { grep -c . "$1/paste_args" 2>/dev/null || echo 0; }
+
+# (a) work order, first contact — step 6b.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+REC_DIAL=$(make_paste_recorder "$t")
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-fc-a" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$REC_DIAL" --target "$t/target" --mode work_order --label "probe label" \
+    --prompt "first contact budget" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+[[ "$(jq -r .first_contact <<<"$out")" == "true" ]] && paste_args_have_flag "$t"
+check "work-order first contact passes cmux-paste.sh --first-contact" $? \
+  "args=$(cat "$t/paste_args" 2>/dev/null) out=$out stderr=$(cat "$t/err.txt")"
+
+# (b) work order, follow-up with no cached surface — falls through to step 6b.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+REC_DIAL=$(make_paste_recorder "$t")
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-fc-b" --session "fcb0fcb0-fcb0-4cb0-8cb0-fcb0fcb0fcb0" \
+  --mode work_order
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-fc-b" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$REC_DIAL" --target "$t/target" --mode work_order --label "probe label" \
+    --prompt "follow-up budget" --boot-timeout 5 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+launch_script_of "$call_dir" >/dev/null
+[[ "$(jq -r .first_contact <<<"$out")" == "false" && "$(paste_calls "$t")" -ge 1 ]] \
+  && ! paste_args_have_flag "$t"
+check "a work-order follow-up through step 6b does not pass --first-contact" $? \
+  "args=$(cat "$t/paste_args" 2>/dev/null) out=$out stderr=$(cat "$t/err.txt")"
+
+# (c) conference, first contact — step 5b, through cmux-call.sh.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+REC_DIAL=$(make_paste_recorder "$t")
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-fc-c" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$REC_DIAL" --target "$t/target" --mode conference --label "probe label" \
+    --prompt "conference first contact budget" 2>"$t/err.txt")
+conf_launch=$(grep -oE '/tmp/hotline-cmux-launch-[A-Za-z0-9]+' "$t/send_calls" 2>/dev/null | head -1)
+[[ -n "$conf_launch" ]] && note_leak "$conf_launch"
+[[ "$(jq -r .status <<<"$out")" == "connected" ]] && paste_args_have_flag "$t"
+check "conference first contact passes cmux-paste.sh --first-contact" $? \
+  "args=$(cat "$t/paste_args" 2>/dev/null) out=$out stderr=$(cat "$t/err.txt")"
+
+# (d) conference, follow-up with no cached surface — cmux-call.sh --resume.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+REC_DIAL=$(make_paste_recorder "$t")
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session "caller-fc-d" --session "fcd0fcd0-fcd0-4cd0-8cd0-fcd0fcd0fcd0" \
+  --mode conference_call
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-fc-d" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" \
+  bash "$REC_DIAL" --target "$t/target" --mode conference --label "probe label" \
+    --prompt "conference follow-up budget" 2>"$t/err.txt")
+conf_launch=$(grep -oE '/tmp/hotline-cmux-launch-[A-Za-z0-9]+' "$t/send_calls" 2>/dev/null | head -1)
+[[ -n "$conf_launch" ]] && note_leak "$conf_launch"
+[[ "$(jq -r .status <<<"$out")" == "connected" && "$(jq -r .first_contact <<<"$out")" == "false" \
+   && "$(paste_calls "$t")" -ge 1 ]] && ! paste_args_have_flag "$t"
+check "a conference follow-up through cmux-call.sh --resume does not pass --first-contact" $? \
+  "args=$(cat "$t/paste_args" 2>/dev/null) out=$out stderr=$(cat "$t/err.txt")"
+
 dial_wrapper_finish

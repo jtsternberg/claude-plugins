@@ -100,6 +100,23 @@
 #       follow-up dial. Not exit 5: that one is herdr's lifecycle reporting a gate
 #       with NO answer in the transcript, so it carries no response; this one has
 #       the callee's own words. Not 0, because callers read 0 as "work done".
+#   8 — SUPERSEDED: the caller dialed a follow-up into this same session before
+#       this call resolved, and dial.sh recorded it in call_dir/superseded_by.json
+#       (`call_dir`, `call_id` of the follow-up), AND the callee has started on it:
+#       a user record carrying the follow-up's nonce, or a STATUS naming it. A
+#       follow-up still queued behind the old turn is not enough — that turn can
+#       still answer this nonce, so the wait goes on. Exits naming that call dir
+#       on stderr: wait on IT, because the callee's answer now arrives under the
+#       follow-up's nonce. No response.json, no error.txt; the surface/session
+#       is left LIVE — the follow-up is running in it. An answer for THIS nonce
+#       already in the transcript still wins (exit 0/4/7).
+#
+# Why 8 exists: the follow-up's ringing prompt is, in the transcript, a genuine
+# prompt after ours — the exact shape of a human reassigning the callee — so the
+# waiter sat out the 180s preempt grace and exited 3 naming the caller's own
+# follow-up as the "preempting prompt". Only dial.sh knows the prompt was the same
+# caller's, so it leaves the marker; without one (another caller's dial, a human)
+# exit 3 is unchanged.
 #
 # Why 7 exists: BLOCKED is not a ringing-protocol status, but callers whose work
 # orders define it (agentic-run) get callees that end their turns on it. Unread, it
@@ -297,6 +314,11 @@ fi
 # error.txt WITHOUT the marker and still short-circuits immediately, unchanged.
 # response.json is the guard against clearing a call that genuinely finished.
 # (claude-plugins-tyaj)
+# Who is waiting on this call, for the callee's notify-caller.sh: a live waiter
+# delivers the answer itself, so the push notice is only for a call nobody waits
+# on. Left behind on exit on purpose — the reader checks the pid is still a waiter.
+echo "$$" > "$CALL_DIR/waiter.pid" 2>/dev/null || true
+
 WAITER_TIMEOUT_MARKER="$CALL_DIR/waiter_timeout.txt"
 if [[ -f "$WAITER_TIMEOUT_MARKER" && ! -f "$CALL_DIR/response.json" ]]; then
   echo "hotline: a previous waiter gave up on this call ($(tr -d '\n' < "$WAITER_TIMEOUT_MARKER")) — resuming with a fresh ${TIMEOUT}s budget from now." >&2
@@ -317,6 +339,47 @@ emit_response_json() {
     echo "response.json is not parseable JSON — hotline emission bug" >&2
     exit 1
   fi
+}
+
+# Exit 8 when dial.sh has recorded a same-caller follow-up into this session AND the
+# callee has started on it. Called only where the transcript (or screen) holds no
+# answer for this nonce, so a STATUS that already landed is never traded for a
+# pointer. Closes nothing: the follow-up is running in this call's surface.
+#
+# The marker alone is not enough: dial.sh writes it the moment the follow-up is
+# delivered, and into a busy REPL that only QUEUES it — the old turn runs on and can
+# still end on this nonce's STATUS. So the follow-up has to have reached the model:
+# a user record carrying its nonce (an idle send, or the queue flushed after our
+# turn ended, so any answer of ours is already above it), or the callee's own STATUS
+# naming its nonce (the only proof for a follow-up injected mid-turn as a
+# queued_command attachment, which the old turn could still finish around). Not the
+# enqueue record, and not a queued prompt drawn on screen: both say "still queued".
+# Until then, return and keep waiting on our own nonce.
+SUPERSEDED_MARKER="$CALL_DIR/superseded_by.json"
+follow_up_started() {  # $1 = next nonce  $2 = transcript path or ""  $3 = screen text
+  local tag="CALL_ID: $1" stag="call_id=$1"
+  if [[ -n "$2" && -f "$2" ]]; then
+    jq -e -n --arg tag "$tag" --arg stag "$stag" '
+      any(inputs;
+        (.type == "user" and ((.message.content | tostring) | contains($tag)))
+        or (.type == "assistant" and ((.isSidechain // false) != true)
+            and (([.message.content[]? | select(.type == "text") | .text] | join("\n"))
+                 | test("(^|\n)STATUS: [A-Z_]+ " + $stag + "\\b"))))' "$2" >/dev/null 2>&1
+  else
+    printf '%s\n' "$3" | grep -Eq "STATUS: [A-Z_]+ ${stag}([^A-Za-z0-9_-]|\$)"
+  fi
+}
+superseded_exit() {  # $1 = transcript path or ""  $2 = screen text (screen path only)
+  [[ -f "$SUPERSEDED_MARKER" ]] || return 0
+  local next_dir next_id
+  next_dir=$(jq -r '.call_dir // empty' "$SUPERSEDED_MARKER" 2>/dev/null)
+  next_id=$(jq -r '.call_id // empty' "$SUPERSEDED_MARKER" 2>/dev/null)
+  [[ "$next_id" =~ ^[A-Za-z0-9_-]+$ ]] || return 0
+  follow_up_started "$next_id" "${1-}" "${2-}" || return 0
+  touch "$CALL_DIR/done"
+  declare -F cleanup_script_only >/dev/null && cleanup_script_only
+  echo "Superseded — the callee has started on your follow-up (call_id=$next_id) without answering call_id=$CALL_ID, so its answer arrives under the follow-up's nonce. Wait on that call instead: wait-for-response.sh ${next_dir:-<see $SUPERSEDED_MARKER>}" >&2
+  exit 8
 }
 
 if $HERDR_MODE; then
@@ -641,6 +704,7 @@ if $HERDR_MODE; then
       T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$LIVE_TRANSCRIPT" "$CALL_ID" 2>/dev/null)
       T_RC=$?
       set -e
+      case $T_RC in 0|13|14) ;; *) superseded_exit "$LIVE_TRANSCRIPT" ;; esac
       case $T_RC in
         0)   # turn complete
           printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
@@ -1148,6 +1212,7 @@ if $CMUX_MODE; then
       T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$TRANSCRIPT_PATH" "$CALL_ID" 2>/dev/null)
       T_RC=$?
       set -e
+      case $T_RC in 0|13|14) ;; *) superseded_exit "$TRANSCRIPT_PATH" ;; esac
       case $T_RC in
         0)  # turn complete — T_OUT is {"session_id":..,"response":..}
           printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
@@ -1340,8 +1405,10 @@ if $CMUX_MODE; then
       END {print s}
     ')
 
-    [[ -z "$LATEST_STATUS" ]] && continue
-    [[ "$LATEST_STATUS" =~ ^STATUS:\ WORK_IN_PROGRESS ]] && continue
+    if [[ -z "$LATEST_STATUS" || "$LATEST_STATUS" =~ ^STATUS:\ WORK_IN_PROGRESS ]]; then
+      superseded_exit "" "$CLEAN"
+      continue
+    fi
 
     # A BLOCKED on screen yields to any terminal STATUS above it, as in transcript
     # mode, where a DONE followed by a BLOCKED is exit 0. Being the latest STATUS
