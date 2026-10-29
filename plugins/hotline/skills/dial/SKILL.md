@@ -490,7 +490,8 @@ Exit codes that are not failures:
   `"awaiting_review": true`, the durable form of the signal). The surface and
   session are left live on purpose — relay the report, then send the follow-up by
   dialing the same target again. The wrapper routes it back into that same
-  surface.
+  surface. On headless there is no live surface; the follow-up resumes the
+  session.
 - **Exit 5 — the callee is waiting on a human** (herdr calls only). herdr reported
   its lifecycle as `blocked` with no STATUS for your nonce: it is sitting on a
   permission gate or asking a question, so more time cannot help. `error.txt` says
