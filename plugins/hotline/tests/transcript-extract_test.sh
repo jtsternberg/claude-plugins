@@ -467,6 +467,40 @@ bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
   || fail "an earlier DONE wins over a later BLOCKED" "got exit $RC"
 rm -f "$F"
 
+# Case 34: BLOCKED mid-turn must not resolve. The callee wrote the BLOCKED line,
+# then kept going in the same message (a tool call): the record's stop_reason is
+# tool_use and the turn is not over, so a poll landing here keeps waiting.
+MIDTURN_BLOCKED='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"id":"msg_mid","stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nWhich schema?\nSTATUS: BLOCKED call_id='"$NONCE"'\nActually let me check the docs."},{"type":"tool_use","id":"tu1","name":"Read","input":{}}]}}'
+F=$(mkf "$USER_NONCE
+$MIDTURN_BLOCKED")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "BLOCKED on a tool_use record → exit 10 (turn not over)" \
+  || fail "BLOCKED on a tool_use record → exit 10 (turn not over)" "got exit $RC"
+rm -f "$F"
+
+# Case 35: BLOCKED on an end_turn record that is followed by another assistant
+# record → not the turn's last word, keep waiting.
+F=$(mkf "$USER_NONCE
+$BLOCKED_REC
+$THINKING")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "BLOCKED followed by a later assistant record → exit 10" \
+  || fail "BLOCKED followed by a later assistant record → exit 10" "got exit $RC"
+rm -f "$F"
+
+# Case 36: claude writes one record per content block, each carrying the message's
+# stop_reason. A final message of [text with BLOCKED, then a trailing text block]
+# ends the turn on that message, so BLOCKED in an earlier block of it still counts.
+SPLIT_A='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"id":"msg_fin","stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nWhich schema?\nSTATUS: BLOCKED call_id='"$NONCE"'"}]}}'
+SPLIT_B='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"id":"msg_fin","stop_reason":"end_turn","content":[{"type":"text","text":""}]}}'
+F=$(mkf "$USER_NONCE
+$SPLIT_A
+$SPLIT_B")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 14 ]] && pass "BLOCKED in an earlier block of the final end_turn message → exit 14" \
+  || fail "BLOCKED in an earlier block of the final end_turn message → exit 14" "got exit $RC"
+rm -f "$F"
+
 echo ""
 echo "transcript-extract: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then printf '  - %s\n' "${FAILED[@]}"; exit 1; fi

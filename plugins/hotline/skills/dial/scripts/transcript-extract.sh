@@ -226,8 +226,26 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
              | select(test("STATUS: [A-Z_]+ " + $stag))
            ] | length) > 0
      end) as $still_ours
+  # Did the turn END on a BLOCKED for our nonce? Claude writes one record per
+  # content block, each stamped with the stop_reason of its message, so "the turn ended
+  # here" is: the last non-sidechain assistant record says end_turn, and the
+  # BLOCKED sits in that same message (matched by message.id; a record without one
+  # stands alone). A BLOCKED line on a tool_use record is mid-turn — the callee
+  # wrote it and kept going. null stop_reason (seen on interrupted records) is not
+  # end_turn, which errs toward waiting.
+  | ([ (if $ui == null then [] else .[$ui:] end)[]
+       | select(.type == "assistant" and ((.isSidechain // false) != true)) ]) as $asst
+  | ($asst | last) as $la
+  | (if $la == null or (($la.message.stop_reason // "") != "end_turn") then false
+     else ([ $asst[]
+             | select(if $la.message.id == null then . == $la
+                      else .message.id == $la.message.id end)
+             | [.message.content[]? | select(.type == "text") | .text] | join("\n") ]
+           | join("\n")
+           | test("STATUS: BLOCKED " + $stag + "[[:space:]]*($|\n)"))
+     end) as $blocked_end
   | if $ui == null then
-      {submitted: false, session_id: "", text: "", preempt: ""}
+      {submitted: false, session_id: "", text: "", preempt: "", blocked_end: false}
     else
       {submitted: true,
        session_id: (.[$ui].sessionId // (map(.sessionId // empty) | last) // ""),
@@ -245,7 +263,8 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
        # our call_id. A post-preempt STATUS for our nonce means the receiver is
        # still on OUR order, so this reports "" and the caller reads that as
        # "submitted, still working". (claude-plugins-mrpi)
-       preempt: (if $still_ours then "" else ($pe.t // "") end)}
+       preempt: (if $still_ours then "" else ($pe.t // "") end),
+       blocked_end: $blocked_end}
     end
 ' "$TRANSCRIPT") || { echo "jq failed parsing $TRANSCRIPT" >&2; exit 1; }
 
@@ -255,6 +274,7 @@ SUBMITTED=$(printf '%s' "$PARSED" | jq -r '.submitted')
 SESSION_ID=$(printf '%s' "$PARSED" | jq -r '.session_id')
 TEXT=$(printf '%s' "$PARSED" | jq -r '.text')
 PREEMPT=$(printf '%s' "$PARSED" | jq -r '.preempt')
+BLOCKED_END=$(printf '%s' "$PARSED" | jq -r '.blocked_end')
 
 # A resolving STATUS for THIS nonce present yet? Terminal ones end the call;
 # AWAITING_REVIEW ends only this turn (see the note above). Both deliver a body,
@@ -270,7 +290,8 @@ if printf '%s\n' "$TEXT" | grep -qE "$TERM_RE"; then
   # awk below (which stops at the first `term` match), so the body and the exit code
   # always describe the same sentinel.
   RESOLVED=$(printf '%s\n' "$TEXT" | grep -oE "$TERM_RE" | head -1 | awk '{print $2}')
-elif [[ "$(printf '%s\n' "$TEXT" | grep -oE "STATUS: [A-Z_]+ call_id=${NONCE}[[:space:]]*$" | tail -1 | awk '{print $2}')" == "BLOCKED" ]]; then
+elif [[ "$BLOCKED_END" == "true" ]] \
+  && [[ "$(printf '%s\n' "$TEXT" | grep -oE "STATUS: [A-Z_]+ call_id=${NONCE}[[:space:]]*$" | tail -1 | awk '{print $2}')" == "BLOCKED" ]]; then
   RESOLVED=BLOCKED
 else
   if [[ -n "$PREEMPT" ]]; then
