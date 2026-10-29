@@ -712,6 +712,9 @@ above still does that:
   for a FIRST delivery (default 40, four times the follow-up budget). First contact
   waits on the callee's transcript being *created*, not appended, so the follow-up
   budget reported landed payloads as unconfirmed under load.
+- **`HOTLINE_CMUX_FIRST_CONFIRM_TRIES=<n>`** — the same first-contact transcript budget
+  for the cmux transport (default 40, at `HOTLINE_PASTE_CONFIRM_SLEEP`'s cadence).
+  Follow-ups keep `HOTLINE_PASTE_CONFIRM_TRIES`.
 - **`HOTLINE_HERDR_BLOCKED_SETTLE=<seconds>`** — pause between the two reads that
   confirm a follow-up's cached agent is really `blocked` (default 1). That state
   fails the dial, so a blink must not be acted on.

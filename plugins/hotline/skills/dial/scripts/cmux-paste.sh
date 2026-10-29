@@ -30,6 +30,7 @@
 #   cmux-paste.sh --surface <handle> --payload-file <path> --call-id <nonce>
 #                 [--cwd <callee-cwd>] [--session <callee-session-id>]
 #                 [--wait-box <seconds>] [--workspace <uuid>] [--baseline <path>]
+#                 [--first-contact]
 #
 #   # → {"delivered":true,"sent":true,"confirmed":"transcript"|"screen","workspace":"…","surface":"…"}
 #   # → {"delivered":false,"sent":false,"reason":"…"}   nothing left this machine
@@ -51,6 +52,14 @@
 #
 # --workspace lets a caller that already walked the cmux tree hand over the
 # workspace UUID instead of making this script walk it again.
+#
+# --first-contact widens the TRANSCRIPT tier's budget (HOTLINE_CMUX_FIRST_CONFIRM_TRIES,
+# default 40 — 12s at the default cadence). A follow-up's proof is one append to a
+# transcript already on disk; first contact waits for Claude Code to CREATE it, and a
+# live dial's transcript appeared ~1.4s after the paste, by which point the flat 3s
+# window had all but closed — a landed payload reported lost. Waiting longer can never
+# double-send. The screen tier and the parked retry keep the follow-up budget: they
+# read pixels that are already there, not a file that is still being made.
 #
 # --baseline names a file holding the pre-paste screen. Confirmation needs to know
 # which screen markers were ALREADY there, so a previous exchange's chrome cannot
@@ -83,6 +92,9 @@ BASELINE_FILE=""
 # seconds rather than discovered a minute later by wait-for-response.sh.
 CONFIRM_TRIES="${HOTLINE_PASTE_CONFIRM_TRIES:-10}"
 CONFIRM_SLEEP="${HOTLINE_PASTE_CONFIRM_SLEEP:-0.3}"
+# Named and sized like herdr-prompt.sh's, for the same reason — see --first-contact.
+FIRST_CONFIRM_TRIES="${HOTLINE_CMUX_FIRST_CONFIRM_TRIES:-40}"
+FIRST_CONTACT=false
 # Settle between a paste and the Enter key event that submits it. The key event
 # travels a different path than the paste, so sent in the same breath it can reach
 # the REPL before the bytes it is meant to submit have been ingested, and the Enter
@@ -99,6 +111,7 @@ while [[ $# -gt 0 ]]; do
     --wait-box)     WAIT_BOX="$2";     shift 2 ;;
     --workspace)    WORKSPACE_ID="$2"; shift 2 ;;
     --baseline)     BASELINE_FILE="$2"; shift 2 ;;
+    --first-contact) FIRST_CONTACT=true; shift ;;
     *)              shift ;;
   esac
 done
@@ -420,10 +433,13 @@ if [[ -n "$CWD" && -n "$SESSION_ID" ]]; then
   done
 fi
 
+TRANSCRIPT_TRIES="$CONFIRM_TRIES"
+$FIRST_CONTACT && TRANSCRIPT_TRIES="$FIRST_CONFIRM_TRIES"
+
 confirmed_by_transcript() {
   local i t
   [[ ${#TRANSCRIPTS[@]} -eq 0 ]] && return 1
-  for ((i = 0; i < CONFIRM_TRIES; i++)); do
+  for ((i = 0; i < TRANSCRIPT_TRIES; i++)); do
     for t in "${TRANSCRIPTS[@]}"; do
       [[ -s "$t" ]] && grep -qF "$CALL_ID" "$t" 2>/dev/null && return 0
     done

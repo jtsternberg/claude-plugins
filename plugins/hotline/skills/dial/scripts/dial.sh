@@ -1927,6 +1927,7 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
                 --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID"
                 --wait-box "$PASTE_BOX_TIMEOUT")
   [[ -n "$DELIVER_WORKSPACE" ]] && DELIVER_ARGS+=(--workspace "$DELIVER_WORKSPACE")
+  [[ "$FIRST_CONTACT" == "true" ]] && DELIVER_ARGS+=(--first-contact)
   DELIVERY=$(bash "$DIAL_SCRIPTS/cmux-paste.sh" "${DELIVER_ARGS[@]}" 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then
     emit_error deliver "the callee's REPL booted but the prompt never landed in it: $(reason_full "$DELIVERY")" \
