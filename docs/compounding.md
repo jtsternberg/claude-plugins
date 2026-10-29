@@ -232,6 +232,11 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   parser drift guard" — this entry adds only the evidence that it keeps happening:
   after both sections existed, nonce injection still grew three copies and a bug fix
   had to land in two of them. (claude-plugins-xick, 279f98e)
+- **A recorded pid names our process only once its command line says so.** A pid
+  file outlives reboots, crashes, and its own process, so `kill -0` alone lets a
+  recycled pid read as live — and a later `kill` signals a bystander. Match
+  `ps -p <pid> -o command=` against the expected script before trusting or
+  signalling it. (1350ac7, claude-plugins-e3ix)
 - **A signal carried by a file's ABSENCE can mean exactly one thing; the moment it
   must mean two, give it a name.** hotline's call dir inferred the cmux sub-mode from
   which host-handle file existed, so `no surface_ref.txt` meant "this degraded",

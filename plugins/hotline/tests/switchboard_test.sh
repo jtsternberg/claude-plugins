@@ -597,6 +597,55 @@ else
   fail "lifecycle: status not_running after stop (got: $STATUS_OUT2)"
 fi
 
+# ---- case: a pid file naming an unrelated live process is stale ------------------
+# After a reboot or crash the recorded pid can be recycled by anything. A live pid
+# alone must not read as the server, and the unrelated process must never be
+# signalled — by stop, or by start's predecessor sweep.
+
+STALE_HOME="$SANDBOX/stalehome"
+mkdir -p "$STALE_HOME/.agents-hotline"
+sleep 60 &
+STRANGER_PID=$!
+echo "$STRANGER_PID" > "$STALE_HOME/.agents-hotline/switchboard.pid"
+
+ST_OUT=$(HOME="$STALE_HOME" bash "$SB_SCRIPTS/switchboard.sh" status)
+if [[ $(echo "$ST_OUT" | jq -r '.status') == "not_running" ]]; then
+  pass "stale pidfile: status reports not_running for an unrelated pid"
+else
+  fail "stale pidfile: status reports not_running for an unrelated pid (got: $ST_OUT)"
+fi
+
+echo "$STRANGER_PID" > "$STALE_HOME/.agents-hotline/switchboard.pid"
+SP_OUT=$(HOME="$STALE_HOME" bash "$SB_SCRIPTS/switchboard.sh" stop)
+sleep 0.2
+if kill -0 "$STRANGER_PID" 2>/dev/null \
+   && [[ $(echo "$SP_OUT" | jq -r '.status') == "not_running" ]] \
+   && [[ $(echo "$SP_OUT" | jq -r '.stale_pid') == "$STRANGER_PID" ]]; then
+  pass "stale pidfile: stop leaves the unrelated pid alone and says so"
+else
+  fail "stale pidfile: stop leaves the unrelated pid alone and says so (got: $SP_OUT, alive=$(kill -0 "$STRANGER_PID" 2>/dev/null && echo yes || echo no))"
+fi
+if [[ ! -e "$STALE_HOME/.agents-hotline/switchboard.pid" ]]; then
+  pass "stale pidfile: stop clears the stale pid file"
+else
+  fail "stale pidfile: stop clears the stale pid file"
+fi
+
+STALE_PORT=$(( PORT + 3 ))
+echo "$STRANGER_PID" > "$STALE_HOME/.agents-hotline/switchboard.pid"
+SS_OUT=$(HOME="$STALE_HOME" HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
+  bash "$SB_SCRIPTS/switchboard.sh" start --port="$STALE_PORT" --no-open)
+sleep 0.2
+SS_PID=$(echo "$SS_OUT" | jq -r '.pid')
+if [[ $(echo "$SS_OUT" | jq -r '.status') == "started" ]] && kill -0 "$STRANGER_PID" 2>/dev/null \
+   && [[ $(cat "$STALE_HOME/.agents-hotline/switchboard.pid") == "$SS_PID" ]]; then
+  pass "stale pidfile: start proceeds, replaces the file, spares the unrelated pid"
+else
+  fail "stale pidfile: start proceeds, replaces the file, spares the unrelated pid (got: $SS_OUT, alive=$(kill -0 "$STRANGER_PID" 2>/dev/null && echo yes || echo no))"
+fi
+HOME="$STALE_HOME" bash "$SB_SCRIPTS/switchboard.sh" stop > /dev/null
+kill "$STRANGER_PID" 2>/dev/null
+
 # ---- summary ----------------------------------------------------------------
 
 echo ""
