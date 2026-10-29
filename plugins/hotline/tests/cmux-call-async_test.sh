@@ -382,6 +382,24 @@ else
   fail "side-by-side async resolves and calls cmux-cli's opener with --wait-ready" \
        "side_log=$(cat "$tmp/side_log" 2>/dev/null || echo NONE) stderr=$(cat "$tmp/stderr.txt")"
 fi
+if grep -q -- '--wait-ready-timeout 30' "$tmp/side_log"; then
+  pass "side-by-side async passes the 30-second default"
+else
+  fail "side-by-side async passes the 30-second default" "$(cat "$tmp/side_log")"
+fi
+cp "$tmp/send_calls" "$tmp/send_calls.original"
+out_override=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" HOTLINE_SURFACE_READY_TIMEOUT=12 \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt override 2>"$tmp/override.err")
+override_dir=$(printf '%s' "$out_override" | jq -r '.call_dir // empty')
+if grep -q -- '--wait-ready-timeout 12' "$tmp/side_log" && [[ -f "$override_dir/surface_ref.txt" ]]; then
+  pass "side-by-side async passes override to opener"
+else
+  fail "side-by-side async passes override to opener" "$(cat "$tmp/side_log")"
+fi
+[[ -f "$override_dir/launch_script.txt" ]] && rm -f "$(cat "$override_dir/launch_script.txt")"
+rm -rf "$override_dir"
+cp "$tmp/send_calls.original" "$tmp/send_calls"
 if [[ -n "$call_dir" && -f "$call_dir/surface_ref.txt" && "$(cat "$call_dir/surface_ref.txt")" == "SURFACE-UUID-777" ]]; then
   pass "side-by-side async writes stable surface UUID handle"
 else
@@ -707,6 +725,35 @@ fi
 [[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
 rm -rf "$tmp" "$call_dir"
 
+# Explicit ownership permits retry only after the opener reports cleanup failure.
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-cmux-test-XXXXXX)
+mkdir -p "$tmp/cwd"; : > "$tmp/screen.txt"; make_min_surface_cmux "$tmp/bin"
+cat > "$tmp/open-side.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "  owned_cleanup_failed surface_id=EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE workspace_id=BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB pane_id=DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD" >&2
+exit 3
+EOF
+chmod +x "$tmp/open-side.sh"
+cp "$(dirname "$SCRIPT_UNDER_TEST")/../../../../cmux-cli/skills/using-cmux-cli/scripts/bounded-command.py" "$tmp/bounded-command.py"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt hi)
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+if grep -q 'close-surface --workspace BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB --surface EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE --force' "$tmp/close_calls"; then
+  pass "explicit failed cleanup retries owned UUID without tree lookup"
+else
+  fail "explicit failed cleanup retries owned UUID without tree lookup" "$(cat "$tmp/close_calls" 2>/dev/null)"
+fi
+rm -rf "$call_dir"
+# Simulate the bounded helper timing out, without a real sleep or cmux process.
+printf 'import sys\nsys.exit(124)\n' > "$tmp/bounded-command.py"
+out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt hi)
+call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
+if grep -q 'failed to close the owned orphan surface' "$call_dir/surface_err.txt"; then
+  pass "timed out owned cleanup retry records failure"
+else
+  fail "timed out owned cleanup retry records failure" "$(cat "$call_dir/surface_err.txt" 2>/dev/null)"
+fi
+rm -rf "$tmp" "$call_dir"
+
 # Surface readiness TIMEOUT: cmux-cli's opener exits 3 (no JSON) with the surface
 # ref in its stderr. The launcher must close that orphan and write the async
 # error contract — never leave a wedged surface behind.
@@ -739,12 +786,10 @@ fi
 # leaked the surface it meant to reap (claude-plugins-5k43). Both halves are the
 # UUIDs the tree reported — the positional surface:777 out of the opener's stderr
 # is only what starts the lookup.
-if grep -q "close-surface --workspace WORKSPACE-UUID-5 --surface SURFACE-UUID-777" \
-     "$tmp/close_calls" 2>/dev/null; then
-  pass "side-by-side readiness timeout closes the orphan surface scoped to its workspace"
+if [[ ! -s "$tmp/close_calls" ]]; then
+  pass "old opener diagnostic does not prove ownership and is not reaped"
 else
-  fail "side-by-side readiness timeout closes the orphan surface scoped to its workspace" \
-       "close_calls=$(cat "$tmp/close_calls" 2>/dev/null || echo NONE)"
+  fail "old opener diagnostic does not prove ownership and is not reaped" "close_calls=$(cat "$tmp/close_calls")"
 fi
 # The call FAILED before a placement was settled, so the dir names no cmux host at
 # all and the waiters take the file-watch path that reports the launcher's own
@@ -775,10 +820,10 @@ out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" CMUX_FAKE_NO_TREE=1 \
   HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" \
   bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" --prompt "hello" 2>"$tmp/stderr.txt")
 call_dir=$(printf '%s' "$out" | jq -r '.call_dir // empty')
-if grep -q "failed to close the orphan surface SURFACE-UUID-777" "$call_dir/surface_err.txt" 2>/dev/null; then
-  pass "a close that cannot be scoped is RECORDED in surface_err.txt, not swallowed"
+if grep -q "NOT reaping orphan surface surface:777" "$call_dir/surface_err.txt" 2>/dev/null; then
+  pass "old opener refusal is recorded in surface_err.txt"
 else
-  fail "a close that cannot be scoped is RECORDED in surface_err.txt, not swallowed" \
+  fail "old opener refusal is recorded in surface_err.txt" \
        "surface_err=$(cat "$call_dir/surface_err.txt" 2>/dev/null || echo NONE)"
 fi
 if [[ ! -s "$tmp/close_calls" ]]; then

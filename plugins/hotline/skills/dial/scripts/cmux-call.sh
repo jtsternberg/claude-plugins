@@ -187,7 +187,7 @@ elif [[ "$PLACEMENT" == "window" ]]; then
 else
   # Side-by-side via cmux-cli's canonical opener. On a --wait-ready timeout it
   # exits 3 (no JSON); surface its stderr as the error.
-  READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-8}"
+  READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-$HOTLINE_SIDE_SURFACE_READY_TIMEOUT_DEFAULT}"
   # NO --title: it would PIN a static tab title over claude's own dynamic one and
   # cost the ◑/✳/⏺ activity glyph for the life of the tab. The label already reaches
   # the strip through --name → `claude -n` → the terminal title.
@@ -199,9 +199,9 @@ else
   rm -f /tmp/hotline-side-err.$$
   SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
   SURF_ID=$(printf '%s' "$SURF_JSON" | jq -r '.surface_id // empty')
-  [[ -z "$SURF_REF" ]] && { jq -n --arg e "surface opener returned no ref: $SURF_JSON" '{error: $e}'; exit 1; }
+  [[ -z "$SURF_REF" && -z "$SURF_ID" ]] && { jq -n --arg e "surface opener returned no handle: $SURF_JSON" '{error: $e}'; exit 1; }
   SEND_TARGET=(--surface "${SURF_ID:-$SURF_REF}")
-  PLACE_REF="$SURF_REF"; PLACE_ID="$SURF_ID"; PLACE_KIND="surface"
+  PLACE_REF="${SURF_REF:-$SURF_ID}"; PLACE_ID="$SURF_ID"; PLACE_KIND="surface"
 fi
 
 # Session ID for the callee. See cmux-call-async.sh for the full rationale:

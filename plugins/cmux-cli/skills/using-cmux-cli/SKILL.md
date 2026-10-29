@@ -77,6 +77,7 @@ cmux accepts three handle formats anywhere a `window`, `workspace`, `pane`, or `
 
 **Get UUIDs like this:**
 - Your own location: `cmux identify --json --id-format both` returns your caller/focused UUIDs (without that flag you get refs only — see above). The `CMUX_*_ID` env vars (`CMUX_SURFACE_ID`, `CMUX_WORKSPACE_ID`, `CMUX_TAB_ID`) are UUIDs too, but they are a **snapshot from the moment your process was spawned** — a surface that has since been moved, re-registered, or superseded leaves them naming something cmux no longer knows, and an agent-spawned surface (a dialed-in callee) is the common case. `identify` can also answer `"caller": null` for exactly that reason, and then it reports the **focused** context, which is somebody else's surface. So confirm the id you intend to act on appears in `cmux tree --all --json --id-format uuids` before you target it, and treat "not in the tree" as unknown location rather than as a usable handle.
+- Fresh creations: trust validated UUIDs returned by the creation command; a tree may lag or refs may renumber.
 - Anything else: `cmux tree --all --json --id-format uuids` (or `--id-format both` to see refs alongside for a human). Snapshot once, read the UUIDs you need, then target by those.
 
 ### An empty or unresolved handle silently targets *you*
@@ -105,10 +106,7 @@ SID=$(jq -r '.surface_id // empty' <<<"$OUT")
 [[ -n "$SID" && "$SID" != "null" ]] || { echo "no surface handle — refusing to send" >&2; exit 2; }
 ```
 
-An `rc 4` specifically means the surface was created but cmux never resolved it to
-a UUID; the surface is **not** closed (nothing safe to close it by) and the
-diagnostic names its positional ref so you can find it in
-`cmux tree --all --json --id-format both`.
+An `rc 4` means the creation response lacked valid UUIDs or named a mismatched container. The script does not close an untrusted target; inspect the tree to find any orphan.
 
 **Real failure this prevents:** exactly the sequence above, live. A helper exited non-zero with empty output, and the next `send` typed a probe command into the user's prompt box mid-conversation. The only evidence was a `surface.input_sent` event whose `payload.result.surface_id` was the caller's own.
 
@@ -123,7 +121,7 @@ Guard both ends — validate before, verify after:
 
 In a shell script, don't hand-roll the check a fourth time: `cmux_handle_ok <what> <handle>` in `plugins/hotline/scripts/repl-state.sh` is the guard this repo already uses for it.
 
-`open-side-surface.sh` will not hand you a null id at all: it retries the ref→UUID lookup (a fresh surface is not instantly enumerable) and, if it still cannot name what it created, exits **4** with a diagnostic and no JSON rather than reporting nulls as success. Keep the guard above anyway — `identify` and a hand-rolled tree read can each still answer `null`.
+`open-side-surface.sh` will not hand you a null id at all: it takes UUIDs directly from the `new-surface` or `new-pane` creation response, and exits **4** with a diagnostic and no JSON if it cannot identify what it created. Keep the guard above anyway — `identify` and a hand-rolled tree read can each still answer `null`.
 
 **Which surface it substitutes depends on the path.** `cmux send` and the other CLI verbs default their `--surface`/`--workspace` to the `$CMUX_*_ID` env vars, so an empty handle lands on **the caller's own surface**. A malformed `cmux rpc` call — camelCase param keys, which are silently dropped — instead resolves against the **focused** surface and returns `ok:true` carrying somebody else's grid. Either way the call succeeds and the target is not the one you named, which is why the verification is `result.surface_id`, not the exit code.
 
@@ -231,6 +229,8 @@ The full catalog (38 event names), the payload shapes, the `agent.hook.*` double
 ### The default routing
 
 For any "open X" / "start X" / "ssh to X" / "run Y in a new terminal" request that *doesn't* specify a destination, route through the side-by-side workflow below. Don't reach for `cmux new-workspace`, `cmux new-window`, or bare `cmux ssh <host>` — those spawn in places the user can't see without switching context.
+
+The `--wait-ready` budget covers the readiness probes after creation and naming; preflight, creation, and naming are outside it. On timeout, cleanup gets a separate two-second command budget; Hotline may make one separately bounded retry.
 
 **Fresh surfaces need a moment before their PTY accepts input — sending immediately can drop your `\n` (the shell's "Last login" banner prints *after* your typed command, swallowing the newline, leaving the command sitting at the prompt unexecuted).** Use `--wait-ready` on `open-side-surface.sh` and the script handles both this and the "Terminal surface not found" PTY-attach race internally.
 
@@ -673,9 +673,9 @@ Key options (run `--help` for the full list):
 - `--title <text>` — **pass this every time.** Applies the title with `cmux rename-tab` at creation, so the tab is findable and the returned `surface_title` is something you can report. Omitting it leaves a generic auto-title and prints a hint on stderr; `title_status` in the JSON tells you whether it was `applied`, `failed`, or `unset`.
 - `--json` — emit `{surface_ref, surface_id, pane_ref, pane_id, workspace_ref, workspace_id, surface_title, workspace_name, title_status, mode, subject, surface_type, url, ready}` for chaining. Chain on the `*_id` UUIDs (`surface_id`, `workspace_id`), not the `*_ref` positional labels — and report `surface_title` + `workspace_name` to the user, never the refs.
 - `--wait-ready` — for terminal surfaces, block until the PTY is attached *and* the shell is actually executing input. The probe send is what attaches the PTY (`Ctrl-U`, then `echo <marker>`, re-sent until the marker appears twice); it does **not** focus the surface. Without this you have to hand-roll a readiness loop and dodge the "Terminal surface not found" race. No-op for browser surfaces.
-- `--wait-ready-timeout <seconds>` — override the wait-ready budget (default 5).
+- `--wait-ready-timeout <seconds>` — override the wait-ready budget (default 30 seconds). On timeout, either creation path attempts to close its own surface by its creation UUID.
 
-On success it prints the new surface's ref + pane + workspace, its `title:` and `workspace:` names, plus which branch it took (`new-surface` vs `new-pane`). Failure goes to stderr with exit 1 (cmux error), 2 (context error), or 3 (`--wait-ready` timed out — surface exists but PTY never echoed the probe).
+On success it prints the new surface's ref + pane + workspace, its `title:` and `workspace:` names, plus which branch it took (`new-surface` vs `new-pane`). Failure goes to stderr with exit 1 (cmux error), 2 (context error), 3 (`--wait-ready` timed out), or 4 (creation identity unavailable).
 
 ### What it decides under the hood
 
@@ -687,7 +687,7 @@ Keep this as a mental model — you can still hand-roll a variant when the user'
    - **Only one pane** → `cmux new-pane --direction right --type <t> [--url <u>] --workspace <ws>`. (Uses `new-pane` rather than `new-split` because only `new-pane` supports `--type browser`.)
    - **Multiple panes** → pick your-pane-index **+ 1** (fall back to **− 1** if you're rightmost), then `cmux new-surface --pane <adjacent-pane-UUID> --type <t> [--url <u>] --workspace <ws> --window <win>`. The new surface becomes a tab in that existing pane column and auto-selects.
 
-   **Always pass `--workspace`/`--window`, and use a UUID for every handle the tree gives you one for.** `new-surface` looks the pane up *inside* a workspace context that defaults to `$CMUX_WORKSPACE_ID` (see `cmux new-surface --help`), and that scoping applies to a **pane UUID exactly as it does to a positional `pane:N`** — a valid UUID whose workspace is not the inherited one comes back `not_found: Pane not found`, and a valid ref in the wrong context comes back `not_found: Workspace not found`. An agent-spawned surface inherits the workspace id of whoever spawned it, not the one its own pane lives in, so pin the container explicitly rather than letting cmux infer it. Prefer UUIDs on top of that, because positional refs renumber as surfaces open and close: the pane ref you read in step 2 can denote something else by step 3. The workspace and window `.id`s sit in the same snapshot as the pane's — carry them, and fall back to the ref only where one is null.
+   **Pin `--workspace`, and `--window` for new-surface, with UUIDs.** `new-surface` looks the pane up *inside* a workspace context that defaults to `$CMUX_WORKSPACE_ID` (see `cmux new-surface --help`), and that scoping applies to a **pane UUID exactly as it does to a positional `pane:N`** — a valid UUID whose workspace is not the inherited one comes back `not_found: Pane not found`, and a valid ref in the wrong context comes back `not_found: Workspace not found`. An agent-spawned surface inherits the workspace id of whoever spawned it, not the one its own pane lives in, so pin the container explicitly rather than letting cmux infer it. Prefer UUIDs on top of that, because positional refs renumber as surfaces open and close: the pane ref you read in step 2 can denote something else by step 3. The workspace and window `.id`s sit in the same snapshot as the pane's — carry them and refuse creation if a required UUID is missing.
 
 ### Why not always `new-split` / `new-pane`?
 
@@ -699,7 +699,7 @@ Creating a new pane column when an adjacent one already exists shoves your surfa
 
 ### Verify
 
-The script parses cmux's `OK surface:<n> pane:<p> workspace:<w>` output and reports the result. Re-confirm with `cmux tree --workspace $CMUX_WORKSPACE_ID` if you need to see it in situ — the new ref should appear under the expected pane with `[selected]` on it, **carrying the title you asked for**. A ref sitting there under a generic auto-title means the rename didn't land; fix it before reporting (see [Name it, then report it by name](#name-it-then-report-it-by-name-required)).
+The script consumes creation JSON UUIDs directly; display refs are optional. Re-confirm with `cmux tree --workspace $CMUX_WORKSPACE_ID` if you need to see it in situ — the new ref should appear under the expected pane with `[selected]` on it, **carrying the title you asked for**. A ref sitting there under a generic auto-title means the rename didn't land; fix it before reporting (see [Name it, then report it by name](#name-it-then-report-it-by-name-required)).
 
 ---
 

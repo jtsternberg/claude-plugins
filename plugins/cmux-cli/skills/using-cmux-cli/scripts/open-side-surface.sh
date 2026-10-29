@@ -19,8 +19,7 @@
 #          ref inside a workspace context defaulting to $CMUX_WORKSPACE_ID, so a
 #          bare ref fails as "not_found: Workspace not found" whenever the caller
 #          lives in a different workspace than the pane it wants a sibling of.
-#   4. Parse `OK surface:<n> pane:<p> workspace:<w>` from cmux's output, then
-#      resolve UUIDs + human-readable names from a fresh `--id-format both` tree.
+#   4. Use UUIDs from the creation JSON for either mode; refs are display only.
 #   5. Apply `--title` via `cmux rename-tab` so the tab is findable in the UI,
 #      and hand back surface_title / workspace_name — a positional ref is not
 #      something the user can locate.
@@ -35,7 +34,7 @@ URL=""
 TITLE=""
 OUTPUT_JSON=0
 WAIT_READY=0
-WAIT_READY_TIMEOUT=5
+WAIT_READY_TIMEOUT=30
 
 usage() {
   cat <<'EOF'
@@ -63,7 +62,7 @@ Options:
                           round-trips a probe (echo <marker>) to verify
                           execution. No-op for browser surfaces.
       --wait-ready-timeout <seconds>
-                          Override the --wait-ready timeout (default: 5).
+                          Override the --wait-ready timeout (default: 30).
   -h, --help             Show this help.
 
 The script decides between `cmux new-pane --direction right` (when the
@@ -85,14 +84,14 @@ names to report back (surface_title, workspace_name):
    "title_status":"applied",
    "mode":"new-surface","subject":"caller","surface_type":"terminal","url":null,"ready":"ready"}
 
-Requires: cmux, jq.
+Requires: cmux, jq, python3 (for --wait-ready).
 
 Exit codes:
   0 = surface created (and ready, if --wait-ready)
   1 = cmux command failed (see stderr)
   2 = usage / dependency / context error
-  3 = --wait-ready timed out (surface exists but PTY never echoed probe)
-  4 = the surface was created but cmux never resolved it to a UUID; the ids are
+  3 = --wait-ready timed out (cleanup attempted by UUID)
+  4 = the surface was created but cmux did not provide usable UUIDs; the ids are
       the point of the JSON, and a null one is how a payload reaches the CALLER'S
       own input box, so this refuses rather than reporting nulls as success
   130 = interrupted (Ctrl-C)
@@ -120,9 +119,17 @@ if [[ "$SURFACE_TYPE" != "terminal" && "$SURFACE_TYPE" != "browser" ]]; then
   exit 2
 fi
 
+if [[ ! "$WAIT_READY_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "open-side-surface: --wait-ready-timeout must be a positive integer" >&2
+  exit 2
+fi
+
 # --- Preflight ---
 command -v cmux >/dev/null 2>&1 || { echo "open-side-surface: cmux not on PATH" >&2; exit 2; }
 command -v jq   >/dev/null 2>&1 || { echo "open-side-surface: jq required (brew install jq)" >&2; exit 2; }
+if [[ $WAIT_READY -eq 1 && "$SURFACE_TYPE" == terminal ]]; then
+  command -v python3 >/dev/null 2>&1 || { echo "open-side-surface: python3 required for bounded readiness" >&2; exit 2; }
+fi
 
 # --- Resolve subject ---
 # A freshly-spawned or just-moved caller surface can be momentarily unqueryable
@@ -246,12 +253,20 @@ if [[ $my_pos -lt 0 ]]; then
   exit 2
 fi
 
+# All creation targets must be stable container identities.
+uuid_pattern='^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$'
+if [[ ! "$subject_ws_id" =~ $uuid_pattern || ! "$subject_win_id" =~ $uuid_pattern ]]; then
+  echo "open-side-surface: workspace or window UUID unavailable; refusing positional container target." >&2
+  exit 2
+fi
+subject_ws_target="$subject_ws_id"
+subject_win_target="$subject_win_id"
 # --- Decide and execute ---
 mode=""
 if [[ $pane_count -eq 1 ]]; then
   # No adjacent pane exists — create one to the right.
   mode="new-pane"
-  args=(new-pane --direction right --type "$SURFACE_TYPE" --workspace "$subject_ws")
+  args=(new-pane --direction right --type "$SURFACE_TYPE" --workspace "$subject_ws_target")
   [[ "$SURFACE_TYPE" == "browser" && -n "$URL" ]] && args+=(--url "$URL")
 else
   # Pick adjacent: prefer the pane immediately to the right (idx+1), else left.
@@ -269,36 +284,35 @@ else
   # So the container is always pinned explicitly here — which is what a hotline
   # callee dialing onward needs, since its inherited workspace id names the
   # CALLER's workspace, not the one its own pane lives in. Every handle here is
-  # a UUID when the snapshot carries one, ref only as a fallback: positional
+  # a validated UUID: positional
   # refs renumber as surfaces open and close, so a ref read out of the snapshot
   # above can denote something else by the time this runs. (The new-pane branch
   # above pins --workspace for the same reason: never let cmux infer the
   # container.)
-  subject_ws_target="${subject_ws_id:-$subject_ws}"
-  subject_win_target="${subject_win_id:-$subject_win}"
-  if [[ -n "$adjacent_pane_id" ]]; then
-    args=(new-surface --pane "$adjacent_pane_id" --type "$SURFACE_TYPE" \
-          --workspace "$subject_ws_target" --window "$subject_win_target")
-  else
-    # No pane UUID available: keep the positional ref, pinned to the same
-    # context.
-    args=(new-surface --pane "$adjacent_pane" --type "$SURFACE_TYPE" \
-          --workspace "$subject_ws_target" --window "$subject_win_target")
+  if [[ ! "$adjacent_pane_id" =~ $uuid_pattern ]]; then
+    echo "open-side-surface: adjacent pane UUID unavailable; refusing positional target." >&2
+    exit 2
   fi
+  args=(new-surface --pane "$adjacent_pane_id" --type "$SURFACE_TYPE" \
+        --workspace "$subject_ws_target" --window "$subject_win_target")
   [[ "$SURFACE_TYPE" == "browser" && -n "$URL" ]] && args+=(--url "$URL")
 fi
 
 # --- Execute, capture, parse ---
-if ! out=$(cmux "${args[@]}" 2>&1); then
+create_cmd=(--json --id-format both "${args[@]}")
+create_err=$(mktemp)
+trap 'rm -f "$create_err"' EXIT
+if ! out=$(cmux "${create_cmd[@]}" 2>"$create_err"); then
   echo "open-side-surface: cmux ${args[*]} failed:" >&2
   printf '%s\n' "$out" >&2
+  cat "$create_err" >&2
   # cmux reports a context-resolution miss as a bare `not_found`, which reads as
   # if the target were gone when the real cause is usually that we could not
   # address it unambiguously. Say which, so the caller is not left guessing.
-  if [[ "$out" == *"not_found"* ]]; then
+  if [[ "$out" == *"not_found"* ]] || grep -q not_found "$create_err"; then
     {
       echo "  The target was pinned explicitly ($subject_ws_target /"
-      echo "  ${subject_win_target:-?} / ${adjacent_pane_id:-$adjacent_pane}), so this is not the"
+      echo "  ${subject_win_target:-?} / ${adjacent_pane_id:-<new-pane>}), so this is not the"
       echo "  inherited-workspace miss: something moved between the tree snapshot above"
       echo "  and this call — the pane or its workspace closed, or the workspace was"
       echo "  moved to another window. Re-run to snapshot again."
@@ -307,119 +321,31 @@ if ! out=$(cmux "${args[@]}" 2>&1); then
   exit 1
 fi
 
-# Parse `OK surface:<n> pane:<p> workspace:<w>` (order may vary slightly).
-new_surface=$(printf '%s' "$out" | grep -oE 'surface:[0-9]+' | head -1 || true)
-new_pane=$(printf    '%s' "$out" | grep -oE 'pane:[0-9]+'    | head -1 || true)
-new_ws=$(printf      '%s' "$out" | grep -oE 'workspace:[0-9]+' | head -1 || true)
+cat "$create_err" >&2
 
-# Fall back to what we know if the output surprises us.
-[[ -z "$new_pane" && "$mode" == "new-surface" ]] && new_pane="$adjacent_pane"
-[[ -z "$new_ws" ]] && new_ws="$subject_ws"
-
-if [[ -z "$new_surface" ]]; then
-  echo "open-side-surface: created a surface but could not parse its ref from cmux output:" >&2
-  printf '%s\n' "$out" >&2
-  exit 1
-fi
-
-# --- Resolve stable UUIDs (and human-readable names) for the new surface ---
-# How hard to try before giving up: ~0.8s total, spent only on the failing path.
-RESOLVE_TRIES="${CMUX_SIDE_RESOLVE_TRIES:-5}"
-RESOLVE_SLEEP="${CMUX_SIDE_RESOLVE_SLEEP:-0.2}"
-# The `OK ...` line only gives positional refs, which renumber as surfaces open
-# and close. Look the new surface up in a fresh `--id-format both` tree so we can
-# hand callers UUIDs (the `.id` fields) to target by — and use them ourselves for
-# the readiness probes below. A ref that never resolves is a hard failure rather
-# than a degrade: see the refusal below for why a reported null is worse than an
-# error.
-#
-# The same lookup also pulls the surface's title and its workspace's name: a
-# positional ref like `surface:258` is meaningless to the human (cmux's UI never
-# shows it, and it renumbers), so callers need names to report back.
-# A FRESH SURFACE IS NOT INSTANTLY ENUMERABLE, so the lookup is retried. The
-# `OK surface:N` line comes back before the surface is necessarily in the tree,
-# and a single snapshot taken in that gap finds nothing — observed live with a
-# healthy surface that a tree taken moments later resolved perfectly.
-#
-# `read` consuming an empty lookup returns 1, which `set -euo pipefail` turns into
-# an abort before the next line runs, so every attempt keeps its `|| true`
-# (claude-plugins-h2et, -99nu). What that guard must NOT do is let an unresolved id
-# leave this script as success — see the refusal below.
-new_surface_id=""; new_pane_id=""; new_ws_id=""; new_surface_title=""; new_ws_name=""
-resolve_tries=0
-tree_read_ok=false
-tree_err=""
-while :; do
-  tree_both=$(cmux tree --all --json --id-format both 2>/dev/null) || tree_both=""
-  if [[ -n "$tree_both" ]]; then
-    tree_read_ok=true
-    IFS=$'\t' read -r new_surface_id new_pane_id new_ws_id new_surface_title new_ws_name < <(
-      printf '%s' "$tree_both" | jq -r --arg s "$new_surface" '
-        .windows[].workspaces[] as $ws
-        | $ws.panes[].surfaces[]
-        | select(.ref == $s)
-        | [(.id // ""), (.pane_id // ""), ($ws.id // ""), (.title // ""), ($ws.title // "")]
-        | @tsv' 2>/dev/null | head -1
-    ) || true
-  fi
-  [[ -n "$new_surface_id" && -n "$new_pane_id" && -n "$new_ws_id" ]] && break
-  resolve_tries=$((resolve_tries + 1))
-  (( resolve_tries >= RESOLVE_TRIES )) && break
-  sleep "$RESOLVE_SLEEP"
-done
-
-# --- An unresolved id is a hard failure, never a reported null. --------------
-# Falling back to the positional ref and emitting `"surface_id": null` looked like
-# the safe degrade, and it is the documented lead-in to the worst failure here: a
-# caller does `SID=$(jq -r '.surface_id' …)`, gets an empty string, and the next
-# `cmux send --surface "$SID"` falls back to $CMUX_SURFACE_ID and types the payload
-# into THE CALLER'S OWN input box — exit 0, no warning. Only a caller that runs the
-# guard this skill prescribes escapes it, and a JSON contract must not depend on
-# every consumer remembering a guard.
-#
-# So: refuse.
-#
-# THE TRADEOFF, ACCEPTED DELIBERATELY. This is not a no-op for callers: hotline
-# guards on `surface_ref`, not `surface_id` (`cmux-call-async.sh`, and
-# `SURF_HANDLE="${SURF_ID:-$SURF_REF}"` below it), so it SURVIVED the old
-# ref-degrade — a dial whose surface was healthy, titled and ready completed on the
-# ref alone. Refusing therefore converts a limping-but-working dial into a hard
-# failure, and that is the cost.
-#
-# It is worth paying because of the one cause a retry cannot fix. If the lookup
-# failed because the echoed ref RENUMBERED — a `surface.moved` in the window
-# between cmux minting the ref and this snapshot is exactly that
-# (references/events.md) — then the ref no longer names the surface we created, and
-# proceeding on it is how a work order gets pasted into a BYSTANDER'S live REPL.
-# A failed dial is recoverable in one command; that is not recoverable at all.
-#
-# AND IT DELIBERATELY LEAVES AN ORPHAN. The surface exists and is not closed here,
-# because there is nothing safe to close it BY: `cmux close-surface` needs a handle,
-# and the only handle we have is the positional ref that may already name a
-# different slot — closing on it would reap whatever occupies that slot now, which
-# is the same reasoning that makes the caller's reap path refuse a ref
-# (cmux-call-async.sh). A leaked surface a human can see and close is strictly
-# better than a close that lands on a live tab. The diagnostic names the ref for
-# that human and deliberately does NOT print a `surface_id=` line, so no reaper
-# matches a UUID that was never resolved.
-#
-# Exit 4, distinct from 1 (create/parse), 2 (no panes / identify) and 3 (readiness
-# or an empty handle), so a caller can tell "cmux would not name what it just made"
-# from the failures it already handles.
-if [[ -z "$new_surface_id" || -z "$new_pane_id" || -z "$new_ws_id" ]]; then
-  {
-    echo "open-side-surface: created $new_surface but cmux never resolved it to a UUID after ${RESOLVE_TRIES} attempts — refusing to report a null id as success."
-    if ! $tree_read_ok; then
-      echo "  Cause: \`cmux tree --all --json --id-format both\` returned nothing on every attempt, so no lookup ran at all."
-    else
-      echo "  Cause: the tree read fine but held no surface with ref $new_surface. Positional refs renumber as surfaces open and close, so the ref cmux echoed may already name a different slot."
-    fi
-    echo "  A null surface_id is how a payload ends up in the CALLER'S input box: an empty handle makes \`cmux send\` fall back to \$CMUX_SURFACE_ID."
-    echo "  The surface was created and is NOT closed, because a positional ref is not safe to close by — it names whatever occupies that slot now. Find and close it by hand:"
-    echo "    cmux tree --all --json --id-format both"
-  } >&2
+# Creation UUIDs are authoritative; post-create trees can be stale or refs renumbered.
+new_surface=$(printf '%s' "$out" | jq -r '.surface_ref | strings' 2>/dev/null) || new_surface=""
+new_pane=$(printf '%s' "$out" | jq -r '.pane_ref | strings' 2>/dev/null) || new_pane=""
+new_ws=$(printf '%s' "$out" | jq -r '.workspace_ref | strings' 2>/dev/null) || new_ws=""
+new_surface_id=$(printf '%s' "$out" | jq -r '.surface_id | strings' 2>/dev/null) || new_surface_id=""
+new_pane_id=$(printf '%s' "$out" | jq -r '.pane_id | strings' 2>/dev/null) || new_pane_id=""
+new_ws_id=$(printf '%s' "$out" | jq -r '.workspace_id | strings' 2>/dev/null) || new_ws_id=""
+if [[ ! "$new_surface_id" =~ $uuid_pattern || ! "$new_pane_id" =~ $uuid_pattern || ! "$new_ws_id" =~ $uuid_pattern ]] ||
+   [[ "$(printf %s "$new_ws_id" | tr "[:upper:]" "[:lower:]")" != "$(printf %s "$subject_ws_id" | tr "[:upper:]" "[:lower:]")" ]] ||
+   { [[ "$mode" == new-surface ]] && [[ "$(printf %s "$new_pane_id" | tr "[:upper:]" "[:lower:]")" != "$(printf %s "$adjacent_pane_id" | tr "[:upper:]" "[:lower:]")" ]]; }; then
+  echo "open-side-surface: creation response has invalid UUIDs or mismatched containers; refusing to target or close it." >&2
   exit 4
 fi
+if [[ "$mode" == new-pane ]]; then
+  for existing_id in "${pane_ids[@]}"; do
+    if [[ "$(printf %s "$new_pane_id" | tr '[:upper:]' '[:lower:]')" == "$(printf %s "$existing_id" | tr '[:upper:]' '[:lower:]')" ]]; then
+      echo "open-side-surface: new-pane returned an existing pane UUID; refusing to target or close it." >&2
+      exit 4
+    fi
+  done
+fi
+new_surface_title=""
+new_ws_name=$(printf '%s' "$subject_tree" | jq -r --arg win "$subject_win" --arg ws "$subject_ws" 'first(.windows[] | select(.ref == $win) | .workspaces[] | select(.ref == $ws)) | .title // ""')
 
 surface_handle="$new_surface_id"
 pane_handle="$new_pane_id"
@@ -487,14 +413,20 @@ if [[ $WAIT_READY -eq 1 ]]; then
 
     nonce="$(date +%s)$$${RANDOM:-0}"
     marker="__CMUX_PTYREADY_${nonce}__"
-    start_ts=$(date +%s)
+    bounded_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bounded-command.py"
+    # The clock seam permits deterministic tests; production uses monotonic time.
+    ready_clock() { if [[ -n "${CMUX_READY_CLOCK_FILE:-}" ]]; then cat "$CMUX_READY_CLOCK_FILE"; else python3 "$bounded_helper" clock; fi; }
+    remaining() { now_ts=$(ready_clock); echo $((deadline - now_ts)); }
+    ready_file=$(mktemp)
+    trap 'rm -f "$create_err" "$ready_file"' EXIT
+    start_ts=$(ready_clock)
+    deadline=$((start_ts + WAIT_READY_TIMEOUT))
     ready_status="timeout"
     attempt=0
 
     while :; do
-      now_ts=$(date +%s)
-      elapsed=$((now_ts - start_ts))
-      if (( elapsed >= WAIT_READY_TIMEOUT )); then
+      budget=$(remaining)
+      if (( budget <= 0 )); then
         break
       fi
 
@@ -506,17 +438,25 @@ if [[ $WAIT_READY -eq 1 ]]; then
       # satisfy the ≥2-hit test below while proving nothing. Raw byte through the
       # TEXT path: `send-key ctrl+u` does not reach the program.
       if (( attempt % 5 == 0 )); then
-        cmux send --surface "$surface_handle" $'\025' >/dev/null 2>&1 || true
-        cmux send --surface "$surface_handle" "echo ${marker}\n" >/dev/null 2>&1 || true
+        python3 "$bounded_helper" "deadline:$deadline" cmux send --workspace "$ws_handle" --surface "$surface_handle" $'\025' >/dev/null 2>&1 || true
+        budget=$(remaining)
+        (( budget > 0 )) || break
+        python3 "$bounded_helper" "deadline:$deadline" cmux send --workspace "$ws_handle" --surface "$surface_handle" "echo ${marker}\n" >/dev/null 2>&1 || true
       fi
       attempt=$((attempt + 1))
       sleep 0.2
 
       # The typed `echo MARKER` echoes back as input (1 hit); shell execution
       # adds the output line (2nd hit). >=2 hits => the shell actually ran it.
-      hits=$(cmux read-screen --surface "$surface_handle" --scrollback --lines 200 2>/dev/null \
-             | grep -Fc "${marker}" || true)
-      if [[ "${hits:-0}" -ge 2 ]]; then
+      budget=$(remaining)
+      (( budget > 0 )) || break
+      : > "$ready_file"
+      read_ok=1
+      python3 "$bounded_helper" "deadline:$deadline" cmux read-screen --workspace "$ws_handle" --surface "$surface_handle" --scrollback --lines 200 >"$ready_file" 2>/dev/null || read_ok=0
+      budget=$(remaining)
+      (( budget > 0 )) || break
+      hits=$(grep -Fc "${marker}" "$ready_file" || true)
+      if [[ "$read_ok" -eq 1 && "${hits:-0}" -ge 2 ]]; then
         ready_status="ready"
         break
       fi
@@ -525,15 +465,15 @@ if [[ $WAIT_READY -eq 1 ]]; then
     if [[ "$ready_status" != "ready" ]]; then
       {
         echo "open-side-surface: --wait-ready timed out after ${WAIT_READY_TIMEOUT}s for $new_surface ($new_pane)."
-        # THE UUIDs, in a parseable form, because this exit leaves a surface
-        # behind and the caller's only description of it is this text. A
-        # positional `surface:N` is not a safe thing to reap from: it names
-        # whatever occupies slot N when the close runs, not the surface this
-        # probe opened, and slots renumber the moment any sibling closes. Emitted
-        # only when the tree resolved them — an unresolved id must read as absent,
-        # not as the string "none".
-        if [[ -n "$new_surface_id" ]]; then
-          echo "  surface_id=$new_surface_id workspace_id=$new_ws_id pane_id=$new_pane_id"
+        # Only the creation UUID proves ownership; a ref-based tree lookup can
+        # race renumbering. Preserve the existing diagnostic if cleanup fails.
+        uuid_pattern='^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$'
+        if [[ "$new_surface_id" =~ $uuid_pattern && "$new_ws_id" =~ $uuid_pattern ]] &&
+           python3 "$bounded_helper" 2 cmux close-surface --workspace "$new_ws_id" --surface "$new_surface_id" --force >/dev/null 2>&1; then
+          echo "  Closed the created surface by UUID."
+        else
+          echo "  Cleanup failed or a safe UUID was unavailable; the surface may remain open."
+          [[ "$new_surface_id" =~ $uuid_pattern && "$new_ws_id" =~ $uuid_pattern ]] && echo "  owned_cleanup_failed surface_id=$new_surface_id workspace_id=$new_ws_id pane_id=$new_pane_id"
         fi
         echo "  Possible causes:"
         echo "    • Shell still initializing (slow rc files, network mounts, login banner)"

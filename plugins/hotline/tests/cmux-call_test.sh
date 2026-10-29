@@ -476,7 +476,11 @@ mkdir -p "$tmp/bin" "$tmp/cwd"
 cat > "$tmp/open-side.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "invoked: $*" >> "${SIDE_STUB_LOG:?}"
-printf '%s\n' '{"surface_ref":"surface:777","surface_id":"SURFACE-UUID-777","pane_ref":"pane:55","pane_id":"PANE-UUID-55","workspace_ref":"workspace:5","ready":"ready"}'
+# Fake a surface that cannot become ready before simulated second 10.
+prev=""; budget=0
+for arg in "$@"; do [[ "$prev" == --wait-ready-timeout ]] && budget="$arg"; prev="$arg"; done
+(( budget >= 10 )) || exit 3
+printf '%s\n' '{"surface_id":"SURFACE-UUID-777","pane_ref":"pane:55","pane_id":"PANE-UUID-55","workspace_ref":"workspace:5","ready":"ready"}'
 EOF
 chmod +x "$tmp/open-side.sh"
 cat > "$tmp/bin/cmux" <<'EOF'
@@ -522,6 +526,19 @@ else
        "side_log=$(cat "$tmp/side_log" 2>/dev/null || echo NONE)"
 fi
 
+if grep -q -- '--wait-ready-timeout 30' "$tmp/side_log"; then
+  pass "side-by-side sync passes the 30-second default"
+else
+  fail "side-by-side sync passes the 30-second default" "$(cat "$tmp/side_log")"
+fi
+PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" HOTLINE_SURFACE_READY_TIMEOUT=12 \
+  HOTLINE_OPEN_SIDE_SURFACE="$tmp/open-side.sh" SIDE_STUB_LOG="$tmp/side_log" \
+  bash "$SCRIPT_UNDER_TEST" --cwd "$tmp/cwd" > "$tmp/override.json" 2> "$tmp/override.err"
+if grep -q -- '--wait-ready-timeout 12' "$tmp/side_log" && ! jq -e '.error' "$tmp/override.json" >/dev/null; then
+  pass "sync override reaches a fake surface ready after 8 seconds"
+else
+  fail "sync override reaches a fake surface ready after 8 seconds" "$(cat "$tmp/override.err")"
+fi
 send_calls=$(cat "$tmp/send_calls" 2>/dev/null || true)
 assert_contains "side-by-side sends launch script to the SURFACE (not a workspace)" \
   "$send_calls" "send --surface SURFACE-UUID-777 bash /tmp/hotline-cmux-launch-"
@@ -530,11 +547,11 @@ placement=$(jq -r '.placement // empty' "$tmp/out.json" 2>/dev/null || true)
 surf_ref=$(jq -r '.surface_ref // empty' "$tmp/out.json" 2>/dev/null || true)
 surf_id=$(jq -r '.surface_id // empty' "$tmp/out.json" 2>/dev/null || true)
 ws_ref=$(jq -r '.workspace_ref // "null"' "$tmp/out.json" 2>/dev/null || true)
-if [[ "$placement" == "surface" && "$surf_ref" == "surface:777" \
+if [[ "$placement" == "surface" && "$surf_ref" == "SURFACE-UUID-777" \
       && "$surf_id" == "SURFACE-UUID-777" && "$ws_ref" == "null" ]]; then
-  pass "side-by-side reports display ref plus stable surface ID"
+  pass "missing display ref still reports and targets stable surface ID"
 else
-  fail "side-by-side reports display ref plus stable surface ID" \
+  fail "missing display ref still reports and targets stable surface ID" \
        "placement=$placement surface_ref=$surf_ref surface_id=$surf_id workspace_ref=$ws_ref"
 fi
 ls=$(printf '%s' "$send_calls" | sed -E 's/.*bash (\/tmp\/hotline-cmux-launch-[^\\[:space:]]+).*/\1/' | tail -1)

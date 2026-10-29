@@ -503,8 +503,8 @@ else
     fi
   else
     # Side-by-side: cmux-cli's canonical opener. On a --wait-ready timeout it
-    # exits 3 with NO JSON (the surface ref is named in its stderr diagnostic);
-    # parse it so we can close the orphan rather than leak it.
+    # exits 3 with NO JSON; it attempts cleanup and signals an owned orphan only
+    # if that cleanup fails.
     # NO --title, deliberately. The opener would apply it with `cmux rename-tab`,
     # which PINS a static title over claude's own dynamic one for the life of the
     # tab — costing the ◑/✳/⏺ activity glyph that is how a stuck callee is spotted.
@@ -512,6 +512,7 @@ else
     # publishes it as the terminal title, and cmux renders that live. The opener
     # prints a hint to stderr about the absent --title; it lands in surface_err.txt
     # and is expected there.
+    READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-$HOTLINE_SIDE_SURFACE_READY_TIMEOUT_DEFAULT}"
     if SURF_JSON=$("$OPEN_SIDE_SURFACE" --caller --wait-ready \
         --wait-ready-timeout "$READY_TIMEOUT" --json 2>"$CALL_DIR/surface_err.txt"); then
       SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
@@ -545,47 +546,26 @@ else
           echo "DEGRADED HANDLE: open-side-surface returned the positional ref $SURF_REF and no surface_id, so this callee is addressed by a ref rather than a UUID."
           echo "  A ref names whatever occupies that slot when a later call runs — it renumbers when a sibling surface closes or moves — so a send, read or close on it can land on the wrong surface."
           echo "  Opener: ${OPEN_SIDE_SURFACE:-<unresolved>}"
-          echo "  Fix: update the cmux-cli plugin. A current opener resolves the UUID (retrying, since a fresh surface is not instantly enumerable) or exits 4 rather than reporting a null."
+          echo "  Fix: update the cmux-cli plugin. A current opener uses creation UUIDs or exits 4 rather than reporting a null."
         } >> "$CALL_DIR/surface_err.txt"
       fi
     else
       rc=$?
-      # The opener named the surface it had already created in its stderr, so
-      # there is one to reap — but ONLY BY UUID. Resolving a positional
-      # `surface:N` through the tree does not make the ref correct; it makes the
-      # close land on whatever occupies slot N at lookup time, and the window
-      # between the opener minting that ref and this reap is the whole readiness
-      # probe (HOTLINE_SURFACE_READY_TIMEOUT, 8s by default) — long enough for a
-      # sibling to close and renumber it onto a live tab. The old unscoped close
-      # merely no-op'd; a scoped one would succeed on the wrong surface, so a ref
-      # is no longer something to act on.
-      #
-      # The opener prints `surface_id=<uuid>` in the same diagnostic for exactly
-      # this. The close still resolves it through the tree, because
-      # `cmux close-surface` needs --workspace as well (claude-plugins-5k43).
-      # Recorded either way, never swallowed — a skipped reap leaks a wedged
-      # surface, which is worth the same trace as a failed one.
-      ORPHAN_ID=$(grep -oE 'surface_id=[0-9A-Za-z-]+' "$CALL_DIR/surface_err.txt" 2>/dev/null \
-        | head -1 | cut -d= -f2 || true)
+      # Only the current opener's explicit failed-cleanup signal proves ownership.
+      # Older openers may have resolved surface_id from a renumbered ref.
+      OWNED=$(grep '^  owned_cleanup_failed surface_id=' "$CALL_DIR/surface_err.txt" 2>/dev/null | head -1 || true)
       ORPHAN=$(grep -oE 'surface:[0-9]+' "$CALL_DIR/surface_err.txt" 2>/dev/null | head -1 || true)
-      if [[ -n "$ORPHAN_ID" ]]; then
-        if ! cmux_close_surface_scoped "orphan side surface" "$ORPHAN_ID"; then
-          echo "failed to close the orphan surface $ORPHAN_ID: $CMUX_CLOSE_ERR" \
-            >> "$CALL_DIR/surface_err.txt"
+      UUID_RE='^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$'
+      ORPHAN_ID=$(printf '%s' "$OWNED" | sed -n 's/.*surface_id=\([^ ]*\).*/\1/p')
+      ORPHAN_WS=$(printf '%s' "$OWNED" | sed -n 's/.*workspace_id=\([^ ]*\).*/\1/p')
+      if [[ "$ORPHAN_ID" =~ $UUID_RE && "$ORPHAN_WS" =~ $UUID_RE ]]; then
+        if ! python3 "$(dirname "$OPEN_SIDE_SURFACE")/bounded-command.py" 2 cmux close-surface --workspace "$ORPHAN_WS" --surface "$ORPHAN_ID" --force >> "$CALL_DIR/surface_err.txt" 2>&1; then
+          echo "failed to close the owned orphan surface $ORPHAN_ID" >> "$CALL_DIR/surface_err.txt"
         fi
       elif [[ -n "$ORPHAN" ]]; then
-        echo "NOT reaping orphan surface $ORPHAN: the opener named it only by positional ref, which points at whatever occupies that slot now rather than at the surface it opened. Close it by hand — \`cmux tree --all --json --id-format both\` will say which UUID it is." \
-          >> "$CALL_DIR/surface_err.txt"
+        echo "NOT reaping orphan surface $ORPHAN: no trustworthy ownership signal; inspect it by hand." >> "$CALL_DIR/surface_err.txt"
       elif [[ ! -s "$CALL_DIR/surface_err.txt" ]]; then
-        # The opener exited reporting NOTHING — a shell-level abort, not
-        # something cmux refused. Neither grep above can find a UUID to reap or
-        # a positional ref to refuse, but the opener may still have created a
-        # surface before dying: it hadn't reached the point of exec'ing claude
-        # into it, so it carries no `hotline:` session title, just the shell's
-        # own generic one. Named here (not just closed) because there is no
-        # UUID to close it BY — see the positional-ref refusal above.
-        echo "opener exited (rc=$rc) with no diagnostic at all, before printing a surface_id — it may have created a surface before dying, left with a generic shell title (no \`hotline:\` name) and no UUID recorded to close it by. Find it by hand: \`cmux tree --all --json --id-format both\`, then close whichever surface in this workspace still shows a plain shell prompt." \
-          >> "$CALL_DIR/surface_err.txt"
+        echo "opener exited (rc=$rc) with no diagnostic at all, before printing a surface_id; a surface may remain open." >> "$CALL_DIR/surface_err.txt"
       fi
       SURF_ERR="$(cat "$CALL_DIR/surface_err.txt" 2>/dev/null)"
       if [[ "$rc" -eq 3 ]]; then
