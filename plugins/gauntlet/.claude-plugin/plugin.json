@@ -1,7 +1,7 @@
 {
   "name": "gauntlet",
   "description": "The Gauntlet Loop as a skill: build a piece, capture the real output, have a fresh harsh critic judge it blind against a reference that is already excellent, and loop until it wins. Builders and critics are fresh hotline callees on herdr; every round is a commit on a gauntlet branch.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": { "name": "JT Sternberg", "url": "https://github.com/jtsternberg" },
   "dependencies": ["hotline"]
 }

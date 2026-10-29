@@ -490,7 +490,8 @@ Exit codes that are not failures:
   `"awaiting_review": true`, the durable form of the signal). The surface and
   session are left live on purpose — relay the report, then send the follow-up by
   dialing the same target again. The wrapper routes it back into that same
-  surface.
+  surface. On headless there is no live surface; the follow-up resumes the
+  session.
 - **Exit 5 — the callee is waiting on a human** (herdr calls only). herdr reported
   its lifecycle as `blocked` with no STATUS for your nonce: it is sitting on a
   permission gate or asking a question, so more time cannot help. `error.txt` says
@@ -511,6 +512,15 @@ Exit codes that are not failures:
   last turn ended early and to finish. If it was only idle waiting on its own
   background work, re-run the wait on the same `CALL_DIR` instead. `error.txt` names
   which condition fired.
+- **Exit 7 — the callee asked a question.** Its turn ended on
+  `STATUS: BLOCKED call_id=<nonce>` — not a ringing-protocol status, but one your
+  own work order may define for "I need an answer before I can go on". Read
+  `.response` as on exit 0: it is the callee's question (the JSON also carries
+  `"blocked": true`). The surface and session are left live, as on exit 4 — answer
+  with a follow-up dial to the same target. Unlike exit 5, the transcript holds the
+  callee's own words. On headless there is no live surface; the follow-up resumes the
+  session. A BLOCKED the callee later worked past (a later WORK_IN_PROGRESS or
+  terminal STATUS) does not count, and neither does one written mid-turn.
 
 Leave the call dir where it is when the exchange is done; cleanup is the
 wrapper's job, not yours. Every dial starts by reaping call dirs older than

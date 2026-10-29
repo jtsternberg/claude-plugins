@@ -43,8 +43,8 @@
 #
 # Output (stdout, every mode):
 #   {"session_id":"...","response":"..."}
-# plus, on exit 4 only, an additive `"awaiting_review":true` — every other status
-# emits byte-identical JSON to before.
+# plus, on exit 4 only, an additive `"awaiting_review":true`, and on exit 7 only an
+# additive `"blocked":true` — every other status emits byte-identical JSON to before.
 #
 # The emitted JSON is compact (single line) and re-validated via jq before
 # being written to stdout — so stdout is guaranteed to be parseable JSON on
@@ -92,6 +92,20 @@
 #       is coming without a nudge, so error.txt names the condition and the resume
 #       move: a follow-up dial into the same target re-targets the same agent and
 #       continues its session. Left live and marked RESUMABLE like 5.
+#   7 — BLOCKED QUESTION (every transport): the callee ended its turn
+#       on `STATUS: BLOCKED call_id=<nonce>` — it needs an answer before it can go
+#       on. Same valid JSON on stdout as exit 0, carrying the callee's question as
+#       `.response`, plus `"blocked": true`; response.json + done are written and the
+#       surface/session is left LIVE, exactly as on exit 4. Answer it with a
+#       follow-up dial. Not exit 5: that one is herdr's lifecycle reporting a gate
+#       with NO answer in the transcript, so it carries no response; this one has
+#       the callee's own words. Not 0, because callers read 0 as "work done".
+#
+# Why 7 exists: BLOCKED is not a ringing-protocol status, but callers whose work
+# orders define it (agentic-run) get callees that end their turns on it. Unread, it
+# was "still working": on herdr the wait sat out HOTLINE_STALL_SECONDS of quiet and
+# exited 6 — six times in one pipeline run, 10–12 minutes each, with the question
+# already in the transcript.
 #
 # Why 6 exists: a callee whose turn died on `API Error: Connection lost
 # mid-response` sat `idle` with no STATUS, and the waiter spent its whole 4-hour
@@ -640,6 +654,12 @@ if $HERDR_MODE; then
           emit_response_json
           exit 4
           ;;
+        14)  # the callee ended its turn on a question — agent live for the answer
+          printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
+          touch "$CALL_DIR/done"
+          emit_response_json
+          exit 7
+          ;;
         10) H_SUBMITTED=true ;;   # submitted, model working — be patient
         12)                       # preempted: a new human prompt landed after ours
           {
@@ -1146,6 +1166,14 @@ if $CMUX_MODE; then
           emit_response_json
           exit 4
           ;;
+        14)  # the callee ended its turn on a question. Same delivery and same kept
+          # surface as 13: the answer goes back into this session.
+          printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
+          touch "$CALL_DIR/done"
+          cleanup_script_only
+          emit_response_json
+          exit 7
+          ;;
         10)                       # submitted, model working — be patient
           T_SUBMITTED=true
           # The extractor sees post-preempt evidence we are still the live order
@@ -1315,7 +1343,25 @@ if $CMUX_MODE; then
     [[ -z "$LATEST_STATUS" ]] && continue
     [[ "$LATEST_STATUS" =~ ^STATUS:\ WORK_IN_PROGRESS ]] && continue
 
-    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) ]]; then
+    # A BLOCKED on screen yields to any terminal STATUS above it, as in transcript
+    # mode, where a DONE followed by a BLOCKED is exit 0. Being the latest STATUS
+    # is the only turn-end evidence this path has: the screen carries no
+    # stop_reason, and the input box is drawn whether the callee is idle or busy.
+    # So a BLOCKED the callee is about to work past (a tool call next, no STATUS
+    # yet) can still resolve here. The gap is confined to calls with no transcript,
+    # which is the only time this loop runs.
+    if [[ "$LATEST_STATUS" =~ ^STATUS:\ BLOCKED ]]; then
+      LATEST_TERMINAL=$(echo "$CLEAN" | awk -v re="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)${STATUS_TAIL_AWK}" '
+        match($0, re) {
+          s=substr($0, RSTART)
+          sub(/[[:space:]]+$/, "", s)
+        }
+        END {print s}
+      ')
+      [[ -n "$LATEST_TERMINAL" ]] && LATEST_STATUS=$LATEST_TERMINAL
+    fi
+
+    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW|BLOCKED) ]]; then
       # Strip terminal chrome before extracting the response. Aggressive
       # prefix match strips lines starting with claude's box-drawing
       # characters (the REPL renders its idle prompt as a multi-line box
@@ -1333,14 +1379,22 @@ if $CMUX_MODE; then
       # every terminal STATUS, emit the LAST saved buffer — matches the
       # LATEST_STATUS we chose for detection.
       WIP_RE="STATUS: WORK_IN_PROGRESS${STATUS_TAIL_AWK}"
-      TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)${STATUS_TAIL_AWK}"
+      # BLOCKED ends a body only when it won detection; when a terminal won, a
+      # BLOCKED line is just a sentinel to drop.
+      BLK_RE="STATUS: BLOCKED${STATUS_TAIL_AWK}"
+      if [[ "$LATEST_STATUS" =~ ^STATUS:\ BLOCKED ]]; then
+        TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW|BLOCKED)${STATUS_TAIL_AWK}"
+      else
+        TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)${STATUS_TAIL_AWK}"
+      fi
       RESPONSE=$(echo "$CLEAN" \
         | grep -v "^bash /tmp/hotline-launch" \
         | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
         | grep -vE "^>[[:space:]]*$" \
-        | awk -v wip="$WIP_RE" -v term="$TERM_RE" '
+        | awk -v wip="$WIP_RE" -v term="$TERM_RE" -v blk="$BLK_RE" '
             $0 ~ wip  {buf=""; next}
             $0 ~ term {result=buf; buf=""; next}
+            $0 ~ blk  {next}
             {buf = buf $0 ORS}
             END {printf "%s", result}
           ')
@@ -1356,6 +1410,16 @@ if $CMUX_MODE; then
         cleanup_script_only
         emit_response_json
         exit 4
+      fi
+      # BLOCKED is LATEST_STATUS here only when it is the last STATUS on screen and
+      # no terminal precedes it — the transcript path's rule, minus its end_turn check.
+      if [[ "$LATEST_STATUS" =~ ^STATUS:\ BLOCKED ]]; then
+        jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
+          '{session_id: $sid, response: $resp, blocked: true}' > "$CALL_DIR/response.json"
+        touch "$CALL_DIR/done"
+        cleanup_script_only
+        emit_response_json
+        exit 7
       fi
 
       jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
@@ -1406,4 +1470,10 @@ if [[ ! -f "$CALL_DIR/response.json" ]]; then
   exit 1
 fi
 
+# headless-call-async.sh classifies the final STATUS into these markers; map them
+# to the codes every other transport uses (claude-plugins-x5zb). The session is
+# resumable either way, so "left live" is a follow-up dial with --resume.
 emit_response_json
+jq -e '.blocked == true' "$CALL_DIR/response.json" >/dev/null 2>&1 && exit 7
+jq -e '.awaiting_review == true' "$CALL_DIR/response.json" >/dev/null 2>&1 && exit 4
+exit 0

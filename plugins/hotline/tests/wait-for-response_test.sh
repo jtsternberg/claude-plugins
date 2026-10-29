@@ -961,6 +961,101 @@ else
 fi
 rm -rf "$HA" "$CDA" "$SDA"
 
+# ---- BLOCKED: the callee ended its turn on a question ----------------------
+# A callee whose work order defines `STATUS: BLOCKED` ends its turn on it to ask
+# something. Unrecognized, that read as "still working" and the wait ran on to its
+# timeout (herdr: to the stall window). It resolves like AWAITING_REVIEW — body
+# delivered, surface left live for the answer — but on its own exit, 7, so a
+# caller can tell "callee asked a question" from "checkpoint" and from exit 0.
+echo ""
+echo "BLOCKED question:"
+
+BL=$(setup_await_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] migrate the schema"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nwhich schema should it target?\nSTATUS: BLOCKED call_id='"$TNONCE"'"}]}}')
+HBL=${BL%%|*}; rBL=${BL#*|}; CDBL=${rBL%%|*}; rBLb=${rBL#*|}; SDBL=${rBLb%%|*}; LOGBL=${rBLb#*|}
+START_BL=$SECONDS
+set +e
+OUTBL=$(HOME="$HBL" PATH="$SDBL:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDBL" --timeout 40 --submit-deadline 6 2>/dev/null)
+RCBL=$?
+set -e
+ELBL=$((SECONDS - START_BL))
+if [[ $RCBL -eq 7 && $ELBL -lt 20 ]]; then
+  pass "BLOCKED returns instead of polling, exit 7 (${ELBL}s)"
+else
+  fail "BLOCKED returns instead of polling, exit 7" "rc=$RCBL elapsed=${ELBL}s out=$OUTBL"
+fi
+if [[ "$(printf '%s' "$OUTBL" | jq -r .response 2>/dev/null)" == "which schema should it target?" ]]; then
+  pass "BLOCKED delivers the callee's question as the response"
+else
+  fail "BLOCKED delivers the callee's question as the response" "out=$OUTBL"
+fi
+if [[ "$(jq -r '.blocked // false' "$CDBL/response.json" 2>/dev/null)" == "true" && -f "$CDBL/done" ]]; then
+  pass "response.json carries blocked:true, and done is written"
+else
+  fail "response.json carries blocked:true, and done is written" "$(cat "$CDBL/response.json" 2>/dev/null)"
+fi
+if grep -qE "close-surface|close-workspace" "$LOGBL" 2>/dev/null; then
+  fail "BLOCKED must leave the surface live for the answer" "cmux calls: $(cat "$LOGBL")"
+else
+  pass "BLOCKED leaves the surface live even with keep_workspace=false"
+fi
+rm -rf "$HBL" "$CDBL" "$SDBL"
+
+# Scrape fallback (no session id → no transcript): the same contract off the screen.
+BS=$(setup_await_call '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unused"}}')
+HBS=${BS%%|*}; rBS=${BS#*|}; CDBS=${rBS%%|*}; rBSb=${rBS#*|}; SDBS=${rBSb%%|*}; LOGBS=${rBSb#*|}
+rm -f "$CDBS/session_id.txt"
+{
+  echo '#!/usr/bin/env bash'
+  echo "printf '%s\\n' \"\$*\" >> '$LOGBS'"
+  echo 'if [[ "$1" == "read-screen" ]]; then'
+  echo "  printf '%s\\n' 'STATUS: WORK_IN_PROGRESS call_id=$TNONCE' 'which schema should it target?' 'STATUS: BLOCKED call_id=$TNONCE'"
+  echo 'fi'
+  echo 'exit 0'
+} > "$SDBS/cmux"
+set +e
+OUTBS=$(HOME="$HBS" PATH="$SDBS:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDBS" --timeout 20 --submit-deadline 4 2>/dev/null)
+RCBS=$?
+set -e
+if [[ $RCBS -eq 7 && "$(printf '%s' "$OUTBS" | jq -r '.blocked // false' 2>/dev/null)" == "true" ]] \
+   && [[ "$(printf '%s' "$OUTBS" | jq -r .response 2>/dev/null)" == *"which schema should it target?"* ]]; then
+  pass "scrape fallback: BLOCKED → exit 7 with the question and blocked:true"
+else
+  fail "scrape fallback: BLOCKED → exit 7 with the question and blocked:true" "rc=$RCBS out=$OUTBS"
+fi
+if grep -qE "close-surface|close-workspace" "$LOGBS" 2>/dev/null; then
+  fail "scrape fallback: BLOCKED leaves the surface live" "cmux calls: $(cat "$LOGBS")"
+else
+  pass "scrape fallback: BLOCKED leaves the surface live"
+fi
+rm -rf "$HBS" "$CDBS" "$SDBS"
+
+# Scrape fallback, DONE then BLOCKED for the same nonce: the transcript path
+# resolves on the earlier terminal (exit 0), so the scrape must too, not exit 7.
+BT=$(setup_await_call '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unused"}}')
+HBT=${BT%%|*}; rBT=${BT#*|}; CDBT=${rBT%%|*}; rBTb=${rBT#*|}; SDBT=${rBTb%%|*}; LOGBT=${rBTb#*|}
+rm -f "$CDBT/session_id.txt"
+{
+  echo '#!/usr/bin/env bash'
+  echo "printf '%s\\n' \"\$*\" >> '$LOGBT'"
+  echo 'if [[ "$1" == "read-screen" ]]; then'
+  echo "  printf '%s\\n' 'STATUS: WORK_IN_PROGRESS call_id=$TNONCE' 'migrated' 'STATUS: DONE call_id=$TNONCE' 'one more thing?' 'STATUS: BLOCKED call_id=$TNONCE'"
+  echo 'fi'
+  echo 'exit 0'
+} > "$SDBT/cmux"
+set +e
+OUTBT=$(HOME="$HBT" PATH="$SDBT:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDBT" --timeout 20 --submit-deadline 4 2>/dev/null)
+RCBT=$?
+set -e
+if [[ $RCBT -eq 0 ]] && ! printf '%s' "$OUTBT" | jq -e 'has("blocked")' >/dev/null 2>&1 \
+   && [[ "$(printf '%s' "$OUTBT" | jq -r .response 2>/dev/null)" == *"migrated"* ]]; then
+  pass "scrape fallback: an earlier DONE wins over a later BLOCKED (exit 0, like transcript mode)"
+else
+  fail "scrape fallback: an earlier DONE wins over a later BLOCKED" "rc=$RCBT out=$OUTBT"
+fi
+rm -rf "$HBT" "$CDBT" "$SDBT"
+
 # ---- resumable waiter timeout (claude-plugins-tyaj) ------------------------
 # A waiter that runs out of budget writes done+error.txt so a caller who does not
 # want to wait again sees the failure without re-polling. That made a long work

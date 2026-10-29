@@ -16,6 +16,8 @@ export const REFS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'r
 const ref = (name) => readFileSync(join(REFS, name), 'utf8');
 const fill = (tpl, vars) => tpl.replace(/\{\{([A-Z_]+)\}\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+// Wait exits that park a live callee: 4 checkpoint, 5 herdr gate, 7 the callee's question.
+const PAUSE_RCS = new Set([4, 5, 7]);
 const NUDGE = 'The conductor is unattended: nobody will review this checkpoint. Finish the work order as written and end with STATUS: WORK_COMPLETE.\n';
 const CALL_STATE = new Set(['event', 'ts', 'call_dir', 'agent_name', 'callee_session_id', 'done', 'paused', 'reviewPaused', 'failPaused', 'close', 'delivery_unconfirmed']);
 const criteriaList = (spec) => spec.criteria.map((c) => `- **${c.id}**: ${c.ask}`).join('\n');
@@ -165,9 +167,9 @@ export class Run {
     await this.settle([call]);
   }
 
-  completeBuilder(call, { rc }) {
+  completeBuilder(call, { rc, response }) {
     const { piece, round, wave, call_dir } = call;
-    if (rc === 4 || rc === 5) return this.pause(call, rc);
+    if (PAUSE_RCS.has(rc)) return this.pause(call, rc, undefined, response);
     if (rc !== 0) {
       if (!call.failPaused) return this.pause(call, rc, rc === 3 ? 'preempted' : 'wait_failed');
       return this.stranded(call, 'build_error', rc);
@@ -181,10 +183,13 @@ export class Run {
 
   // Timeout, preemption and an unconfirmed delivery pause only a worktree callee
   // (builder, smoother): a stranded critic works in a temp dir and harms nothing.
-  pause(call, rc, reason = rc === 4 ? 'awaiting_review' : 'blocked') {
+  // Exit 7 is the callee asking a question in its own words; the reason stays the
+  // enum 'blocked' that the ledger rules read, and the question rides beside it.
+  pause(call, rc, reason = rc === 4 ? 'awaiting_review' : 'blocked', response = null) {
     const { pane } = calleeHandle(call.call_dir);
     return this.record({
       event: 'paused', call_dir: call.call_dir, role: call.role, piece: call.piece, wait_rc: rc, agent_name: call.agent_name, reason,
+      ...(rc === 7 && response ? { question: response } : {}),
       close: pane ? `herdr pane close ${pane}` : null,
     });
   }
@@ -257,7 +262,7 @@ export class Run {
 
   completeCritic(call, { rc, response }) {
     const fields = { piece: call.piece, round: call.round, wave: call.wave, pass: call.pass, call_dir: call.call_dir, ...(call.recheck ? { recheck: true } : {}) };
-    if (rc === 4 || rc === 5) { this.pause(call, rc); return null; }
+    if (PAUSE_RCS.has(rc)) { this.pause(call, rc, undefined, response); return null; }
     if (rc !== 0) { discard(call.blind_base); this.record({ event: 'judge_error', ...fields, wait_rc: rc, reason: rc === 3 ? 'preempted' : 'wait failed' }); return null; }
     const parsed = parseVerdict(response, this.spec);
     if (parsed.ok) {
@@ -311,8 +316,8 @@ export class Run {
     await this.settle([call]);
   }
 
-  completeSmoother(call, { rc }) {
-    if (rc === 4 || rc === 5) return this.pause(call, rc);
+  completeSmoother(call, { rc, response }) {
+    if (PAUSE_RCS.has(rc)) return this.pause(call, rc, undefined, response);
     if (rc !== 0 && !call.failPaused) return this.pause(call, rc, rc === 3 ? 'preempted' : 'wait_failed');
     if (rc !== 0) return this.stranded(call, 'smooth_error', rc);
     // No commit is a legitimate answer: nothing needed smoothing, so nothing is re-judged.

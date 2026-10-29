@@ -5,6 +5,7 @@
 //   FAKE_SMOOTHER  nocommit (default) | commit
 //   FAKE_WAIT_RC_BUILDER / FAKE_WAIT_RC_CRITIC   the waiter's exit code (default 0)
 //   FAKE_WAIT_RC_NUDGE   the exit code for a call whose prompt is the unattended nudge
+//   FAKE_WAIT_RESPONSE   the response.json text, in place of the role's default
 //   FAKE_TRUST=1   the first dial fails at deliver with a trust dialog on screen
 //   FAKE_DIAL_FAIL=builder|critic   that role's dial errors outright
 //   FAKE_DIAL_SENT=builder   that role's dial fails at deliver with sent:true (the order may have landed)
@@ -60,6 +61,7 @@ if (mode === 'wait') {
   log({ kind: 'wait', call_dir: cd, argv, role: meta.role });
   let response = 'done\nSTATUS: WORK_COMPLETE call_id=x';
   if (meta.role === 'critic') response = critic(meta);
+  if (env.FAKE_WAIT_RESPONSE !== undefined) response = env.FAKE_WAIT_RESPONSE;
   writeFileSync(join(cd, 'response.json'), JSON.stringify({ session_id: 's', response }));
   if (meta.nudge && env.FAKE_WAIT_RC_NUDGE !== undefined) process.exit(Number(env.FAKE_WAIT_RC_NUDGE));
   process.exit(Number(meta.role === 'critic' ? env.FAKE_WAIT_RC_CRITIC ?? 0 : env.FAKE_WAIT_RC_BUILDER ?? 0));

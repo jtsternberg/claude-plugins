@@ -4,7 +4,7 @@
 # replaces terminal screen-scraping for hotline's cmux transport
 # (claude-plugins-0pwc). Drives synthetic transcripts through the extractor and
 # asserts the exit-code contract (0 done / 10 working / 11 not-submitted /
-# 12 preempted / 13 awaiting review) and the reconstructed response body.
+# 12 preempted / 13 awaiting review / 14 blocked) and the reconstructed response body.
 # =============================================================================
 set -u
 
@@ -396,6 +396,129 @@ OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>/dev/null); RC=$?
 [[ "$OUT" == *"PSR4 migration"* ]] \
   && pass "the reported prompt is the LATEST one, not the redirect it superseded" \
   || fail "the reported prompt is the LATEST one" "out=$OUT"
+rm -f "$F"
+
+# ---- BLOCKED: the callee ended its turn on a question ------------------------
+# A callee whose work order defines `STATUS: BLOCKED` ends its turn on it when it
+# needs an answer. It is resolving only as the LAST STATUS for our nonce: a BLOCKED
+# the callee later worked past (more prose, then a terminal) is superseded.
+BLOCKED_REC='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nWhich schema should the migration target?\n\nSTATUS: BLOCKED call_id='"$NONCE"'"}]}}'
+
+# Case 29: a turn ending on BLOCKED resolves on exit 14 with the question as the body.
+F=$(mkf "$USER_NONCE
+$WIP
+$BLOCKED_REC")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
+RESP=$(printf '%s' "$OUT" | jq -r '.response' 2>/dev/null)
+BFLAG=$(printf '%s' "$OUT" | jq -r '.blocked // false' 2>/dev/null)
+[[ $RC -eq 14 ]] && pass "exit 14 when the turn ends on STATUS: BLOCKED" \
+  || fail "exit 14 when the turn ends on STATUS: BLOCKED" "rc=$RC out=$OUT"
+[[ "$RESP" == "Which schema should the migration target?" ]] \
+  && pass "BLOCKED body is the callee's question, sentinels stripped" \
+  || fail "BLOCKED body is the callee's question" "resp=$RESP"
+[[ "$BFLAG" == "true" ]] && pass "blocked:true marks the payload" \
+  || fail "blocked:true marks the payload" "out=$OUT"
+rm -f "$F"
+
+# Case 30: BLOCKED, then more work, then WORK_COMPLETE → the terminal wins, exit 0,
+# and the superseded BLOCKED neither marks the payload nor leaks into the body.
+LATER_DONE='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nfound the answer in the docs, migrated\nSTATUS: WORK_COMPLETE call_id='"$NONCE"'"}]}}'
+F=$(mkf "$USER_NONCE
+$BLOCKED_REC
+$LATER_DONE")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
+RESP=$(printf '%s' "$OUT" | jq -r '.response' 2>/dev/null)
+if [[ $RC -eq 0 ]] && ! printf '%s' "$OUT" | jq -e 'has("blocked")' >/dev/null 2>&1; then
+  pass "BLOCKED then WORK_COMPLETE → exit 0, no blocked key"
+else
+  fail "BLOCKED then WORK_COMPLETE → exit 0, no blocked key" "rc=$RC out=$OUT"
+fi
+[[ "$RESP" == "found the answer in the docs, migrated" ]] \
+  && pass "the terminal's body excludes the superseded BLOCKED" \
+  || fail "the terminal's body excludes the superseded BLOCKED" "resp=$RESP"
+rm -f "$F"
+
+# Case 31: BLOCKED followed by a WORK_IN_PROGRESS → the callee picked the work back
+# up mid-turn, so the wait keeps polling.
+F=$(mkf "$USER_NONCE
+$BLOCKED_REC
+$WIP")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "BLOCKED then WORK_IN_PROGRESS → exit 10 (keep polling)" \
+  || fail "BLOCKED then WORK_IN_PROGRESS → exit 10" "got exit $RC"
+rm -f "$F"
+
+# Case 32: a sibling call's BLOCKED must not resolve ours.
+OTHER_BLOCKED='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"other question\nSTATUS: BLOCKED call_id=ffff0000ffff0000"}]}}'
+F=$(mkf "$USER_NONCE
+$WIP
+$OTHER_BLOCKED")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "a sibling call's BLOCKED does not resolve ours" \
+  || fail "a sibling call's BLOCKED does not resolve ours" "got exit $RC"
+rm -f "$F"
+
+# Case 33: a terminal that comes FIRST still wins over a later BLOCKED.
+F=$(mkf "$USER_NONCE
+$BODY
+$BLOCKED_REC")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 0 ]] && pass "an earlier DONE wins over a later BLOCKED" \
+  || fail "an earlier DONE wins over a later BLOCKED" "got exit $RC"
+rm -f "$F"
+
+# Case 34: BLOCKED mid-turn must not resolve. The callee wrote the BLOCKED line,
+# then kept going in the same message (a tool call): the record's stop_reason is
+# tool_use and the turn is not over, so a poll landing here keeps waiting.
+MIDTURN_BLOCKED='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"id":"msg_mid","stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nWhich schema?\nSTATUS: BLOCKED call_id='"$NONCE"'\nActually let me check the docs."},{"type":"tool_use","id":"tu1","name":"Read","input":{}}]}}'
+F=$(mkf "$USER_NONCE
+$MIDTURN_BLOCKED")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "BLOCKED on a tool_use record → exit 10 (turn not over)" \
+  || fail "BLOCKED on a tool_use record → exit 10 (turn not over)" "got exit $RC"
+rm -f "$F"
+
+# Case 35: BLOCKED on an end_turn record that is followed by another assistant
+# record → not the turn's last word, keep waiting.
+F=$(mkf "$USER_NONCE
+$BLOCKED_REC
+$THINKING")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "BLOCKED followed by a later assistant record → exit 10" \
+  || fail "BLOCKED followed by a later assistant record → exit 10" "got exit $RC"
+rm -f "$F"
+
+# Case 36: claude writes one record per content block, each carrying the message's
+# stop_reason. A final message of [text with BLOCKED, then a trailing text block]
+# ends the turn on that message, so BLOCKED in an earlier block of it still counts.
+SPLIT_A='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"id":"msg_fin","stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nWhich schema?\nSTATUS: BLOCKED call_id='"$NONCE"'"}]}}'
+SPLIT_B='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"id":"msg_fin","stop_reason":"end_turn","content":[{"type":"text","text":""}]}}'
+F=$(mkf "$USER_NONCE
+$SPLIT_A
+$SPLIT_B")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 14 ]] && pass "BLOCKED in an earlier block of the final end_turn message → exit 14" \
+  || fail "BLOCKED in an earlier block of the final end_turn message → exit 14" "got exit $RC"
+rm -f "$F"
+
+# Case 37: a STATUS line that does not start the line is quoted, not emitted —
+# real transcripts carry every sentinel at column 0. A blockquote or an indented
+# (code-block) DONE for our nonce must not resolve the call.
+QUOTED='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nthe old reply said:\n> STATUS: DONE call_id='"$NONCE"'\n    STATUS: WORK_COMPLETE call_id='"$NONCE"'"}]}}'
+F=$(mkf "$USER_NONCE
+$QUOTED")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "quoted / indented STATUS lines do not resolve (exit 10)" \
+  || fail "quoted / indented STATUS lines do not resolve (exit 10)" "got exit $RC"
+rm -f "$F"
+
+# Case 38: same for BLOCKED — a quoted BLOCKED at the end of the turn is not ours.
+QUOTED_BLK='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nthe docs show:\n> STATUS: BLOCKED call_id='"$NONCE"'"}]}}'
+F=$(mkf "$USER_NONCE
+$QUOTED_BLK")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "a quoted BLOCKED does not resolve (exit 10)" \
+  || fail "a quoted BLOCKED does not resolve (exit 10)" "got exit $RC"
 rm -f "$F"
 
 echo ""
