@@ -359,12 +359,8 @@ if [[ -n "$PROMPT" ]]; then
   echo true > "$CALL_DIR/keep_workspace.txt"
 
   # Which surface? A surface placement already knows — but ${PLACE_ID} alone is not
-  # enough. Both openers now emit surface_id (open-window-surface.sh:197-233,
-  # open-side-surface.sh — the same ref→UUID lookup, claude-plugins-h2et), and both
-  # OMIT the key when that lookup comes up empty: a cmux too old for
-  # `--id-format both`, or a tree entry with no `.id`. The fallback is for exactly
-  # that miss — before the window opener resolved ids, it was every --window
-  # conference and intermittent side ones. Fall back to the display ref exactly as
+  # enough. The side opener requires creation UUIDs; the window opener can omit
+  # surface_id if its tree lookup fails. Fall back to the display ref exactly as
   # SEND_TARGET does; cmux-paste.sh resolves a ref through the tree.
   PASTE_SURFACE="${PLACE_ID:-$PLACE_REF}"
   PASTE_WORKSPACE=""
