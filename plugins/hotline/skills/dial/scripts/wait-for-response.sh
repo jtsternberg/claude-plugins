@@ -92,7 +92,7 @@
 #       is coming without a nudge, so error.txt names the condition and the resume
 #       move: a follow-up dial into the same target re-targets the same agent and
 #       continues its session. Left live and marked RESUMABLE like 5.
-#   7 — BLOCKED QUESTION (every transport but headless): the callee ended its turn
+#   7 — BLOCKED QUESTION (every transport): the callee ended its turn
 #       on `STATUS: BLOCKED call_id=<nonce>` — it needs an answer before it can go
 #       on. Same valid JSON on stdout as exit 0, carrying the callee's question as
 #       `.response`, plus `"blocked": true`; response.json + done are written and the
@@ -1470,4 +1470,10 @@ if [[ ! -f "$CALL_DIR/response.json" ]]; then
   exit 1
 fi
 
+# headless-call-async.sh classifies the final STATUS into these markers; map them
+# to the codes every other transport uses (claude-plugins-x5zb). The session is
+# resumable either way, so "left live" is a follow-up dial with --resume.
 emit_response_json
+jq -e '.blocked == true' "$CALL_DIR/response.json" >/dev/null 2>&1 && exit 7
+jq -e '.awaiting_review == true' "$CALL_DIR/response.json" >/dev/null 2>&1 && exit 4
+exit 0

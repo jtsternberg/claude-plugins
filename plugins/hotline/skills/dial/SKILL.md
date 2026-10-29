@@ -517,9 +517,9 @@ Exit codes that are not failures:
   `.response` as on exit 0: it is the callee's question (the JSON also carries
   `"blocked": true`). The surface and session are left live, as on exit 4 — answer
   with a follow-up dial to the same target. Unlike exit 5, the transcript holds the
-  callee's own words, and it applies on every transport except headless (a headless
-  turn's result comes back on exit 0, whatever its last STATUS). A BLOCKED the callee
-  later worked past (a later WORK_IN_PROGRESS or terminal STATUS) does not count.
+  callee's own words. On headless there is no live surface; the follow-up resumes the
+  session. A BLOCKED the callee later worked past (a later WORK_IN_PROGRESS or
+  terminal STATUS) does not count, and neither does one written mid-turn.
 
 Leave the call dir where it is when the exchange is done; cleanup is the
 wrapper's job, not yours. Every dial starts by reaping call dirs older than

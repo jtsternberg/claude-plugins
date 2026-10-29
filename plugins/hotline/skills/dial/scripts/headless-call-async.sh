@@ -8,7 +8,9 @@
 #
 # Output files (written under ${HOTLINE_CALL_HOME:-/tmp}/hotline-call-<random>/):
 #   session_id.txt  — written as soon as session ID appears in stream
-#   response.json   — written when call completes: {"session_id":"..","response":".."}
+#   response.json   — written when call completes: {"session_id":"..","response":".."},
+#                     plus `"awaiting_review":true` or `"blocked":true` when the
+#                     turn ended on that STATUS
 #   error.txt       — written if the call fails
 #   done            — empty sentinel file, created when call finishes
 #
@@ -219,8 +221,28 @@ fi
     RESPONSE="[HOTLINE WARNING: Agent ran $NUM_TURNS turns but produced no text response. Session ID: $SESSION_ID]"
   fi
 
-  jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
-    '{session_id: $sid, response: $resp}' > "$CALL_DIR/response.json"
+  # Which STATUS the turn ended on, for the same additive markers the other
+  # transports write (claude-plugins-x5zb). Outside the block the test suite
+  # mirrors; tests/headless-status_test.sh drives this one through the real script.
+  # claude -p has exited, so the turn is over and the text is final. A headless
+  # call carries no nonce, so the callee's STATUS lines are bare; a call_id suffix
+  # is tolerated anyway. The first terminal wins, as in transcript-extract.sh;
+  # BLOCKED counts only as the last STATUS with no terminal before it.
+  STATUSES=$(printf '%s\n' "$RESPONSE" \
+    | grep -oE 'STATUS: [A-Z_]+( call_id=[^[:space:]]+)?[[:space:]]*$' \
+    | awk '{print $2}' || true)
+  FIRST_TERM=$(printf '%s\n' "$STATUSES" \
+    | grep -m1 -E '^(WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)$' || true)
+  MARKER=""
+  if [[ "$FIRST_TERM" == "AWAITING_REVIEW" ]]; then
+    MARKER=awaiting_review
+  elif [[ -z "$FIRST_TERM" && "$(printf '%s\n' "$STATUSES" | tail -1)" == "BLOCKED" ]]; then
+    MARKER=blocked
+  fi
+
+  jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" --arg mark "$MARKER" \
+    '{session_id: $sid, response: $resp} + (if $mark == "" then {} else {($mark): true} end)' \
+    > "$CALL_DIR/response.json"
 
   touch "$CALL_DIR/done"
 ) &>/dev/null &
