@@ -699,6 +699,26 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
 check "AWAITING_REVIEW → exit 4 with the same additive marker as cmux" $? \
   "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
 
+# BLOCKED is the shape that sat out HOTLINE_STALL_SECONDS: the callee settles idle
+# with its question in the transcript. The stall window is left at its 600s default,
+# so only recognizing the STATUS can make this return inside the 10s budget.
+t=$(new_env)
+NONCE="b10cb10cb10cb10c"
+cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-r-3b "herdr-sess" "$NONCE" "$t/target"
+transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
+  "$NONCE" BLOCKED "which schema should it target?"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 HERDR_STUB_STATUS=idle HOTLINE_POLL_SLEEP=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 10 2>"$t/err.txt"); rc=$?
+[[ $rc -eq 7 && "$(jq -r '.blocked' <<<"$out" 2>/dev/null)" == "true" \
+   && "$(jq -r '.response' <<<"$out" 2>/dev/null)" == "which schema should it target?" ]]
+check "BLOCKED → exit 7 with the question and blocked:true, not a stall" $? \
+  "rc=$rc out=$out stderr=$(cat "$t/err.txt")"
+[[ -f "$cd_path/done" && "$(jq -r '.blocked' "$cd_path/response.json" 2>/dev/null)" == "true" ]]
+check "…and writes response.json + done like any resolved wait" $? \
+  "call_dir: $(ls "$cd_path" | tr '\n' ' ')"
+
 t=$(new_env)
 NONCE="9999888877776666"
 cd_path="$t/call"

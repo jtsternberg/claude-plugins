@@ -498,6 +498,13 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   budget and sends nothing. Raise `HOTLINE_STALL_SECONDS` (or set `0`) for callees
   that work that way.
 
+**The response wait exits 7 — the callee asked a question**
+- Not a failure. The callee's turn ended on `STATUS: BLOCKED call_id=<nonce>`, and
+  `.response` (stdout and response.json, which also carry `"blocked": true`) is its
+  question. Answer it with a follow-up dial to the same target; the session is live.
+- Exit 5 is the different case: herdr's lifecycle says `blocked` and the transcript
+  has no STATUS for the nonce, so there is no question to read — look at the agent.
+
 **`stage: transport` — "herdr agent … is BLOCKED and cannot take a follow-up"**
 - The cached agent is alive and confirmed (two reads) waiting on **input** — a
   permission gate, or a question. Nothing was submitted to it and nothing was

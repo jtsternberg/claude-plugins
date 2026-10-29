@@ -41,7 +41,19 @@
 #   13 — AWAITING_REVIEW: this step's reply is complete but the work order is not
 #        finished. Same JSON as exit 0 plus `"awaiting_review": true`.
 #        → caller stops waiting and keeps the session live for a follow-up.
+#   14 — BLOCKED: the callee ended its turn on `STATUS: BLOCKED` — it needs an
+#        answer before it can go on. Same JSON as exit 0 plus `"blocked": true`.
+#        → caller stops waiting and keeps the session live for the answer.
 #   1  — usage / unreadable transcript error (message on stderr)
+#
+# BLOCKED
+# Not a ringing-protocol status: callees emit it when the caller's own work order
+# defines it (agentic-run's phase prompts do). Unrecognized, it read as "still
+# working", and on herdr the wait sat out HOTLINE_STALL_SECONDS of quiet before
+# exiting 6 — measured six times in one pipeline run, 10–12 minutes each. It
+# resolves ONLY as the last STATUS for our nonce: a callee can write BLOCKED and
+# then work past it, and a later WORK_IN_PROGRESS or terminal supersedes it. A
+# terminal anywhere in the text still wins, exactly as before.
 #
 # AWAITING_REVIEW (claude-plugins-n4vy)
 # "Is the work finished" and "is the reply ready" are two different facts, and the
@@ -253,7 +265,14 @@ PREEMPT=$(printf '%s' "$PARSED" | jq -r '.preempt')
 # THEN handed something else has still answered, and that response is owed to the
 # caller. Preemption only decides what to do when no resolving STATUS exists.
 TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=${NONCE}[[:space:]]*$"
-if ! printf '%s\n' "$TEXT" | grep -qE "$TERM_RE"; then
+if printf '%s\n' "$TEXT" | grep -qE "$TERM_RE"; then
+  # Which resolving STATUS stopped us? The FIRST one in the text wins, matching the
+  # awk below (which stops at the first `term` match), so the body and the exit code
+  # always describe the same sentinel.
+  RESOLVED=$(printf '%s\n' "$TEXT" | grep -oE "$TERM_RE" | head -1 | awk '{print $2}')
+elif [[ "$(printf '%s\n' "$TEXT" | grep -oE "STATUS: [A-Z_]+ call_id=${NONCE}[[:space:]]*$" | tail -1 | awk '{print $2}')" == "BLOCKED" ]]; then
+  RESOLVED=BLOCKED
+else
   if [[ -n "$PREEMPT" ]]; then
     printf '%s\n' "${PREEMPT:0:200}"
     exit 12   # reassigned — our STATUS is never coming
@@ -261,24 +280,24 @@ if ! printf '%s\n' "$TEXT" | grep -qE "$TERM_RE"; then
   exit 10     # submitted, still working
 fi
 
-# Which resolving STATUS stopped us? The FIRST one in the text wins, matching the
-# awk below (which stops at the first `term` match), so the body and the exit code
-# always describe the same sentinel.
-RESOLVED=$(printf '%s\n' "$TEXT" | grep -oE "$TERM_RE" | head -1 | awk '{print $2}')
-
 # Extract the response body: reset the buffer at each WORK_IN_PROGRESS (so only
 # the final attempt's prose counts — matches the screen-scrape semantics), stop
 # at the resolving STATUS, drop the STATUS sentinel lines, and trim surrounding
 # blank lines.
-BODY=$(printf '%s\n' "$TEXT" | awk -v nonce="$NONCE" '
+# A BLOCKED line is a sentinel too: dropped from the body, and on the BLOCKED path
+# (where it is the last STATUS) it is where the body ends.
+BODY=$(printf '%s\n' "$TEXT" | awk -v nonce="$NONCE" -v resolved="$RESOLVED" '
   BEGIN {
     wip  = "STATUS: WORK_IN_PROGRESS call_id=" nonce "[[:space:]]*$"
     term = "STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=" nonce "[[:space:]]*$"
+    blk  = "STATUS: BLOCKED call_id=" nonce "[[:space:]]*$"
   }
   $0 ~ wip  { n=0; delete L; next }
   $0 ~ term { stop=1; exit }
+  $0 ~ blk  { if (resolved == "BLOCKED") kept = n; next }
   { L[++n] = $0 }
   END {
+    if (resolved == "BLOCKED") n = kept
     # trim leading blanks
     s=1; while (s<=n && L[s] ~ /^[[:space:]]*$/) s++
     e=n; while (e>=s && L[e] ~ /^[[:space:]]*$/) e--
@@ -294,6 +313,13 @@ if [[ "$RESOLVED" == "AWAITING_REVIEW" ]]; then
   jq -n -c --arg sid "$SESSION_ID" --arg resp "$BODY" \
     '{session_id: $sid, response: $resp, awaiting_review: true}'
   exit 13
+fi
+
+if [[ "$RESOLVED" == "BLOCKED" ]]; then
+  # Additive marker, for the same reason as awaiting_review above.
+  jq -n -c --arg sid "$SESSION_ID" --arg resp "$BODY" \
+    '{session_id: $sid, response: $resp, blocked: true}'
+  exit 14
 fi
 
 jq -n -c --arg sid "$SESSION_ID" --arg resp "$BODY" '{session_id: $sid, response: $resp}'
