@@ -194,7 +194,7 @@ elif [[ "$PLACEMENT" == "window" ]]; then
 else
   # Side-by-side via cmux-cli's canonical opener. On a --wait-ready timeout it
   # exits 3 (no JSON); surface its stderr as the error.
-  READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-8}"
+  READY_TIMEOUT="${HOTLINE_SURFACE_READY_TIMEOUT:-$HOTLINE_SIDE_SURFACE_READY_TIMEOUT_DEFAULT}"
   # NO --title: it would PIN a static tab title over claude's own dynamic one and
   # cost the ◑/✳/⏺ activity glyph for the life of the tab. The label already reaches
   # the strip through --name → `claude -n` → the terminal title.
@@ -206,9 +206,9 @@ else
   rm -f /tmp/hotline-side-err.$$
   SURF_REF=$(printf '%s' "$SURF_JSON" | jq -r '.surface_ref // empty')
   SURF_ID=$(printf '%s' "$SURF_JSON" | jq -r '.surface_id // empty')
-  [[ -z "$SURF_REF" ]] && { jq -n --arg e "surface opener returned no ref: $SURF_JSON" '{error: $e}'; exit 1; }
+  [[ -z "$SURF_REF" && -z "$SURF_ID" ]] && { jq -n --arg e "surface opener returned no handle: $SURF_JSON" '{error: $e}'; exit 1; }
   SEND_TARGET=(--surface "${SURF_ID:-$SURF_REF}")
-  PLACE_REF="$SURF_REF"; PLACE_ID="$SURF_ID"; PLACE_KIND="surface"
+  PLACE_REF="${SURF_REF:-$SURF_ID}"; PLACE_ID="$SURF_ID"; PLACE_KIND="surface"
 fi
 
 # Session ID for the callee. See cmux-call-async.sh for the full rationale:
@@ -359,12 +359,8 @@ if [[ -n "$PROMPT" ]]; then
   echo true > "$CALL_DIR/keep_workspace.txt"
 
   # Which surface? A surface placement already knows — but ${PLACE_ID} alone is not
-  # enough. Both openers now emit surface_id (open-window-surface.sh:197-233,
-  # open-side-surface.sh — the same ref→UUID lookup, claude-plugins-h2et), and both
-  # OMIT the key when that lookup comes up empty: a cmux too old for
-  # `--id-format both`, or a tree entry with no `.id`. The fallback is for exactly
-  # that miss — before the window opener resolved ids, it was every --window
-  # conference and intermittent side ones. Fall back to the display ref exactly as
+  # enough. The side opener requires creation UUIDs; the window opener can omit
+  # surface_id if its tree lookup fails. Fall back to the display ref exactly as
   # SEND_TARGET does; cmux-paste.sh resolves a ref through the tree.
   PASTE_SURFACE="${PLACE_ID:-$PLACE_REF}"
   PASTE_WORKSPACE=""

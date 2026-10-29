@@ -62,19 +62,21 @@ make_shim() {
   cat > "$dir/bin/cmux" <<'SHIM'
 #!/usr/bin/env bash
 ST="${CMUX_FAKE_STATE:?}"
+[[ "$1" == --json ]] && shift 3
 case "$1" in
   identify)
     jq -n '{caller: {pane_ref:"pane:3", workspace_ref:"workspace:7",
                      window_ref:"window:1", surface_ref:"surface:11"}}' ;;
   tree)
-    jq -n '{windows: [{ref:"window:1", id:"WIN-UUID", index:0,
-      workspaces: [{ref:"workspace:7", id:"WS-UUID", index:0, title:"ready hygiene",
+    jq -n '{windows: [{ref:"window:1", id:"AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", index:0,
+      workspaces: [{ref:"workspace:7", id:"BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB", index:0, title:"ready hygiene",
         panes: [{ref:"pane:3", id:"PANE-UUID", index:0,
           surfaces: [{ref:"surface:11", id:"SURF-OLD", pane_id:"PANE-UUID", index:0, title:"agent"},
-                     {ref:"surface:258", id:"SURF-NEW", pane_id:"PANE-UUID", index:1, title:"zsh"}]}]}]}]}' ;;
+                     {ref:"surface:258", id:"EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE", pane_id:"PANE-UUID", index:1, title:"zsh"}]}]}]}]}' ;;
   new-pane|new-surface)
-    echo "$*" >> "$ST/create_calls"; echo "OK surface:258 pane:3 workspace:7" ;;
+    echo "$*" >> "$ST/create_calls"; echo '{"surface_id":"EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE","surface_ref":"surface:258","pane_id":"DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD","pane_ref":"pane:3","workspace_id":"BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB","workspace_ref":"workspace:7"}' ;;
   rename-tab) echo "OK" ;;
+  close-surface) exit 1 ;;
   focus-pane) echo "$*" >> "$ST/focus_calls"; exit 0 ;;
   send)
     printf '%q ' "$@" >> "$ST/send_calls"; printf '\n' >> "$ST/send_calls"
@@ -123,7 +125,7 @@ fi
 # log, so the raw 0x15 byte shows up as $'\025' rather than mangling the line.
 clears=$(grep -c "\\\$'\\\\025'" "$tmp/send_calls" 2>/dev/null || true)
 misaddressed=$(grep "\\\$'\\\\025'" "$tmp/send_calls" 2>/dev/null \
-  | grep -vc -- '--surface SURF-NEW' || true)
+  | grep -vc -- '--surface EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE' || true)
 if [[ "${clears:-0}" -ge 1 && "${misaddressed:-0}" -eq 0 ]]; then
   pass "each probe is preceded by a Ctrl-U on the same handle"
 else
@@ -171,12 +173,12 @@ fi
 # only the positional `surface:258` in there, a caller reaping the orphan closes
 # whatever occupies slot 258 when its close runs — which is not necessarily the
 # surface this probe opened, because slots renumber as siblings close.
-if grep -q 'surface_id=SURF-NEW' "$tmp/err.txt"; then
+if grep -q 'surface_id=EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE' "$tmp/err.txt"; then
   pass "…and names the orphan surface by UUID, as surface_id=<uuid>"
 else
   fail "…and names the orphan surface by UUID, as surface_id=<uuid>" "err=$(cat "$tmp/err.txt")"
 fi
-if grep -q 'workspace_id=WS-UUID' "$tmp/err.txt"; then
+if grep -q 'workspace_id=BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB' "$tmp/err.txt"; then
   pass "…with its workspace UUID too, which close-surface requires"
 else
   fail "…with its workspace UUID too, which close-surface requires" "err=$(cat "$tmp/err.txt")"

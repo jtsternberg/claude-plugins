@@ -58,14 +58,14 @@ TITLE=$(cat "$title_file")
 emit_tree() {
   jq -n --arg t "$TITLE" '{
     windows: [{
-      ref: "window:1", id: "WIN-UUID", index: 0,
+      ref: "window:1", id: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", index: 0,
       workspaces: [{
-        ref: "workspace:7", id: "WS-UUID", index: 0, title: "plugin surface naming",
+        ref: "workspace:7", id: "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB", index: 0, title: "plugin surface naming",
         panes: [{
-          ref: "pane:3", id: "PANE-UUID", index: 0,
+          ref: "pane:3", id: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC", index: 0,
           surfaces: [
-            { ref: "surface:11", id: "SURF-OLD", pane_id: "PANE-UUID", index: 0, title: "agent" },
-            { ref: "surface:258", id: "SURF-NEW", pane_id: "PANE-UUID", index: 1, title: $t }
+            { ref: "surface:11", id: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF", pane_id: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC", index: 0, title: "agent" },
+            { ref: "surface:258", id: "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE", pane_id: "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC", index: 1, title: $t }
           ]
         }]
       }]
@@ -73,6 +73,7 @@ emit_tree() {
   }'
 }
 
+[[ "$1" == --json ]] && shift 3
 case "$1" in
   identify)
     if [[ -n "${CMUX_FAKE_IDENTIFY_EMPTY:-}" ]]; then
@@ -85,7 +86,7 @@ case "$1" in
   tree) emit_tree ;;
   new-pane|new-surface)
     echo "$*" >> "$ST/create_calls"
-    echo "OK surface:258 pane:3 workspace:7"
+    echo '{"surface_id":"EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE","surface_ref":"surface:258","pane_id":"DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD","pane_ref":"pane:4","workspace_id":"BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB","workspace_ref":"workspace:7"}'
     ;;
   rename-tab)
     echo "$*" >> "$ST/rename_calls"
@@ -121,7 +122,7 @@ if [[ $rc -eq 0 ]]; then
 else
   fail "exits 0 with --title" "rc=$rc err=$(cat "$tmp/err.txt")"
 fi
-if grep -q 'rename-tab .*--tab SURF-NEW' "$tmp/rename_calls" 2>/dev/null \
+if grep -q 'rename-tab .*--tab EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE' "$tmp/rename_calls" 2>/dev/null \
    && grep -q 'dev server :3000' "$tmp/rename_calls" 2>/dev/null; then
   pass "--title applies the name via rename-tab on the new surface's UUID"
 else
@@ -151,7 +152,7 @@ rm -rf "$tmp"
 # workspace and lose reusable-surface bookkeeping).
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/cmux-naming-XXXXXX"); make_shim "$tmp"
 out=$(PATH="$tmp/bin:$PATH" CMUX_FAKE_STATE="$tmp" \
-      CMUX_FAKE_IDENTIFY_EMPTY=1 CMUX_SURFACE_ID="SURF-OLD" \
+      CMUX_FAKE_IDENTIFY_EMPTY=1 CMUX_SURFACE_ID="FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF" \
       bash "$OPENER" --json 2>"$tmp/err.txt")
 rc=$?
 if [[ $rc -eq 0 && "$(jq -r '.surface_ref' <<<"$out")" == "surface:258" ]]; then
@@ -220,10 +221,10 @@ if grep -q "rename-tab' failed" "$tmp/err.txt" 2>/dev/null; then
 else
   fail "rename failure is reported on stderr" "err=$(cat "$tmp/err.txt")"
 fi
-if [[ "$(jq -r '.surface_title' <<<"$out")" == "zsh" ]]; then
-  pass "surface_title falls back to the real (generic) title, not the intended one"
+if [[ "$(jq -r '.surface_title' <<<"$out")" == "null" ]]; then
+  pass "failed rename does not claim an unverified title"
 else
-  fail "surface_title falls back to the real title" "got=$(jq -c '.surface_title' <<<"$out" 2>/dev/null)"
+  fail "failed rename does not claim an unverified title" "got=$(jq -c '.surface_title' <<<"$out" 2>/dev/null)"
 fi
 rm -rf "$tmp"
 

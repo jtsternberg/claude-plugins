@@ -258,16 +258,10 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   `IFS=$'\t' read -r a b c < <(jq …)` returns 1 when the lookup matches nothing, and
   `set -euo pipefail` turns that into an exit before any output — so a script that
   meant to *degrade* to a fallback aborts the whole call instead, silently and with
-  no diagnostic. Every cmux surface opener resolves ref→UUID this way: append
-  `|| true` so the fallback below it can run — and make that fallback a loud
-  non-zero exit, never a null in a field callers read as a handle. Degrading to
-  `"surface_id": null` reported as success is *worse* than the abort it replaced:
-  `open-side-surface.sh --json` answered all four ids null for a completely healthy
-  surface, and that null is the documented first step of a payload typed into the
-  caller's own input box. A fresh surface is also not instantly enumerable, so
-  retry the lookup before concluding anything. Guarded by
-  `plugins/cmux-cli/tests/side-surface-scope_test.sh`'s unresolvable-echoed-ref case
-  and `cmux_close_surface_scoped`'s in `plugins/hotline/tests/`.
+  no diagnostic. Append `|| true` where the fallback must run, and make a missing
+  required handle a loud non-zero exit rather than reporting success with null IDs.
+  The opener now validates creation UUIDs directly; scoped close lookup coverage
+  remains in `plugins/hotline/tests/`.
   **This entry named two sites and only one was fixed**, for months: cmux echoes an
   `OK surface:N` that a following `tree` does not resolve, so the unguarded read in
   `open-side-surface.sh` aborted with rc=1 and *both* output streams empty, taking

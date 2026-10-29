@@ -1071,6 +1071,7 @@ repl_trust_dialog_refusal() {
 # places with two different values, so the documented 60s default and the actual
 # 20s box wait disagreed.
 HOTLINE_BOOT_TIMEOUT_CMUX="${HOTLINE_BOOT_TIMEOUT_CMUX:-60}"
+HOTLINE_SIDE_SURFACE_READY_TIMEOUT_DEFAULT=30
 HOTLINE_BOOT_TIMEOUT_HEADLESS="${HOTLINE_BOOT_TIMEOUT_HEADLESS:-30}"
 
 # --- The per-call nonce ------------------------------------------------------

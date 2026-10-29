@@ -178,7 +178,7 @@ segment above.
 
 **`surface <ref> PTY never became ready`**
 - The new surface was created but its shell never echoed the readiness probe within the timeout (`surface-ready.sh` exited 3). Common causes: a very slow shell rc, a non-shell program in the surface, or the PTY backend never attaching.
-- Recovery: the launcher already closed the surface (no orphan) and wrote the async error. Bump the budget with `HOTLINE_SURFACE_READY_TIMEOUT=<seconds>` (default 8) and retry, or use `--detached`.
+- Recovery: the launcher already closed the surface (no orphan) and wrote the async error. Bump the budget with `HOTLINE_SURFACE_READY_TIMEOUT=<seconds>` (default 30 for side-by-side; 8 for window or detached) and retry, or use `--detached`.
 
 **"Terminal surface not found" / "Failed to read terminal text" mid-call**
 - The surface lost (or never attached) its PTY. `cmux send` is what attaches it, lazily, on first send — so the readiness probe (`surface-ready.sh`) is the recovery, and it runs before the launch command. Nothing focuses the pane to force attachment: focus moves the user's cursor into the callee's shell, which is how their keystrokes end up prepended to a launch command.

@@ -43,8 +43,8 @@ OPENER="$PLUGIN_DIR/skills/using-cmux-cli/scripts/open-side-surface.sh"
 
 # Workspace X: what the agent-spawned session inherited in its env.
 # Workspace Y: where its surface actually lives, per the tree.
-WS_X_ID="AAAAAAAA-0000-0000-0000-00000000000X"
-WS_Y_ID="BBBBBBBB-0000-0000-0000-00000000000Y"
+WS_X_ID="AAAAAAAA-0000-0000-0000-000000000001"
+WS_Y_ID="BBBBBBBB-0000-0000-0000-000000000002"
 SURF_CALLER_ID="CCCCCCCC-0000-0000-0000-0000000000C1"
 PANE_ADJACENT_ID="DDDDDDDD-0000-0000-0000-0000000000D1"
 WIN_ID="EEEEEEEE-0000-0000-0000-0000000000E1"
@@ -80,6 +80,7 @@ PANE_ADJACENT_ID="$PANE_ADJACENT_ID"
 WIN_ID="$WIN_ID"
 SHIM
   cat >> "$dir/bin/cmux" <<'SHIM'
+case "$1" in --json) shift; [[ "$1 $2" == "--id-format both" ]] || exit 9; shift 2;; esac
 case "$1" in
   identify)
     if [[ -n "${CMUX_FAKE_IDENTIFY_EMPTY:-}" ]]; then
@@ -163,7 +164,7 @@ case "$1" in
       echo "Error: not_found: Pane not found" >&2
       exit 1
     fi
-    echo "OK surface:258 pane:3 workspace:70" ;;
+    jq -n --arg ws "$WS_Y_ID" --arg pane "$PANE_ADJACENT_ID" '{surface_id:"FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",surface_ref:"surface:258",pane_id:$pane,pane_ref:"pane:3",workspace_id:$ws,workspace_ref:"workspace:70"}' ;;
   rename-tab) echo "OK" ;;
   focus-pane|send|read-screen) exit 0 ;;
   *) exit 0 ;;
@@ -243,154 +244,28 @@ else
 fi
 assert_pinned "identify succeeds" "$tmp2/create_calls" "$PANE_ADJACENT_ID" "$WIN_ID"
 
-# --- Case 3: pane `.id`s are null — the positional branch, still pinned ---
-# The opener has no pane UUID to target, so it hands cmux `pane:3`; that ref
-# only resolves inside the right window/workspace, so the container flags are
-# what make the call work at all. The workspace and window still carry UUIDs
-# here, which is the shape where a container UUID can end up in --pane.
+# --- Case 3: a missing pane UUID must not fall back to a positional target ---
 tmp3=$(mktemp -d "${TMPDIR:-/tmp}/cmux-scope-c-XXXXXX"); make_shim "$tmp3"
 out3=$(PATH="$tmp3/bin:$PATH" CMUX_FAKE_STATE="$tmp3" CMUX_FAKE_PANE_IDS_NULL=1 \
        CMUX_SURFACE_ID="$SURF_CALLER_ID" CMUX_WORKSPACE_ID="$WS_X_ID" \
        bash "$OPENER" --caller --title "scoped side surface" --json 2>"$tmp3/err.txt")
 rc3=$?
-if [[ $rc3 -eq 0 && "$(jq -r '.surface_ref' <<<"$out3" 2>/dev/null)" == "surface:258" ]]; then
-  pass "pane .id null — opens side-by-side on the positional ref"
+if [[ $rc3 -eq 2 && ! -s "$tmp3/create_calls" ]]; then
+  pass "pane .id null — refuses positional target"
 else
-  fail "pane .id null — opens side-by-side on the positional ref" \
-       "rc=$rc3 out=$out3 err=$(cat "$tmp3/err.txt")"
+  fail "pane .id null — refuses positional target" "rc=$rc3"
 fi
-assert_pinned "pane .id null" "$tmp3/create_calls" "pane:3" "$WIN_ID"
 
-# --- Case 4: window `.id` is null — --window falls back to the ref ---
+# --- Case 4: a missing window UUID must not fall back to a positional target ---
 tmp4=$(mktemp -d "${TMPDIR:-/tmp}/cmux-scope-d-XXXXXX"); make_shim "$tmp4"
 out4=$(PATH="$tmp4/bin:$PATH" CMUX_FAKE_STATE="$tmp4" CMUX_FAKE_WINDOW_ID_NULL=1 \
        CMUX_SURFACE_ID="$SURF_CALLER_ID" CMUX_WORKSPACE_ID="$WS_X_ID" \
        bash "$OPENER" --caller --title "scoped side surface" --json 2>"$tmp4/err.txt")
 rc4=$?
-if [[ $rc4 -eq 0 && "$(jq -r '.surface_ref' <<<"$out4" 2>/dev/null)" == "surface:258" ]]; then
-  pass "window .id null — opens side-by-side"
+if [[ $rc4 -eq 2 && ! -s "$tmp4/create_calls" ]]; then
+  pass "window .id null — refuses positional container"
 else
-  fail "window .id null — opens side-by-side" \
-       "rc=$rc4 out=$out4 err=$(cat "$tmp4/err.txt")"
-fi
-assert_pinned "window .id null" "$tmp4/create_calls" "$PANE_ADJACENT_ID" "window:1"
-# --- Case 5: cmux echoes a ref the tree does not resolve ---------------------
-# THE CONTRACT HERE CHANGED, and the direction matters. The `read` consuming an
-# empty lookup returns 1, which `set -euo pipefail` turns into an abort before the
-# next line runs, so each attempt keeps its `|| true` (claude-plugins-h2et, -99nu)
-# — but degrading to the positional ref and reporting `"surface_id": null` as a
-# SUCCESS is the documented lead-in to the worst failure in this repo. A caller
-# does `SID=$(jq -r '.surface_id' …)`, gets an empty string, and the next
-# `cmux send --surface "$SID"` falls back to $CMUX_SURFACE_ID and types the payload
-# into the CALLER'S OWN input box, exit 0, no warning. Observed live with all four
-# ids null against a surface that was completely healthy.
-#
-# So an id that will not resolve is now rc 4 with a diagnostic, and these cases pin
-# that it is never reported as a success instead.
-tmp5=$(mktemp -d "${TMPDIR:-/tmp}/cmux-scope-e-XXXXXX"); make_shim "$tmp5"
-out5=$(PATH="$tmp5/bin:$PATH" CMUX_FAKE_STATE="$tmp5" CMUX_FAKE_NEW_SURFACE_MISSING=1 \
-       CMUX_SIDE_RESOLVE_TRIES=2 CMUX_SIDE_RESOLVE_SLEEP=0 \
-       CMUX_SURFACE_ID="$SURF_CALLER_ID" CMUX_WORKSPACE_ID="$WS_X_ID" \
-       bash "$OPENER" --caller --title "scoped side surface" --json 2>"$tmp5/err.txt")
-rc5=$?
-err5=$(cat "$tmp5/err.txt")
-if [[ $rc5 -eq 4 ]]; then
-  pass "unresolvable echoed ref — fails loudly (rc 4), never reports a null id as success"
-else
-  fail "unresolvable echoed ref — fails loudly (rc 4), never reports a null id as success" \
-       "rc=$rc5 out=[$out5] err=[$err5]"
-fi
-# NO success payload on stdout. This is strictly stronger than the old assertion
-# that `.surface_id` be JSON null rather than the string "null": `jq -r` renders
-# both identically, so a consumer's `[[ -n "$SID" ]]` guard passes on either and
-# hands cmux `--surface null` — not empty, so cmux substitutes a target instead of
-# refusing. With no payload at all there is nothing for that guard to misread.
-if [[ -z "$out5" ]] || ! jq -e 'has("surface_id")' <<<"$out5" >/dev/null 2>&1; then
-  pass "unresolvable echoed ref — emits no JSON payload for a caller to misparse"
-else
-  fail "unresolvable echoed ref — emits no JSON payload for a caller to misparse" "out=[$out5]"
-fi
-# The surface EXISTS and is not closed, so the diagnostic has to name it. It must
-# name the REF (a human can find it) and must NOT print a `surface_id=` line: the
-# caller's reap path greps for exactly that and would try to close a UUID that was
-# never resolved (cmux-call-async.sh).
-if printf '%s' "$err5" | grep -qF 'surface:258'; then
-  pass "unresolvable echoed ref — the diagnostic names the surface left behind"
-else
-  fail "unresolvable echoed ref — the diagnostic names the surface left behind" "err=[$err5]"
-fi
-if printf '%s' "$err5" | grep -q 'surface_id='; then
-  fail "unresolvable echoed ref — never prints a surface_id= a reaper would act on" "err=[$err5]"
-else
-  pass "unresolvable echoed ref — never prints a surface_id= a reaper would act on"
-fi
-# Which of the two causes it was. Both produce an empty lookup and only the
-# diagnostic can tell them apart.
-if printf '%s' "$err5" | grep -qF 'held no surface with ref'; then
-  pass "unresolvable echoed ref — says the tree read fine but had no such ref"
-else
-  fail "unresolvable echoed ref — says the tree read fine but had no such ref" "err=[$err5]"
-fi
-
-# --- Case 5b: the post-create tree read itself comes back empty --------------
-# The other cause of an unresolved id. Same refusal, different sentence — a reader
-# told "no such ref" would go hunting a renumbering bug that is not there.
-tmp5b=$(mktemp -d "${TMPDIR:-/tmp}/cmux-scope-f-XXXXXX"); make_shim "$tmp5b"
-out5b=$(PATH="$tmp5b/bin:$PATH" CMUX_FAKE_STATE="$tmp5b" CMUX_FAKE_TREE_EMPTY_AFTER_CREATE=1 \
-        CMUX_SIDE_RESOLVE_TRIES=2 CMUX_SIDE_RESOLVE_SLEEP=0 \
-        CMUX_SURFACE_ID="$SURF_CALLER_ID" CMUX_WORKSPACE_ID="$WS_X_ID" \
-        bash "$OPENER" --caller --title "scoped side surface" --json 2>"$tmp5b/err.txt")
-rc5b=$?
-err5b=$(cat "$tmp5b/err.txt")
-if [[ $rc5b -eq 4 && -z "$out5b" ]]; then
-  pass "a tree read that returns nothing after the create also refuses (rc 4, no payload)"
-else
-  fail "a tree read that returns nothing after the create also refuses (rc 4, no payload)" \
-       "rc=$rc5b out=[$out5b] err=[$err5b]"
-fi
-if printf '%s' "$err5b" | grep -qF 'returned nothing on every attempt'; then
-  pass "…and names THAT cause rather than blaming a missing ref"
-else
-  fail "…and names THAT cause rather than blaming a missing ref" "err=[$err5b]"
-fi
-
-# --- Case 5c: the live shape — the surface shows up on a later tree read -----
-# This is what was actually observed: `--wait-ready --json` reported all four ids
-# null, and `cmux tree --all --json --id-format both` moments later resolved the
-# same `surface:73` to a healthy, correctly-titled surface. A single snapshot
-# taken in that gap finds nothing, so the lookup is retried — and the retry is the
-# fix, not the refusal above it.
-tmp5c=$(mktemp -d "${TMPDIR:-/tmp}/cmux-scope-g-XXXXXX"); make_shim "$tmp5c"
-out5c=$(PATH="$tmp5c/bin:$PATH" CMUX_FAKE_STATE="$tmp5c" CMUX_FAKE_NEW_SURFACE_AFTER=2 \
-        CMUX_SIDE_RESOLVE_TRIES=5 CMUX_SIDE_RESOLVE_SLEEP=0 \
-        CMUX_SURFACE_ID="$SURF_CALLER_ID" CMUX_WORKSPACE_ID="$WS_X_ID" \
-        bash "$OPENER" --caller --title "scoped side surface" --json 2>"$tmp5c/err.txt")
-rc5c=$?
-if [[ $rc5c -eq 0 ]]; then
-  pass "a surface that appears on a later tree read resolves instead of failing"
-else
-  fail "a surface that appears on a later tree read resolves instead of failing" \
-       "rc=$rc5c out=[$out5c] err=[$(cat "$tmp5c/err.txt")]"
-fi
-want "…and reports the UUID, not the ref it was looked up by" \
-     "$(jq -r '.surface_id' <<<"$out5c" 2>/dev/null)" "SURF-NEW"
-# The invariant, stated positively: a payload that IS emitted has all three ids.
-# `pane_id` and `workspace_id` are not cosmetic — they are what pins the container
-# on every follow-up call, and an unpinned one resolves in the caller's context.
-if jq -e '(.surface_id | type == "string") and (.pane_id | type == "string")
-          and (.workspace_id | type == "string")' <<<"$out5c" >/dev/null 2>&1; then
-  pass "a successful payload never carries a null surface_id/pane_id/workspace_id"
-else
-  fail "a successful payload never carries a null surface_id/pane_id/workspace_id" "out=[$out5c]"
-fi
-# And the retry must not have been free of the guard it replaced: the run above
-# consumed more than one post-create tree read, which is the only proof the retry
-# ran rather than the fixture simply answering on the first look.
-post_reads=$(( $(cat "$tmp5c/tree_reads" 2>/dev/null || echo 0) - $(cat "$tmp5c/tree_reads_at_create" 2>/dev/null || echo 0) ))
-if (( post_reads >= 3 )); then
-  pass "…having actually retried the lookup (${post_reads} post-create tree reads)"
-else
-  fail "…having actually retried the lookup" "only $post_reads post-create tree reads"
+  fail "window .id null — refuses positional container" "rc=$rc4"
 fi
 
 echo

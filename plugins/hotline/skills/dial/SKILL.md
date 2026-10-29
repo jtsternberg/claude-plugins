@@ -635,7 +635,7 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   Skips the fingerprint dance entirely, so `replay` never happens. This is the
   escape hatch when identity discovery fails.
 - **`HOTLINE_SURFACE_READY_TIMEOUT=<seconds>`** — PTY-readiness budget for a new
-  surface (default 8).
+  surface (default 30 for side-by-side; 8 for window or detached).
 - **`HOTLINE_CALL_SWEEP_DAYS=<n>`** — age floor (default 3) for the TTL sweep
   that runs at the start of every dial, reaping `hotline-call-*` dirs under
   `HOTLINE_CALL_HOME` (default `/tmp`) older than this. `find -mtime` drops the
