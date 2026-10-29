@@ -521,6 +521,14 @@ Exit codes that are not failures:
   callee's own words. On headless there is no live surface; the follow-up resumes the
   session. A BLOCKED the callee later worked past (a later WORK_IN_PROGRESS or
   terminal STATUS) does not count, and neither does one written mid-turn.
+- **Exit 8 — your own follow-up superseded this call.** You dialed a follow-up
+  into the same session before this call resolved, so the callee answers under the
+  follow-up's nonce. The wait exits at once (no preempt grace) and stderr names the
+  follow-up's call dir, also in `$CALL_DIR/superseded_by.json` (`call_dir`,
+  `call_id`): **wait on that call dir instead.** Nothing is closed — the follow-up is
+  running in the same surface. An answer for this call's own nonce that already
+  landed still wins (exit 0/4/7). A follow-up from a different caller session, or a
+  human typing into the surface, still reads as exit 3.
 
 Leave the call dir where it is when the exchange is done; cleanup is the
 wrapper's job, not yours. Every dial starts by reaping call dirs older than

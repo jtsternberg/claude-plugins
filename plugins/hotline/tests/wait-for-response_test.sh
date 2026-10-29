@@ -1674,6 +1674,111 @@ else
 fi
 rm -rf "$GH" "$GCD" "$GSD"
 
+# ---- supersede: the same caller's own follow-up is not a reassignment ---------
+# A follow-up the caller dials into the same busy session reads, in the transcript,
+# exactly like a human handing the callee a new task. dial.sh records it as
+# superseded_by.json in this call dir, and the waiter exits 8 at once naming the
+# new call dir — no grace window, no "reassigned" verdict. No marker (a different
+# caller's dial, or a human) keeps exit 3.
+echo ""
+echo "Supersede marker:"
+
+SUP_NEW_NONCE="newnonce0sup0001"
+SUP_BODY='{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] do the thing"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nworking"}]}}
+{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"<command-name>/hotline:hotline-ringing</command-name>\n<command-args>[CALL_ID: '"$SUP_NEW_NONCE"'] [FOLLOW_UP] [MODE: work_order] [CALLER: /c] [SESSION: caller-x]\nand one more thing</command-args>"}}'
+
+setup_sup_call() {  # $1 = transcript body, $2 = write marker (true/false) → "HOME|CALL_DIR|STUBDIR|LOG"
+  local ct h rest cd sd log
+  ct=$(setup_transcript_call "$1")
+  h=${ct%%|*}; rest=${ct#*|}; cd=${rest%%|*}; sd=${rest#*|}
+  # keep_workspace=false + a logging cmux: exit 8 must close NOTHING, because the
+  # follow-up it names is running in that same surface.
+  echo "false" > "$cd/keep_workspace.txt"
+  log="$sd/cmux.log"; : > "$log"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\nexit 0\n' "$log" > "$sd/cmux"
+  chmod +x "$sd/cmux"
+  if [[ "$2" == true ]]; then
+    jq -n --arg d "$TMP_ROOT/hotline-call-NEWDIR" --arg id "$SUP_NEW_NONCE" \
+      '{call_dir:$d, call_id:$id}' > "$cd/superseded_by.json"
+  fi
+  echo "$h|$cd|$sd|$log"
+}
+
+# S1 — marker + the follow-up's prompt in the transcript → exit 8, immediately.
+# Grace and budget are both enormous, so only the marker can end it fast.
+SC=$(setup_sup_call "$SUP_BODY" true)
+SH=${SC%%|*}; r=${SC#*|}; SCD=${r%%|*}; r=${r#*|}; SSD=${r%%|*}; SLOG=${r#*|}
+set +e
+SERR=$(HOME="$SH" PATH="$SSD:$PATH" HOTLINE_PREEMPT_GRACE=4000 \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$SCD" --timeout 6000 --submit-deadline 99 2>&1 >/dev/null)
+SRC=$?
+set -e
+if [[ $SRC -eq 8 ]] && printf '%s' "$SERR" | grep -q "hotline-call-NEWDIR" \
+   && printf '%s' "$SERR" | grep -q "$SUP_NEW_NONCE"; then
+  pass "a superseded call exits 8 naming the new call dir and nonce"
+else
+  fail "a superseded call exits 8 naming the new call dir and nonce" "rc=$SRC err=$SERR"
+fi
+if printf '%s' "$SERR" | grep -qi "reassigned\|grace window"; then
+  fail "exit 8 does not say reassigned or wait out the grace" "err=$SERR"
+else
+  pass "exit 8 does not say reassigned or wait out the grace"
+fi
+if grep -q "close-" "$SLOG"; then
+  fail "exit 8 leaves the surface the follow-up is running in open" "cmux: $(cat "$SLOG")"
+else
+  pass "exit 8 leaves the surface the follow-up is running in open"
+fi
+rm -rf "$SH" "$SCD" "$SSD"
+
+# S2 — same transcript, NO marker (another caller's dial, or a human) → exit 3.
+SC=$(setup_sup_call "$SUP_BODY" false)
+SH=${SC%%|*}; r=${SC#*|}; SCD=${r%%|*}; r=${r#*|}; SSD=${r%%|*}
+set +e
+SERR=$(HOME="$SH" PATH="$SSD:$PATH" HOTLINE_PREEMPT_GRACE=6 \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$SCD" --timeout 60 --submit-deadline 99 2>&1 >/dev/null)
+SRC=$?
+set -e
+if [[ $SRC -eq 3 ]]; then
+  pass "without a marker the same prompt still preempts (exit 3)"
+else
+  fail "without a marker the same prompt still preempts (exit 3)" "rc=$SRC err=$SERR"
+fi
+rm -rf "$SH" "$SCD" "$SSD"
+
+# S3 — marker, but our STATUS is already in the transcript → the answer wins.
+SC=$(setup_sup_call "$SUP_BODY
+"'{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nfirst order done\nSTATUS: WORK_COMPLETE call_id='"$TNONCE"'"}]}}' true)
+SH=${SC%%|*}; r=${SC#*|}; SCD=${r%%|*}; r=${r#*|}; SSD=${r%%|*}
+set +e
+SOUT=$(HOME="$SH" PATH="$SSD:$PATH" \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$SCD" --timeout 60 --submit-deadline 99 2>/dev/null)
+SRC=$?
+set -e
+if [[ $SRC -eq 0 ]] && [[ "$(printf '%s' "$SOUT" | jq -r .response 2>/dev/null)" == *"first order done"* ]]; then
+  pass "a superseded call whose answer already landed still returns it (exit 0)"
+else
+  fail "a superseded call whose answer already landed still returns it (exit 0)" "rc=$SRC out=$SOUT"
+fi
+rm -rf "$SH" "$SCD" "$SSD"
+
+# S4 — marker while the callee is merely working (no follow-up prompt in the
+# transcript yet: it is still queued) → exit 8 at once, not a wait to the budget.
+SC=$(setup_sup_call "$(printf '%s\n' "$SUP_BODY" | sed -n 1,2p)" true)
+SH=${SC%%|*}; r=${SC#*|}; SCD=${r%%|*}; r=${r#*|}; SSD=${r%%|*}
+set +e
+SERR=$(HOME="$SH" PATH="$SSD:$PATH" \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$SCD" --timeout 6000 --submit-deadline 99 2>&1 >/dev/null)
+SRC=$?
+set -e
+if [[ $SRC -eq 8 ]]; then
+  pass "a superseded call exits 8 while the follow-up is still queued"
+else
+  fail "a superseded call exits 8 while the follow-up is still queued" "rc=$SRC err=$SERR"
+fi
+rm -rf "$SH" "$SCD" "$SSD"
+
 # ---- summary ---------------------------------------------------------------
 
 echo ""
