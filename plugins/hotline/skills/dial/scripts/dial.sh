@@ -1614,6 +1614,8 @@ if [[ "$MODE_TAG" == "conference_call" && "$TRANSPORT" == "cmux" ]]; then
   $DO_FORK && CONF_ARGS+=(--fork-session)
   [[ -n "$TOOLS" ]] && CONF_ARGS+=(--tools "$TOOLS")
   CONF_ARGS+=(--box-timeout "$PASTE_BOX_TIMEOUT")
+  # cmux-call.sh cannot tell a first contact from a --resume on its own; see 6b.
+  $FIRST_CONTACT && CONF_ARGS+=(--first-contact)
   # The file, never argv: conference was the last hotline path handing a whole
   # payload to `claude` on a command line (claude-plugins-92s5).
   CONF_ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
