@@ -565,14 +565,30 @@ check "…and nothing is closed: the agent outlives the call (that is why herdr 
 
 # --- superseded by the caller's own follow-up → exit 8, agent untouched ------
 # The herdr twin of wait-for-response_test.sh's supersede cases: dial.sh's marker
-# ends the wait at once, naming the follow-up's call dir, while the agent sits
-# `working` on a turn that will never carry this nonce's STATUS.
+# plus the follow-up's prompt reaching the callee ends the wait, naming the
+# follow-up's call dir, while the agent sits `working` on the follow-up's turn.
+# The marker alone (follow-up still queued) does not: the old turn may still answer.
 t=$(new_env)
 NONCE="ff00aa11bb22cc44"
 cd_path="$t/call"
+stage_herdr_dir "$cd_path" hotline-r-8q "herdr-sess" "$NONCE" "$t/target"
+HTP="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$HTP" "$NONCE" "" "working on it"
+jq -n --arg d "$t/next-call" '{call_dir:$d, call_id:"nextnonce0000001"}' > "$cd_path/superseded_by.json"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" CMUX_LOG="$t/cmux.log" HERDR_STUB_AGENT_ANY=1 \
+      HERDR_STUB_STATUS=working HOTLINE_POLL_SLEEP=0 \
+      bash "$WAIT_RESPONSE" "$cd_path" --timeout 8 2>"$t/err.txt"); rc=$?
+[[ $rc -ne 8 ]] && ! grep -q Superseded "$t/err.txt"
+check "wait-for-response (herdr) does not exit 8 while the follow-up is only queued" $? \
+  "rc=$rc stderr=$(cat "$t/err.txt")"
+
+t=$(new_env)
+cd_path="$t/call"
 stage_herdr_dir "$cd_path" hotline-r-8 "herdr-sess" "$NONCE" "$t/target"
-transcript_with "$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl" \
-  "$NONCE" "" "working on it"
+HTP="$t/home/.claude/projects/$(encode_cwd "$t/target")/herdr-sess.jsonl"
+transcript_with "$HTP" "$NONCE" "" "working on it"
+printf '%s\n' '{"type":"user","isSidechain":false,"sessionId":"herdr-sess","message":{"content":"/hotline:hotline-ringing [CALL_ID: nextnonce0000001] [FOLLOW_UP] one more thing"}}' >> "$HTP"
 jq -n --arg d "$t/next-call" '{call_dir:$d, call_id:"nextnonce0000001"}' > "$cd_path/superseded_by.json"
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
       HERDR_STATE="$t/state" CMUX_LOG="$t/cmux.log" HERDR_STUB_AGENT_ANY=1 \

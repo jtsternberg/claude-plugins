@@ -1763,21 +1763,99 @@ else
 fi
 rm -rf "$SH" "$SCD" "$SSD"
 
-# S4 — marker while the callee is merely working (no follow-up prompt in the
-# transcript yet: it is still queued) → exit 8 at once, not a wait to the budget.
-SC=$(setup_sup_call "$(printf '%s\n' "$SUP_BODY" | sed -n 1,2p)" true)
+# The follow-up is only QUEUED: the REPL accepted it (an enqueue record) but the old
+# turn is still running, so the callee may yet answer the OLD nonce.
+SUP_QUEUED="$(printf '%s\n' "$SUP_BODY" | sed -n 1,2p)
+"'{"type":"queue-operation","operation":"enqueue","sessionId":"sess-tcm","content":"/hotline:hotline-ringing [CALL_ID: '"$SUP_NEW_NONCE"'] [FOLLOW_UP] and one more thing"}'
+
+# S4 — marker, follow-up still queued → no exit 8; the waiter keeps waiting on the
+# old nonce (here until its small budget runs out).
+SC=$(setup_sup_call "$SUP_QUEUED" true)
 SH=${SC%%|*}; r=${SC#*|}; SCD=${r%%|*}; r=${r#*|}; SSD=${r%%|*}
 set +e
-SERR=$(HOME="$SH" PATH="$SSD:$PATH" \
+SERR=$(HOME="$SH" PATH="$SSD:$PATH" HOTLINE_POLL_SLEEP=0 \
+  bash "$DIAL_SCRIPTS/wait-for-response.sh" "$SCD" --timeout 8 --submit-deadline 99 2>&1 >/dev/null)
+SRC=$?
+set -e
+if [[ $SRC -ne 8 ]] && ! printf '%s' "$SERR" | grep -q "Superseded"; then
+  pass "a follow-up still queued behind the old turn does not supersede it"
+else
+  fail "a follow-up still queued behind the old turn does not supersede it" "rc=$SRC err=$SERR"
+fi
+rm -rf "$SH" "$SCD" "$SSD"
+
+# S5 — same, and the old turn then finishes under the OLD nonce while the waiter is
+# polling → that answer resolves the call (0, and 4/7 for the other endings).
+for sup_end in "WORK_COMPLETE:0" "AWAITING_REVIEW:4" "BLOCKED:7"; do
+  sup_status=${sup_end%%:*}; sup_rc=${sup_end#*:}
+  SC=$(setup_sup_call "$SUP_QUEUED" true)
+  SH=${SC%%|*}; r=${SC#*|}; SCD=${r%%|*}; r=${r#*|}; SSD=${r%%|*}
+  STP=$(transcript_path_in "$SH")
+  set +e
+  HOME="$SH" PATH="$SSD:$PATH" HOTLINE_POLL_SLEEP=0.1 \
+    bash "$DIAL_SCRIPTS/wait-for-response.sh" "$SCD" --timeout 600 --submit-deadline 99 \
+    >"$SCD/t-out" 2>"$SCD/t-err" &
+  swp=$!
+  sleep 1
+  printf '%s\n' '{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nold order answered\nSTATUS: '"$sup_status"' call_id='"$TNONCE"'"}]}}' >> "$STP"
+  wait "$swp"; SRC=$?
+  set -e
+  if [[ $SRC -eq $sup_rc ]] && [[ "$(jq -r .response "$SCD/t-out" 2>/dev/null)" == *"old order answered"* ]]; then
+    pass "an old-nonce $sup_status after a queued follow-up still resolves (exit $sup_rc)"
+  else
+    fail "an old-nonce $sup_status after a queued follow-up still resolves (exit $sup_rc)" "rc=$SRC err=$(cat "$SCD/t-err")"
+  fi
+  rm -rf "$SH" "$SCD" "$SSD"
+done
+
+# S6 — the follow-up was injected into the busy turn (queued_command attachment, no
+# user record) and the callee has started answering it under the NEW nonce → 8.
+SC=$(setup_sup_call "$SUP_QUEUED
+"'{"type":"attachment","isSidechain":false,"sessionId":"sess-tcm","attachment":{"type":"queued_command","prompt":"/hotline:hotline-ringing [CALL_ID: '"$SUP_NEW_NONCE"'] [FOLLOW_UP] and one more thing"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"tool_use","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$SUP_NEW_NONCE"'\non it"}]}}' true)
+SH=${SC%%|*}; r=${SC#*|}; SCD=${r%%|*}; r=${r#*|}; SSD=${r%%|*}
+set +e
+SERR=$(HOME="$SH" PATH="$SSD:$PATH" HOTLINE_PREEMPT_GRACE=4000 \
   bash "$DIAL_SCRIPTS/wait-for-response.sh" "$SCD" --timeout 6000 --submit-deadline 99 2>&1 >/dev/null)
 SRC=$?
 set -e
 if [[ $SRC -eq 8 ]]; then
-  pass "a superseded call exits 8 while the follow-up is still queued"
+  pass "an injected follow-up the callee is answering under its own nonce supersedes (exit 8)"
 else
-  fail "a superseded call exits 8 while the follow-up is still queued" "rc=$SRC err=$SERR"
+  fail "an injected follow-up the callee is answering under its own nonce supersedes (exit 8)" "rc=$SRC err=$SERR"
 fi
 rm -rf "$SH" "$SCD" "$SSD"
+
+# S7/S8 — screen-scrape path (no transcript): the screen must show the callee
+# answering under the NEW nonce before 8; a queued follow-up drawn on screen is not it.
+sup_screen_case() {  # $1 = name  $2 = screen text  $3 = expect 8 (true/false)
+  local dc h cd sd rc err
+  dc=$(setup_discrim_call "" "$2" true)
+  h=${dc%%|*}; r=${dc#*|}; cd=${r%%|*}; sd=${r#*|}
+  rm -f "$cd/cwd.txt"
+  jq -n --arg d "$TMP_ROOT/hotline-call-NEWDIR" --arg id "$SUP_NEW_NONCE" \
+    '{call_dir:$d, call_id:$id}' > "$cd/superseded_by.json"
+  set +e
+  err=$(HOME="$h" PATH="$sd:$PATH" HOTLINE_POLL_SLEEP=0 \
+    bash "$DIAL_SCRIPTS/wait-for-response.sh" "$cd" --timeout 8 2>&1 >/dev/null)
+  rc=$?
+  set -e
+  if { [[ "$3" == true ]] && [[ $rc -eq 8 ]]; } || { [[ "$3" == false ]] && [[ $rc -ne 8 ]]; }; then
+    pass "$1"
+  else
+    fail "$1" "rc=$rc err=$err"
+  fi
+  rm -rf "$h" "$cd" "$sd"
+}
+sup_screen_case "screen: a follow-up still queued does not supersede" \
+"STATUS: WORK_IN_PROGRESS call_id=$TNONCE
+working
+> /hotline:hotline-ringing [CALL_ID: $SUP_NEW_NONCE] [FOLLOW_UP] and one more thing" false
+sup_screen_case "screen: the callee answering under the new nonce supersedes (exit 8)" \
+"STATUS: WORK_IN_PROGRESS call_id=$TNONCE
+working
+STATUS: WORK_IN_PROGRESS call_id=$SUP_NEW_NONCE
+on it" true
 
 # ---- summary ---------------------------------------------------------------
 
