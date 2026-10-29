@@ -142,6 +142,35 @@ HOTLINE_POLL_SLEEP=0 bash "$WAIT" "$cd9" --timeout 4 >/dev/null 2>"$t/werr.txt";
 [[ $wrc -eq 0 && -s "$cd9/waiter.pid" ]]
 check "wait-for-response.sh writes waiter.pid into the call dir" $? "rc=$wrc err=$(cat "$t/werr.txt")"
 
+# 10. The ringing skill's documented command is allowed by its own allowed-tools rule,
+#     matched the way Claude Code's permission docs describe: the whole command text
+#     against the rule with `*` as any text and everything else literal, after
+#     ${CLAUDE_SKILL_DIR} is substituted in both. One line, so no separate
+#     subcommand (a `SKILL_DIR=…` assignment) needs a rule of its own.
+SKILL_MD="$HOTLINE_DIR/skills/ringing/SKILL.md"
+FAKE_SKILL_DIR="/Users/someone/.claude/plugins/cache/x/hotline/1.0.0/skills/ringing"
+rule_line=$(sed -n '2,/^---$/{/^allowed-tools:/p;}' "$SKILL_MD")
+rules=$(grep -o 'Bash([^)]*)' <<<"$rule_line" | sed 's/^Bash(//; s/)$//')
+block=$(awk '/^## Tell the Caller/{s=1} s&&/^```bash$/{b=1; next} b&&/^```$/{exit} b' "$SKILL_MD")
+nlines=$(grep -c . <<<"$block")
+[[ "$nlines" -eq 1 ]]
+check "the notify command is a single command line" $? "block=[$block]"
+cmd=${block//'${CLAUDE_SKILL_DIR}'/$FAKE_SKILL_DIR}
+matched=0
+while IFS= read -r r; do
+  [[ -n "$r" ]] || continue
+  r=${r//'${CLAUDE_SKILL_DIR}'/$FAKE_SKILL_DIR}
+  glob=""; i=0
+  while (( i < ${#r} )); do
+    c=${r:i:1}
+    if [[ "$c" == "*" ]]; then glob+="*"; else printf -v q '%q' "$c"; glob+="$q"; fi
+    i=$((i + 1))
+  done
+  eval "[[ \$cmd == $glob ]]" && matched=1
+done <<<"$rules"
+[[ $matched -eq 1 ]]
+check "the documented notify command matches the skill's allowed-tools rule" $? "rules=[$rules] cmd=[$cmd]"
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then

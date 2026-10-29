@@ -3,7 +3,7 @@ name: hotline-ringing
 description: "Prime this agent to handle an incoming hotline call — protocol, isolation rules, response format."
 argument-hint: "[MODE: mode] [CALLER: path] [SESSION: id] task..."
 disable-model-invocation: true
-allowed-tools: "Bash(bash *notify-caller.sh *) SendMessage"
+allowed-tools: "Bash(bash ${CLAUDE_SKILL_DIR}/scripts/notify-caller.sh *) SendMessage"
 ---
 
 # Hotline: Ringing — Incoming Call Protocol
@@ -167,9 +167,10 @@ The caller hears your answer only if something on its side is waiting for it, an
 Codex: skip this section — Codex has no `SendMessage`.
 
 ```bash
-SKILL_DIR="${CLAUDE_SKILL_DIR}"
-bash "$SKILL_DIR/scripts/notify-caller.sh" --caller-session "<SESSION>" --call-id "<CALL_ID>" --status "<the STATUS you will end on>"
+bash ${CLAUDE_SKILL_DIR}/scripts/notify-caller.sh --caller-session "<SESSION>" --call-id "<CALL_ID>" --status "<the STATUS you will end on>"
 ```
+
+Run it exactly as written, on one line: the `allowed-tools` rule covers this command text, so a launcher that grants Bash only through this skill still runs it without a prompt. Quoting the path, or setting a variable on a line of its own, makes it a command the rule no longer matches.
 
 It prints one JSON line. On `"send":true`, call `SendMessage` once: `to` is the printed `to`, `message` is the printed `message` followed by a blank line and the first three to five lines of your answer, and `summary` is `hotline <CALL_ID> <STATUS>`. On `"send":false`, send nothing: the caller already has a waiter, isn't a live session here, or was already told. If `SendMessage` errors, leave it there — don't retry, and add a `HOTLINE_NOTE` to your reply. The script lives in your own plugin and reads only hotline's shared state under `~/.agents-hotline`, so running it doesn't break Workspace Isolation.
 
