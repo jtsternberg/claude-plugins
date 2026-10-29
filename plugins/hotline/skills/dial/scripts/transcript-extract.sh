@@ -181,7 +181,7 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
   | (map(.type == "assistant"
          and ((.isSidechain // false) != true)
          and (([.message.content[]? | select(.type == "text") | .text] | join("\n"))
-              | test("STATUS: [A-Z_]+ " + $stag)))
+              | test("(^|\n)STATUS: [A-Z_]+ " + $stag)))
      | index(true)) as $ai
   # (4) the enqueue record — the REPL accepted the keystrokes, delivery pending.
   | (map(.type == "queue-operation"
@@ -223,7 +223,7 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
      else ([ $rest[($pe.i + 1):][]
              | select(.type == "assistant" and ((.isSidechain // false) != true))
              | ([.message.content[]? | select(.type == "text") | .text] | join("\n"))
-             | select(test("STATUS: [A-Z_]+ " + $stag))
+             | select(test("(^|\n)STATUS: [A-Z_]+ " + $stag))
            ] | length) > 0
      end) as $still_ours
   # Did the turn END on a BLOCKED for our nonce? Claude writes one record per
@@ -242,7 +242,7 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
                       else .message.id == $la.message.id end)
              | [.message.content[]? | select(.type == "text") | .text] | join("\n") ]
            | join("\n")
-           | test("STATUS: BLOCKED " + $stag + "[[:space:]]*($|\n)"))
+           | test("(^|\n)STATUS: BLOCKED " + $stag + "[[:space:]]*($|\n)"))
      end) as $blocked_end
   | if $ui == null then
       {submitted: false, session_id: "", text: "", preempt: "", blocked_end: false}
@@ -276,6 +276,12 @@ TEXT=$(printf '%s' "$PARSED" | jq -r '.text')
 PREEMPT=$(printf '%s' "$PARSED" | jq -r '.preempt')
 BLOCKED_END=$(printf '%s' "$PARSED" | jq -r '.blocked_end')
 
+# Every sentinel match here is anchored to the start of the line. Measured across
+# 961 real transcripts, all 3,587 STATUS lines in assistant prose start at column
+# 0; one that does not is quoted (`> STATUS: DONE …`, an indented code block) and
+# would otherwise resolve the call. The screen scrape in wait-for-response.sh is
+# deliberately NOT anchored: the REPL renders prose behind `⏺ ` or an indent.
+#
 # A resolving STATUS for THIS nonce present yet? Terminal ones end the call;
 # AWAITING_REVIEW ends only this turn (see the note above). Both deliver a body,
 # so both stop the wait — they differ in what the caller does next, which the
@@ -284,14 +290,14 @@ BLOCKED_END=$(printf '%s' "$PARSED" | jq -r '.blocked_end')
 # Checked BEFORE preemption on purpose: a receiver that answered our call and was
 # THEN handed something else has still answered, and that response is owed to the
 # caller. Preemption only decides what to do when no resolving STATUS exists.
-TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=${NONCE}[[:space:]]*$"
+TERM_RE="^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=${NONCE}[[:space:]]*$"
 if printf '%s\n' "$TEXT" | grep -qE "$TERM_RE"; then
   # Which resolving STATUS stopped us? The FIRST one in the text wins, matching the
   # awk below (which stops at the first `term` match), so the body and the exit code
   # always describe the same sentinel.
   RESOLVED=$(printf '%s\n' "$TEXT" | grep -oE "$TERM_RE" | head -1 | awk '{print $2}')
 elif [[ "$BLOCKED_END" == "true" ]] \
-  && [[ "$(printf '%s\n' "$TEXT" | grep -oE "STATUS: [A-Z_]+ call_id=${NONCE}[[:space:]]*$" | tail -1 | awk '{print $2}')" == "BLOCKED" ]]; then
+  && [[ "$(printf '%s\n' "$TEXT" | grep -oE "^STATUS: [A-Z_]+ call_id=${NONCE}[[:space:]]*$" | tail -1 | awk '{print $2}')" == "BLOCKED" ]]; then
   RESOLVED=BLOCKED
 else
   if [[ -n "$PREEMPT" ]]; then
@@ -309,9 +315,9 @@ fi
 # (where it is the last STATUS) it is where the body ends.
 BODY=$(printf '%s\n' "$TEXT" | awk -v nonce="$NONCE" -v resolved="$RESOLVED" '
   BEGIN {
-    wip  = "STATUS: WORK_IN_PROGRESS call_id=" nonce "[[:space:]]*$"
-    term = "STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=" nonce "[[:space:]]*$"
-    blk  = "STATUS: BLOCKED call_id=" nonce "[[:space:]]*$"
+    wip  = "^STATUS: WORK_IN_PROGRESS call_id=" nonce "[[:space:]]*$"
+    term = "^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=" nonce "[[:space:]]*$"
+    blk  = "^STATUS: BLOCKED call_id=" nonce "[[:space:]]*$"
   }
   $0 ~ wip  { n=0; delete L; next }
   $0 ~ term { stop=1; exit }

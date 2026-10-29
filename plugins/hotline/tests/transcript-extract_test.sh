@@ -501,6 +501,26 @@ bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
   || fail "BLOCKED in an earlier block of the final end_turn message → exit 14" "got exit $RC"
 rm -f "$F"
 
+# Case 37: a STATUS line that does not start the line is quoted, not emitted —
+# real transcripts carry every sentinel at column 0. A blockquote or an indented
+# (code-block) DONE for our nonce must not resolve the call.
+QUOTED='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nthe old reply said:\n> STATUS: DONE call_id='"$NONCE"'\n    STATUS: WORK_COMPLETE call_id='"$NONCE"'"}]}}'
+F=$(mkf "$USER_NONCE
+$QUOTED")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "quoted / indented STATUS lines do not resolve (exit 10)" \
+  || fail "quoted / indented STATUS lines do not resolve (exit 10)" "got exit $RC"
+rm -f "$F"
+
+# Case 38: same for BLOCKED — a quoted BLOCKED at the end of the turn is not ours.
+QUOTED_BLK='{"type":"assistant","isSidechain":false,"sessionId":"sess-1","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$NONCE"'\nthe docs show:\n> STATUS: BLOCKED call_id='"$NONCE"'"}]}}'
+F=$(mkf "$USER_NONCE
+$QUOTED_BLK")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "a quoted BLOCKED does not resolve (exit 10)" \
+  || fail "a quoted BLOCKED does not resolve (exit 10)" "got exit $RC"
+rm -f "$F"
+
 echo ""
 echo "transcript-extract: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then printf '  - %s\n' "${FAILED[@]}"; exit 1; fi

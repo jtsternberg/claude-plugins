@@ -70,6 +70,11 @@ run_headless $'question?\nSTATUS: BLOCKED call_id=0123abcd0123abcd'
 [[ $RC -eq 7 ]] && pass "headless: a STATUS carrying a call_id suffix still classifies" \
   || fail "headless: a STATUS carrying a call_id suffix still classifies" "rc=$RC out=$OUT"
 
+run_headless $'the docs show:\n> STATUS: BLOCKED'
+[[ $RC -eq 0 ]] && ! jq -e 'has("blocked")' <<<"$OUT" >/dev/null 2>&1 \
+  && pass "headless: a quoted BLOCKED is not the callee's STATUS" \
+  || fail "headless: a quoted BLOCKED is not the callee's STATUS" "rc=$RC out=$OUT"
+
 echo ""
 echo "headless-status: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then printf '  - %s\n' "${FAILED[@]}"; exit 1; fi

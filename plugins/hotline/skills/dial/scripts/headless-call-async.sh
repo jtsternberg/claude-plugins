@@ -226,10 +226,11 @@ fi
   # mirrors; tests/headless-status_test.sh drives this one through the real script.
   # claude -p has exited, so the turn is over and the text is final. A headless
   # call carries no nonce, so the callee's STATUS lines are bare; a call_id suffix
-  # is tolerated anyway. The first terminal wins, as in transcript-extract.sh;
+  # is tolerated anyway. Anchored to line start, as in transcript-extract.sh (a
+  # STATUS that does not start its line is quoted). The first terminal wins;
   # BLOCKED counts only as the last STATUS with no terminal before it.
   STATUSES=$(printf '%s\n' "$RESPONSE" \
-    | grep -oE 'STATUS: [A-Z_]+( call_id=[^[:space:]]+)?[[:space:]]*$' \
+    | grep -oE '^STATUS: [A-Z_]+( call_id=[^[:space:]]+)?[[:space:]]*$' \
     | awk '{print $2}' || true)
   FIRST_TERM=$(printf '%s\n' "$STATUSES" \
     | grep -m1 -E '^(WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)$' || true)
