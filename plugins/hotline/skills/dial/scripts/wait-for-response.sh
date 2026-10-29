@@ -311,6 +311,11 @@ fi
 # error.txt WITHOUT the marker and still short-circuits immediately, unchanged.
 # response.json is the guard against clearing a call that genuinely finished.
 # (claude-plugins-tyaj)
+# Who is waiting on this call, for the callee's notify-caller.sh: a live waiter
+# delivers the answer itself, so the push notice is only for a call nobody waits
+# on. Left behind on exit on purpose — the reader checks the pid is still a waiter.
+echo "$$" > "$CALL_DIR/waiter.pid" 2>/dev/null || true
+
 WAITER_TIMEOUT_MARKER="$CALL_DIR/waiter_timeout.txt"
 if [[ -f "$WAITER_TIMEOUT_MARKER" && ! -f "$CALL_DIR/response.json" ]]; then
   echo "hotline: a previous waiter gave up on this call ($(tr -d '\n' < "$WAITER_TIMEOUT_MARKER")) — resuming with a fresh ${TIMEOUT}s budget from now." >&2
