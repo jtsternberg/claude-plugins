@@ -20,8 +20,8 @@
 # caller-name-ambiguous, already-notified.
 #
 # Decisions, in order:
-#   1. A live waiter on this call (call_dir/waiter.pid running wait-for-response.sh)
-#      delivers the answer itself, so a notice would only duplicate it. The call
+#   1. A live waiter on this call (call_dir/waiter.pid running wait-for-response.sh
+#      with this call dir among its args) delivers the answer itself, so a notice would only duplicate it. The call
 #      dir comes from the caller's own session cache, matched on last_call_id; an
 #      older exchange's nonce is no longer there, which only means the notice goes
 #      out without a call dir.
@@ -73,8 +73,14 @@ if [[ -f "$CACHE_FILE" ]]; then
 fi
 if [[ -n "$CALL_DIR" && -s "$CALL_DIR/waiter.pid" ]]; then
   WPID=$(tr -dc '0-9' < "$CALL_DIR/waiter.pid")
-  # The command check is what makes a recycled pid harmless.
-  if [[ -n "$WPID" ]] && ps -p "$WPID" -o command= 2>/dev/null | grep -q 'wait-for-response\.sh'; then
+  # A recycled pid can land on another call's waiter, so the process must be a
+  # waiter AND name this call dir. Matched on the dir's mktemp basename, since the
+  # caller may have passed the path relative or with a trailing slash.
+  WCMD=""
+  [[ -n "$WPID" ]] && WCMD=$(ps -p "$WPID" -o command= 2>/dev/null)
+  CALL_BASE=$(basename "$CALL_DIR")
+  if [[ "$WCMD" == *wait-for-response.sh* ]] \
+     && [[ " $WCMD " =~ [[:space:]/]"$CALL_BASE"/?[[:space:]] ]]; then
     skip waiter-live
   fi
 fi

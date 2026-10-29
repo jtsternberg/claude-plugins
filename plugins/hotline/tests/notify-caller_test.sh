@@ -113,7 +113,7 @@ jq -n --arg d "$cd7" --arg n "$NONCE" \
   '{connections:{"/some/target":{session_id:"s",last_call_id:$n,last_call_dir:$d}}}' \
   > "$t/home/.agents-hotline/sessions/$CALLER.json"
 mkdir -p "$t/fake"; printf '#!/usr/bin/env bash\nsleep 30\n' > "$t/fake/wait-for-response.sh"
-bash "$t/fake/wait-for-response.sh" & wp=$!; BG_PIDS+=("$wp")
+bash "$t/fake/wait-for-response.sh" "$cd7" & wp=$!; BG_PIDS+=("$wp")
 echo "$wp" > "$cd7/waiter.pid"
 notify "$t" --call-id "$NONCE" --status WORK_COMPLETE
 [[ "$(field .send)" == "false" && "$(field .reason)" == "waiter-live" ]]
@@ -170,6 +170,36 @@ while IFS= read -r r; do
 done <<<"$rules"
 [[ $matched -eq 1 ]]
 check "the documented notify command matches the skill's allowed-tools rule" $? "rules=[$rules] cmd=[$cmd]"
+
+# 11. A recycled pid: waiter.pid names a live wait-for-response.sh, but one waiting
+#     on a DIFFERENT call → not a waiter on this call, so the notice still goes out.
+t=$(new_env); agents "$t" "$LIVE"
+cd10="$t/hotline-call-ten"; mkdir -p "$cd10"
+mkdir -p "$t/home/.agents-hotline/sessions"
+jq -n --arg d "$cd10" --arg n "$NONCE" \
+  '{connections:{"/some/target":{session_id:"s",last_call_id:$n,last_call_dir:$d}}}' \
+  > "$t/home/.agents-hotline/sessions/$CALLER.json"
+mkdir -p "$t/fake"; printf '#!/usr/bin/env bash\nsleep 30\n' > "$t/fake/wait-for-response.sh"
+bash "$t/fake/wait-for-response.sh" "$t/hotline-call-other" --timeout 60 & wp=$!; BG_PIDS+=("$wp")
+echo "$wp" > "$cd10/waiter.pid"
+notify "$t" --call-id "$NONCE" --status WORK_COMPLETE
+[[ "$(field .send)" == "true" ]]
+check "a waiter on another call (recycled pid) does not suppress the notice" $? "out=$NOUT"
+kill "$wp" 2>/dev/null; wait "$wp" 2>/dev/null
+# …and the real shape of a waiter on THIS call — relative path, trailing slash — still counts.
+t=$(new_env); agents "$t" "$LIVE"
+cd10b="$t/hotline-call-tenb"; mkdir -p "$cd10b"
+mkdir -p "$t/home/.agents-hotline/sessions"
+jq -n --arg d "$cd10b" --arg n "$NONCE" \
+  '{connections:{"/some/target":{session_id:"s",last_call_id:$n,last_call_dir:$d}}}' \
+  > "$t/home/.agents-hotline/sessions/$CALLER.json"
+mkdir -p "$t/fake"; printf '#!/usr/bin/env bash\nsleep 30\n' > "$t/fake/wait-for-response.sh"
+(cd "$t" && exec bash "$t/fake/wait-for-response.sh" "hotline-call-tenb/" --timeout 60) & wp=$!; BG_PIDS+=("$wp")
+echo "$wp" > "$cd10b/waiter.pid"
+notify "$t" --call-id "$NONCE" --status WORK_COMPLETE
+[[ "$(field .send)" == "false" && "$(field .reason)" == "waiter-live" ]]
+check "a waiter given this call dir as a relative path still counts" $? "out=$NOUT"
+kill "$wp" 2>/dev/null; wait "$wp" 2>/dev/null
 
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
