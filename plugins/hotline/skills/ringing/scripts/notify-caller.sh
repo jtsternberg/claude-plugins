@@ -3,8 +3,8 @@
 # Notify Caller: decide whether a callee should push "your call resolved" into the
 # caller's live Claude Code session, and print who to send it to.
 #
-# Hotline is pull-only: the answer reaches the caller only through a waiter
-# (wait-for-response.sh). A caller that never started one, or whose waiter died,
+# A waiter (wait-for-response.sh) reads the full answer for the caller.
+# A caller that never started one, or whose waiter died,
 # never hears — a WORK_COMPLETE once sat unread until the human noticed it. The
 # push is Claude Code's cross-session messaging, and only a model can send it
 # (SendMessage is a tool; no CLI verb exists), so the callee sends and this script
