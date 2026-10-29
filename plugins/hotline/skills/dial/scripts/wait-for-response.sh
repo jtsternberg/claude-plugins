@@ -1343,6 +1343,24 @@ if $CMUX_MODE; then
     [[ -z "$LATEST_STATUS" ]] && continue
     [[ "$LATEST_STATUS" =~ ^STATUS:\ WORK_IN_PROGRESS ]] && continue
 
+    # A BLOCKED on screen yields to any terminal STATUS above it, as in transcript
+    # mode, where a DONE followed by a BLOCKED is exit 0. Being the latest STATUS
+    # is the only turn-end evidence this path has: the screen carries no
+    # stop_reason, and the input box is drawn whether the callee is idle or busy.
+    # So a BLOCKED the callee is about to work past (a tool call next, no STATUS
+    # yet) can still resolve here. The gap is confined to calls with no transcript,
+    # which is the only time this loop runs.
+    if [[ "$LATEST_STATUS" =~ ^STATUS:\ BLOCKED ]]; then
+      LATEST_TERMINAL=$(echo "$CLEAN" | awk -v re="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)${STATUS_TAIL_AWK}" '
+        match($0, re) {
+          s=substr($0, RSTART)
+          sub(/[[:space:]]+$/, "", s)
+        }
+        END {print s}
+      ')
+      [[ -n "$LATEST_TERMINAL" ]] && LATEST_STATUS=$LATEST_TERMINAL
+    fi
+
     if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW|BLOCKED) ]]; then
       # Strip terminal chrome before extracting the response. Aggressive
       # prefix match strips lines starting with claude's box-drawing
@@ -1361,14 +1379,22 @@ if $CMUX_MODE; then
       # every terminal STATUS, emit the LAST saved buffer — matches the
       # LATEST_STATUS we chose for detection.
       WIP_RE="STATUS: WORK_IN_PROGRESS${STATUS_TAIL_AWK}"
-      TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW|BLOCKED)${STATUS_TAIL_AWK}"
+      # BLOCKED ends a body only when it won detection; when a terminal won, a
+      # BLOCKED line is just a sentinel to drop.
+      BLK_RE="STATUS: BLOCKED${STATUS_TAIL_AWK}"
+      if [[ "$LATEST_STATUS" =~ ^STATUS:\ BLOCKED ]]; then
+        TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW|BLOCKED)${STATUS_TAIL_AWK}"
+      else
+        TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)${STATUS_TAIL_AWK}"
+      fi
       RESPONSE=$(echo "$CLEAN" \
         | grep -v "^bash /tmp/hotline-launch" \
         | grep -vE "^[╭│╰─└┌┘┐ℹ]" \
         | grep -vE "^>[[:space:]]*$" \
-        | awk -v wip="$WIP_RE" -v term="$TERM_RE" '
+        | awk -v wip="$WIP_RE" -v term="$TERM_RE" -v blk="$BLK_RE" '
             $0 ~ wip  {buf=""; next}
             $0 ~ term {result=buf; buf=""; next}
+            $0 ~ blk  {next}
             {buf = buf $0 ORS}
             END {printf "%s", result}
           ')
@@ -1385,8 +1411,8 @@ if $CMUX_MODE; then
         emit_response_json
         exit 4
       fi
-      # BLOCKED can only be LATEST_STATUS here when it is the last STATUS on screen,
-      # which is the transcript path's "resolving only as the last STATUS" rule.
+      # BLOCKED is LATEST_STATUS here only when it is the last STATUS on screen and
+      # no terminal precedes it — the transcript path's rule, minus its end_turn check.
       if [[ "$LATEST_STATUS" =~ ^STATUS:\ BLOCKED ]]; then
         jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
           '{session_id: $sid, response: $resp, blocked: true}' > "$CALL_DIR/response.json"

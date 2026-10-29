@@ -1031,6 +1031,31 @@ else
 fi
 rm -rf "$HBS" "$CDBS" "$SDBS"
 
+# Scrape fallback, DONE then BLOCKED for the same nonce: the transcript path
+# resolves on the earlier terminal (exit 0), so the scrape must too, not exit 7.
+BT=$(setup_await_call '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unused"}}')
+HBT=${BT%%|*}; rBT=${BT#*|}; CDBT=${rBT%%|*}; rBTb=${rBT#*|}; SDBT=${rBTb%%|*}; LOGBT=${rBTb#*|}
+rm -f "$CDBT/session_id.txt"
+{
+  echo '#!/usr/bin/env bash'
+  echo "printf '%s\\n' \"\$*\" >> '$LOGBT'"
+  echo 'if [[ "$1" == "read-screen" ]]; then'
+  echo "  printf '%s\\n' 'STATUS: WORK_IN_PROGRESS call_id=$TNONCE' 'migrated' 'STATUS: DONE call_id=$TNONCE' 'one more thing?' 'STATUS: BLOCKED call_id=$TNONCE'"
+  echo 'fi'
+  echo 'exit 0'
+} > "$SDBT/cmux"
+set +e
+OUTBT=$(HOME="$HBT" PATH="$SDBT:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDBT" --timeout 20 --submit-deadline 4 2>/dev/null)
+RCBT=$?
+set -e
+if [[ $RCBT -eq 0 ]] && ! printf '%s' "$OUTBT" | jq -e 'has("blocked")' >/dev/null 2>&1 \
+   && [[ "$(printf '%s' "$OUTBT" | jq -r .response 2>/dev/null)" == *"migrated"* ]]; then
+  pass "scrape fallback: an earlier DONE wins over a later BLOCKED (exit 0, like transcript mode)"
+else
+  fail "scrape fallback: an earlier DONE wins over a later BLOCKED" "rc=$RCBT out=$OUTBT"
+fi
+rm -rf "$HBT" "$CDBT" "$SDBT"
+
 # ---- resumable waiter timeout (claude-plugins-tyaj) ------------------------
 # A waiter that runs out of budget writes done+error.txt so a caller who does not
 # want to wait again sees the failure without re-polling. That made a long work
