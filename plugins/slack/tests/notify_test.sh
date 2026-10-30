@@ -35,6 +35,9 @@ trap 'rm -rf "$SANDBOX"' EXIT
 while IFS='=' read -r var _; do
   [[ -n "$var" ]] && unset "$var"
 done < <(env | grep -E '^SLACK_WEBHOOK' || true)
+# The suite runs inside Claude Code sessions, which set this; the session-link
+# cases below set it explicitly.
+unset CLAUDE_CODE_BRIDGE_SESSION_ID
 
 # Deliberately NOT shaped like a real webhook URL: GitHub push protection flags
 # realistic placeholders as leaked secrets, so this only needs to satisfy the
@@ -186,6 +189,60 @@ if [[ $STATUS -ne 0 ]] && grep -q "array" <<<"$OUT"; then
   pass "a --blocks-file that isn't a JSON array is rejected"
 else
   fail "a --blocks-file that isn't a JSON array is rejected (status $STATUS: $OUT)"
+fi
+
+# ---- Remote Control session link --------------------------------------------
+
+LINK='<https://claude.ai/code/session_TEST01|Open Claude session>'
+
+OUT="$(CLAUDE_CODE_BRIDGE_SESSION_ID=session_TEST01 SLACK_WEBHOOK_URL="$FAKE_URL" bash "$NOTIFY" --dry-run 'done' 2>&1)"
+PAYLOAD="$(sed -n '/^{/,$p' <<<"$OUT")"
+if [[ "$(jq -r '.text' <<<"$PAYLOAD")" == "done"$'\n'"$LINK" ]]; then
+  pass "a Remote Control session's link is appended as the final line"
+else
+  fail "a Remote Control session's link is appended as the final line (got: $(jq -c '.text' <<<"$PAYLOAD"))"
+fi
+
+OUT="$(SLACK_WEBHOOK_URL="$FAKE_URL" bash "$NOTIFY" --dry-run 'done' 2>&1)"
+PAYLOAD="$(sed -n '/^{/,$p' <<<"$OUT")"
+if [[ "$(jq -r '.text' <<<"$PAYLOAD")" == "done" ]]; then
+  pass "no link is added outside a Remote Control session"
+else
+  fail "no link is added outside a Remote Control session (got: $(jq -c '.text' <<<"$PAYLOAD"))"
+fi
+
+OUT="$(CLAUDE_CODE_BRIDGE_SESSION_ID=session_TEST01 SLACK_WEBHOOK_URL="$FAKE_URL" bash "$NOTIFY" --dry-run --no-session-link 'done' 2>&1)"
+PAYLOAD="$(sed -n '/^{/,$p' <<<"$OUT")"
+if [[ "$(jq -r '.text' <<<"$PAYLOAD")" == "done" ]]; then
+  pass "--no-session-link suppresses the link"
+else
+  fail "--no-session-link suppresses the link (got: $(jq -c '.text' <<<"$PAYLOAD"))"
+fi
+
+OUT="$(CLAUDE_CODE_BRIDGE_SESSION_ID=session_TEST01 SLACK_WEBHOOK_URL="$FAKE_URL" bash "$NOTIFY" --dry-run 'done <https://claude.ai/code/session_TEST01|Open overseer session>' 2>&1)"
+PAYLOAD="$(sed -n '/^{/,$p' <<<"$OUT")"
+if [[ "$(jq -r '.text' <<<"$PAYLOAD")" == 'done <https://claude.ai/code/session_TEST01|Open overseer session>' ]]; then
+  pass "text that already links this session gets no second link"
+else
+  fail "text that already links this session gets no second link (got: $(jq -c '.text' <<<"$PAYLOAD"))"
+fi
+
+OUT="$(CLAUDE_CODE_BRIDGE_SESSION_ID='session_x>|evil' SLACK_WEBHOOK_URL="$FAKE_URL" bash "$NOTIFY" --dry-run 'done' 2>&1)"
+PAYLOAD="$(sed -n '/^{/,$p' <<<"$OUT")"
+if [[ "$(jq -r '.text' <<<"$PAYLOAD")" == "done" ]]; then
+  pass "a session id that isn't session_<alnum> is never spliced into mrkdwn"
+else
+  fail "a session id that isn't session_<alnum> is never spliced into mrkdwn (got: $(jq -c '.text' <<<"$PAYLOAD"))"
+fi
+
+OUT="$(CLAUDE_CODE_BRIDGE_SESSION_ID=session_TEST01 SLACK_WEBHOOK_URL="$FAKE_URL" bash "$NOTIFY" --dry-run --text 'fallback' --blocks-file "$SANDBOX/blocks.json" 2>&1)"
+PAYLOAD="$(sed -n '/^{/,$p' <<<"$OUT")"
+if [[ "$(jq -r '.blocks | length' <<<"$PAYLOAD")" == "2" ]] \
+   && [[ "$(jq -r '.blocks[-1].type' <<<"$PAYLOAD")" == "context" ]] \
+   && [[ "$(jq -r '.blocks[-1].elements[0].text' <<<"$PAYLOAD")" == "$LINK" ]]; then
+  pass "a Block Kit message gets the link as a trailing context block"
+else
+  fail "a Block Kit message gets the link as a trailing context block (got: $(jq -c '.blocks' <<<"$PAYLOAD"))"
 fi
 
 # ---- guardrails -------------------------------------------------------------

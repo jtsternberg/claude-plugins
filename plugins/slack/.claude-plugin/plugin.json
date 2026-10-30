@@ -1,7 +1,7 @@
 {
   "name": "slack",
   "description": "Slack from the terminal via the Slack Web API — read a thread, message, search result, or channel history as clean text (read-slack), and post notifications and summaries into one fixed channel through an incoming webhook (notify-slack).",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "author": {
     "name": "JT Sternberg",
     "url": "https://github.com/jtsternberg"

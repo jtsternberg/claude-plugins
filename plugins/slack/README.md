@@ -147,6 +147,8 @@ Slack's markup is not Markdown (`*bold*`, `<url|label>`, no headings or tables).
 
 Text is capped at 40,000 bytes — Slack's limit for a message's `text`. The script refuses longer input rather than letting Slack truncate it.
 
+From a Claude Code session with Remote Control on, each message ends with an `Open Claude session` link back to that session (read from `$CLAUDE_CODE_BRIDGE_SESSION_ID`). It is skipped when the variable is unset, when the text already links the same session, or with `--no-session-link`.
+
 ### More than one channel
 
 One webhook, one channel — a second channel means a second webhook, named the same way:

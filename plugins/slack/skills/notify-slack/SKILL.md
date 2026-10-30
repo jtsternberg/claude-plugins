@@ -66,6 +66,12 @@ Slack's message markup is not Markdown — `*bold*` not `**bold**`, `<url|label>
 
 Text is capped at 40,000 bytes (Slack's limit for a message's `text`). The script refuses longer input rather than letting Slack truncate it — post a summary with a link instead.
 
+## The session link
+
+Run from a Claude Code session with Remote Control on, every message ends with a link back to that session — `<https://claude.ai/code/session_…|Open Claude session>` on its own last line, or a trailing context block for a Block Kit message — so whoever reads the notification can open the conversation that sent it. The id comes from `$CLAUDE_CODE_BRIDGE_SESSION_ID`; outside Remote Control that is unset and no link is added. Text that already links the same session is left alone, so a caller with its own label keeps it. `--no-session-link` turns it off for one message.
+
+A process detached from the session (a launchd job, a `nohup`'d watcher) does not inherit the variable, so its posts carry no link.
+
 ## More than one destination
 
 One webhook, one channel — so reaching a second channel means a second webhook, named the same way:

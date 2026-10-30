@@ -15,9 +15,16 @@
 #   --blocks-file <path> JSON array of Block Kit blocks; --text becomes the
 #                        notification/fallback line.
 #   --thread-ts <ts>     Post as a reply in the thread with this parent ts.
+#   --no-session-link    Don't append this Claude session's Remote Control link.
 #   --dry-run            Print the JSON payload and the destination; send nothing.
 #
 # Text resolution order: --text-file, --text, positional arg, stdin.
+#
+# Session link: when run from a Claude Code session with Remote Control on
+# ($CLAUDE_CODE_BRIDGE_SESSION_ID set), a "<https://claude.ai/code/…|Open Claude
+# session>" link is appended as the message's last line (or, with --blocks-file,
+# as a trailing context block) so the reader can jump into that session. Skipped
+# when the text already links the same session.
 #
 # Auth: with --to <name>, resolves the webhook URL from SLACK_WEBHOOK_URL_<NAME>
 # or a 1Password ref in SLACK_WEBHOOK_OP_REF_<NAME> via `op read` — name each
@@ -40,6 +47,7 @@ BLOCKS_FILE=""
 THREAD_TS=""
 DRY_RUN=0
 CHECK=0
+SESSION_LINK=1
 POSITIONAL=""
 
 # Slack's documented maximum for a message's `text` field.
@@ -90,6 +98,7 @@ while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--check)        CHECK=1; shift;;
 		--dry-run)      DRY_RUN=1; shift;;
+		--no-session-link) SESSION_LINK=0; shift;;
 		--to)           TARGET="${2:-}"; [[ -n "$TARGET" ]] || die "--to needs a name"; shift 2;;
 		--text)         TEXT="${2:-}"; shift 2;;
 		--text-file)    TEXT_FILE="${2:-}"; [[ -n "$TEXT_FILE" ]] || die "--text-file needs a path"; shift 2;;
@@ -152,8 +161,22 @@ TRIMMED="$(cat "$TEXT_SRC")"
 printf '%s' "$TRIMMED" > "$TEXT_SRC"
 unset TRIMMED
 
+[[ -s "$TEXT_SRC" ]] || die "Message text is empty."
+
+# The id is spliced into mrkdwn, so anything outside the shape Claude Code
+# issues (session_<alnum>) is dropped rather than escaped. Callers that already
+# link the session themselves (the overseer, with its own label) are left alone.
+LINK=""
+BRIDGE_ID="${CLAUDE_CODE_BRIDGE_SESSION_ID:-}"
+if [[ $SESSION_LINK -eq 1 && "$BRIDGE_ID" =~ ^session_[A-Za-z0-9]+$ ]]; then
+	SESSION_URL="https://claude.ai/code/$BRIDGE_ID"
+	if ! grep -qF "$SESSION_URL" "$TEXT_SRC" ${BLOCKS_FILE:+"$BLOCKS_FILE"}; then
+		LINK="<$SESSION_URL|Open Claude session>"
+		[[ -n "$BLOCKS_FILE" ]] || printf '\n%s' "$LINK" >> "$TEXT_SRC"
+	fi
+fi
+
 TEXT_LEN=$(wc -c < "$TEXT_SRC" | tr -d ' ')
-[[ "$TEXT_LEN" -gt 0 ]] || die "Message text is empty."
 if [[ "$TEXT_LEN" -gt "$MAX_TEXT" ]]; then
 	die "Message is $TEXT_LEN bytes; Slack's limit for a message's text is $MAX_TEXT. Post a summary plus a link, or split it deliberately."
 fi
@@ -170,7 +193,12 @@ if [[ -n "$BLOCKS_FILE" ]]; then
 	jq -e 'type == "array"' "$BLOCKS_FILE" >/dev/null 2>&1 \
 		|| die "--blocks-file must contain a JSON array of Block Kit blocks: $BLOCKS_FILE"
 	jq_args+=(--slurpfile blocks "$BLOCKS_FILE")
-	jq_filter+=' + {blocks: $blocks[0]}'
+	if [[ -n "$LINK" ]]; then
+		jq_args+=(--arg link "$LINK")
+		jq_filter+=' + {blocks: ($blocks[0] + [{type: "context", elements: [{type: "mrkdwn", text: $link}]}])}'
+	else
+		jq_filter+=' + {blocks: $blocks[0]}'
+	fi
 fi
 
 if [[ -n "$THREAD_TS" ]]; then
