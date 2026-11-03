@@ -556,6 +556,11 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   `grep -rl 'CALL_ID: <nonce>' ~/.codex/sessions` before doing anything; do not
   re-dial blindly.
 
+**Headless codex (`--agent codex --headless`) — error.txt says "codex exec failed: …"**
+- That is codex's own `turn.failed` message from `$call_dir/stream.jsonl`; stderr is
+  in `$call_dir/stderr.txt`. A missing `codex` on PATH is caught earlier, at
+  `stage: transport`.
+
 **Response wait exits 6 (STALLED) on a codex call**
 - The turn ended with no STATUS for the nonce — most often Codex did not load the
   ringing skill (hotline not installed in Codex) and ignored the inline reminder.

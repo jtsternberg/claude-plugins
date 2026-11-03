@@ -80,9 +80,9 @@
 # cannot be handed a session id up front, so the call dir gets agent_kind.txt=codex
 # and NO session_id.txt/session_id_preset.txt: the thread id is learned from the
 # rollout once the prompt lands (dial.sh writes it after delivery; see
-# scripts/codex-rollout.sh for why the rollout is the response channel). --name,
-# --tools and HOTLINE_CALLEE_ENV are claude flags with no codex equivalent here:
-# the first is dropped, the other two are refused rather than silently ignored.
+# scripts/codex-rollout.sh for why the rollout is the response channel). --name is
+# dropped and --tools refused (claude-only); HOTLINE_CALLEE_ENV is delivered as
+# codex shell_environment_policy overrides (callee_env_codex_config).
 #
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
 # --detached is accepted and ignored, and so is a side placement: dial.sh's
@@ -208,7 +208,6 @@ case "$AGENT_KIND" in
   codex)
     # dial.sh refuses these at its args gate; repeated for a direct invocation.
     $TOOLS_GIVEN && die "--tools is a claude --allowedTools list; a codex callee has no equivalent, so it is refused rather than ignored"
-    [[ -n "$CALLEE_SETTINGS" ]] && die "HOTLINE_CALLEE_ENV rides claude's --settings; a codex callee cannot take it, so it is refused rather than ignored"
     command -v codex >/dev/null 2>&1 || hotline_remote_active \
       || die "--agent codex: codex is not on PATH, so herdr would have nothing to start"
     hotline_remote_active && die "--agent codex is local-only for now: the rollout it answers through would live on $(hotline_remote_target), and the remote fetch path reads Claude transcripts only"
@@ -451,6 +450,9 @@ CODEX_ARGS=(-c check_for_update_on_startup=false)
 # Extra codex argv, whitespace-split (no quoting). The escape hatch for whatever this
 # launcher does not model — a profile, `--disable hooks` to get past a hooks-review
 # gate without persisting a trust decision, a feature flag.
+while IFS= read -r -d '' _codex_env; do
+  CODEX_ARGS+=(-c "$_codex_env")
+done < <(callee_env_codex_config)
 if [[ -n "${HOTLINE_CODEX_ARGS:-}" ]]; then
   read -r -a _codex_extra <<<"$HOTLINE_CODEX_ARGS"
   CODEX_ARGS+=("${_codex_extra[@]}")

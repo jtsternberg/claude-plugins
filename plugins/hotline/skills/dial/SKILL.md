@@ -342,10 +342,12 @@ rollout is normalized into the rows the Claude transcript reader already parses,
 | Combination | Result |
 |---|---|
 | `--agent codex`, any mode, side or detached | supported — first contact only. Selects herdr |
-| `--transport cmux`/`headless`, `--headless` | refused (`args`) — only herdr can start codex |
+| `--agent codex --headless` (or `--transport headless`) | supported — runs `codex exec --json -o <file> -` with the prompt on stdin; `.remote_session_id` is the thread id and the reply is codex's last message. STATUS lines are bare (no nonce), as for claude headless |
+| `HOTLINE_CALLEE_ENV*` | supported — delivered as `-c shell_environment_policy.set.<KEY>=<value>`, which reaches the commands codex runs |
+| `--transport cmux` | refused (`args`) — cmux launches claude only |
 | `--remote` | refused (`args`) — the rollout lives on the box that runs codex, and the remote fetch reads Claude transcripts only |
 | `--resume`, or a session id as the target | refused (`args`) — codex cannot adopt a claude session |
-| `--tools`, `HOTLINE_CALLEE_ENV*` | refused (`args`) — claude-only flags with no codex equivalent |
+| `--tools` | refused (`args`) — claude's allowlist has no honest codex mapping; use `HOTLINE_CODEX_ARGS="-s read-only"` for a sandbox |
 | a re-dial of the same target | a NEW codex callee. Codex calls go to dial history but not the follow-up cache, so a later claude dial never re-targets a codex agent |
 
 Startup gates are refused before anything is typed (`stage: deliver`, `sent:false`):
@@ -355,6 +357,9 @@ composer to appear before typing), and the update prompt (suppressed with
 `-c check_for_update_on_startup=false`). hotline never answers a trust decision:
 run `codex` in the directory once and answer it, or pass
 `HOTLINE_CODEX_ARGS="--disable hooks"` to skip hooks for that callee only.
+`codex exec` (headless) shows no dialogs at all — and it **persists folder trust**
+for the target directory in `~/.codex/config.toml` without asking (verified on
+codex-cli 0.165.0), so a later interactive codex there skips the trust dialog too.
 Approvals and sandbox come from your `~/.codex/config.toml`;
 `HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` adds `--dangerously-bypass-approvals-and-sandbox`.
 

@@ -60,16 +60,16 @@ refuses() {  # refuses <label> <detail-substring> <dial args...>
     && ! grep -q 'agent start' "$t/herdr.log" 2>/dev/null
   check "$label" $? "out=$out"
 }
-refuses "--transport cmux"        "herdr-only"        --transport cmux
-refuses "--transport headless"    "herdr-only"        --transport headless
-refuses "--headless"              "herdr-only"        --headless
+refuses "--transport cmux"        "herdr or headless" --transport cmux
 refuses "--remote"                "local-only"        --remote jt@box
 refuses "--resume <id>"           "cannot continue"   --resume 11111111-2222-3333-4444-555555555555
 refuses "--tools"                 "--allowedTools"    --tools "Read"
 t=$(new_env); codex_env "$t"
-out=$(dial "$t" "${CENV[@]}" HOTLINE_CALLEE_ENV="A=1" -- --target "$t/target" --mode work_order --prompt x --agent codex)
-[[ "$(jq -r .stage <<<"$out")" == args && "$(jq -r .detail <<<"$out")" == *"HOTLINE_CALLEE_ENV"* ]]
-check "HOTLINE_CALLEE_ENV set → args error (it rides claude's --settings)" $? "out=$out"
+out=$(dial "$t" "${CENV[@]}" HOTLINE_CALLEE_ENV="A=1 B=two" -- --target "$t/target" --mode work_order --prompt x --agent codex)
+START=$(grep 'agent start' "$t/herdr.log")
+[[ "$(jq -r .status <<<"$out")" == connected && "$START" == *'shell_environment_policy.set.A=\"1\"'* \
+   && "$START" == *'shell_environment_policy.set.B=\"two\"'* ]]
+check "HOTLINE_CALLEE_ENV → codex shell_environment_policy.set overrides on the launch argv" $? "out=$out start=$START"
 t=$(new_env)
 out=$(dial "$t" "${CENV[@]}" -- --target "$t/target" --mode quick --prompt x --agent gemini)
 [[ "$(jq -r .stage <<<"$out")" == args ]]
@@ -152,5 +152,57 @@ wout=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" HERDR_STA
        bash "$SCRIPTS/wait-for-response.sh" "$CD" --timeout 30 2>"$t/werr.txt"); wrc=$?
 [[ $wrc -eq 6 ]]
 check "submitted, idle, no STATUS → exit 6 STALLED (the protocol-not-followed case)" $? "rc=$wrc err=$(head -c 400 "$t/werr.txt")"
+
+# ===========================================================================
+echo "5. --headless --agent codex runs codex exec, same call-dir contract:"
+# ===========================================================================
+# A `codex exec` stand-in: the real CLI's event shapes (thread.started, item.completed,
+# turn.completed) on stdout, the final message in the -o file, the prompt on stdin.
+headless_codex() {  # headless_codex <scratch> [reply]
+  local t="$1"
+  cat > "$t/bin/codex" <<STUB
+#!/usr/bin/env bash
+printf '%q ' "\$@" >> "$t/codex.log"; printf '\n' >> "$t/codex.log"
+OUT=""; prev=""
+for a in "\$@"; do [[ "\$prev" == "-o" ]] && OUT="\$a"; prev="\$a"; done
+cat > "$t/codex.stdin"
+echo '{"type":"thread.started","thread_id":"$THREAD"}'
+echo '{"type":"turn.started"}'
+printf '%s\n' "${2:-STATUS: WORK_IN_PROGRESS
+
+headless codex answer
+
+STATUS: DONE}" > "\$OUT"
+echo '{"type":"item.completed","item":{"type":"agent_message","text":"x"}}'
+echo '{"type":"turn.completed","usage":{}}'
+STUB
+  chmod +x "$t/bin/codex"
+}
+# The worker is a real background process; the waiter's clock is the harness's, so
+# give the worker real time to finish before asking.
+await_done() { local i=0; while [[ ! -e "$1/done" && $i -lt 100 ]]; do sleep 0.1; i=$((i + 1)); done; }
+t=$(new_env); headless_codex "$t"
+out=$(dial "$t" HOTLINE_CALL_HOME="$t" HOTLINE_CALLEE_ENV="A=1" -- --target "$t/target" --mode quick --prompt "what is up" --agent codex --headless)
+CD=$(jq -r '.call_dir // empty' <<<"$out")
+[[ "$(jq -r .status <<<"$out")" == connected && "$(jq -r .transport <<<"$out")" == headless && "$(jq -r .agent <<<"$out")" == codex ]]
+check "dial → connected, transport headless, agent codex" $? "out=$out err=$(cat "$t/err.txt")"
+await_done "$CD"
+wout=$(env PATH="$t/bin:$PATH" HOME="$t/home" bash "$SCRIPTS/wait-for-response.sh" "$CD" --timeout 20 2>"$t/werr.txt"); wrc=$?
+[[ $wrc -eq 0 && "$(jq -r .session_id <<<"$wout")" == "$THREAD" && "$(jq -r .response <<<"$wout")" == *"headless codex answer"* ]]
+check "wait-for-response.sh → exit 0, thread id + codex's last message" $? "rc=$wrc out=$wout err=$(cat "$t/werr.txt")"
+CL=$(cat "$t/codex.log")
+[[ "$CL" == "exec --json -o "* && "$CL" == *'shell_environment_policy.set.A=\"1\"'* && "$CL" == *" - " \
+   && "$CL" != *"what is up"* && "$(cat "$t/codex.stdin")" == *"what is up"* && "$(cat "$t/codex.stdin")" == *'$hotline:hotline-ringing'* ]]
+check "argv: exec --json -o, callee env as -c overrides, prompt on STDIN (never argv)" $? "argv=$CL"
+[[ "$(cat "$t/codex.stdin")" != *"call_id=<"* ]]
+check "the headless STATUS reminder is bare — a headless call carries no nonce" $? "stdin=$(cat "$t/codex.stdin")"
+
+t=$(new_env); headless_codex "$t" $'STATUS: WORK_IN_PROGRESS\nwhich branch?\nSTATUS: BLOCKED'
+out=$(dial "$t" HOTLINE_CALL_HOME="$t" -- --target "$t/target" --mode work_order --prompt x --agent codex --headless)
+CD=$(jq -r '.call_dir // empty' <<<"$out")
+await_done "$CD"
+env PATH="$t/bin:$PATH" HOME="$t/home" bash "$SCRIPTS/wait-for-response.sh" "$CD" --timeout 20 >/dev/null 2>&1; wrc=$?
+[[ $wrc -eq 7 && "$(jq -r .blocked "$CD/response.json")" == true ]]
+check "a codex exec reply ending on BLOCKED → exit 7, the shared headless marker" $? "rc=$wrc resp=$(cat "$CD/response.json" 2>/dev/null)"
 
 herdr_suite_finish

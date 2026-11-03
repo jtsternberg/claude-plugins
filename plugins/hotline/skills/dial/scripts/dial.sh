@@ -50,11 +50,12 @@
 # substitute for "run this over there", so a failed preflight is an error with the
 # hop's own diagnostic and never a quiet local call.
 #
-# --agent codex makes the callee a CODEX agent instead of claude. It is herdr-only
-# and local-only for now, so it SELECTS herdr the way --remote does, and refuses
-# what it cannot do yet with an args error: --transport cmux/headless, --headless,
-# --remote, --resume or a session id in --target (codex cannot adopt a claude
-# session), --tools, and HOTLINE_CALLEE_ENV. Its answer comes back through the same
+# --agent codex makes the callee a CODEX agent instead of claude. It runs over herdr
+# (selected by default, the way --remote selects it) or headless (`codex exec`), and
+# refuses what it cannot do yet with an args error: --transport cmux, --remote,
+# --resume or a session id in --target (codex cannot adopt a claude session) and
+# --tools. HOTLINE_CALLEE_ENV is delivered as codex shell_environment_policy
+# overrides. Its answer comes back through the same
 # wait-for-response.sh contract — exit codes and response.json unchanged — read from
 # the callee's Codex rollout. Every codex dial starts a NEW callee: there is no
 # follow-up into a codex agent yet, so it is not entered in the session cache.
@@ -463,14 +464,10 @@ case "$AGENT_KIND" in
   claude) ;;
   codex)
     case "$TRANSPORT_REQ" in
-      ""|herdr) ;;
-      *) emit_error args "--agent codex is herdr-only, and --transport $TRANSPORT_REQ cannot host it" \
-           "A codex callee is started with \`herdr agent start --kind codex\`; cmux and headless launch claude only. Drop --transport (--agent codex selects herdr) or drop --agent codex." ;;
+      ""|herdr|headless) ;;
+      *) emit_error args "--agent codex runs over herdr or headless, and --transport $TRANSPORT_REQ cannot host it" \
+           "A codex callee is started with \`herdr agent start --kind codex\`, or headless with \`codex exec\`. Drop --transport (--agent codex selects herdr), pass --headless, or drop --agent codex." ;;
     esac
-    if $FORCE_HEADLESS; then
-      emit_error args "--agent codex is herdr-only, and --headless asks for \`claude -p\`" \
-        "Drop --headless; --agent codex runs an interactive codex in a herdr pane."
-    fi
     if [[ -n "$REMOTE_TARGET" ]]; then
       emit_error args "--agent codex is local-only for now; --remote is not supported with it" \
         "The codex answer is read from its rollout under ~/.codex on the box that runs it, and the remote fetch path reads Claude transcripts only. Dial the codex callee on this machine, or drop --agent codex to dial claude on $REMOTE_TARGET."
@@ -483,11 +480,14 @@ case "$AGENT_KIND" in
       emit_error args "--tools is claude's --allowedTools list; a codex callee has no equivalent" \
         "Drop --tools. A codex callee runs with your ~/.codex/config.toml approval and sandbox settings (HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 bypasses them, a real trust decision)."
     fi
-    if [[ -n "${HOTLINE_CALLEE_ENV:-}${HOTLINE_CALLEE_ENV_FORWARD:-}${HOTLINE_CALLEE_GIT_CONFIG:-}" ]]; then
-      emit_error args "HOTLINE_CALLEE_ENV* rides claude's --settings; a codex callee cannot take it" \
-        "Unset HOTLINE_CALLEE_ENV / HOTLINE_CALLEE_ENV_FORWARD / HOTLINE_CALLEE_GIT_CONFIG for a codex dial, or drop --agent codex."
+    # Before any transport preflight, so both hosts report the same missing piece.
+    if [[ -z "$REMOTE_TARGET" ]] && ! command -v codex >/dev/null 2>&1; then
+      emit_error transport "--agent codex: codex is not on PATH, so there is nothing to start" \
+        "Install the Codex CLI (or put it on PATH), or drop --agent codex."
     fi
-    TRANSPORT_REQ="herdr"
+    # HOTLINE_CALLEE_ENV* is delivered as codex shell_environment_policy overrides
+    # (callee_env_codex_config), so it needs no refusal here.
+    $FORCE_HEADLESS || [[ "$TRANSPORT_REQ" == headless ]] || TRANSPORT_REQ="herdr"
     ;;
   *) emit_error args "Unknown --agent '$AGENT_KIND'" "Valid agents: claude (default), codex (herdr only)." ;;
 esac
@@ -957,10 +957,6 @@ elif [[ "$TRANSPORT_REQ" == "herdr" ]]; then
   HERDR_PRE=$(bash "$DIAL_SCRIPTS/check-herdr.sh" 2>/dev/null)
   if [[ "$(jq -r '.usable // false' <<<"$HERDR_PRE" 2>/dev/null)" == "true" ]]; then
     TRANSPORT="herdr"
-    if [[ "$AGENT_KIND" == "codex" ]] && ! command -v codex >/dev/null 2>&1; then
-      emit_error transport "--agent codex: codex is not on PATH, so herdr would have nothing to start" \
-        "Install the Codex CLI (or put it on PATH), or drop --agent codex."
-    fi
   else
     emit_error transport \
       "$(jq -r '.reason // "check-herdr.sh produced no usable answer"' <<<"$HERDR_PRE" 2>/dev/null)" \
@@ -1256,9 +1252,13 @@ ringing_payload() {
 # have the hotline plugin installed receives the mention as plain text — and a reply
 # with no STATUS for the nonce is a call that can only end STALLED.
 codex_ringing_payload() {
+  # Headless carries no nonce (its reply is the process output), so its STATUS
+  # lines are bare — the same rule the ringing skill states.
+  local suffix=" call_id=<the CALL_ID above>"
+  [[ "$TRANSPORT" == "headless" ]] && suffix=""
   printf '$hotline:hotline-ringing [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s\n\n%s' \
     "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE" \
-    "(hotline protocol: begin your reply with the line \`STATUS: WORK_IN_PROGRESS call_id=<the CALL_ID above>\` and end it with \`STATUS: <DONE|WORK_COMPLETE|AWAITING_REVIEW|OUT_OF_SCOPE> call_id=<the CALL_ID above>\` on its own line.)"
+    "(hotline protocol: begin your reply with the line \`STATUS: WORK_IN_PROGRESS$suffix\` and end it with \`STATUS: <DONE|WORK_COMPLETE|AWAITING_REVIEW|OUT_OF_SCOPE>$suffix\` on its own line.)"
 }
 
 # THE MESSAGE RIDES THE RINGING SKILL'S ARGUMENTS, and Claude Code substitutes
@@ -1771,6 +1771,7 @@ fire_headless() {
   [[ -n "$EFFECTIVE_RESUME" ]] && ARGS+=(--resume "$EFFECTIVE_RESUME")
   $DO_FORK && ARGS+=(--fork-session)
   [[ -n "$TOOLS" ]] && ARGS+=(--tools "$TOOLS")
+  ARGS+=(--agent "$AGENT_KIND")
   ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
   bash "$DIAL_SCRIPTS/headless-call-async.sh" "${ARGS[@]}" 2>"$ERR_FILE"
 }
