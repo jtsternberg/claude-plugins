@@ -266,6 +266,22 @@ check "forgetting an entry that is already gone succeeds" $? ""
 HOME="$T/home6" bash "$CACHE" forget "$TARGET" --caller-session caller-6 >/dev/null 2>&1
 check "…as does forgetting one in a cache file that does not exist" $? ""
 
+HOME="$T/home" bash "$CACHE" set "$TARGET" --caller-session caller-kind \
+  --session codex-thread --mode quick_call --agent-kind codex >/dev/null
+kind_get() { HOME="$T/home" bash "$CACHE" get "$TARGET" --caller-session caller-kind; }
+[[ "$(kind_get | jq -r .agent_kind)" == codex ]]
+check "--agent-kind survives set on a new caller cache" $?
+HOME="$T/home" bash "$CACHE" set "$TARGET" --caller-session caller-kind \
+  --session claude-thread --mode quick_call --agent-kind claude >/dev/null
+[[ "$(kind_get | jq -r .agent_kind)" == claude ]]
+check "--agent-kind replaces an existing entry's kind" $?
+HOME="$T/home" bash "$CACHE" update "$TARGET" --caller-session caller-kind --agent-kind codex >/dev/null
+[[ "$(kind_get | jq -r .agent_kind)" == codex ]]
+check "update --agent-kind changes the kind" $?
+HOME="$T/home" bash "$CACHE" update "$TARGET" --caller-session caller-kind --clear-surface >/dev/null
+[[ "$(kind_get | jq -r .agent_kind)" == codex ]]
+check "an omitted kind stays intact, including when the host handle is cleared" $?
+
 echo ""
 echo "Result: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then

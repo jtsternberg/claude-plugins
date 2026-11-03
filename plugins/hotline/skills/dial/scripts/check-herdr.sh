@@ -37,8 +37,8 @@
 # Emitted on success for a remote dial: .remote (the target) alongside .pane.
 #
 # Usage:
-#   check-herdr.sh
-#   HOTLINE_HERDR_REMOTE=<ssh-target> check-herdr.sh
+#   check-herdr.sh [--agent claude|codex]
+#   HOTLINE_HERDR_REMOTE=<ssh-target> check-herdr.sh [--agent claude|codex]
 # =============================================================================
 set -uo pipefail
 
@@ -50,6 +50,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../../scripts/herdr-state.sh
 source "$SCRIPT_DIR/../../../scripts/herdr-state.sh"
+AGENT_KIND=claude
+[[ "${1:-}" == --agent ]] && AGENT_KIND="$2"
 
 unusable() {  # unusable <reason> <recovery>
   jq -nc --arg reason "$1" --arg recovery "$2" \
@@ -86,15 +88,15 @@ herdr_resolve_split_pane || unusable \
   "Open a herdr pane${REMOTE:+ on $REMOTE} (any pane will do — hotline splits it), or set $PANE_VAR=<pane-id> to name one explicitly."
 
 if [[ -n "$REMOTE" ]]; then
-  hotline_remote_have_cmd claude || unusable \
-    "claude is not on the PATH a non-login ssh command gets on $REMOTE, so \`herdr agent start --kind claude\` there would have nothing to start" \
-    "Check it yourself with \`ssh $REMOTE command -v claude\`. If it resolves for you interactively but not there, the install is only on a login-shell PATH — add its directory to that box's non-login environment (~/.ssh/environment, or the shell rc the ssh command actually reads)."
+  hotline_remote_have_cmd "$AGENT_KIND" || unusable \
+    "$AGENT_KIND is not on the PATH a non-login ssh command gets on $REMOTE, so \`herdr agent start --kind $AGENT_KIND\` there would have nothing to start" \
+    "Check it yourself with \`ssh $REMOTE command -v $AGENT_KIND\`. If it resolves for you interactively but not there, the install is only on a login-shell PATH — add its directory to that box's non-login environment (~/.ssh/environment, or the shell rc the ssh command actually reads)."
 fi
 
-jq -nc --arg pane "$HERDR_PANE" --arg remote "$REMOTE" \
+jq -nc --arg pane "$HERDR_PANE" --arg remote "$REMOTE" --arg agent "$AGENT_KIND" \
   '{usable: true,
     reason: (if $remote == "" then "herdr is on PATH, a server answered, and a pane is available to split"
-             else "ssh reached \($remote); herdr is on its PATH, its server answered, a pane is available to split, and claude resolves there" end),
+             else "ssh reached \($remote); herdr is on its PATH, its server answered, a pane is available to split, and \($agent) resolves there" end),
     pane: $pane}
    + (if $remote == "" then {} else {remote: $remote} end)'
 exit 0

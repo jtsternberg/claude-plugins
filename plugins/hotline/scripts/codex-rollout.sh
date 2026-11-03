@@ -28,19 +28,60 @@
 
 codex_sessions_root() { printf '%s/sessions' "${CODEX_HOME:-$HOME/.codex}"; }
 
-# codex_find_rollout <nonce> [max-age-minutes] → the rollout path on stdout, exit 0;
+# codex_find_rollout <nonce> [max-age-minutes] [remote-tries] [remote-sleep]
+# → the rollout path on stdout, exit 0;
 # exit 1 when none carries the nonce yet. Only recent files are scanned: a rollout is
 # appended while its session lives, so its mtime is fresh by the time we look, and
 # the sessions tree accumulates months of history.
+# The remote confirmation loop stays in one hop so every poll shares one budget.
 codex_find_rollout() {
   local nonce="$1" age="${2:-240}" root hit
   [[ -n "$nonce" ]] || return 1
+  if declare -F hotline_remote_active >/dev/null && hotline_remote_active; then
+    local cmd tries="${3:-1}" nap="${4:-0}" saved="${HOTLINE_REMOTE_HOP_BUDGET:-}" rc
+    cmd='root="$HOME/.codex/sessions"; i=0; while [ "$i" -lt '
+    cmd+="$(hotline_remote_shquote "$tries") ]; do hit=\$(find \"\$root\" -type f -name 'rollout-*.jsonl' -mmin $(hotline_remote_shquote "-$age") -exec grep -lF -- $(hotline_remote_shquote "CALL_ID: $nonce") {} + 2>/dev/null | head -1);"
+    cmd+=' if [ -n "$hit" ]; then printf %s "$hit"; exit 0; fi; i=$((i+1));'
+    cmd+=" sleep $(hotline_remote_shquote "$nap"); done; exit 1"
+    HOTLINE_REMOTE_HOP_BUDGET=$(awk -v t="$tries" -v s="$nap" 'BEGIN{printf "%d", (t*s)+20}')
+    hotline_remote_run "$cmd"; rc=$?
+    HOTLINE_REMOTE_HOP_BUDGET="$saved"
+    [[ $rc -eq 0 && -n "$HOTLINE_REMOTE_OUT" ]] || return 1
+    printf '%s' "$HOTLINE_REMOTE_OUT"
+    return 0
+  fi
   root=$(codex_sessions_root)
   [[ -d "$root" ]] || return 1
   hit=$(find "$root" -type f -name 'rollout-*.jsonl' -mmin "-$age" -print0 2>/dev/null \
         | xargs -0 grep -l -F "CALL_ID: $nonce" 2>/dev/null | head -1)
   [[ -n "$hit" ]] || return 1
   printf '%s' "$hit"
+}
+
+# Thread adoption has no age limit: a resumed conversation can have been idle for months.
+codex_find_thread() {
+  local id="$1" root hit
+  [[ "$id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+  if declare -F hotline_remote_active >/dev/null && hotline_remote_active; then
+    hotline_remote_run "find \"\$HOME/.codex/sessions\" -type f -name $(hotline_remote_shquote "rollout-*-$id.jsonl") -print 2>/dev/null | head -1" || return 1
+    hit="$HOTLINE_REMOTE_OUT"
+  else
+    root=$(codex_sessions_root)
+    hit=$(find "$root" -type f -name "rollout-*-$id.jsonl" -print 2>/dev/null | head -1)
+  fi
+  [[ -n "$hit" ]] || return 1
+  printf '%s' "$hit"
+}
+
+codex_thread_cwd() {
+  local file="$1" data
+  if declare -F hotline_remote_active >/dev/null && hotline_remote_active; then
+    hotline_remote_run "head -1 $(hotline_remote_shquote "$file")" || return 1
+    data="$HOTLINE_REMOTE_OUT"
+  else
+    data=$(head -1 "$file") || return 1
+  fi
+  jq -er 'select(.type == "session_meta") | .payload.cwd | select(type == "string" and length > 0)' <<<"$data"
 }
 
 # codex_thread_id_of <rollout-path> → the thread id the filename ends in.

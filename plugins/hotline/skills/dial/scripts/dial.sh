@@ -51,13 +51,15 @@
 # hop's own diagnostic and never a quiet local call.
 #
 # --agent codex makes the callee a CODEX agent instead of claude. It is herdr-only
-# and local-only for now, so it SELECTS herdr the way --remote does, and refuses
-# what it cannot do yet with an args error: --transport cmux/headless, --headless,
-# --remote, --resume or a session id in --target (codex cannot adopt a claude
-# session), --tools, and HOTLINE_CALLEE_ENV. Its answer comes back through the same
+# and SELECTS herdr the way --remote does. Local and remote calls support cached
+# follow-ups and --resume <codex-thread-id> (also a session-id target); Claude
+# session ids, --transport cmux/headless, --headless, --tools, and HOTLINE_CALLEE_ENV
+# are refused. Codex adoption continues the thread directly, without a fork.
+# Its answer comes back through the same
 # wait-for-response.sh contract — exit codes and response.json unchanged — read from
-# the callee's Codex rollout. Every codex dial starts a NEW callee: there is no
-# follow-up into a codex agent yet, so it is not entered in the session cache.
+# the callee's Codex rollout, fetched into a local mirror each poll for --remote.
+# A re-dial reuses the cached agent of the same kind; a dead agent or kind mismatch
+# starts a fresh callee and is named in .fallbacks.
 # HOTLINE_CODEX_MODEL sets `codex -m`; HOTLINE_CODEX_ARGS adds raw codex argv.
 #
 # HOTLINE_TRANSPORT_AUTO=1 is the one way herdr is chosen WITHOUT --transport: it
@@ -471,14 +473,6 @@ case "$AGENT_KIND" in
       emit_error args "--agent codex is herdr-only, and --headless asks for \`claude -p\`" \
         "Drop --headless; --agent codex runs an interactive codex in a herdr pane."
     fi
-    if [[ -n "$REMOTE_TARGET" ]]; then
-      emit_error args "--agent codex is local-only for now; --remote is not supported with it" \
-        "The codex answer is read from its rollout under ~/.codex on the box that runs it, and the remote fetch path reads Claude transcripts only. Dial the codex callee on this machine, or drop --agent codex to dial claude on $REMOTE_TARGET."
-    fi
-    if [[ -n "$RESUME_ARG" ]]; then
-      emit_error args "--agent codex cannot continue an existing session$($TARGET_IS_SESSION && echo ', and a session id in --target is one' || echo ' (--resume)')" \
-        "Every codex dial starts a NEW codex callee. Pass the WORKSPACE as --target, or drop --agent codex to resume that session over claude."
-    fi
     if [[ -n "$TOOLS" ]]; then
       emit_error args "--tools is claude's --allowedTools list; a codex callee has no equivalent" \
         "Drop --tools. A codex callee runs with your ~/.codex/config.toml approval and sandbox settings (HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 bypasses them, a real trust decision)."
@@ -538,7 +532,7 @@ case "$TRANSPORT_REQ" in
     # the answer from. Following up into a callee THIS caller already dialed is a
     # different thing and needs no flag (the cache holds the agent name); this
     # refusal is about adopting a session hotline did not start.
-    if [[ -n "$RESUME_ARG" ]]; then
+    if [[ -n "$RESUME_ARG" && "$AGENT_KIND" != "codex" ]]; then
       # Named by what the CALLER typed. A session id in --target carries the same
       # request as --resume, and a refusal that talks about a flag they never passed
       # reads as a bug in hotline rather than as a choice they can act on.
@@ -580,6 +574,17 @@ if [[ -n "$REMOTE_TARGET" ]]; then
   export HOTLINE_HERDR_REMOTE="$REMOTE_TARGET"
 else
   unset HOTLINE_HERDR_REMOTE
+fi
+
+if [[ "$AGENT_KIND" == "codex" && -n "$RESUME_ARG" ]]; then
+  source "$PLUGIN_SCRIPTS/codex-rollout.sh"
+  CODEX_ADOPT_ROLLOUT=$(codex_find_thread "$RESUME_ARG") || emit_error args \
+    "--agent codex cannot continue '$RESUME_ARG': no Codex thread with that id exists on ${REMOTE_TARGET:-this machine}" \
+    "A Claude session cannot be adopted by Codex. Use --agent claude for a Claude session, or supply a Codex thread id from the callee's sessions directory."
+  if [[ -z "$TARGET_REF" || "$TARGET_REF" == "$RESUME_ARG" ]]; then
+    TARGET_REF=$(codex_thread_cwd "$CODEX_ADOPT_ROLLOUT") || emit_error resolve \
+      "The Codex thread has no recorded workspace" "Pass --target <workspace-path> alongside --resume <thread-id>."
+  fi
 fi
 
 if [[ -n "$BOOT_TIMEOUT" && ! "$BOOT_TIMEOUT" =~ ^[0-9]+$ ]]; then
@@ -954,10 +959,10 @@ elif [[ "$TRANSPORT_REQ" == "herdr" ]]; then
   # (headless has no live host to follow up into at all). check-herdr.sh reports the
   # reason and the recovery; both are passed through verbatim rather than
   # re-summarised here, because it knows which of the three checks failed.
-  HERDR_PRE=$(bash "$DIAL_SCRIPTS/check-herdr.sh" 2>/dev/null)
+  HERDR_PRE=$(bash "$DIAL_SCRIPTS/check-herdr.sh" --agent "$AGENT_KIND" 2>/dev/null)
   if [[ "$(jq -r '.usable // false' <<<"$HERDR_PRE" 2>/dev/null)" == "true" ]]; then
     TRANSPORT="herdr"
-    if [[ "$AGENT_KIND" == "codex" ]] && ! command -v codex >/dev/null 2>&1; then
+    if [[ "$AGENT_KIND" == "codex" && -z "$REMOTE_TARGET" ]] && ! command -v codex >/dev/null 2>&1; then
       emit_error transport "--agent codex: codex is not on PATH, so herdr would have nothing to start" \
         "Install the Codex CLI (or put it on PATH), or drop --agent codex."
     fi
@@ -1116,7 +1121,7 @@ PREV_SURFACE_REF=""
 PREV_CALL_ID=""
 # The callee session this target was cached with. Kept because a follow-up can end
 # up on a DIFFERENT session than the cached one — a herdr follow-up whose agent has
-# died falls back to a fresh launch, and herdr cannot re-host an existing session,
+# died falls back to a fresh launch, without resuming the lost conversation,
 # so the new callee has a new id. Step 6 compares the two and heals the cache when
 # they differ; a cmux follow-up resumes the same id, so nothing there changes.
 PREV_SESSION_ID=""
@@ -1144,7 +1149,7 @@ if $NO_FORK && [[ -n "$RESUME_ARG" ]] && ! $FRESH && [[ "$TRANSPORT" == "cmux" &
     add_fallback "live-session-adopted($RESUME_ARG in surface $ADOPTED_SURFACE; ${CACHED_SID:+displaced cached $CACHED_SID, }the cache had lost it)"
   fi
 fi
-if [[ "$AGENT_KIND" != "codex" ]] && { [[ -z "$RESUME_ARG" ]] || $NO_FORK; }; then
+if [[ -z "$RESUME_ARG" || "$AGENT_KIND" == "codex" ]] || $NO_FORK; then
   if CACHED=$(bash "$DIAL_SCRIPTS/session-cache.sh" get "$TARGET_PATH" \
                 --caller-session "$MY_SESSION_ID" 2>/dev/null) && [[ -n "$CACHED" ]] \
      && [[ -z "$RESUME_ARG" || "$(jq -r '.session_id // empty' <<<"$CACHED")" == "$RESUME_ARG" ]]; then
@@ -1160,6 +1165,7 @@ if [[ "$AGENT_KIND" != "codex" ]] && { [[ -z "$RESUME_ARG" ]] || $NO_FORK; }; th
     # written before these fields existed.
     PREV_TRANSPORT=$(jq -r '.transport // empty' <<<"$CACHED")
     PREV_REMOTE=$(jq -r '.remote // empty' <<<"$CACHED")
+    PREV_AGENT_KIND=$(jq -r '.agent_kind // "claude"' <<<"$CACHED")
 
     # A HANDLE FROM A DIFFERENT HOST IS NOT REUSABLE, and it is worse than useless:
     # surface_ref is an opaque string, so a herdr agent name from box A is
@@ -1181,6 +1187,8 @@ if [[ "$AGENT_KIND" != "codex" ]] && { [[ -z "$RESUME_ARG" ]] || $NO_FORK; }; th
       HOST_MISMATCH="host ${PREV_REMOTE:-local}→${REMOTE_TARGET:-local}"
     elif [[ -n "$PREV_TRANSPORT" && "$PREV_TRANSPORT" != "$TRANSPORT" ]]; then
       HOST_MISMATCH="transport ${PREV_TRANSPORT}→${TRANSPORT}"
+    elif [[ "$PREV_AGENT_KIND" != "$AGENT_KIND" ]]; then
+      HOST_MISMATCH="agent-kind ${PREV_AGENT_KIND}→${AGENT_KIND}"
     fi
 
     if $FRESH; then
@@ -1223,7 +1231,7 @@ EFFECTIVE_RESUME=""
 DO_FORK=false
 if [[ -n "$RESUME_ARG" ]]; then
   EFFECTIVE_RESUME="$RESUME_ARG"
-  $NO_FORK || DO_FORK=true
+  if [[ "$AGENT_KIND" != codex ]]; then $NO_FORK || DO_FORK=true; fi
 elif ! $FIRST_CONTACT; then
   EFFECTIVE_RESUME="$REMOTE_SESSION_ID"
 fi
@@ -1256,8 +1264,8 @@ ringing_payload() {
 # have the hotline plugin installed receives the mention as plain text — and a reply
 # with no STATUS for the nonce is a call that can only end STALLED.
 codex_ringing_payload() {
-  printf '$hotline:hotline-ringing [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s\n\n%s' \
-    "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE" \
+  printf '$hotline:hotline-ringing %s[MODE: %s] [CALLER: %s] [SESSION: %s]\n%s\n\n%s' \
+    "${1:-}" "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$MESSAGE" \
     "(hotline protocol: begin your reply with the line \`STATUS: WORK_IN_PROGRESS call_id=<the CALL_ID above>\` and end it with \`STATUS: <DONE|WORK_COMPLETE|AWAITING_REVIEW|OUT_OF_SCOPE> call_id=<the CALL_ID above>\` on its own line.)"
 }
 
@@ -1290,6 +1298,10 @@ skill_args_message() {
 # HEADLESS STAYS RAW. `claude -p --resume` takes the message as the prompt itself,
 # never as a paste, so there is nothing to route around.
 followup_payload() {
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    codex_ringing_payload '[FOLLOW_UP] '
+    return
+  fi
   printf '/hotline:hotline-ringing [FOLLOW_UP] [MODE: %s] [CALLER: %s] [SESSION: %s]\n%s' \
     "$MODE_TAG" "$MY_CWD" "$MY_SESSION_ID" "$(skill_args_message)"
 }
@@ -1344,8 +1356,7 @@ SESSION_NAME="hotline: $LABEL ($MODE_TAG)"
 # [FOLLOW_UP] invocation would tell it to continue a call it has no record of; it
 # needs the first-contact invocation, as any new callee does. cmux never
 # reaches this state — its fresh launch `--resume`s the same session, which already
-# loaded the skill — but herdr cannot re-host a session at all (see fire_herdr), so
-# its reuse→fresh fallback genuinely opens a new conversation.
+# loaded the skill — but herdr's reuse→fresh fallback opens a new conversation.
 #
 # The PROMPT SHAPE is what changes, and the cache-forget gate reads this flag for
 # the same reason (see THE CACHE ENTRY GOES). FIRST_CONTACT is not flipped: it
@@ -1622,7 +1633,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
   else
     # The file, never --prompt: same reason as the cmux path (claude-plugins-86ka).
     REUSE=$(bash "$DIAL_SCRIPTS/herdr-reuse-agent.sh" \
-      --agent "$SURFACE_REF" --session "$REMOTE_SESSION_ID" \
+      --agent "$SURFACE_REF" --session "$REMOTE_SESSION_ID" --agent-kind "$AGENT_KIND" \
       --prompt-file "$SEND_PROMPT_FILE" --cwd "$TARGET_PATH" 2>/dev/null)
 
     # BLOCKED FIRST — before anything that could start a second callee. The agent
@@ -1662,7 +1673,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     # {"fallback":"fresh"} — refused BEFORE anything was submitted (the agent is
     # gone, or blocked on input), so a fresh callee is safe. It just will not
     # remember anything.
-    add_fallback "herdr-agent-reuse→fresh($(reason_of "$REUSE"); the fresh callee starts WITHOUT the prior context — herdr cannot re-host an existing claude session)"
+    add_fallback "herdr-agent-reuse→fresh($(reason_of "$REUSE"); the fresh callee starts WITHOUT the prior context)"
     reshape_as_first_contact
     SURFACE_REF=""
   fi
@@ -1801,12 +1812,8 @@ fire_cmux() {
 # nothing left for the launcher to decide. Focus is the one thing a placement could
 # still change, and it is not one: only conference focuses, after delivery (step 6b).
 #
-# $EFFECTIVE_RESUME IS DELIBERATELY NOT PASSED. Reaching this function on a
-# follow-up means the reuse step above refused (dead or blocked agent), and herdr
-# cannot re-host an existing session at all: `claude --resume` and `--session-id`
-# are mutually exclusive, and without the preset there is no transcript path to read
-# the answer from. So the fresh callee is genuinely fresh, and the reuse→fresh
-# fallback entry says so rather than letting a caller infer continuity.
+# A cached follow-up that lost its agent starts fresh. Only explicit Codex thread
+# adoption passes --resume; Claude adoption conflicts with its --session-id preset.
 fire_herdr() {
   local ARGS=(--cwd "$TARGET_PATH")
   # --name is claude's OWN terminal title, which is how the label reaches a split
@@ -1818,6 +1825,9 @@ fire_herdr() {
   # --label additionally names the TAB a `tab`/`workspace` placement creates, never
   # the agent, so it cannot displace the directory in that 14-char budget.
   ARGS+=(--name "$SESSION_NAME" --label "$LABEL" --agent "$AGENT_KIND")
+  if [[ "$AGENT_KIND" == "codex" && -n "$RESUME_ARG" ]] && ! $RESHAPED_AS_FIRST_CONTACT; then
+    ARGS+=(--resume "$RESUME_ARG")
+  fi
   [[ -n "$TOOLS" ]] && ARGS+=(--tools "$TOOLS")
   [[ -n "$BOOT_TIMEOUT" ]] && ARGS+=(--boot-timeout "$BOOT_TIMEOUT")
   ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
