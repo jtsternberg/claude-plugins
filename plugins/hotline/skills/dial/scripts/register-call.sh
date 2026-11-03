@@ -92,13 +92,23 @@ if [[ -s "$CALL_DIR/remote_target.txt" ]]; then
   TRANSPORT_ARGS+=(--remote "$(tr -d '[:space:]' < "$CALL_DIR/remote_target.txt")")
 fi
 
-bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
-  --caller-session "$CALLER_SESSION" \
-  --session "$SESSION_ID" \
-  --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} \
-  ${CALL_ID_ARGS[@]+"${CALL_ID_ARGS[@]}"} \
-  ${CALL_DIR_ARGS[@]+"${CALL_DIR_ARGS[@]}"} \
-  ${TRANSPORT_ARGS[@]+"${TRANSPORT_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
+# A CODEX callee is recorded in history only, never in the follow-up cache. Every
+# follow-up path re-targets the cached handle with Claude's `/hotline:…` invocation
+# and confirms against a Claude transcript, so a cached codex agent would be
+# re-addressed by the wrong protocol — and a later claude dial to the same target
+# would "follow up" into codex. Each codex dial starts its own callee.
+CACHE_CALL=true
+[[ "$(tr -d '[:space:]' < "$CALL_DIR/agent_kind.txt" 2>/dev/null)" == "codex" ]] && CACHE_CALL=false
+
+if $CACHE_CALL; then
+  bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
+    --caller-session "$CALLER_SESSION" \
+    --session "$SESSION_ID" \
+    --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} \
+    ${CALL_ID_ARGS[@]+"${CALL_ID_ARGS[@]}"} \
+    ${CALL_DIR_ARGS[@]+"${CALL_DIR_ARGS[@]}"} \
+    ${TRANSPORT_ARGS[@]+"${TRANSPORT_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
+fi
 
 # Dial history: "who called THIS workspace", keyed by the RECEIVER's cwd.
 # --session keeps its historical meaning (the CALLER's session id); the callee's

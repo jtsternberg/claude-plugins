@@ -475,7 +475,24 @@ if $HERDR_MODE; then
   # The hop's diagnostic when the REMOTE derivation failed, "" otherwise. Kept
   # because zero candidates then means something else entirely (below).
   REMOTE_DERIVE_ERR=""
-  if [[ -n "$SESSION_ID" && -n "$CALL_ID" && -f "$CALL_DIR/cwd.txt" && -x "$TRANSCRIPT_PATH_SH" ]]; then
+  # A CODEX CALLEE answers through its rollout, not a Claude transcript (see
+  # scripts/codex-rollout.sh). The rollout is found by the nonce — dial.sh records it
+  # in codex_rollout.txt after delivery, and a hand-run waiter re-finds it — and each
+  # poll normalizes it into codex_transcript.jsonl, which is what the UNCHANGED
+  # extractor reads. TRANSCRIPT_PATH names the rollout, the file a human would open.
+  AGENT_KIND="claude"
+  [[ -s "$CALL_DIR/agent_kind.txt" ]] && AGENT_KIND=$(tr -d '[:space:]' < "$CALL_DIR/agent_kind.txt")
+  CODEX_ROLLOUT=""
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    # shellcheck source=../../../scripts/codex-rollout.sh
+    source "$HERDR_SCRIPTS/codex-rollout.sh"
+    [[ -s "$CALL_DIR/codex_rollout.txt" ]] && CODEX_ROLLOUT=$(cat "$CALL_DIR/codex_rollout.txt")
+    if [[ -z "$CALL_ID" ]]; then
+      echo "Cannot read a codex callee's response: $CALL_DIR has no call_id.txt, and the rollout is found by that nonce." >&2
+      exit 1
+    fi
+    TRANSCRIPT_CANDIDATES=("${CODEX_ROLLOUT:-$(codex_sessions_root)/**/rollout-*.jsonl containing CALL_ID: $CALL_ID}")
+  elif [[ -n "$SESSION_ID" && -n "$CALL_ID" && -f "$CALL_DIR/cwd.txt" && -x "$TRANSCRIPT_PATH_SH" ]]; then
     RECV_CWD=$(cat "$CALL_DIR/cwd.txt")
     if hotline_remote_active; then
       # A REDIRECTION TO A FILE, not the process substitution the local twin uses,
@@ -535,6 +552,14 @@ if $HERDR_MODE; then
   # the mirror is a copy this script made, not a thing they can inspect on the box.
   herdr_live_transcript() {
     local c
+    if [[ "$AGENT_KIND" == "codex" ]]; then
+      if [[ -z "$CODEX_ROLLOUT" || ! -f "$CODEX_ROLLOUT" ]]; then
+        CODEX_ROLLOUT=$(codex_find_rollout "$CALL_ID") || { CODEX_ROLLOUT=""; return 1; }
+        printf '%s\n' "$CODEX_ROLLOUT" > "$CALL_DIR/codex_rollout.txt"
+      fi
+      codex_rollout_normalize "$CODEX_ROLLOUT" "$CALL_DIR/codex_transcript.jsonl" || return 1
+      printf '%s' "$CALL_DIR/codex_transcript.jsonl"; return 0
+    fi
     if hotline_remote_active; then
       if hotline_remote_fetch_transcript "$REMOTE_MIRROR" "${TRANSCRIPT_CANDIDATES[@]}" >/dev/null; then
         printf '%s' "$REMOTE_MIRROR"; return 0
@@ -625,6 +650,11 @@ if $HERDR_MODE; then
   # subagents sits `idle` with a flat main transcript while they work; only their
   # files show it. A remote call has only the main-transcript mirror.
   activity_size() {  # <transcript>
+    # A codex callee's tool calls land in the raw rollout, never in the normalized
+    # copy (which carries messages only), so the rollout is what shows it working.
+    if [[ "$AGENT_KIND" == "codex" && -n "$CODEX_ROLLOUT" ]]; then
+      wc -c < "$CODEX_ROLLOUT" 2>/dev/null | tr -d '[:space:]'; return 0
+    fi
     {
       wc -c < "$1"
       local d="${1%.jsonl}/subagents"
@@ -696,7 +726,11 @@ if $HERDR_MODE; then
     # Only for a local call: remotely LIVE_TRANSCRIPT is the mirror this script
     # wrote, and reporting it as "the transcript" would send a reader to a temp copy
     # instead of the file on the box that is still being appended to.
-    if [[ -n "$LIVE_TRANSCRIPT" ]] && ! hotline_remote_active; then
+    if [[ -n "$LIVE_TRANSCRIPT" && "$AGENT_KIND" == "codex" ]]; then
+      # Found inside the $(…) above, so only its file reached this shell.
+      [[ -z "$CODEX_ROLLOUT" && -s "$CALL_DIR/codex_rollout.txt" ]] && CODEX_ROLLOUT=$(cat "$CALL_DIR/codex_rollout.txt")
+      TRANSCRIPT_PATH="$CODEX_ROLLOUT"
+    elif [[ -n "$LIVE_TRANSCRIPT" ]] && ! hotline_remote_active; then
       TRANSCRIPT_PATH="$LIVE_TRANSCRIPT"
     fi
     if [[ -n "$LIVE_TRANSCRIPT" ]]; then
