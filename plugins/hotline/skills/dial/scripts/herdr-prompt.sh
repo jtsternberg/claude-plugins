@@ -248,7 +248,7 @@ if $FIRST_CONTACT; then
   # interactive_ready: this probe can prove a dialog is there, never that one is not,
   # and turning "could not look" into a refusal would make delivery impossible instead
   # of unproven the day `agent read` changes shape.
-  herdr_agent_screen "$AGENT"
+  herdr_agent_screen "$AGENT" "$([[ "$AGENT_KIND" == codex ]] && echo visible || echo recent)"
   if [[ "$AGENT_KIND" == "codex" ]]; then
     # shellcheck source=../../../scripts/codex-rollout.sh
     source "$HOTLINE_SCRIPTS/codex-rollout.sh"
@@ -266,7 +266,7 @@ if $FIRST_CONTACT; then
         undelivered "codex agent $AGENT never drew its input composer within the readiness budget, and no known startup dialog is on screen either — \`${HERDR_HOP}herdr agent attach $AGENT\` shows what is there. Nothing was submitted, so re-dialing is safe. Screen tail: $(printf '%s' "$HERDR_AGENT_SCREEN" | grep -v '^[[:space:]]*$' | tail -3 | tr '\n' ' ' | cut -c1-200)" false
       fi
       sleep "$CONFIRM_SLEEP"
-      herdr_agent_screen "$AGENT"
+      herdr_agent_screen "$AGENT" visible
     done
   elif repl_trust_dialog_present "$HERDR_AGENT_SCREEN"; then
     # THE FIX GOES FIRST in this string, deliberately. dial.sh forwards a detail
