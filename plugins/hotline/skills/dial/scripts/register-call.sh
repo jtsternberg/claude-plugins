@@ -92,16 +92,21 @@ if [[ -s "$CALL_DIR/remote_target.txt" ]]; then
   TRANSPORT_ARGS+=(--remote "$(tr -d '[:space:]' < "$CALL_DIR/remote_target.txt")")
 fi
 
-# A CODEX callee is recorded in history only, never in the follow-up cache. Every
-# follow-up path re-targets the cached handle with Claude's `/hotline:…` invocation
-# and confirms against a Claude transcript, so a cached codex agent would be
-# re-addressed by the wrong protocol — and a later claude dial to the same target
-# would "follow up" into codex. Each codex dial starts its own callee.
+AGENT_KIND=claude
+[[ -s "$CALL_DIR/agent_kind.txt" ]] && AGENT_KIND=$(tr -d '[:space:]' < "$CALL_DIR/agent_kind.txt")
+
+# A codex callee is cached for follow-up ONLY over herdr — the one host whose reuse
+# path speaks codex (herdr-reuse-agent.sh --agent-kind). cmux surface reuse and the
+# headless `claude -p --resume` follow-up are claude-only, so a cached cmux/headless
+# codex entry would be re-addressed by the wrong protocol. Those go to history only.
 CACHE_CALL=true
-[[ "$(tr -d '[:space:]' < "$CALL_DIR/agent_kind.txt" 2>/dev/null)" == "codex" ]] && CACHE_CALL=false
+if [[ "$AGENT_KIND" == codex && "$(tr -d '[:space:]' < "$CALL_DIR/transport.txt" 2>/dev/null)" != herdr ]]; then
+  CACHE_CALL=false
+fi
 
 if $CACHE_CALL; then
   bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
+    --agent-kind "$AGENT_KIND" \
     --caller-session "$CALLER_SESSION" \
     --session "$SESSION_ID" \
     --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} \

@@ -369,9 +369,10 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
 - Not a malfunction: these are herdr's remaining boundaries, and each message names
   what is actually missing. `--window` has no herdr implementation at all — hotline
   splits a pane and never creates herdr workspaces or tabs, so there is no window to
-  place a callee in. `--resume` is a conflict rather than a gap: herdr hosts a callee
+  place a callee in. For Claude sessions, `--resume` is a conflict rather than a gap: herdr hosts a callee
   it *starts*, with a `--session-id` preset that is the only reason the transcript is
-  readable, and `claude --resume` cannot take that preset.
+  readable, and `claude --resume` cannot take that preset. Codex thread adoption
+  with `--agent codex --resume <thread-id>` is supported (see Codex callees below).
 - Recovery: re-dial without `--window` (side or detached), or over cmux when a real
   window is the point. To continue a session you already dialed, drop `--resume`
   entirely — the cached herdr agent is re-targeted by name with no flag at all.
@@ -537,6 +538,27 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   handles are in the emitted JSON for exactly this.
 
 ### Codex callees (`--agent codex`)
+
+**`stage: args` — "no Codex thread with that id exists"**
+- `--resume <id>` and a session-id target require a Codex rollout whose filename
+  ends in that id. Local lookup uses `${CODEX_HOME:-~/.codex}/sessions`; remote
+  lookup uses the remote `$HOME/.codex/sessions`. A Claude session requires
+  `--agent claude`. For a Codex thread with no workspace metadata, pass its
+  workspace explicitly with `--target <path> --resume <id>`.
+
+**A follow-up starts a fresh callee (`.fallbacks`)**
+- `agent-kind claude→codex` or `codex→claude` means the cache holds a different
+  program. Match the cached agent kind to continue its conversation. A
+  `herdr-agent-reuse→fresh` entry means the cached agent is gone; the fresh Codex
+  callee has no prior context. To recover the old thread, re-dial with its Codex
+  thread id in `--resume`. A blocked live agent instead refuses the follow-up;
+  attach and clear its gate, then re-dial.
+
+For `--remote`, run attachment and rollout inspection on that box (for example,
+`ssh <target> herdr agent attach <agent>`). Preflight requires `codex` on its
+non-login PATH; check with `ssh <target> command -v codex`. The response waiter
+refreshes `$call_dir/codex_rollout_mirror.jsonl` each poll and normalizes that
+local copy; `codex_rollout.txt` records the original remote path.
 
 **`stage: boot` or `stage: deliver` naming FOLDER-TRUST, HOOKS-REVIEW or UPDATE**
 - Codex is sitting on a startup dialog and nothing was typed into it (`sent:false`),

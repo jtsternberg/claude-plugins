@@ -405,6 +405,14 @@ PROMPT_SENT=true
 # nothing else here is.
 if [[ "$AGENT_KIND" == "codex" ]]; then
   source "$HOTLINE_SCRIPTS/codex-rollout.sh"
+  if hotline_remote_active; then
+    if ROLLOUT=$(codex_find_rollout "$CALL_ID" 240 "$CONFIRM_TRIES" "$CONFIRM_SLEEP"); then
+      jq -nc --arg a "$AGENT" --arg s "${AGENT_STATUS:-unknown}" --arg r "$ROLLOUT" --arg t "$(codex_thread_id_of "$ROLLOUT")" \
+        '{delivered:true,sent:true,confirmed:"rollout",agent:$a,agent_status:$s,rollout:$r,thread_id:$t}'
+      exit 0
+    fi
+    undelivered "submitted to remote herdr agent $AGENT but nonce $CALL_ID never appeared in any Codex rollout on $(hotline_remote_target). Read that box's ~/.codex/sessions before re-dialing; a re-dial may run the work order twice."
+  fi
   try=0
   while [[ $try -lt $CONFIRM_TRIES ]]; do
     if ROLLOUT=$(codex_find_rollout "$CALL_ID"); then

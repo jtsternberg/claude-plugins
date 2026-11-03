@@ -22,7 +22,7 @@
 # Usage:
 #   herdr-reuse-agent.sh --agent <name> --session <callee-session-id>
 #                        (--prompt <text> | --prompt-file <path>)
-#                        [--cwd <callee-cwd>]
+#                        [--cwd <callee-cwd>] [--agent-kind claude|codex]
 #   # → {"call_dir":"…","delivery":"prompt","confirmed":"transcript"}
 #   #     re-targeted the live agent and proved the payload landed
 #   # → {"fallback":"fresh","reason":"…"}
@@ -103,6 +103,7 @@ SESSION_ID=""
 PROMPT=""
 PROMPT_FILE=""
 CWD=""
+AGENT_KIND=claude
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -111,6 +112,7 @@ while [[ $# -gt 0 ]]; do
     --prompt)      PROMPT="$2";      shift 2 ;;
     --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
     --cwd)         CWD="$2";         shift 2 ;;
+    --agent-kind)  AGENT_KIND="$2";  shift 2 ;;
     *)             shift ;;
   esac
 done
@@ -170,6 +172,7 @@ fi
 # and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
 CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 echo herdr    > "$CALL_DIR/transport.txt"
+echo "$AGENT_KIND" > "$CALL_DIR/agent_kind.txt"
 echo "$AGENT" > "$CALL_DIR/herdr_agent.txt"
 # See herdr-call-async.sh's WHY NOTHING IS CLOSED. Doubly true here: the agent
 # predates this call, so closing it would end a conversation the caller may not
@@ -183,7 +186,7 @@ if hotline_remote_active; then
 fi
 if [[ -n "$SESSION_ID" ]]; then
   echo "$SESSION_ID" > "$CALL_DIR/session_id.txt"
-  echo "$SESSION_ID" > "$CALL_DIR/session_id_preset.txt"
+  [[ "$AGENT_KIND" != codex ]] && echo "$SESSION_ID" > "$CALL_DIR/session_id_preset.txt"
 fi
 # CANONICALIZED, for the same reason the launcher canonicalizes it: Claude Code
 # encodes the cwd it RESOLVED, so a callee under a symlinked path writes its
@@ -219,7 +222,7 @@ chmod 600 "$PAYLOAD_FILE" 2>/dev/null || true
 # herdr-prompt.sh owns both halves — the same script first contact uses — so
 # there is exactly one herdr delivery path to reason about and one place a new
 # landing signal has to be taught.
-DELIVER_ARGS=(--agent "$AGENT" --payload-file "$PAYLOAD_FILE" --call-id "$CALL_ID")
+DELIVER_ARGS=(--agent "$AGENT" --payload-file "$PAYLOAD_FILE" --call-id "$CALL_ID" --agent-kind "$AGENT_KIND")
 [[ -n "$CWD"        ]] && DELIVER_ARGS+=(--cwd "$CWD")
 [[ -n "$SESSION_ID" ]] && DELIVER_ARGS+=(--session "$SESSION_ID")
 DELIVERY=$(bash "$SCRIPT_DIR/herdr-prompt.sh" "${DELIVER_ARGS[@]}" 2>/dev/null)
@@ -245,6 +248,9 @@ if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; 
 fi
 
 rm -f "$PAYLOAD_FILE"
+if [[ "$AGENT_KIND" == codex ]]; then
+  jq -r '.rollout // empty' <<<"$DELIVERY" > "$CALL_DIR/codex_rollout.txt"
+fi
 
 jq -nc --arg dir "$CALL_DIR" --arg agent "$AGENT" --arg st "$AGENT_STATUS" \
   --arg confirmed "$(jq -r '.confirmed // empty' <<<"$DELIVERY" 2>/dev/null)" \

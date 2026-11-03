@@ -553,11 +553,16 @@ if $HERDR_MODE; then
   herdr_live_transcript() {
     local c
     if [[ "$AGENT_KIND" == "codex" ]]; then
-      if [[ -z "$CODEX_ROLLOUT" || ! -f "$CODEX_ROLLOUT" ]]; then
+      if [[ -z "$CODEX_ROLLOUT" ]] || { ! hotline_remote_active && [[ ! -f "$CODEX_ROLLOUT" ]]; }; then
         CODEX_ROLLOUT=$(codex_find_rollout "$CALL_ID") || { CODEX_ROLLOUT=""; return 1; }
         printf '%s\n' "$CODEX_ROLLOUT" > "$CALL_DIR/codex_rollout.txt"
       fi
-      codex_rollout_normalize "$CODEX_ROLLOUT" "$CALL_DIR/codex_transcript.jsonl" || return 1
+      local raw="$CODEX_ROLLOUT"
+      if hotline_remote_active; then
+        raw="$CALL_DIR/codex_rollout_mirror.jsonl"
+        hotline_remote_fetch_transcript "$raw" "$CODEX_ROLLOUT" >/dev/null || return 1
+      fi
+      codex_rollout_normalize "$raw" "$CALL_DIR/codex_transcript.jsonl" || return 1
       printf '%s' "$CALL_DIR/codex_transcript.jsonl"; return 0
     fi
     if hotline_remote_active; then
@@ -653,7 +658,9 @@ if $HERDR_MODE; then
     # A codex callee's tool calls land in the raw rollout, never in the normalized
     # copy (which carries messages only), so the rollout is what shows it working.
     if [[ "$AGENT_KIND" == "codex" && -n "$CODEX_ROLLOUT" ]]; then
-      wc -c < "$CODEX_ROLLOUT" 2>/dev/null | tr -d '[:space:]'; return 0
+      local raw="$CODEX_ROLLOUT"
+      hotline_remote_active && raw="$CALL_DIR/codex_rollout_mirror.jsonl"
+      wc -c < "$raw" 2>/dev/null | tr -d '[:space:]'; return 0
     fi
     {
       wc -c < "$1"

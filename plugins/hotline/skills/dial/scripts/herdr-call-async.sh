@@ -70,7 +70,7 @@
 #
 # Usage:
 #   herdr-call-async.sh --cwd <path> (--prompt <text> | --prompt-file <path>)
-#                       [--agent claude|codex]
+#                       [--agent claude|codex] [--resume <codex-thread-id>]
 #                       [--name <session-name>] [--label <text>] [--tools <list>]
 #                       [--boot-timeout <seconds>] [--detached]
 #   # → {"call_dir":"…","agent":"hotline-…","pane":"w6:p2","session_id":"…"}
@@ -199,7 +199,7 @@ fi
 # This is NOT the follow-up path and never was: a follow-up re-targets the herdr
 # agent that already hosts the session (herdr-reuse-agent.sh), so it launches
 # nothing and needs no resume.
-if [[ -n "$RESUME_ID" ]] || $FORK_SESSION; then
+if { [[ -n "$RESUME_ID" ]] || $FORK_SESSION; } && [[ "$AGENT_KIND" != codex ]]; then
   die "herdr cannot re-host an existing claude session: --resume/--fork-session are incompatible with the --session-id preset the transcript path is derived from. To continue a session hotline already dialed, re-dial the target and the live herdr agent is re-targeted by name; to adopt an unrelated session id, dial with --transport cmux."
 fi
 
@@ -210,7 +210,6 @@ case "$AGENT_KIND" in
     $TOOLS_GIVEN && die "--tools is a claude --allowedTools list; a codex callee has no equivalent, so it is refused rather than ignored"
     command -v codex >/dev/null 2>&1 || hotline_remote_active \
       || die "--agent codex: codex is not on PATH, so herdr would have nothing to start"
-    hotline_remote_active && die "--agent codex is local-only for now: the rollout it answers through would live on $(hotline_remote_target), and the remote fetch path reads Claude transcripts only"
     ;;
   *) die "--agent must be claude or codex, got '$AGENT_KIND'" ;;
 esac
@@ -446,6 +445,7 @@ CLAUDE_ARGS+=("--allowedTools=$ALLOWED_TOOLS")
 # verified live on codex-cli 0.165.0. Approvals/sandbox are left to the user's own
 # config.toml unless the same opt-in that skips claude's permission gates is set.
 CODEX_ARGS=(-c check_for_update_on_startup=false)
+[[ -n "$RESUME_ID" ]] && CODEX_ARGS+=(resume "$RESUME_ID")
 [[ -n "${HOTLINE_CODEX_MODEL:-}" ]] && CODEX_ARGS+=(-m "$HOTLINE_CODEX_MODEL")
 # Extra codex argv, whitespace-split (no quoting). The escape hatch for whatever this
 # launcher does not model — a profile, `--disable hooks` to get past a hooks-review
