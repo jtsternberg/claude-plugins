@@ -187,6 +187,9 @@ fb_json() {
 # recovery string can tell the model to read a field that is actually there: the herdr
 # delivery error's advice turns on `sent`, and forwarding it beats asking the model to
 # consult a result it never sees.
+# A variable, not a `{\}` literal in the default: bash 3.2 (macOS /bin/bash) keeps
+# the backslash, handing jq `{\}` and crashing every three-argument emit_error.
+EMPTY_JSON_OBJECT='{}'
 emit_error() {  # emit_error <stage> <detail> <recovery> [<extra-json-object>]
   # A stage that will never be retried should not keep the work-order text
   # around forever (claude-plugins-x7m9) — only the PAYLOAD goes, never the
@@ -207,7 +210,7 @@ emit_error() {  # emit_error <stage> <detail> <recovery> [<extra-json-object>]
   esac
   jq -n --arg stage "$1" --arg detail "$2" --arg recovery "$3" \
         --arg call_dir "$CALL_DIR" --argjson fallbacks "$(fb_json)" \
-        --argjson extra "${4:-{\}}" \
+        --argjson extra "${4:-$EMPTY_JSON_OBJECT}" \
     '{status:"error", stage:$stage, detail:$detail, recovery:$recovery,
       fallbacks:$fallbacks}
      + (if $call_dir == "" then {} else {call_dir:$call_dir} end)
