@@ -252,9 +252,22 @@ if $FIRST_CONTACT; then
   if [[ "$AGENT_KIND" == "codex" ]]; then
     # shellcheck source=../../../scripts/codex-rollout.sh
     source "$HOTLINE_SCRIPTS/codex-rollout.sh"
-    if CODEX_DIALOG=$(codex_startup_dialog "$HERDR_AGENT_SCREEN"); then
-      undelivered "$(codex_startup_dialog_recovery "$CODEX_DIALOG" "$CWD") NOTHING WAS SUBMITTED: herdr reported agent $AGENT ready, but a work order typed into that dialog would answer it instead of becoming a turn. \`${HERDR_HOP}herdr agent attach $AGENT\` shows it." false
-    fi
+    # WAIT FOR THE COMPOSER, not merely for the absence of a dialog — see
+    # codex_composer_ready. An unreadable screen proceeds, as for claude below.
+    COMPOSER_TRIES="${HOTLINE_CODEX_COMPOSER_TRIES:-60}"
+    composer_try=0
+    while [[ -n "$HERDR_AGENT_SCREEN" ]]; do
+      if CODEX_DIALOG=$(codex_startup_dialog "$HERDR_AGENT_SCREEN"); then
+        undelivered "$(codex_startup_dialog_recovery "$CODEX_DIALOG" "$CWD") NOTHING WAS SUBMITTED: herdr reported agent $AGENT ready, but a work order typed into that dialog would answer it instead of becoming a turn. \`${HERDR_HOP}herdr agent attach $AGENT\` shows it." false
+      fi
+      codex_composer_ready "$HERDR_AGENT_SCREEN" && break
+      composer_try=$((composer_try + 1))
+      if [[ $composer_try -ge $COMPOSER_TRIES ]]; then
+        undelivered "codex agent $AGENT never drew its input composer within the readiness budget, and no known startup dialog is on screen either — \`${HERDR_HOP}herdr agent attach $AGENT\` shows what is there. Nothing was submitted, so re-dialing is safe. Screen tail: $(printf '%s' "$HERDR_AGENT_SCREEN" | grep -v '^[[:space:]]*$' | tail -3 | tr '\n' ' ' | cut -c1-200)" false
+      fi
+      sleep "$CONFIRM_SLEEP"
+      herdr_agent_screen "$AGENT"
+    done
   elif repl_trust_dialog_present "$HERDR_AGENT_SCREEN"; then
     # THE FIX GOES FIRST in this string, deliberately. dial.sh forwards a detail
     # whole now (claude-plugins-e3xr), but the reader of a failed dial scans the

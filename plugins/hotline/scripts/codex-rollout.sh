@@ -127,6 +127,19 @@ codex_startup_dialog() {
   return 1
 }
 
+# codex_composer_ready <screen-text> → exit 0 when Codex's input composer is drawn.
+#
+# A POSITIVE signal, because the negative one races: herdr calls a codex agent ready
+# BEFORE its hooks-review dialog draws (seconds later, verified live), so "no dialog
+# on screen yet" proved nothing and the opening Enter answered the dialog. The
+# composer's footer is drawn only once every startup gate is cleared.
+codex_composer_ready() {
+  local flat
+  flat=$(tr -s '[:space:]' ' ' <<<"$1")
+  [[ "$flat" == *"? for shortcuts"* || "$flat" == *"Ask Codex to do anything"* \
+     || "$flat" == *"context left"* ]]
+}
+
 # codex_startup_dialog_recovery <dialog> <cwd> → what the human should do, on stdout.
 codex_startup_dialog_recovery() {
   case "$1" in

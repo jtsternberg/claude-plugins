@@ -99,5 +99,9 @@ check "update prompt" $([[ "$(codex_startup_dialog "Update available · 0.165 �
 codex_startup_dialog "› Ask Codex to do anything" >/dev/null
 check "the ready composer is not a dialog" $([[ $? -eq 1 ]]; echo $?)
 
+check "the composer footer is the ready signal" $(codex_composer_ready $'› Ask Codex to do anything\n ? for shortcuts'; echo $?)
+codex_composer_ready "  Hooks need review" 
+check "a dialog screen is not ready" $([[ $? -eq 1 ]]; echo $?)
+
 echo "$PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

@@ -42,8 +42,11 @@ STUBW
 
 # Every codex dial in this file: the herdr preflight's pane, and a confirmation budget
 # measured in ticks rather than seconds.
+CODEX_READY_SCREEN="$ROOT/codex-ready-screen"
+printf '› Ask Codex to do anything\n  ? for shortcuts\n' > "$CODEX_READY_SCREEN"
 CENV=(HOTLINE_HERDR_PANE=w1:p1 HOTLINE_HERDR_FIRST_SETTLE=0 HOTLINE_HERDR_PANE_SETTLE=0
-      HOTLINE_PASTE_CONFIRM_SLEEP=0.05)
+      HOTLINE_PASTE_CONFIRM_SLEEP=0.05 HOTLINE_CODEX_COMPOSER_TRIES=5
+      HERDR_STUB_SCREEN="$CODEX_READY_SCREEN")
 
 # ===========================================================================
 echo "1. --agent codex refuses what it cannot do yet — args errors, nothing launched:"
@@ -121,6 +124,15 @@ out=$(dial "$t" "${CENV[@]}" HERDR_STUB_SCREEN="$t/screen" -- --target "$t/targe
 [[ "$(jq -r .stage <<<"$out")" == deliver && "$(jq -r .sent <<<"$out")" == false \
    && "$(jq -r .detail <<<"$out")" == *"HOOKS-REVIEW"* ]] && ! grep -q 'agent prompt' "$t/herdr.log"
 check "hooks-review dialog (herdr says idle+ready) → deliver error, sent:false, no prompt" $? "out=$out"
+
+# herdr calls codex ready BEFORE the hooks dialog draws, so a screen with neither the
+# dialog nor the composer yet must not be read as "clear to type".
+t=$(new_env); codex_env "$t"
+printf '  booting\n' > "$t/screen"
+out=$(dial "$t" "${CENV[@]}" HERDR_STUB_SCREEN="$t/screen" -- --target "$t/target" --mode quick --prompt x --agent codex)
+[[ "$(jq -r .stage <<<"$out")" == deliver && "$(jq -r .sent <<<"$out")" == false \
+   && "$(jq -r .detail <<<"$out")" == *"never drew its input composer"* ]] && ! grep -q 'agent prompt' "$t/herdr.log"
+check "no composer yet (and no dialog yet) → refused, sent:false, no prompt" $? "out=$out"
 
 # ===========================================================================
 echo "4. A turn that ends with no STATUS for the nonce is not waited out:"
