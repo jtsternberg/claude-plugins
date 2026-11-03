@@ -55,7 +55,9 @@ codex_thread_id_of() {
 #
 # The mapping, and what each half of it is for:
 #   user message      → {type:"user", message:{content:<text>}}. Codex injects its own
-#                       context as user messages too (AGENTS.md, environment_context);
+#                       context as user messages too (AGENTS.md, environment_context,
+#                       and the <skill> body a `$plugin:skill` mention loads — right
+#                       AFTER our prompt, verified live);
 #                       those are dropped, or the extractor would read the next turn's
 #                       context block as a human reassigning the callee.
 #   assistant message → {type:"assistant", message:{id, content:[text], stop_reason}}.
@@ -94,7 +96,7 @@ codex_rollout_normalize() {
        | map(select(. != null))) as $enders
     | range(0; $ev | length) as $k | $ev[$k]
     | if .role == "user" then
-        select((.text | test("^\\s*(# AGENTS\\.md instructions|<environment_context>|<user_instructions>|<INSTRUCTIONS>)")) | not)
+        select((.text | test("^\\s*(# AGENTS\\.md instructions|<environment_context>|<user_instructions>|<INSTRUCTIONS>|<skill>)")) | not)
         | {type: "user", sessionId: $sid, message: {content: .text}}
       elif .role == "assistant" then
         {type: "assistant", sessionId: $sid,

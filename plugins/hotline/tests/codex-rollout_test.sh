@@ -72,6 +72,11 @@ R="$T/r6.jsonl"
 extract "$R"
 check "a later injected environment_context row is NOT read as a reassignment → exit 10" $([[ $RC -eq 10 ]]; echo $?) "rc=$RC out=$OUT"
 
+R="$T/r6b.jsonl"
+{ meta; umsg "[CALL_ID: $N]"$'\n'"\$hotline:hotline-ringing go"; umsg $'<skill>\n<name>hotline:hotline-ringing</name>\n...</skill>'; tool; } > "$R"
+extract "$R"
+check "the <skill> body Codex injects after our prompt is NOT a reassignment → exit 10" $([[ $RC -eq 10 ]]; echo $?) "rc=$RC out=$OUT"
+
 R="$T/r7.jsonl"
 { meta; umsg "[CALL_ID: $N] go"; jq -nc '{type:"event_msg",payload:{type:"error",message:"stream disconnected"}}'; } > "$R"
 codex_rollout_normalize "$R" "$T/norm.jsonl"
