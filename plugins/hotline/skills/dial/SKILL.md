@@ -343,7 +343,7 @@ rollout is normalized into the rows the Claude transcript reader already parses,
 
 | Combination | Result |
 |---|---|
-| `--agent codex` over herdr (default), any mode, side or detached | supported. A re-dial of the same target reuses the cached live codex agent with a `$hotline:hotline-ringing [FOLLOW_UP]` message and a new nonce; a dead agent starts fresh with a `.fallbacks` entry |
+| `--agent codex` over herdr (default), any mode, side or detached | supported. A re-dial of the same target reuses the cached live codex agent with a `$hotline:hotline-ringing [FOLLOW_UP]` message and a new nonce; if that agent died, a new one runs `codex resume <thread>` so the conversation continues (`herdr-agent-reuse→resumed` in `.fallbacks`) |
 | `--agent codex --remote <ssh-target>` | supported (herdr) — checks remote `codex` on PATH, confirms the nonce on that box, and mirrors the rollout from its `$HOME/.codex/sessions` each response poll |
 | `--resume <codex-thread-id>`, or a thread id as the target | supported over herdr — launches `codex resume <id>` and continues that thread, unforked; a thread-id target gets its workspace from the rollout. Claude session ids are refused (`args`), as is `--resume` over cmux/headless |
 | `--agent codex --transport cmux`, quick/work_order, side/detached/window | supported — `codex` runs in the surface; first contact waits for codex's composer (refusing on a dialog) and is confirmed by the nonce in the rollout. First contact only: a re-dial starts a new callee |

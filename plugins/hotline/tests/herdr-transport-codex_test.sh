@@ -230,8 +230,9 @@ check "follow-up waiter extracts only the new nonce's response" $? "rc=$rc out=$
 
 out=$(dial "$t" "${CENV[@]}" HERDR_STUB_GONE_NAMES="$agent" -- --target "$t/target" --mode quick --prompt third --agent codex)
 [[ "$(jq -r .status <<<"$out")" == connected && $(grep -c 'agent start' "$t/herdr.log") -eq 2 \
-   && "$(jq -r '.fallbacks | join(" ")' <<<"$out")" == *'herdr-agent-reuse→fresh'* ]]
-check "dead cached codex agent falls back to a fresh callee with a recorded fallback" $? "out=$out"
+   && "$(grep 'agent start' "$t/herdr.log" | tail -1)" == *"resume $THREAD"* \
+   && "$(jq -r '.fallbacks | join(" ")' <<<"$out")" == *'herdr-agent-reuse→resumed'* ]]
+check "dead cached codex agent → a new agent RESUMES the cached thread (codex can be re-hosted)" $? "out=$out"
 [[ "$(grep 'agent prompt' "$t/herdr.log" | tail -1)" != *'[FOLLOW_UP]'* ]]
 check "dead-agent fallback reshapes the payload as first contact" $?
 
@@ -349,8 +350,8 @@ agent=$(cat "$(jq -r .call_dir <<<"$out")/herdr_agent.txt")
 out=$(dial "$t" "${CENV[@]}" HERDR_STUB_GONE_NAMES="$agent" -- --target "$t/target" \
       --resume "$THREAD" --agent codex --mode quick --prompt explicit-followup)
 [[ "$(jq -r .status <<<"$out")" == connected \
-   && "$(jq -r '.fallbacks | join(" ")' <<<"$out")" == *'herdr-agent-reuse→fresh'* \
-   && "$(grep 'agent start' "$t/herdr.log" | tail -1)" != *"resume $THREAD"* ]]
-check "a cached thread's dead-agent fallback starts fresh even when the thread id was explicit" $? "out=$out"
+   && "$(jq -r '.fallbacks | join(" ")' <<<"$out")" == *'herdr-agent-reuse→resumed'* \
+   && "$(grep 'agent start' "$t/herdr.log" | tail -1)" == *"resume $THREAD"* ]]
+check "an explicit --resume of a cached thread whose agent died resumes it" $? "out=$out"
 
 herdr_suite_finish

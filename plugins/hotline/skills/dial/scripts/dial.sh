@@ -1684,7 +1684,11 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     # {"fallback":"fresh"} — refused BEFORE anything was submitted (the agent is
     # gone, or blocked on input), so a fresh callee is safe. It just will not
     # remember anything.
-    add_fallback "herdr-agent-reuse→fresh($(reason_of "$REUSE"); the fresh callee starts WITHOUT the prior context)"
+    if [[ "$AGENT_KIND" == "codex" && -n "${REMOTE_SESSION_ID:-}" ]]; then
+      add_fallback "herdr-agent-reuse→resumed($(reason_of "$REUSE"); a new codex agent runs \`codex resume $REMOTE_SESSION_ID\`, so the conversation continues)"
+    else
+      add_fallback "herdr-agent-reuse→fresh($(reason_of "$REUSE"); the fresh callee starts WITHOUT the prior context)"
+    fi
     reshape_as_first_contact
     SURFACE_REF=""
   fi
@@ -1838,8 +1842,13 @@ fire_herdr() {
   # --label additionally names the TAB a `tab`/`workspace` placement creates, never
   # the agent, so it cannot displace the directory in that 14-char budget.
   ARGS+=(--name "$SESSION_NAME" --label "$LABEL" --agent "$AGENT_KIND")
-  if [[ "$AGENT_KIND" == "codex" && -n "$RESUME_ARG" ]] && ! $RESHAPED_AS_FIRST_CONTACT; then
-    ARGS+=(--resume "$RESUME_ARG")
+  # A CODEX thread can be re-hosted (`codex resume`), unlike a claude session under
+  # herdr's --session-id preset. So an explicit thread id is resumed, and so is the
+  # cached thread when its agent died — the fallback keeps the conversation.
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    local resume_thread="${RESUME_ARG:-}"
+    [[ -z "$resume_thread" ]] && $RESHAPED_AS_FIRST_CONTACT && resume_thread="$REMOTE_SESSION_ID"
+    [[ -n "$resume_thread" ]] && ARGS+=(--resume "$resume_thread")
   fi
   [[ -n "$TOOLS" ]] && ARGS+=(--tools "$TOOLS")
   [[ -n "$BOOT_TIMEOUT" ]] && ARGS+=(--boot-timeout "$BOOT_TIMEOUT")

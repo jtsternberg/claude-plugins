@@ -546,13 +546,13 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   `--agent claude`. For a Codex thread with no workspace metadata, pass its
   workspace explicitly with `--target <path> --resume <id>`.
 
-**A follow-up starts a fresh callee (`.fallbacks`)**
-- `agent-kind claude→codex` or `codex→claude` means the cache holds a different
-  program. Match the cached agent kind to continue its conversation. A
-  `herdr-agent-reuse→fresh` entry means the cached agent is gone; the fresh Codex
-  callee has no prior context. To recover the old thread, re-dial with its Codex
-  thread id in `--resume`. A blocked live agent instead refuses the follow-up;
-  attach and clear its gate, then re-dial.
+**A codex follow-up reports `herdr-agent-reuse→resumed` or a fresh callee (`.fallbacks`)**
+- `herdr-agent-reuse→resumed(…)`: the cached agent was gone, so a new one ran
+  `codex resume <thread>` — the conversation continues; nothing to do.
+- `agent-kind claude→codex` or `codex→claude`: the cache holds a different program,
+  so a fresh callee started. Match the cached agent kind to continue its
+  conversation. A blocked live agent instead refuses the follow-up; attach and
+  clear its gate, then re-dial.
 
 For `--remote`, run attachment and rollout inspection on that box (for example,
 `ssh <target> herdr agent attach <agent>`). Preflight requires `codex` on its
