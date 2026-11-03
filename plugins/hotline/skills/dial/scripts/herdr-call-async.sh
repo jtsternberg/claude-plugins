@@ -448,6 +448,13 @@ CLAUDE_ARGS+=("--allowedTools=$ALLOWED_TOOLS")
 # config.toml unless the same opt-in that skips claude's permission gates is set.
 CODEX_ARGS=(-c check_for_update_on_startup=false)
 [[ -n "${HOTLINE_CODEX_MODEL:-}" ]] && CODEX_ARGS+=(-m "$HOTLINE_CODEX_MODEL")
+# Extra codex argv, whitespace-split (no quoting). The escape hatch for whatever this
+# launcher does not model — a profile, `--disable hooks` to get past a hooks-review
+# gate without persisting a trust decision, a feature flag.
+if [[ -n "${HOTLINE_CODEX_ARGS:-}" ]]; then
+  read -r -a _codex_extra <<<"$HOTLINE_CODEX_ARGS"
+  CODEX_ARGS+=("${_codex_extra[@]}")
+fi
 case "${HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS:-}" in
   1|true|TRUE|yes|YES) CODEX_ARGS+=(--dangerously-bypass-approvals-and-sandbox) ;;
 esac
