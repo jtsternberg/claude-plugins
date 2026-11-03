@@ -60,7 +60,7 @@ refuses() {  # refuses <label> <detail-substring> <dial args...>
     && ! grep -q 'agent start' "$t/herdr.log" 2>/dev/null
   check "$label" $? "out=$out"
 }
-refuses "--transport cmux"        "herdr or headless" --transport cmux
+refuses "--transport cmux --mode conference" "does not support --mode conference" --transport cmux --mode conference
 refuses "--remote"                "local-only"        --remote jt@box
 refuses "--resume <id>"           "cannot continue"   --resume 11111111-2222-3333-4444-555555555555
 refuses "--tools"                 "--allowedTools"    --tools "Read"

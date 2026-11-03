@@ -344,7 +344,8 @@ rollout is normalized into the rows the Claude transcript reader already parses,
 | `--agent codex`, any mode, side or detached | supported — first contact only. Selects herdr |
 | `--agent codex --headless` (or `--transport headless`) | supported — runs `codex exec --json -o <file> -` with the prompt on stdin; `.remote_session_id` is the thread id and the reply is codex's last message. STATUS lines are bare (no nonce), as for claude headless |
 | `HOTLINE_CALLEE_ENV*` | supported — delivered as `-c shell_environment_policy.set.<KEY>=<value>`, which reaches the commands codex runs |
-| `--transport cmux` | refused (`args`) — cmux launches claude only |
+| `--agent codex --transport cmux`, quick/work_order, side/detached/window | supported — `codex` runs in the surface; first contact waits for codex's composer (refusing on a dialog) and is confirmed by the nonce in the rollout; the answer is read from the rollout |
+| `--transport cmux --mode conference` | refused (`args`) — the cmux conference path is claude-only; use herdr |
 | `--remote` | refused (`args`) — the rollout lives on the box that runs codex, and the remote fetch reads Claude transcripts only |
 | `--resume`, or a session id as the target | refused (`args`) — codex cannot adopt a claude session |
 | `--tools` | refused (`args`) — claude's allowlist has no honest codex mapping; use `HOTLINE_CODEX_ARGS="-s read-only"` for a sandbox |

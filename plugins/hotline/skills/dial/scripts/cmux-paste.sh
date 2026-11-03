@@ -30,7 +30,13 @@
 #   cmux-paste.sh --surface <handle> --payload-file <path> --call-id <nonce>
 #                 [--cwd <callee-cwd>] [--session <callee-session-id>]
 #                 [--wait-box <seconds>] [--workspace <uuid>] [--baseline <path>]
-#                 [--first-contact]
+#                 [--first-contact] [--agent-kind claude|codex]
+#
+# --agent-kind codex: --wait-box waits for CODEX's composer instead of claude's box
+# (refusing, sent:false, on a codex startup dialog — codex_startup_dialog), and the
+# proof is the nonce in the codex rollout, found by that nonce. The success JSON adds
+# "rollout" and "thread_id". There is no screen tier for codex: its TUI chrome is
+# not what the screen markers below describe.
 #
 #   # → {"delivered":true,"sent":true,"confirmed":"transcript"|"screen","workspace":"…","surface":"…"}
 #   # → {"delivered":false,"sent":false,"reason":"…"}   nothing left this machine
@@ -95,6 +101,7 @@ CONFIRM_SLEEP="${HOTLINE_PASTE_CONFIRM_SLEEP:-0.3}"
 # Named and sized like herdr-prompt.sh's, for the same reason — see --first-contact.
 FIRST_CONFIRM_TRIES="${HOTLINE_CMUX_FIRST_CONFIRM_TRIES:-40}"
 FIRST_CONTACT=false
+AGENT_KIND="claude"
 # Settle between a paste and the Enter key event that submits it. The key event
 # travels a different path than the paste, so sent in the same breath it can reach
 # the REPL before the bytes it is meant to submit have been ingested, and the Enter
@@ -112,6 +119,7 @@ while [[ $# -gt 0 ]]; do
     --workspace)    WORKSPACE_ID="$2"; shift 2 ;;
     --baseline)     BASELINE_FILE="$2"; shift 2 ;;
     --first-contact) FIRST_CONTACT=true; shift ;;
+    --agent-kind)    AGENT_KIND="$2";    shift 2 ;;
     *)              shift ;;
   esac
 done
@@ -216,7 +224,25 @@ read_live() {
 }
 
 BOX_RAW=""
-if [[ "$WAIT_BOX" != "0" ]]; then
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  # shellcheck source=../../../scripts/codex-rollout.sh
+  source "$HOTLINE_SCRIPTS/codex-rollout.sh"
+fi
+if [[ "$AGENT_KIND" == "codex" && "$WAIT_BOX" != "0" ]]; then
+  BOX_DEADLINE=$(( $(date +%s) + WAIT_BOX ))
+  BOX_READY=false
+  while [[ $(date +%s) -le $BOX_DEADLINE ]]; do
+    BOX_RAW=$(read_raw) || BOX_RAW=""
+    if [[ -n "$BOX_RAW" ]]; then
+      if CODEX_DIALOG=$(codex_startup_dialog "$BOX_RAW"); then
+        undelivered "$(codex_startup_dialog_recovery "$CODEX_DIALOG" "$CWD") NOTHING WAS SUBMITTED: a work order pasted into that dialog would answer it instead of becoming a turn. \`cmux read-screen --surface $SURFACE_REF\` shows it." false
+      fi
+      codex_composer_ready "$BOX_RAW" && { BOX_READY=true; break; }
+    fi
+    sleep 0.4
+  done
+  $BOX_READY || undelivered "surface $SURFACE_REF never drew codex's input composer within ${WAIT_BOX}s, and no known codex dialog is on screen; delivering now would paste into whatever IS there. Nothing was sent." false
+elif [[ "$WAIT_BOX" != "0" ]]; then
   BOX_DEADLINE=$(( $(date +%s) + WAIT_BOX ))
   BOX_READY=false
   while [[ $(date +%s) -le $BOX_DEADLINE ]]; do
@@ -339,7 +365,8 @@ paste_one() { # <payload-file> <submit-key>  — undelivered() exits on socket r
 # one design invariant (a slash command gets an inline nonce AND a split delivery),
 # so every reader takes it from repl-state.sh rather than restating it.
 SPLIT_PASTE=false
-hotline_payload_needs_split_delivery "$PAYLOAD_FILE" && SPLIT_PASTE=true
+# Codex invokes the ringing skill as a `$…` mention, so there is no slash parse to protect.
+[[ "$AGENT_KIND" != "codex" ]] && hotline_payload_needs_split_delivery "$PAYLOAD_FILE" && SPLIT_PASTE=true
 
 # --- The fragmentation marker, taken BEFORE anything goes out. ---------------
 # One `terminal.paste` is supposed to land as ONE user turn (18/18 multi-line
@@ -397,6 +424,20 @@ fi
 # Re-measuring also keeps this window reaching zero rows into history, the same as
 # the baseline's, so "not on the pre-paste screen" keeps meaning fresh.
 cmux_screen_rows_forget
+
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  tries="$CONFIRM_TRIES"; $FIRST_CONTACT && tries="$FIRST_CONFIRM_TRIES"
+  for ((i = 0; i < tries; i++)); do
+    if ROLLOUT=$(codex_find_rollout "$CALL_ID"); then
+      jq -nc --arg w "$WS_ID" --arg s "$SURF_ID" --arg r "$ROLLOUT" --arg t "$(codex_thread_id_of "$ROLLOUT")" \
+        '{delivered: true, sent: true, confirmed: "rollout", workspace: $w, surface: $s, rollout: $r, thread_id: $t}'
+      exit 0
+    fi
+    sleep "$CONFIRM_SLEEP"
+  done
+  undelivered "pasted into surface $SURF_ID but nonce $CALL_ID never appeared in any codex rollout under $(codex_sessions_root) within the confirmation budget. Look there (or \`cmux read-screen --surface $SURFACE_REF\`) before re-dialing — a re-dial would run the work order twice." true
+fi
+
 measure_pane
 
 # --- Did the callee actually get it? ----------------------------------------

@@ -1113,6 +1113,26 @@ if $CMUX_MODE; then
     RECV_CWD=$(cat "$CALL_DIR/cwd.txt")
     TRANSCRIPT_PATH=$(bash "$TRANSCRIPT_PATH_SH" --cwd "$RECV_CWD" --session "$SESSION_ID" 2>/dev/null || true)
   fi
+  # A CODEX callee in a cmux surface: the same normalized-rollout transcript the herdr
+  # branch reads (see codex-rollout.sh), refreshed at the top of every poll below.
+  CMUX_AGENT_KIND="claude"
+  [[ -s "$CALL_DIR/agent_kind.txt" ]] && CMUX_AGENT_KIND=$(tr -d '[:space:]' < "$CALL_DIR/agent_kind.txt")
+  codex_refresh() { :; }
+  if [[ "$CMUX_AGENT_KIND" == "codex" && -n "$CALL_ID" ]]; then
+    # shellcheck source=../../../scripts/codex-rollout.sh
+    source "$HOTLINE_SCRIPTS/codex-rollout.sh"
+    TRANSCRIPT_PATH="$CALL_DIR/codex_transcript.jsonl"
+    codex_refresh() {
+      local r=""
+      [[ -s "$CALL_DIR/codex_rollout.txt" ]] && r=$(cat "$CALL_DIR/codex_rollout.txt")
+      if [[ -z "$r" || ! -f "$r" ]]; then
+        r=$(codex_find_rollout "$CALL_ID") || return 0
+        printf '%s\n' "$r" > "$CALL_DIR/codex_rollout.txt"
+      fi
+      codex_rollout_normalize "$r" "$TRANSCRIPT_PATH" || true
+    }
+    codex_refresh
+  fi
 
   # Is the nonce sitting unsubmitted in the callee's input box? That is the only
   # thing that actually distinguishes "never submitted" from "submitted, queued
@@ -1224,6 +1244,8 @@ if $CMUX_MODE; then
     # cmux_events_supported caches its probe, so this costs one `cmux events
     # --snapshot` per process however many ticks run.
     turn_gate_ready() {
+      # The gate waits on claude's own Stop hook event; codex emits none.
+      [[ "$CMUX_AGENT_KIND" != "codex" ]] || return 1
       $T_SUBMITTED || return 1
       [[ "$CMUX_GATE_SLICE" != "0" ]] || return 1
       [[ -n "$SESSION_ID" ]] || return 1
@@ -1235,6 +1257,7 @@ if $CMUX_MODE; then
     PREEMPT_SEEN_AT=-1
     PREEMPT_TEXT=""
     while [[ $T_ELAPSED -lt $TIMEOUT ]]; do
+      codex_refresh
       if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
         # No transcript file yet — brief grace, then fall back to scraping
         # rather than hard-fail (guards against a mis-derived path).

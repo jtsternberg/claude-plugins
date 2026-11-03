@@ -51,8 +51,8 @@
 # hop's own diagnostic and never a quiet local call.
 #
 # --agent codex makes the callee a CODEX agent instead of claude. It runs over herdr
-# (selected by default, the way --remote selects it) or headless (`codex exec`), and
-# refuses what it cannot do yet with an args error: --transport cmux, --remote,
+# (selected by default, the way --remote selects it), cmux (not conference) or
+# headless (`codex exec`), and refuses what it cannot do yet with an args error: --remote,
 # --resume or a session id in --target (codex cannot adopt a claude session) and
 # --tools. HOTLINE_CALLEE_ENV is delivered as codex shell_environment_policy
 # overrides. Its answer comes back through the same
@@ -464,10 +464,15 @@ case "$AGENT_KIND" in
   claude) ;;
   codex)
     case "$TRANSPORT_REQ" in
-      ""|herdr|headless) ;;
-      *) emit_error args "--agent codex runs over herdr or headless, and --transport $TRANSPORT_REQ cannot host it" \
-           "A codex callee is started with \`herdr agent start --kind codex\`, or headless with \`codex exec\`. Drop --transport (--agent codex selects herdr), pass --headless, or drop --agent codex." ;;
+      ""|herdr|headless|cmux) ;;
+      *) emit_error args "Unknown --transport '$TRANSPORT_REQ'" "Valid transports with --agent codex: herdr (default), cmux, headless." ;;
     esac
+    # A cmux conference goes through cmux-call.sh, which is synchronous and boots
+    # claude only; the async cmux path is what learned codex.
+    if [[ "$TRANSPORT_REQ" == "cmux" && "$MODE_TAG" == "conference_call" ]]; then
+      emit_error args "--agent codex --transport cmux does not support --mode conference yet" \
+        "Use --transport herdr for a codex conference (it focuses the pane once the prompt lands), or a work_order/quick mode over cmux."
+    fi
     if [[ -n "$REMOTE_TARGET" ]]; then
       emit_error args "--agent codex is local-only for now; --remote is not supported with it" \
         "The codex answer is read from its rollout under ~/.codex on the box that runs it, and the remote fetch path reads Claude transcripts only. Dial the codex callee on this machine, or drop --agent codex to dial claude on $REMOTE_TARGET."
@@ -487,7 +492,8 @@ case "$AGENT_KIND" in
     fi
     # HOTLINE_CALLEE_ENV* is delivered as codex shell_environment_policy overrides
     # (callee_env_codex_config), so it needs no refusal here.
-    $FORCE_HEADLESS || [[ "$TRANSPORT_REQ" == headless ]] || TRANSPORT_REQ="herdr"
+    # herdr unless the caller named another host.
+    $FORCE_HEADLESS || [[ -n "$TRANSPORT_REQ" ]] || TRANSPORT_REQ="herdr"
     ;;
   *) emit_error args "Unknown --agent '$AGENT_KIND'" "Valid agents: claude (default), codex (herdr only)." ;;
 esac
@@ -1791,6 +1797,7 @@ fire_cmux() {
   [[ -n "$EFFECTIVE_RESUME" ]] && ARGS+=(--resume "$EFFECTIVE_RESUME")
   $DO_FORK && ARGS+=(--fork-session)
   [[ -n "$TOOLS" ]] && ARGS+=(--tools "$TOOLS")
+  ARGS+=(--agent "$AGENT_KIND")
   ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
   bash "$DIAL_SCRIPTS/cmux-call-async.sh" "${ARGS[@]}" 2>"$ERR_FILE"
 }
@@ -2014,6 +2021,7 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
                 --wait-box "$PASTE_BOX_TIMEOUT")
   [[ -n "$DELIVER_WORKSPACE" ]] && DELIVER_ARGS+=(--workspace "$DELIVER_WORKSPACE")
   [[ "$FIRST_CONTACT" == "true" ]] && DELIVER_ARGS+=(--first-contact)
+  DELIVER_ARGS+=(--agent-kind "$AGENT_KIND")
   DELIVERY=$(bash "$DIAL_SCRIPTS/cmux-paste.sh" "${DELIVER_ARGS[@]}" 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then
     emit_error deliver "the callee's REPL booted but the prompt never landed in it: $(reason_full "$DELIVERY")" \
@@ -2021,6 +2029,16 @@ if [[ "$TRANSPORT" == "cmux" && -s "$CALL_DIR/pending_paste.md" ]]; then
   fi
   # The callee's transcript is the record now; the vehicle goes.
   rm -f "$CALL_DIR/pending_paste.md"
+  # A codex callee is registered here, once delivery has revealed its thread id — the
+  # step wait-for-session.sh performs (and its launch-script cleanup) for claude.
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    DELIVERY_CONFIRMED=$(jq -r '.confirmed // empty' <<<"$DELIVERY" 2>/dev/null)
+    jq -r '.rollout // empty' <<<"$DELIVERY" > "$CALL_DIR/codex_rollout.txt"
+    REMOTE_SESSION_ID=$(jq -r '.thread_id // empty' <<<"$DELIVERY")
+    [[ -n "$REMOTE_SESSION_ID" ]] && echo "$REMOTE_SESSION_ID" > "$CALL_DIR/session_id.txt"
+    [[ -n "$REMOTE_SESSION_ID" ]] && { bash "$DIAL_SCRIPTS/register-call.sh" "$CALL_DIR" >/dev/null 2>&1 || true; }
+    rm -f "$(cat "$CALL_DIR/launch_script.txt" 2>/dev/null)" 2>/dev/null || true
+  fi
 fi
 
 # --- Step 6b (herdr) — same step, one call instead of a surface hunt. ---------

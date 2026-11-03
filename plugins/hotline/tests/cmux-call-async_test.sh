@@ -1569,6 +1569,20 @@ fi
 rm -rf "$tmp" "$call_dir"
 
 # The whole point of the poison stubs: a leak is a test failure, not a stray pane.
+# --- --agent codex: the surface runs codex, with no claude flags and no preset ---
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-codex-launch-XXXXXX)
+call_dir=$(HOTLINE_CALLEE_ENV="ROLE=x" HOTLINE_CODEX_ARGS="--disable hooks" run_detached_launch "$tmp" --agent codex)
+launch=$(cat "$(cat "$call_dir/launch_script.txt" 2>/dev/null)" 2>/dev/null || echo "")
+last=$(printf '%s\n' "$launch" | tail -1)
+if [[ "$last" == codex\ * && "$last" == *check_for_update_on_startup=false* \
+      && "$last" == *shell_environment_policy.set.ROLE* && "$last" == *"--disable hooks"* \
+      && "$launch" != *claude* && "$launch" != *--session-id* \
+      && ! -e "$call_dir/session_id_preset.txt" && "$(cat "$call_dir/agent_kind.txt")" == codex ]]; then
+  pass "--agent codex: launch line is codex (update check off, env + extra args), no claude flags, no preset"
+else
+  fail "--agent codex: launch line is codex (update check off, env + extra args), no claude flags, no preset" "launch=$launch"
+fi
+
 if [[ -s "$POISON_LOG" ]]; then
   fail "no test reaches the real cmux or claude" "$(cat "$POISON_LOG")"
 else
