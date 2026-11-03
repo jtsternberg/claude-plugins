@@ -536,6 +536,31 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   `ssh <.remote_target> herdr pane close <.remote_pane>` for a remote call — both
   handles are in the emitted JSON for exactly this.
 
+### Codex callees (`--agent codex`)
+
+**`stage: boot` or `stage: deliver` naming FOLDER-TRUST, HOOKS-REVIEW or UPDATE**
+- Codex is sitting on a startup dialog and nothing was typed into it (`sent:false`),
+  so re-dialing is safe once it is cleared. hotline will not answer it: run `codex`
+  in the target directory once and answer the dialog. For hooks-review only,
+  `HOTLINE_CODEX_ARGS="--disable hooks"` gets past it without persisting a trust
+  decision — that callee then runs with no hooks.
+
+**`stage: deliver` — "never drew its input composer"**
+- herdr said the agent was ready but Codex's composer never appeared and no known
+  dialog was on screen. Nothing was sent. `herdr agent attach <agent>` shows what is
+  there; a new Codex dialog wording is the likely cause (`scripts/codex-rollout.sh`
+  holds the signatures).
+
+**`stage: deliver` — "never appeared in any Codex rollout", `sent:true`**
+- The prompt went out but no rollout under `~/.codex/sessions` carries the nonce yet.
+  `grep -rl 'CALL_ID: <nonce>' ~/.codex/sessions` before doing anything; do not
+  re-dial blindly.
+
+**Response wait exits 6 (STALLED) on a codex call**
+- The turn ended with no STATUS for the nonce — most often Codex did not load the
+  ringing skill (hotline not installed in Codex) and ignored the inline reminder.
+  The rollout path is in `$call_dir/codex_rollout.txt`; read the answer there.
+
 ## Remote herdr Failures (`--remote <ssh-target>`)
 
 Everything in **herdr Failures** applies unchanged: the launch, the delivery proof,

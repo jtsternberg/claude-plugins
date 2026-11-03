@@ -115,6 +115,13 @@ wout=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" HERDR_STA
    && "$(jq -r .session_id "$CD/response.json")" == "$THREAD" ]]
 check "wait-for-response.sh → exit 0, the codex body in response.json" $? "rc=$wrc out=$wout err=$(cat "$t/werr.txt")"
 
+t=$(new_env); codex_env "$t"
+out=$(dial "$t" "${CENV[@]}" HOTLINE_CODEX_ARGS="--disable hooks" HOTLINE_CODEX_MODEL=gpt-x \
+      HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 -- --target "$t/target" --mode quick --prompt x --agent codex)
+START=$(grep 'agent start' "$t/herdr.log")
+[[ "$START" == *"--disable hooks"* && "$START" == *"-m gpt-x"* && "$START" == *"--dangerously-bypass-approvals-and-sandbox"* ]]
+check "HOTLINE_CODEX_ARGS / _MODEL / DANGEROUSLY_SKIP_PERMISSIONS reach the codex argv" $? "start=$START"
+
 # ===========================================================================
 echo "3. Startup dialogs are refused before anything is typed:"
 # ===========================================================================

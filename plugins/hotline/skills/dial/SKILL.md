@@ -1,7 +1,7 @@
 ---
 name: hotline-dial
 description: "Call another Claude Code workspace — quick calls, work orders, conference calls. 'Call/dial/message/delegate to <workspace or project>'. Also dials a workspace on ANOTHER machine over SSH (--remote <ssh-target>, herdr on that box)."
-argument-hint: "--label <2-4 words> [--headless] [--herdr] [--remote <ssh-target>] [--detached] [--window <name|ref>] [workspace] [task/question...]"
+argument-hint: "--label <2-4 words> [--headless] [--herdr] [--codex] [--remote <ssh-target>] [--detached] [--window <name|ref>] [workspace] [task/question...]"
 allowed-tools: Bash, ListAgents, SendMessage
 ---
 
@@ -31,6 +31,7 @@ status it returns.
 - **`--label <text>`** — **REQUIRED on every dial**, and normally yours to write rather than the user's: 2-4 words naming what this callee is *doing*, e.g. `fix-hotline-titles`, `review pr 2393`, `audit the cache gate`. It becomes the callee's session name, which is what you read in the cmux tab strip — `◑ hotline: fix-hotline-titles (work_order)`, glyph and all. Nothing else tells two callees in one repo apart. Missing, empty, or whitespace-only is an args error. On a **follow-up** it is ignored: the callee keeps the name first contact gave it. → `--label <text>`
 - **`--herdr`**: host the callee as a **herdr agent** instead of a cmux surface — a persistent pane owned by the herdr server, so the callee **survives a detach, a closed lid, or a dropped SSH session**. That is the reason to ask for it: a long work order you do not want tied to the life of a window. Requires herdr running, here or — with `--remote` below — on another box. Takes any mode, including `conference`, and either the side or detached placement (herdr splits a pane off yours for both). → `--transport herdr`
 - **`--remote <ssh-target>`**: run the callee **on another box** — herdr splits a pane and starts claude *there*, and hotline reads its answer back over ssh. For work that belongs on that machine: its checkout, its GPU, its network. It **selects herdr on its own** (nothing else can host anywhere but here) and is detached by nature, so `--remote <target>` alone is the whole invocation. Needs a non-interactive ssh hop plus herdr *and* claude on that box; if any of that is missing the dial is an **error**, never a quiet local call. → `--remote <ssh-target>`
+- **`--codex`**: the callee is a **Codex** agent instead of claude, hosted over herdr (it selects herdr on its own). Local only, and every codex dial starts a NEW callee — no follow-ups into a codex agent yet. Its answer comes back through the same response wait. See **`--agent codex`** below. → `--agent codex`
 
 ```
 /hotline:hotline-dial dotfiles what branch are you on?
@@ -42,6 +43,7 @@ status it returns.
 /hotline:hotline-dial --window lindris backend tests, please
 /hotline:hotline-dial --herdr dotfiles run the 40-minute migration
 /hotline:hotline-dial --remote jt@buildbox lindris run the integration suite
+/hotline:hotline-dial --codex cmb2 fix the failing field test
 ```
 
 Strip those flags out of the args before reading `$0` and `$1+`, and pass the
@@ -103,6 +105,7 @@ Flags: `--mode quick|work_order|conference` (required),
 `--label <text>` (required — 2-4 words naming what the callee is doing),
 `--prompt-file <path>` (or `--prompt <text>` for a one-liner),
 `--headless`, `--transport cmux|herdr|headless`, `--remote <ssh-target>`,
+`--agent claude|codex`,
 `--placement side|detached`,
 `--window <name|ref>`, `--resume <session-id>` `[--no-fork]`,
 `--refresh-identity`,
@@ -323,6 +326,37 @@ away.
 `.awaiting_response` is `false` for a conference call **on first contact**, on either
 transport — that session is handed to the user in a visible surface (cmux) or a
 focused pane (herdr), so there is nothing to poll. Report it and stop.
+
+### `--agent codex` — a Codex callee
+
+`--agent codex` starts `codex` in the herdr pane (`herdr agent start --kind codex`)
+instead of claude, delivers the work order as a `$hotline:hotline-ringing` mention
+(Codex loads the same ringing skill from the installed hotline plugin) plus a
+one-line STATUS reminder, and reads the answer from the callee's **Codex rollout**
+(`~/.codex/sessions/…/rollout-*-<thread>.jsonl`), found by the call nonce. The
+rollout is normalized into the rows the Claude transcript reader already parses, so
+`wait-for-response.sh`'s exit codes and `response.json` are unchanged.
+`.agent` is `"codex"` in the connected JSON, `.confirmed` is `"rollout"`, and
+`.remote_session_id` is the codex thread id.
+
+| Combination | Result |
+|---|---|
+| `--agent codex`, any mode, side or detached | supported — first contact only. Selects herdr |
+| `--transport cmux`/`headless`, `--headless` | refused (`args`) — only herdr can start codex |
+| `--remote` | refused (`args`) — the rollout lives on the box that runs codex, and the remote fetch reads Claude transcripts only |
+| `--resume`, or a session id as the target | refused (`args`) — codex cannot adopt a claude session |
+| `--tools`, `HOTLINE_CALLEE_ENV*` | refused (`args`) — claude-only flags with no codex equivalent |
+| a re-dial of the same target | a NEW codex callee. Codex calls go to dial history but not the follow-up cache, so a later claude dial never re-targets a codex agent |
+
+Startup gates are refused before anything is typed (`stage: deliver`, `sent:false`):
+Codex's folder-trust dialog, its **hooks-review** dialog (shown whenever hooks are
+new or changed — herdr reports that one as ready, so hotline waits for Codex's
+composer to appear before typing), and the update prompt (suppressed with
+`-c check_for_update_on_startup=false`). hotline never answers a trust decision:
+run `codex` in the directory once and answer it, or pass
+`HOTLINE_CODEX_ARGS="--disable hooks"` to skip hooks for that callee only.
+Approvals and sandbox come from your `~/.codex/config.toml`;
+`HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` adds `--dangerously-bypass-approvals-and-sandbox`.
 
 ## Your judgment calls
 
@@ -576,6 +610,10 @@ the caller took over."
 ## Environment knobs
 
 Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
+
+- **`HOTLINE_CODEX_MODEL=<model>`** — `--agent codex` only: passed as `codex -m`.
+- **`HOTLINE_CODEX_ARGS="<args>"`** — `--agent codex` only: extra codex argv,
+  whitespace-split (no quoting), e.g. `--disable hooks` or `-p <profile>`.
 
 - **`HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1`** — adds
   `--dangerously-skip-permissions` to the receiver's `claude`. **Off by default,

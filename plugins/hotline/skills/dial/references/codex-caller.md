@@ -7,6 +7,9 @@ call, and Codex needs nothing special beyond being one rung down the chain. This
 file covers what a **Codex-run** agent (or any non-Claude caller) needs to know so
 the rest of the dial flow works unchanged.
 
+This is Codex as the CALLER. Codex as the CALLEE is `dial.sh --agent codex`
+(herdr only) — see the dial SKILL.md.
+
 You only need this file if you're running under Codex (or another non-Claude
 harness). Claude callers: ignore it — the main `SKILL.md` flow is for you.
 

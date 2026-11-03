@@ -58,6 +58,7 @@
 # wait-for-response.sh contract — exit codes and response.json unchanged — read from
 # the callee's Codex rollout. Every codex dial starts a NEW callee: there is no
 # follow-up into a codex agent yet, so it is not entered in the session cache.
+# HOTLINE_CODEX_MODEL sets `codex -m`; HOTLINE_CODEX_ARGS adds raw codex argv.
 #
 # HOTLINE_TRANSPORT_AUTO=1 is the one way herdr is chosen WITHOUT --transport: it
 # is an opt-in setting, and even then only inside a herdr pane and only when the
