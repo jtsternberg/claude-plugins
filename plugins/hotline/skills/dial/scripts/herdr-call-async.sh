@@ -545,6 +545,7 @@ while [[ $attempt -lt $START_ATTEMPTS ]]; do
 
   if [[ "$AGENT_KIND" == codex && -z "$CODEX_BOOT_DEADLINE" ]]; then
     CODEX_BOOT_DEADLINE=$(( $(date +%s) + START_TIMEOUT_MS / 1000 ))
+    printf '%s\n' "$CODEX_BOOT_DEADLINE" > "$CALL_DIR/codex_boot_deadline.txt"
   fi
   if herdr_cli agent start "$AGENT_NAME" --kind "$AGENT_KIND" --pane "$NEW_PANE" \
        --timeout "$START_TIMEOUT_MS" -- "${AGENT_ARGS[@]}"; then
@@ -575,7 +576,7 @@ if [[ "$AGENT_KIND" == codex ]] && { [[ "$START_ERR" == *agent_not_ready* ]] \
   remaining=$(( CODEX_BOOT_DEADLINE - $(date +%s) ))
   [[ $remaining -ge 0 ]] || remaining=0
   if codex_wait_composer "$AGENT_NAME" "$NEW_PANE" "$CWD" "$remaining" \
-       "${HOTLINE_CODEX_COMPOSER_TRIES:-60}" "${HOTLINE_PASTE_CONFIRM_SLEEP:-0.3}"; then
+       "${HOTLINE_CODEX_COMPOSER_TRIES:-60}" "${HOTLINE_PASTE_CONFIRM_SLEEP:-0.3}" "$CODEX_BOOT_DEADLINE"; then
     START_OUT="$CODEX_READY_AGENT"
     START_ERR=""
   else

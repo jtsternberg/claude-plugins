@@ -601,6 +601,12 @@ mismatches, inconsistent/missing metadata and dead selected-account agents fail
 closed. Recover with a new explicit-home `--fresh` call. Legacy unpinned Codex
 calls retain their existing dead-agent resume behavior.
 
+Ownership verification matches descriptor device/inode to the current regular
+rollout file and checks process birth identity and the live pane around that
+observation. Framed `lsof` evidence must be complete; replaced files and any
+unresolved, deleted or additional rollout records refuse before input delivery.
+Fresh startup and first-contact readiness share one absolute boot deadline.
+
 Herdr's [Codex integration](https://herdr.dev/docs/integrations/#codex) reports
 session identity from a `SessionStart` hook over its local socket. Codex's
 `--disable hooks` disables that reporting too, so an absent `agent_session` is

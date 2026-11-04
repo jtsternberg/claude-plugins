@@ -68,14 +68,6 @@ for fault in session pane kind dead; do
 done
 # Native herdr 0.9.5 Codex agent-get omits agent_session (captured in the
 # overseer's pipeline-source-smoke/live-agent.json). Verify its process instead.
-cat > "$t/bin/lsof" <<'STUB'
-#!/usr/bin/env bash
-[[ "$*" == '-nP -a -p 5151 -Fn' ]] || exit 1
-[[ "${LSOF_STUB_FAIL:-}" != 1 ]] || exit 1
-printf 'p5151\nn%s\n' "${LSOF_STUB_ROLLOUT:?}"
-[[ -z "${LSOF_STUB_EXTRA:-}" ]] || printf 'n%s\n' "$LSOF_STUB_EXTRA"
-STUB
-chmod +x "$t/bin/lsof"
 out=$(follow CODEX_HOME="$t/personal" HERDR_STUB_OMIT_SESSION=1 HERDR_STUB_CODEX_PID=5151 LSOF_STUB_ROLLOUT="$rollout")
 native_dir=$(jq -r '.call_dir // empty' <<<"$out")
 [[ "$(jq -r .status <<<"$out")" == connected && "$(jq -r .first_contact <<<"$out")" == false \
@@ -99,6 +91,38 @@ check 'native missing-session fallback refuses unavailable process file evidence
 out=$(follow HERDR_STUB_INCLUDE_SESSION=1 HERDR_STUB_CODEX_PID=5151 LSOF_STUB_ROLLOUT="$t/personal/sessions/rollout-other.jsonl")
 [[ "$(jq -r .status <<<"$out")" == error ]] && no_input
 check 'matching reported session never overrides contradictory foreground rollout ownership' $? "out=$out"
+
+for ordinary in config cwd; do
+  if [[ "$ordinary" == config ]]; then
+    extra=(LSOF_STUB_EXTRA="$t/rollout-tools/config.toml")
+  else
+    extra=(LSOF_STUB_EXTRA="$t/rollout-tools" LSOF_STUB_EXTRA_TYPE=DIR LSOF_STUB_EXTRA_FD=cwd)
+  fi
+  out=$(follow "${extra[@]}")
+  [[ "$(jq -r .status <<<"$out")" == connected && "$(jq -r .first_contact <<<"$out")" == false \
+     && $(grep -c 'agent start' "$t/herdr.log") == 1 && "$(cache_get | jq -r .codex_home)" == "$selected" ]]
+  check "ordinary $ordinary under rollout-tools still permits pinned continuation" $? "out=$out"
+done
+prompts=$(grep -c 'agent prompt' "$t/herdr.log"); cached=$(cache_get | jq -r .last_call_dir)
+
+# Recreate the actual pathname with identical contents and a different inode.
+# The lsof fixture retains the original descriptor inode, as in the review probe.
+original_inode=$(python3 -c 'import os,sys; print(os.stat(sys.argv[1]).st_ino)' "$rollout")
+cp "$rollout" "$rollout.replacement"; mv "$rollout.replacement" "$rollout"
+for fault in inode device pid birth truncated deleted; do
+  case "$fault" in
+    inode) extra=(LSOF_STUB_INODE="$original_inode") ;;
+    device) extra=(LSOF_STUB_DEVICE=0x0) ;;
+    pid) extra=(LSOF_STUB_PID=6161) ;;
+    birth) extra=(PS_STUB_CHANGE=1) ;;
+    truncated) extra=(LSOF_STUB_EXTRA="$t/personal/sessions/rollout-incomplete") ;;
+    deleted) extra=(LSOF_STUB_EXTRA="$t/personal/sessions/rollout-second.jsonl (deleted)") ;;
+  esac
+  out=$(follow LSOF_STUB_ROLLOUT="$rollout" "${extra[@]}")
+  [[ "$(jq -r .status <<<"$out")" == error ]] && no_input \
+    && [[ "$(cache_get | jq -r .last_call_dir)" == "$cached" ]]
+  check "$fault ownership evidence refuses full dispatch before input or cache mutation" $? "out=$out"
+done
 
 # Losing the original metadata must not erase the cache's account contract.
 mv "$cached/codex_home.txt" "$cached/codex_home.saved"
