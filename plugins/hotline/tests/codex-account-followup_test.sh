@@ -73,7 +73,21 @@ native_dir=$(jq -r '.call_dir // empty' <<<"$out")
 [[ "$(jq -r .status <<<"$out")" == connected && "$(jq -r .first_contact <<<"$out")" == false \
    && "$(cat "$native_dir/codex_rollout.txt" 2>/dev/null)" == "$rollout" ]]
 check 'native no-agent_session capture continues only through pinned rollout process ownership' $? "out=$out"
+out=$(follow CODEX_HOME="$t/personal" HERDR_STUB_OMIT_SESSION=1 LSOF_STUB_NATIVE_NPOLICY=1)
+[[ "$(jq -r .status <<<"$out")" == connected && "$(jq -r .first_contact <<<"$out")" == false \
+   && "$(cache_get | jq -r .codex_home)" == "$selected" && $(grep -c 'agent start' "$t/herdr.log") == 1 ]]
+check 'captured unnamed NPOLICY descriptor permits verified pinned NONFRESH continuation' $? "out=$out"
 prompts=$(grep -c 'agent prompt' "$t/herdr.log"); cached=$(cache_get | jq -r .last_call_dir)
+for invalid in missing-name regular unknown duplicate contradictory nonnumeric truncated; do
+  out=$(follow LSOF_STUB_NATIVE_NPOLICY="$invalid")
+  [[ "$(jq -r .status <<<"$out")" == error ]] && no_input \
+    && [[ "$(cache_get | jq -r .last_call_dir)" == "$cached" ]]
+  check "invalid native $invalid evidence refuses before input or cache mutation" $? "out=$out"
+done
+out=$(follow LSOF_STUB_NATIVE_NPOLICY=1 LSOF_STUB_INODE=0)
+[[ "$(jq -r .status <<<"$out")" == error ]] && no_input \
+  && [[ "$(cache_get | jq -r .last_call_dir)" == "$cached" ]]
+check 'valid NPOLICY does not override mandatory regular rollout identity' $? "out=$out"
 out=$(follow HERDR_STUB_OMIT_SESSION=1 HERDR_STUB_CODEX_PID=5151 LSOF_STUB_ROLLOUT="$t/personal/sessions/rollout-wrong.jsonl")
 [[ "$(jq -r .status <<<"$out")" == error ]] && no_input
 check 'native missing-session fallback refuses a process holding another account rollout' $? "out=$out"

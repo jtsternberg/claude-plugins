@@ -21,13 +21,22 @@ def birth(pid):
     return value
 
 
+def unnamed_npolicy(entry):
+    # Darwin's network-policy descriptor is not a filesystem object. Accept only
+    # the complete captured shape, not missing names or unknown descriptor types.
+    return (entry.keys() == {b"f", b"t", b"n"} and entry[b"f"].isdigit()
+            and entry[b"t"] == b"NPOLICY" and entry[b"n"] == b"")
+
+
 def fields(record, allowed):
     result = {}
     for token in record.split(b"\0"):
         key, value = token[:1], token[1:]
-        if key not in allowed or not value or key in result:
+        if key not in allowed or key in result or (not value and key != b"n"):
             raise ValueError("incomplete or inconsistent lsof record")
         result[key] = value
+    if b"n" in result and not result[b"n"] and not unnamed_npolicy(result):
+        raise ValueError("incomplete or inconsistent lsof record")
     return result
 
 
@@ -67,6 +76,8 @@ def verify(pid, path, thread):
             entry = fields(record, {b"f", b"t", b"D", b"i", b"n"})
             if not {b"f", b"t", b"n"} <= entry.keys():
                 raise ValueError("unresolved file record")
+            if unnamed_npolicy(entry):
+                continue
             name = os.fsdecode(entry[b"n"])
             if name != path and (entry[b"t"] == b"DIR" or not Path(name).name.startswith("rollout-")):
                 continue
