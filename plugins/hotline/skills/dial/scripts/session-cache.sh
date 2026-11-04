@@ -76,8 +76,8 @@ set -euo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: session-cache.sh get <target-path> --caller-session <id>"
-  echo "       session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>] [--call-dir <path>] [--transport <name>] [--remote <ssh-target>] [--agent-kind claude|codex]"
-  echo "       session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>] [--call-dir <path>] [--transport <name>] [--remote <ssh-target>] [--agent-kind claude|codex]"
+  echo "       session-cache.sh set <target-path> --caller-session <id> --session <id> --mode <mode> [--surface <ref>] [--call-id <id>] [--call-dir <path>] [--transport <name>] [--remote <ssh-target>] [--agent-kind claude|codex] [--codex-home <path>]"
+  echo "       session-cache.sh update <target-path> --caller-session <id> [--session <id>] [--surface <ref> | --clear-surface] [--call-id <id>] [--call-dir <path>] [--transport <name>] [--remote <ssh-target>] [--agent-kind claude|codex] [--codex-home <path>]"
   echo "       session-cache.sh forget <target-path> --caller-session <id>"
   echo "       session-cache.sh list --caller-session <id>"
   echo ""
@@ -103,8 +103,10 @@ CLEAR_SURFACE=false
 TRANSPORT=""
 REMOTE=""
 AGENT_KIND=""
+CODEX_HOME_REF=""
 
 # Absent agent_kind means Claude for caches written before Codex follow-ups existed.
+# codex_home retains an account pin even if the last_call_dir has been swept.
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -117,6 +119,7 @@ while [[ $# -gt 0 ]]; do
     --transport) TRANSPORT="$2"; shift 2 ;;
     --remote) REMOTE="$2"; shift 2 ;;
     --agent-kind) AGENT_KIND="$2"; shift 2 ;;
+    --codex-home) CODEX_HOME_REF="$2"; shift 2 ;;
     --clear-surface) CLEAR_SURFACE=true; shift ;;
     *) [[ -z "$TARGET" ]] && TARGET="$1"; shift ;;
   esac
@@ -168,27 +171,29 @@ case "$CMD" in
     if [[ -f "$CACHE_FILE" ]]; then
       jq --arg t "$TARGET" --arg s "$SESSION_ID" --arg m "$MODE" --arg sf "$SURFACE_REF" \
          --arg ci "$CALL_ID" --arg cd "$CALL_DIR_REF" --arg tr "$TRANSPORT" --arg rm "$REMOTE" \
-         --arg ak "$AGENT_KIND" --argjson now "$NOW" \
+         --arg ak "$AGENT_KIND" --arg ch "$CODEX_HOME_REF" --argjson now "$NOW" \
         '.connections[$t] = ({session_id: $s, started: $now, last_contact: $now, mode: $m, exchange_count: 1}
            + (if $sf == "" then {} else {surface_ref: $sf} end)
            + (if $ci == "" then {} else {last_call_id: $ci} end)
            + (if $cd == "" then {} else {last_call_dir: $cd} end)
            + (if $tr == "" then {} else {transport: $tr} end)
            + (if $rm == "" then {} else {remote: $rm} end)
-           + (if $ak == "" then {} else {agent_kind: $ak} end))' \
+           + (if $ak == "" then {} else {agent_kind: $ak} end)
+           + (if $ch == "" then {} else {codex_home: $ch} end))' \
         "$CACHE_FILE" > "${CACHE_FILE}.tmp" && mv "${CACHE_FILE}.tmp" "$CACHE_FILE"
     else
       jq -n --arg caller "$CALLER_CWD" --arg cs "$CALLER_SESSION" \
         --arg t "$TARGET" --arg s "$SESSION_ID" --arg m "$MODE" --arg sf "$SURFACE_REF" \
         --arg ci "$CALL_ID" --arg cd "$CALL_DIR_REF" --arg tr "$TRANSPORT" --arg rm "$REMOTE" \
-        --arg ak "$AGENT_KIND" --argjson now "$NOW" \
+        --arg ak "$AGENT_KIND" --arg ch "$CODEX_HOME_REF" --argjson now "$NOW" \
         '{caller: $caller, caller_session_id: $cs, connections: {($t): ({session_id: $s, started: $now, last_contact: $now, mode: $m, exchange_count: 1}
            + (if $sf == "" then {} else {surface_ref: $sf} end)
            + (if $ci == "" then {} else {last_call_id: $ci} end)
            + (if $cd == "" then {} else {last_call_dir: $cd} end)
            + (if $tr == "" then {} else {transport: $tr} end)
            + (if $rm == "" then {} else {remote: $rm} end)
-           + (if $ak == "" then {} else {agent_kind: $ak} end))}}' \
+           + (if $ak == "" then {} else {agent_kind: $ak} end)
+           + (if $ch == "" then {} else {codex_home: $ch} end))}}' \
         > "$CACHE_FILE"
     fi
     ;;
@@ -207,7 +212,7 @@ case "$CMD" in
     # describe the host handle, so an entry that no longer has one must not keep
     # claiming which backend and which box that handle was on.
     jq --arg t "$TARGET" --arg sf "$SURFACE_REF" --arg ci "$CALL_ID" --arg sid "$SESSION_ID" \
-       --arg cd "$CALL_DIR_REF" --arg tr "$TRANSPORT" --arg rm "$REMOTE" --arg ak "$AGENT_KIND" \
+       --arg cd "$CALL_DIR_REF" --arg tr "$TRANSPORT" --arg rm "$REMOTE" --arg ak "$AGENT_KIND" --arg ch "$CODEX_HOME_REF" \
        --argjson clear "$($CLEAR_SURFACE && echo true || echo false)" --argjson now "$NOW" \
       '.connections[$t].last_contact = $now
        | .connections[$t].exchange_count += 1
@@ -215,6 +220,7 @@ case "$CMD" in
        | (if $cd == "" then . else .connections[$t].last_call_dir = $cd end)
        | (if $sid == "" then . else .connections[$t].session_id = $sid end)
        | (if $ak == "" then . else .connections[$t].agent_kind = $ak end)
+       | (if $ch == "" then . else .connections[$t].codex_home = $ch end)
        | (if $tr == "" then . else .connections[$t].transport = $tr end)
        | (if $rm == "" then . else .connections[$t].remote = $rm end)
        | (if $clear then del(.connections[$t].surface_ref, .connections[$t].transport, .connections[$t].remote)

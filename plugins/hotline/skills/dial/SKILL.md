@@ -356,7 +356,8 @@ rollout is normalized into the rows the Claude transcript reader already parses,
 Local lookup uses the selected `HOTLINE_CODEX_HOME` (and persisted call home for
 waiters), otherwise `${CODEX_HOME:-~/.codex}/sessions`; with `--remote`, it runs
 on the remote box under its `$HOME/.codex/sessions`. An explicit selected home
-is supported only for fresh local herdr tab/workspace calls; see Environment knobs.
+supports fresh local herdr tab/workspace calls and verified same-home cached
+continuations; see Environment knobs.
 
 Startup gates are refused before anything is typed (`stage: deliver`, `sent:false`):
 Codex's folder-trust dialog, its **hooks-review** dialog (shown whenever hooks are
@@ -635,13 +636,23 @@ the caller took over."
 Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
 
 - **`HOTLINE_CODEX_HOME=<absolute-directory>`** — select the Codex process account.
-  Requires `--agent codex --fresh` and `HOTLINE_HERDR_PLACEMENT=tab` or `workspace`
-  on local herdr. The directory must already exist and be readable/writable; spaces
+  New calls require `--agent codex --fresh` and `HOTLINE_HERDR_PLACEMENT=tab` or
+  `workspace` on local herdr. The directory must already exist and be readable/writable; spaces
   are supported. Hotline passes `--env CODEX_HOME=...` when creating the tab, before
   starting Codex, and records the canonical home in `codex_home.txt` so later waiters
   discover rollouts in the same account even outside the caller environment.
-  Split, remote, resume, cache reuse, cmux and headless are refused when set.
-  Unset preserves existing behavior. `HOTLINE_CALLEE_ENV` configures Codex tool
+  Re-dial the same target/caller with `--agent codex` and without `--fresh` to
+  continue the cached process. An explicit home must match; omitting it inherits
+  the selected home from the cache/call metadata, independent of ambient
+  `CODEX_HOME`. Each follow-up copies `codex_home.txt`, `codex_rollout.txt` and
+  host metadata, and validates the live Codex pane/thread against the launch
+  record before submitting input. Missing/inconsistent metadata, a different
+  account or a dead selected-account agent refuses the call before delivery;
+  start a new explicit-home `--fresh` call to recover. Unpinned legacy calls keep
+  their existing dead-agent resume behavior.
+  Split launches, remote, explicit resume, cmux and headless are refused when set.
+  New calls with no override retain the default account behavior.
+  `HOTLINE_CALLEE_ENV` configures Codex tool
   subprocesses through `shell_environment_policy`; it does not select the account
   that authenticates the Codex process. Keep the home on every new selected-account
   dial; use the call directory with `wait-for-response.sh` for the existing call.

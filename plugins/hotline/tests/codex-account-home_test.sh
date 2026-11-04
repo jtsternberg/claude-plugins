@@ -45,7 +45,9 @@ for extra in 'split' 'remote' 'resume'; do
 done
 for flags in '--agent claude --fresh' '--agent codex' '--agent codex --fresh --headless' '--agent codex --fresh --transport cmux'; do
   out=$(dial "$t" HOTLINE_CODEX_HOME="$t/work" HOTLINE_HERDR_PLACEMENT=tab -- --target "$t/target" --mode quick --prompt x $flags)
-  [[ "$(jq -r .stage <<<"$out")" == args && "$(jq -r .detail <<<"$out")" == *HOTLINE_CODEX_HOME* ]]
+  expected_stage=args
+  [[ "$flags" != '--agent codex' ]] || expected_stage=transport
+  [[ "$(jq -r .stage <<<"$out")" == "$expected_stage" && "$(jq -r .detail <<<"$out")" == *HOTLINE_CODEX_HOME* ]]
   check "dial rejects unsupported selection: $flags" $? "out=$out"
 done
 
