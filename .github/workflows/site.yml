@@ -27,7 +27,11 @@ jobs:
       - name: Check public entry points
         run: |
           test -s _site/index.html
+          test -s _site/guide.html
           test -s _site/docs/compatibility.html
           test -s _site/plugins/hotline/index.html
           test -s _site/assets/css/site.css
           test -s _site/assets/js/site.js
+          test -s _site/LICENSE
+          grep -q '/edit/main/README.md' _site/guide.html
+          grep -q '/edit/main/docs/compatibility.md' _site/docs/compatibility.html

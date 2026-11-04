@@ -19,12 +19,7 @@ defaults:
       layout: default
 
 exclude:
-  - tests
-  - scripts
   - node_modules
   - vendor
-  - AGENTS.md
-  - CLAUDE.md
-  - LICENSE
   - Gemfile
   - Gemfile.lock

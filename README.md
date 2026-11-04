@@ -1,3 +1,8 @@
+---
+layout: default
+permalink: /guide.html
+---
+
 # Claude Code and Codex Plugins by JTSternberg
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -120,7 +125,7 @@ Cross-workspace communication for agent sessions — dial another workspace to a
 
 **Install:** `claude plugin install hotline@jtsternberg` or `codex plugin add hotline@jtsternberg`
 
-#### 🧠 [thinking-tools](plugins/thinking-tools)
+#### 🧠 [thinking-tools](https://github.com/jtsternberg/claude-plugins/tree/main/plugins/thinking-tools)
 Metacognitive reasoning frameworks for careful decision-making. Ships `chestertons-fence` (investigate before removing), `pink-elephant` (rewrite counterproductive prohibitions as positive directives), `interview-mode` (after two rejected drafts of the same artifact, stop generating variants and interview the user to build from their own wording), `no-meat-proxy` (rewrite what you're about to hand over so the reader can relay it in their own words instead of forwarding your text verbatim), and `dont-lead-the-witness` (when you want a genuine response — testing an agent, asking for a review, questioning the user — ask the way the real situation would, with no hint of the answer you expect, and judge by observation).
 
 **Install:** `claude plugin install thinking-tools@jtsternberg`
@@ -194,7 +199,7 @@ Skills for creating git commits from staged or unstaged files with AI-generated 
 
 **Install:** `claude plugin install git-commits@jtsternberg`
 
-#### 🔀 [pr-workflow](plugins/pr-workflow) — plugin group
+#### 🔀 [pr-workflow](https://github.com/jtsternberg/claude-plugins/tree/main/plugins/pr-workflow) — plugin group
 Five single-purpose PR plugins, installable together or one at a time. `pr-workflow`
 itself is a [dependency-only bundle](plugins/pr-workflow/bundle): installing it installs
 all five, and you can then disable the bundle to drop the ones you don't want.

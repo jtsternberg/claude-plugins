@@ -10,6 +10,25 @@
     toggle.title = label;
   };
 
+  const forwardLegacySection = () => {
+    const guide = document.querySelector('main[data-guide-url]');
+    if (!guide || !window.location.hash) return;
+    let id;
+    try { id = decodeURIComponent(window.location.hash.slice(1)); } catch { return; }
+    if (!document.getElementById(id)) window.location.replace(guide.dataset.guideUrl + window.location.hash);
+  };
+  forwardLegacySection();
+  window.addEventListener('hashchange', forwardLegacySection);
+
+  for (const heading of document.querySelectorAll('main :is(h2,h3,h4,h5,h6)[id]')) {
+    const anchor = document.createElement('a');
+    anchor.className = 'heading-anchor';
+    anchor.href = `#${heading.id}`;
+    anchor.setAttribute('aria-label', `Permalink to ${heading.textContent}`);
+    anchor.textContent = '#';
+    heading.append(anchor);
+  }
+
   if (toggle) {
     toggle.hidden = false;
     toggle.addEventListener('click', () => {

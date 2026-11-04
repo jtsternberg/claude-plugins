@@ -75,6 +75,7 @@ svg { display: block; width: 20px; height: 20px; }
 .hero-description > p:first-child { margin: 0; color: var(--muted); font-size: 20px; line-height: 1.6; }
 .hero-note { margin: 0; color: var(--faint); font-size: 11px; line-height: 1.7; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 48px; }
+.guide-link { align-self: center; margin-left: 8px; color: var(--muted); font-size: 13px; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 48px; padding: 12px 22px; border: 1px solid var(--line); border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 600; }
 .button:hover { background: var(--surface); border-color: var(--muted); }
 .button-primary { background: var(--action); color: var(--action-ink); border-color: var(--action); }
@@ -109,7 +110,10 @@ pre, code { font-family: var(--mono); }
 .plugin-category { color: var(--faint); font-size: 12px; }
 .plugin-arrow { justify-self: end; font-size: 22px; }
 .all-plugins { display: inline-block; margin-top: 24px; color: var(--muted); font-size: 13px; }
-.site-footer { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 120px; padding-block: 32px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.site-footer { min-height: 120px; padding-block: 32px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.footer-meta { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.edit-page { margin: 20px 0 0; font-size: 12px; text-align: right; }
+.edit-page a { text-decoration: underline; }
 .site-footer a { text-decoration: none; }
 .site-footer a:hover { text-decoration: underline; }
 .license { color: var(--faint); font-size: 12px; }
@@ -119,6 +123,9 @@ pre, code { font-family: var(--mono); }
 .document { max-width: 900px; margin-inline: auto; padding-block: 42px 64px; overflow-wrap: break-word; }
 .back-link { color: var(--muted); font-size: 13px; }
 .document h1, .document h2, .document h3, .document h4 { line-height: 1.3; letter-spacing: -.025em; }
+.document :is(h2,h3,h4,h5,h6) { position: relative; }
+.heading-anchor { margin-left: .4em; color: var(--faint); font-size: .65em; font-weight: 400; text-decoration: none; opacity: 0; }
+:is(h2,h3,h4,h5,h6):hover .heading-anchor, .heading-anchor:focus-visible { opacity: 1; }
 .document h1 { margin-top: 36px; font-size: clamp(32px, 4vw, 48px); }
 .document h2 { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 28px; }
 .document h3 { margin-top: 32px; font-size: 22px; }
@@ -154,6 +161,7 @@ pre, code { font-family: var(--mono); }
   .desktop-break { display: none; }
   .hero-actions { gap: 12px; margin-top: 36px; }
   .hero-actions .button { padding-inline: 16px; flex: 1 1 auto; }
+  .guide-link { flex-basis: 100%; margin: 4px 0 0; }
   .quick-start, .plugin-highlights { padding-block: 32px 36px; }
   .section-heading { flex-direction: column; gap: 12px; align-items: flex-start; }
   .section-heading h2 { font-size: 29px; }
@@ -167,7 +175,9 @@ pre, code { font-family: var(--mono); }
   .plugin-list h3 { font-size: 18px; }
   .plugin-list p { grid-row: 2; grid-column: 1 / -1; font-size: 13px; }
   .plugin-arrow { grid-column: 2; grid-row: 1; }
-  .site-footer { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .footer-meta { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .edit-page { text-align: left; }
+  .heading-anchor { opacity: 1; }
   .license { font-size: 10px; text-transform: uppercase; }
   .document { padding-top: 32px; }
   .document pre { padding-left: 16px; }
