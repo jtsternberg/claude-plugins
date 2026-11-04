@@ -23,6 +23,10 @@
 #   herdr-reuse-agent.sh --agent <name> --session <callee-session-id>
 #                        (--prompt <text> | --prompt-file <path>)
 #                        [--cwd <callee-cwd>] [--agent-kind claude|codex]
+#                        [--previous-call-dir <path>]
+# Selected-account Codex continuation requires the previous call metadata and a
+# matching live pane/thread. Dead or unverifiable selected agents refuse reuse;
+# legacy unpinned Codex calls retain their existing resume fallback.
 #   # → {"call_dir":"…","delivery":"prompt","confirmed":"transcript"}
 #   #     re-targeted the live agent and proved the payload landed
 #   # → {"fallback":"fresh","reason":"…"}
@@ -104,6 +108,7 @@ PROMPT=""
 PROMPT_FILE=""
 CWD=""
 AGENT_KIND=claude
+PREVIOUS_CALL_DIR=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -113,14 +118,22 @@ while [[ $# -gt 0 ]]; do
     --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
     --cwd)         CWD="$2";         shift 2 ;;
     --agent-kind)  AGENT_KIND="$2";  shift 2 ;;
+    --previous-call-dir) PREVIOUS_CALL_DIR="$2"; shift 2 ;;
     *)             shift ;;
   esac
 done
 
-# A running process or this transport cannot guarantee the requested account.
-if [[ ${HOTLINE_CODEX_HOME+x} ]]; then
-  echo '{"error":"HOTLINE_CODEX_HOME requires a fresh local herdr tab/workspace launch; this entry point cannot guarantee process identity"}'
-  exit 1
+PINNED_CODEX_CALL=false
+account_error() {
+  jq -nc --arg reason "$1" '{account_error:true, error:$reason, reason:$reason}'
+  exit 0
+}
+source "$HOTLINE_SCRIPTS/codex-home.sh"
+if [[ ${HOTLINE_CODEX_HOME+x} || -s "$PREVIOUS_CALL_DIR/codex_home.txt" ]]; then
+  [[ "$AGENT_KIND" == codex ]] || account_error 'HOTLINE_CODEX_HOME continuation requires a Codex agent'
+  codex_home_reuse_validate "$PREVIOUS_CALL_DIR" "$AGENT" "$SESSION_ID" "$CWD" \
+    || account_error "HOTLINE_CODEX_HOME: $CODEX_HOME_ERR"
+  PINNED_CODEX_CALL=true
 fi
 
 # HOW A HUMAN REACHES THIS AGENT. `herdr agent attach <name>` is the single most
@@ -132,6 +145,7 @@ HERDR_HOP=""
 if hotline_remote_active; then HERDR_HOP="ssh $(hotline_remote_target) "; fi
 
 fallback_fresh() {  # fallback_fresh <reason>
+  $PINNED_CODEX_CALL && account_error "Pinned Codex account home continuation refused: $1. The cached agent cannot be restarted without a new explicit --fresh call."
   jq -nc --arg reason "$1" '{fallback: "fresh", reason: $reason}'
   exit 0
 }
@@ -169,6 +183,15 @@ if [[ "$AGENT_STATUS" == "blocked" ]]; then
   exit 0
 fi
 
+# A name alone can outlive a changed pane occupant. Match the pinned launch's
+# pane and thread to herdr's live identity before any input is submitted.
+if $PINNED_CODEX_CALL; then
+  jq -e --arg thread "$SESSION_ID" --arg pane "$CODEX_PINNED_PANE" \
+    '.result.agent | .agent == "codex" and .pane_id == $pane and .agent_session.agent == "codex" and .agent_session.value == $thread' \
+    <<<"$HERDR_CLI_OUT" >/dev/null 2>&1 \
+    || account_error 'Pinned Codex account home continuation refused: live agent kind, pane or thread differs from the launch record; no input was delivered'
+fi
+
 # --- Wire a call dir exactly as the herdr launcher leaves one. ---------------
 # Same backend-agnostic contract, minus the launch: wait-for-response.sh reads
 # transport.txt first and then addresses this agent by name, so a reused call is
@@ -180,6 +203,13 @@ CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 echo herdr    > "$CALL_DIR/transport.txt"
 echo "$AGENT_KIND" > "$CALL_DIR/agent_kind.txt"
 echo "$AGENT" > "$CALL_DIR/herdr_agent.txt"
+if $PINNED_CODEX_CALL; then
+  printf '%s\n' "$HOTLINE_CODEX_HOME" > "$CALL_DIR/codex_home.txt"
+  printf '%s\n' "$CODEX_PINNED_ROLLOUT" > "$CALL_DIR/codex_rollout.txt"
+  for field in herdr_pane herdr_tab herdr_workspace herdr_placement; do
+    [[ ! -s "$PREVIOUS_CALL_DIR/$field.txt" ]] || cp "$PREVIOUS_CALL_DIR/$field.txt" "$CALL_DIR/$field.txt"
+  done
+fi
 # See herdr-call-async.sh's WHY NOTHING IS CLOSED. Doubly true here: the agent
 # predates this call, so closing it would end a conversation the caller may not
 # be finished with.
@@ -253,10 +283,14 @@ if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; 
   fallback_fresh "$DELIVERY_REASON"
 fi
 
-rm -f "$PAYLOAD_FILE"
 if [[ "$AGENT_KIND" == codex ]]; then
+  if $PINNED_CODEX_CALL && [[ "$(jq -r '.rollout // empty' <<<"$DELIVERY")" != "$CODEX_PINNED_ROLLOUT" ]]; then
+    jq -nc --arg dir "$CALL_DIR" --arg pf "$PAYLOAD_FILE" '{undelivered:true,call_dir:$dir,prompt_file:$pf,reason:"Follow-up was submitted but its nonce appeared in another Codex rollout; read the pinned thread before re-dialing"}'
+    exit 0
+  fi
   jq -r '.rollout // empty' <<<"$DELIVERY" > "$CALL_DIR/codex_rollout.txt"
 fi
+rm -f "$PAYLOAD_FILE"
 
 jq -nc --arg dir "$CALL_DIR" --arg agent "$AGENT" --arg st "$AGENT_STATUS" \
   --arg confirmed "$(jq -r '.confirmed // empty' <<<"$DELIVERY" 2>/dev/null)" \

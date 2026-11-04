@@ -589,9 +589,18 @@ with `HOTLINE_HERDR_WORKSPACE`). The tab receives `CODEX_HOME` before Codex star
 process account. The home is canonicalized and stored as `codex_home.txt` in the
 call directory for rollout discovery and independent response waiters.
 
-An explicit home refuses split placement, remote calls, resumed/cached sessions,
-cmux, headless and non-Codex agents. An empty, relative, missing or inaccessible
-home is an error. Leaving the variable unset preserves existing defaults.
+A cached continuation to the same target/caller uses `--agent codex` without
+`--fresh`. Supply the same home or omit the override: the cache retains its
+selected account regardless of ambient `CODEX_HOME`. Follow-up call directories
+copy `codex_home.txt`, `codex_rollout.txt` and host metadata. Reuse validates the
+pinned rollout and live Codex pane/thread before delivery; explicit home
+mismatches, inconsistent/missing metadata and dead selected-account agents fail
+closed. Recover with a new explicit-home `--fresh` call. Legacy unpinned Codex
+calls retain their existing dead-agent resume behavior.
+
+An explicit home refuses split launches, remote calls, explicit resume, cmux,
+headless and non-Codex agents. An empty, relative, missing or inaccessible home is
+an error. New calls without an override preserve the existing defaults.
 For both Claude Code and Codex callers, run the bundled `dial.sh` with the same
 options; no credential contents need to be read or forwarded.
 

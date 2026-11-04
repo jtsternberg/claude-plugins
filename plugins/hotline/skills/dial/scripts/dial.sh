@@ -24,7 +24,9 @@
 #   re-run            → discover from the pending fingerprint, continue as above
 #
 # HOTLINE_CODEX_HOME=<absolute-dir>: select a fresh local Codex account; requires
-# --agent codex --fresh and HOTLINE_HERDR_PLACEMENT=tab|workspace.
+# --agent codex --fresh and HOTLINE_HERDR_PLACEMENT=tab|workspace for a new call.
+# Cached nonfresh calls continue only with a verified matching home/pane/thread;
+# an omitted home inherits the pin, and a dead selected-account agent is refused.
 #
 # Usage:
 #   dial.sh --target <reference> --mode quick|work_order|conference
@@ -503,11 +505,10 @@ esac
 source "$PLUGIN_SCRIPTS/codex-home.sh"
 CODEX_HOME_TRANSPORT="$TRANSPORT_REQ"
 $FORCE_HEADLESS && CODEX_HOME_TRANSPORT=headless
-if ! codex_home_validate "$AGENT_KIND" "$CODEX_HOME_TRANSPORT" "$REMOTE_TARGET" "$RESUME_ARG"; then
+CODEX_HOME_MODE=reuse
+$FRESH && CODEX_HOME_MODE=launch
+if ! codex_home_validate "$AGENT_KIND" "$CODEX_HOME_TRANSPORT" "$REMOTE_TARGET" "$RESUME_ARG" "$CODEX_HOME_MODE"; then
   emit_error args "$CODEX_HOME_ERR" "Use --agent codex --fresh with HOTLINE_HERDR_PLACEMENT=tab or workspace, or unset HOTLINE_CODEX_HOME."
-fi
-if [[ ${HOTLINE_CODEX_HOME+x} ]] && ! $FRESH; then
-  emit_error args "HOTLINE_CODEX_HOME requires --fresh: a cached process cannot change accounts" "Pass --fresh to create a new process with the selected home."
 fi
 
 # --- Transport request, validated BEFORE anything has a side effect ----------
@@ -1148,6 +1149,7 @@ PREV_SESSION_ID=""
 # The call dir of the exchange before this one, so step 5a can ask whether that
 # exchange is still in flight. See detached_exchange_still_waiting there.
 PREV_CALL_DIR=""
+PREV_CODEX_HOME=""
 # A --no-fork dial of a session id the cache no longer holds (a later dial into the
 # same workspace took the slot) may still name a session LIVE in a surface. Register
 # it as this target's cached callee so the lookup below sees an ordinary follow-up and
@@ -1180,6 +1182,7 @@ if [[ -z "$RESUME_ARG" || "$AGENT_KIND" == "codex" ]] || $NO_FORK; then
     PREV_CALL_ID=$(jq -r '.last_call_id // empty' <<<"$CACHED")
     PREV_SESSION_ID=$(jq -r '.session_id // empty' <<<"$CACHED")
     PREV_CALL_DIR=$(jq -r '.last_call_dir // empty' <<<"$CACHED")
+    PREV_CODEX_HOME=$(jq -r '.codex_home // empty' <<<"$CACHED")
     # WHICH BACKEND AND WHICH BOX that host handle belongs to. Absent means what it
     # has always meant — a local callee — because that is the shape of every entry
     # written before these fields existed.
@@ -1240,6 +1243,19 @@ if [[ -z "$RESUME_ARG" || "$AGENT_KIND" == "codex" ]] || $NO_FORK; then
       REMOTE_SESSION_ID="$PREV_SESSION_ID"
       SURFACE_REF="$PREV_SURFACE_REF"
     fi
+  fi
+fi
+
+# Selected-account reuse is stricter than legacy reuse: no mismatch may turn
+# into a fresh launch under an ambient account. Recover the pin before payloads.
+if ! $FRESH && { [[ ${HOTLINE_CODEX_HOME+x} || -n "$PREV_CODEX_HOME" ]] || [[ -s "$PREV_CALL_DIR/codex_home.txt" ]]; }; then
+  if $FIRST_CONTACT || [[ "$AGENT_KIND" != codex || "$TRANSPORT" != herdr || -n "$REMOTE_TARGET" ]]; then
+    emit_error transport "HOTLINE_CODEX_HOME continuation has no matching local cached Codex agent" "Use --fresh with an explicit HOTLINE_CODEX_HOME and tab/workspace placement to start a new call. Nothing was delivered."
+  fi
+  codex_home_reuse_validate "$PREV_CALL_DIR" "$SURFACE_REF" "$REMOTE_SESSION_ID" "$TARGET_PATH" \
+    || emit_error transport "$CODEX_HOME_ERR" "Restore the cached call metadata, or start a new call with --fresh and an explicit HOTLINE_CODEX_HOME."
+  if [[ -n "$PREV_CODEX_HOME" && "$PREV_CODEX_HOME" != "$HOTLINE_CODEX_HOME" ]]; then
+    emit_error transport "Codex account home mismatch between cache and call metadata" "Restore consistent call metadata; nothing was delivered."
   fi
 fi
 
@@ -1659,7 +1675,11 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     # The file, never --prompt: same reason as the cmux path (claude-plugins-86ka).
     REUSE=$(bash "$DIAL_SCRIPTS/herdr-reuse-agent.sh" \
       --agent "$SURFACE_REF" --session "$REMOTE_SESSION_ID" --agent-kind "$AGENT_KIND" \
-      --prompt-file "$SEND_PROMPT_FILE" --cwd "$TARGET_PATH" 2>/dev/null)
+      --previous-call-dir "$PREV_CALL_DIR" --prompt-file "$SEND_PROMPT_FILE" --cwd "$TARGET_PATH" 2>/dev/null)
+
+    if [[ "$(jq -r '.account_error // false' <<<"$REUSE" 2>/dev/null)" == true ]]; then
+      emit_error transport "$(reason_full "$REUSE")" "No personal-account fallback was attempted. Restore the selected agent/metadata or use --fresh with an explicit HOTLINE_CODEX_HOME."
+    fi
 
     # BLOCKED FIRST — before anything that could start a second callee. The agent
     # is live and confirmed waiting on input; nothing was submitted to it.
@@ -1688,8 +1708,11 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
       # The agent is unchanged (that is the point), but bump last_contact /
       # exchange_count and record this turn's nonce and call dir — the dir is what
       # the NEXT follow-up marks superseded.
+      REUSE_ACCOUNT_ARGS=()
+      [[ ! -s "$CALL_DIR/codex_home.txt" ]] || REUSE_ACCOUNT_ARGS=(--codex-home "$(cat "$CALL_DIR/codex_home.txt")")
       bash "$DIAL_SCRIPTS/session-cache.sh" update "$TARGET_PATH" \
         --caller-session "$MY_SESSION_ID" --surface "$SURFACE_REF" \
+        ${REUSE_ACCOUNT_ARGS[@]+"${REUSE_ACCOUNT_ARGS[@]}"} \
         ${CALL_ID_OUT:+--call-id "$CALL_ID_OUT"} --call-dir "$CALL_DIR" >/dev/null 2>&1
       mark_prev_superseded
       [[ -n "$CALLEE_ENV_PATH" ]] && CALLEE_ENV_PATH="not-redelivered"

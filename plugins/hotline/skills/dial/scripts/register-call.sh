@@ -105,6 +105,10 @@ if [[ "$AGENT_KIND" == codex && "$(tr -d '[:space:]' < "$CALL_DIR/transport.txt"
 fi
 
 if $CACHE_CALL; then
+  CODEX_HOME_ARGS=()
+  if [[ "$AGENT_KIND" == codex && -s "$CALL_DIR/codex_home.txt" ]]; then
+    CODEX_HOME_ARGS=(--codex-home "$(cat "$CALL_DIR/codex_home.txt")")
+  fi
   bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
     --agent-kind "$AGENT_KIND" \
     --caller-session "$CALLER_SESSION" \
@@ -112,6 +116,7 @@ if $CACHE_CALL; then
     --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} \
     ${CALL_ID_ARGS[@]+"${CALL_ID_ARGS[@]}"} \
     ${CALL_DIR_ARGS[@]+"${CALL_DIR_ARGS[@]}"} \
+    ${CODEX_HOME_ARGS[@]+"${CODEX_HOME_ARGS[@]}"} \
     ${TRANSPORT_ARGS[@]+"${TRANSPORT_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
 fi
 

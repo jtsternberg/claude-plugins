@@ -376,9 +376,9 @@ case "$1 ${2:-}" in
     TAB="${HERDR_STUB_AGENT_TAB:-${PANE%%:*}:t1}"
     [[ -z "$PANE" ]] && TAB="${HERDR_STUB_AGENT_TAB:-}"
     jq -nc --arg n "$NAME" --arg s "$STATUS" --arg sid "$SID" \
-           --arg ready "$READY" --arg pane "$PANE" --arg tab "$TAB" \
-      '{id:"cli:agent:get",result:{agent:({name:$n,agent:"claude",agent_status:$s,
-         agent_session:{agent:"claude",kind:"id",source:"herdr:claude",value:$sid}}
+           --arg ready "$READY" --arg pane "$PANE" --arg tab "$TAB" --arg kind "${HERDR_STUB_AGENT_KIND:-claude}" \
+      '{id:"cli:agent:get",result:{agent:({name:$n,agent:$kind,agent_status:$s,
+         agent_session:{agent:$kind,kind:"id",source:("herdr:" + $kind),value:$sid}}
          + (if $ready == "omit" then {} else {interactive_ready:($ready == "true")} end)
          + (if $tab == "" then {} else {tab_id:$tab} end)
          + (if $pane == "" then {} else {pane_id:$pane} end))}}'
