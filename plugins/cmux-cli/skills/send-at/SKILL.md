@@ -128,6 +128,9 @@ and arm its detached one-shot wall-clock timer. Queue a self-contained instructi
 to run Step 3 in this same cmux-resident session at fire time, naming the exact
 surface UUID and prompt-file path. The timer never calls cmux. Preserve the exact
 surface/no-fallback contract even if the receiver or surface disappears.
+Apply the **Codex queued sender labels** rule in `$maestro:conduct` to this
+wake instruction: use the caller-supplied exact prefix, or `[cmux send-at timer]`
+when none was supplied. Keep the prompt file's delivery text as authored.
 
 Follow `until` for private payload storage, cancellation/logging, sleep/wake,
 receiver availability and opt-in caffeinate limits. End the turn after arming;

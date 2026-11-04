@@ -288,6 +288,9 @@ file-writing tool to save the exact payload as UTF-8 in a private file (0600),
 outside git; do not embed it in Python or shell source. For a relative delay,
 resolve and report its absolute target
 at arm time. Do not recompute the delay when the timer fires.
+Apply the **Codex queued sender labels** rule in `$maestro:conduct` to the
+saved payload: use the caller-supplied exact prefix, or `[Delayed-work timer]`
+when none was supplied.
 
 ```bash
 python3 - <<'ARM_CODEX_TIMER'
