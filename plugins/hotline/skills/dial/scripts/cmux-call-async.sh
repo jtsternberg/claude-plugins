@@ -75,6 +75,7 @@
 #   cmux-call-async.sh --cwd <path> (--prompt <text> | --prompt-file <path>)
 #                      [--resume <id>] [--name <name>] [--label <text>]
 #                      [--fork-session] [--tools <list>] [--keep-workspace]
+#                      [--agent claude|codex]
 #   # Returns immediately with: {"call_dir": "/tmp/hotline-call-xxxxx"}
 #
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
@@ -85,7 +86,7 @@ if [[ "${1:-}" == "--help" ]]; then
   cat <<'EOF'
 Usage: cmux-call-async.sh --cwd <path> --prompt <text> [--resume <id>]
                           [--name <name>] [--label <text>] [--fork-session]
-                          [--tools <list>] [--keep-workspace]
+                          [--tools <list>] [--keep-workspace] [--agent claude|codex]
 
 Opens an interactive claude session in a cmux workspace and returns immediately
 with {"call_dir": "/tmp/hotline-call-XXXXX"}. The caller then drives polling
@@ -99,6 +100,8 @@ Options:
                      --detached; a surface placement reads it off --name, which
                      claude emits as its own live terminal title.
   --tools <list>     Allowed tools (default: "Bash Read Edit Write Grep Glob")
+  --agent codex      Run codex instead of claude: no session preset, no claude
+                     flags. cmux-paste.sh --agent-kind codex gates and confirms it.
   --keep-workspace   Do not close the cmux workspace after STATUS. Used by
                      conference-call mode to hand the workspace off to the
                      user. wait-for-response.sh reads keep_workspace.txt.
