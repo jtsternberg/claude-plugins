@@ -661,6 +661,13 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   account or a dead selected-account agent refuses the call before delivery;
   start a new explicit-home `--fresh` call to recover. Unpinned legacy calls keep
   their existing dead-agent resume behavior.
+  Herdr's Codex integration reports `agent_session` through a `SessionStart`
+  hook; `--disable hooks` suppresses that identity report. The verified local
+  rollout-ownership path above supports this missing-field runtime without
+  enabling hooks. A PID alone is insufficient. Hotline never installs/enables
+  hooks or answers trust gates to obtain identity. Native hook-based reporting
+  requires a separately reviewed Herdr integration and hook configuration in
+  the selected home; check shared `hooks.json` symlinks before any installation.
   Split launches, remote, explicit resume, cmux and headless are refused when set.
   New calls with no override retain the default account behavior.
   `HOTLINE_CALLEE_ENV` configures Codex tool
