@@ -159,6 +159,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# A running process or this transport cannot guarantee the requested account.
+if [[ ${HOTLINE_CODEX_HOME+x} ]]; then
+  echo '{"error":"HOTLINE_CODEX_HOME requires a fresh local herdr tab/workspace launch; this entry point cannot guarantee process identity"}'
+  exit 1
+fi
+
 if [[ -z "$CWD" && -z "$RESUME_ID" ]]; then
   echo '{"error": "No --cwd provided"}'
   exit 1

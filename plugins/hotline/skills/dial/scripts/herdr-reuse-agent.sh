@@ -117,6 +117,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# A running process or this transport cannot guarantee the requested account.
+if [[ ${HOTLINE_CODEX_HOME+x} ]]; then
+  echo '{"error":"HOTLINE_CODEX_HOME requires a fresh local herdr tab/workspace launch; this entry point cannot guarantee process identity"}'
+  exit 1
+fi
+
 # HOW A HUMAN REACHES THIS AGENT. `herdr agent attach <name>` is the single most
 # useful thing every refusal below tells the caller to run — and for a remote callee
 # it has to be run ON THAT BOX. An attach hint that silently omits the hop sends the

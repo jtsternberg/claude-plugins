@@ -579,3 +579,18 @@ Hotline also still ships the fingerprint-and-grep discovery it was built on, as 
 **[Full docs and usage: SESSION-ID-DISCOVERY.md](SESSION-ID-DISCOVERY.md)**
 
 ---
+
+### Selecting a Codex account
+
+Set `HOTLINE_CODEX_HOME` to the account's existing absolute Codex home and dial
+with `--agent codex --fresh` plus `HOTLINE_HERDR_PLACEMENT=tab` (or `workspace`
+with `HOTLINE_HERDR_WORKSPACE`). The tab receives `CODEX_HOME` before Codex starts;
+`HOTLINE_CALLEE_ENV` only configures tool subprocesses and cannot select the
+process account. The home is canonicalized and stored as `codex_home.txt` in the
+call directory for rollout discovery and independent response waiters.
+
+An explicit home refuses split placement, remote calls, resumed/cached sessions,
+cmux, headless and non-Codex agents. An empty, relative, missing or inaccessible
+home is an error. Leaving the variable unset preserves existing defaults.
+For both Claude Code and Codex callers, run the bundled `dial.sh` with the same
+options; no credential contents need to be read or forwarded.
