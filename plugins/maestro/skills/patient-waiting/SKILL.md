@@ -27,6 +27,8 @@ the exact current thread. It costs no model tokens while waiting and needs a liv
 queue receiver at fire time. Queue acceptance is not delivery proof. If unavailable,
 report the missing capability and offer a manual nudge or short active-turn wait.
 This timed path does not establish a general Codex file/event watcher contract.
+For Codex queued callback payloads, follow the canonical **Codex queued sender
+labels** section in `$maestro:conduct`.
 
 ## The waiting ladder (Claude Code, in order — never skip down)
 

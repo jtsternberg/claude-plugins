@@ -79,6 +79,25 @@ decide which survivors become tracked issues — parking one only with a
 pointer planted where a future editor will trip over it (a comment at the
 edit site outlives a tracker entry nobody re-reads).
 
+### Codex queued sender labels
+
+Codex queue delivers inter-agent reports and watcher/timer callbacks as user
+turns; the TUI renders them in the same gray boxes as human messages. Prefix
+each such queued message with a clear sender name or role in brackets, such
+as `[Pipeline builder]` or `[Review watcher]`. The prefix identifies the
+reported origin; it is not proof of identity or human authorization.
+
+The caller supplies the exact prefix in every dispatched work order and
+callback payload, so callees can follow the rule without loading maestro.
+For example: "Prefix every queued report with `[Pipeline builder]`, including
+blockers and completion." A timer payload might begin `[Review watcher]
+Check the completed review and report the result.` Carry the prefix through
+any follow-up dispatches and callbacks you arm.
+
+This is a Codex-only practice for callers following this protocol; it does
+not enforce labels on arbitrary `codex queue` callers. Claude Code's native
+messages and background-task notifications keep their existing behavior.
+
 ## Waiting and forensics
 
 - A waiter timeout is not a failure: re-run the idempotent waiter on the same
