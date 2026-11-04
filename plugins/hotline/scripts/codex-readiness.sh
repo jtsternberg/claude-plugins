@@ -28,7 +28,7 @@ codex_current_startup_dialog() {
   printf '%s' "$dialog"
 }
 
-# <agent> <pane-or-empty> <cwd> <seconds> <max-probes> <poll-seconds>
+# <agent> <pane-or-empty> <cwd> <seconds> <max-probes> <poll-seconds> [absolute-deadline]
 # CODEX_READY_AGENT is the successful live snapshot; CODEX_READINESS_ERR explains
 # a refusal. Both the wall clock and probe cap bound every outcome.
 codex_wait_composer() {
@@ -37,7 +37,12 @@ codex_wait_composer() {
   CODEX_READY_AGENT=""
   CODEX_READINESS_ERR='Codex readiness budget must be numeric and bounded'
   [[ "$budget" =~ ^[0-9]+$ && "$tries" =~ ^[1-9][0-9]*$ && "$nap" =~ ^[0-9]*[.]?[0-9]+$ ]] || return 1
-  deadline=$(( $(codex_readiness_now) + budget ))
+  if [[ -n "${7:-}" ]]; then
+    [[ "$7" =~ ^[0-9]+$ ]] || return 1
+    deadline="$7"
+  else
+    deadline=$(( $(codex_readiness_now) + budget ))
+  fi
   dialog=""
   while [[ $probe -lt $tries ]]; do
     probe=$((probe+1)); live=""; frame=""; dialog=""

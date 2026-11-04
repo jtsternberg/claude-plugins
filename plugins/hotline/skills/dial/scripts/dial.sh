@@ -2128,6 +2128,7 @@ if [[ "$TRANSPORT" == "herdr" && -s "$CALL_DIR/pending_paste.md" ]]; then
   DELIVERY=$(bash "$DIAL_SCRIPTS/herdr-prompt.sh" \
     --agent "$HERDR_AGENT_REF" --payload-file "$CALL_DIR/pending_paste.md" \
     --pane "$(cat "$CALL_DIR/herdr_pane.txt" 2>/dev/null)" \
+    --startup-deadline "$(cat "$CALL_DIR/codex_boot_deadline.txt" 2>/dev/null)" \
     --call-id "$CALL_ID_OUT" --cwd "$TARGET_PATH" --session "$REMOTE_SESSION_ID" \
     --agent-kind "$AGENT_KIND" --first-contact 2>/dev/null)
   if [[ "$(jq -r '.delivered // false' <<<"$DELIVERY" 2>/dev/null)" != "true" ]]; then

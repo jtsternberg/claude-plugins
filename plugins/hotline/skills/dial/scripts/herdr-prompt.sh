@@ -8,6 +8,7 @@
 #   herdr-prompt.sh --agent <name> --payload-file <path> --call-id <nonce>
 #                   [--cwd <callee-cwd>] [--session <callee-session-id>]
 #                   [--timeout <ms>] [--first-contact] [--agent-kind claude|codex] [--pane <id>]
+#                   [--startup-deadline <epoch-seconds>] (required for Codex first contact)
 #
 # --agent-kind codex: the proof is the nonce in the callee's Codex ROLLOUT, found by
 # that nonce (scripts/codex-rollout.sh) — --session is unknown until it lands, and on
@@ -137,6 +138,7 @@ CALL_ID=""
 CWD=""
 SESSION_ID=""
 EXPECTED_PANE=""
+STARTUP_DEADLINE=""
 TIMEOUT_MS=""
 FIRST_CONTACT=false
 AGENT_KIND="claude"
@@ -165,6 +167,7 @@ while [[ $# -gt 0 ]]; do
     --cwd)          CWD="$2";          shift 2 ;;
     --session)      SESSION_ID="$2";   shift 2 ;;
     --pane)         EXPECTED_PANE="$2"; shift 2 ;;
+    --startup-deadline) STARTUP_DEADLINE="$2"; shift 2 ;;
     --timeout)      TIMEOUT_MS="$2";   shift 2 ;;
     --first-contact) FIRST_CONTACT=true; shift ;;
     --agent-kind)   AGENT_KIND="$2";   shift 2 ;;
@@ -218,9 +221,15 @@ fi
 # herdr-reuse-agent.sh where the caller can still fall back.
 if $FIRST_CONTACT && [[ "$AGENT_KIND" == codex ]]; then
   source "$HOTLINE_SCRIPTS/codex-readiness.sh"
-  sleep "$FIRST_SETTLE"
-  codex_wait_composer "$AGENT" "$AGENT_PANE" "$CWD" "$HOTLINE_BOOT_TIMEOUT_CMUX" \
-    "${HOTLINE_CODEX_COMPOSER_TRIES:-60}" "$CONFIRM_SLEEP" \
+  [[ "$STARTUP_DEADLINE" =~ ^[0-9]+$ ]] || undelivered 'Codex startup deadline is missing or invalid; nothing was submitted' false
+  remaining=$(( STARTUP_DEADLINE - $(codex_readiness_now) ))
+  [[ $remaining -gt 0 ]] || undelivered 'Codex startup deadline expired before first-contact delivery; nothing was submitted' false
+  settle=$(awk -v n="$FIRST_SETTLE" -v r="$remaining" 'BEGIN{if(n>r)n=r; printf "%g",n}')
+  sleep "$settle"
+  remaining=$(( STARTUP_DEADLINE - $(codex_readiness_now) ))
+  [[ $remaining -ge 0 ]] || remaining=0
+  codex_wait_composer "$AGENT" "$AGENT_PANE" "$CWD" "$remaining" \
+    "${HOTLINE_CODEX_COMPOSER_TRIES:-60}" "$CONFIRM_SLEEP" "$STARTUP_DEADLINE" \
     || undelivered "$CODEX_READINESS_ERR" false
   AGENT_STATUS=$(jq -r '.result.agent.agent_status' <<<"$CODEX_READY_AGENT")
   AGENT_PANE=$(jq -r '.result.agent.pane_id' <<<"$CODEX_READY_AGENT")
@@ -370,6 +379,9 @@ fi
 # writes a second one: the reshaped body is not what is on disk, but an unsplit
 # delivery is, and copying a work order into a second temp file to hand it to the
 # same mechanism would put an extra copy of it on the filesystem for nothing.
+if $FIRST_CONTACT && [[ "$AGENT_KIND" == codex && $(codex_readiness_now) -gt $STARTUP_DEADLINE ]]; then
+  undelivered 'Codex startup deadline expired before submission; nothing was submitted' false
+fi
 PROMPT_BODY_FILE="$PAYLOAD_FILE"
 PROMPT_BODY_TEMP=""
 if [[ "$PROMPT_TEXT" != "$(cat "$PAYLOAD_FILE")" ]]; then

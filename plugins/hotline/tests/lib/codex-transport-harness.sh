@@ -4,6 +4,7 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/herdr-transport-harness.sh"
 
 THREAD=01a1a28d-f07a-76a3-bbc7-21b555a6a8dc
+CODEX_PROCESS_STUB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/codex-process-stub.py"
 
 # A codex on PATH (never run — herdr is stubbed — but dial.sh preflights for it),
 # and an `agent prompt` that writes the callee's rollout the way codex would:
@@ -36,14 +37,16 @@ fi
 exec bash "$t/bin/herdr-real" "\$@"
 STUBW
   chmod +x "$t/bin/herdr"
-  # Captured native process-info + lsof filename ownership, never real PIDs.
+  # Captured native process-info/lsof field records, never real PIDs.
   cat > "$t/bin/lsof" <<STUB
 #!/usr/bin/env bash
-[[ "\$*" == "-nP -a -p \${HERDR_STUB_CODEX_PID:-5151} -Fn" ]] || exit 1
-PROCESS_HOME=\$(cat "\$HERDR_STATE/process_home" 2>/dev/null || printf '%s' "\${CODEX_HOME:-\$HOME/.codex}")
-printf 'p5151\\nn%s/sessions/2026/11/03/rollout-2026-11-03T12-56-13-$THREAD.jsonl\\n' "\$PROCESS_HOME"
+exec python3 "$CODEX_PROCESS_STUB" lsof "\$@"
 STUB
-  chmod +x "$t/bin/lsof"
+  cat > "$t/bin/ps" <<STUB
+#!/usr/bin/env bash
+exec python3 "$CODEX_PROCESS_STUB" ps "\$@"
+STUB
+  chmod +x "$t/bin/lsof" "$t/bin/ps"
 }
 
 # Every codex dial in this file: the herdr preflight's pane, and a confirmation budget

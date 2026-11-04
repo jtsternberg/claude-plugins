@@ -5,7 +5,7 @@
 set -u
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/codex-transport-harness.sh"
 REAL_DATE_BIN=$(command -v date)
-for scenario in ${CODEX_STARTUP_CASES:-transient stale gate overlay pending lost delivery false-ready false-gate resolution header spent long-poll}; do
+for scenario in ${CODEX_STARTUP_CASES:-transient stale gate overlay pending lost delivery false-ready false-gate resolution header spent long-poll delivery-budget delivery-late missing-budget missing-partial missing-fast}; do
   t=$(new_env); codex_env "$t"; mkdir -p "$t/work"
   printf '1000\n' > "$t/state/clock"
   mv "$t/bin/herdr" "$t/bin/herdr-codex"
@@ -27,7 +27,24 @@ inner="$(dirname "$0")/herdr-codex"
 mode="$STARTUP_SCENARIO"; elapsed=$(($(cat "$HERDR_STATE/clock")-1000))
 if [[ "$1 ${2:-}" == 'agent start' ]]; then
   bash "$inner" "$@" >/dev/null
+  if [[ "$mode" == missing-* ]]; then
+    case "$mode" in
+      missing-budget) printf '1005\n' > "$HERDR_STATE/clock" ;;
+      missing-partial) printf '1003\n' > "$HERDR_STATE/clock" ;;
+      missing-fast) printf '1001\n' > "$HERDR_STATE/clock" ;;
+    esac
+    for file in "$HOTLINE_CALL_HOME"/hotline-call-*/codex_boot_deadline.txt; do rm -f "$file"; done
+    echo '{"result":{"agent":{"interactive_ready":true,"agent_status":"idle"}}}'; exit 0
+  fi
   [[ "$mode" != spent ]] || printf '1005\n' > "$HERDR_STATE/clock"
+  if [[ "$mode" == delivery-budget ]]; then
+    printf '1005\n' > "$HERDR_STATE/clock"
+    echo '{"result":{"agent":{"interactive_ready":true,"agent_status":"idle"}}}'; exit 0
+  fi
+  if [[ "$mode" == delivery-late ]]; then
+    printf '1003\n' > "$HERDR_STATE/clock"
+    echo '{"result":{"agent":{"interactive_ready":true,"agent_status":"idle"}}}'; exit 0
+  fi
   if [[ "$mode" == false-ready || "$mode" == false-gate ]]; then
     echo '{"result":{"agent":{"interactive_ready":false,"agent_status":"unknown"}}}'; exit 0
   fi
@@ -48,6 +65,11 @@ if [[ "$1 ${2:-}" == 'agent get' && -s "$HERDR_STATE/started" ]]; then
 fi
 if [[ "$1 ${2:-}" == 'pane read' || "$1 ${2:-}" == 'agent read' ]]; then
   case "$mode" in
+    missing-budget) if [[ $elapsed -lt 7 ]]; then printf 'Starting Codex…\n'; else printf '› Ask Codex to do anything\n ? for shortcuts\n'; fi ;;
+    missing-partial) if [[ $elapsed -lt 6 ]]; then printf 'Starting Codex…\n'; else printf '› Ask Codex to do anything\n ? for shortcuts\n'; fi ;;
+    missing-fast) printf '› Ask Codex to do anything\n ? for shortcuts\n' ;;
+    delivery-budget) if [[ $elapsed -lt 7 ]]; then printf 'Starting Codex…\n'; else printf '› Ask Codex to do anything\n ? for shortcuts\n'; fi ;;
+    delivery-late) if [[ $elapsed -lt 6 ]]; then printf 'Starting Codex…\n'; else printf '› Ask Codex to do anything\n ? for shortcuts\n'; fi ;;
     stale) printf 'Earlier startup: Trust this folder?\n› Ask Codex to do anything\n ? for shortcuts\n' ;;
     header) printf 'Trust this folder?\n' ;;
     gate|false-gate|spent) printf 'Trust this folder?\n  1. Trust and continue\n  2. Cancel and exit\nEnter to confirm\n' ;;
@@ -70,6 +92,10 @@ STUB
     --target "$t/target" --agent codex --fresh --mode quick --boot-timeout 5 --prompt 'read-only probe')
   elapsed=$(($(cat "$t/state/clock")-1000))
   case "$scenario" in
+    delivery-budget|delivery-late|missing-budget|missing-partial|missing-fast)
+      [[ "$(jq -r .status <<<"$out")" == error && $elapsed -le 5 ]] && ! grep -q 'agent prompt' "$t/herdr.log"
+      check "$scenario: one requested boot deadline spans launch and first-contact delivery" $? "elapsed=$elapsed out=$out"
+      ;;
     transient|stale|delivery|false-ready|resolution)
       [[ "$(jq -r .status <<<"$out")" == connected && "$(jq -r .confirmed <<<"$out")" == rollout \
          && $(grep -c 'agent start' "$t/herdr.log") == 1 && $(grep -c 'agent prompt' "$t/herdr.log") == 1 ]]
