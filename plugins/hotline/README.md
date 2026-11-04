@@ -601,6 +601,20 @@ mismatches, inconsistent/missing metadata and dead selected-account agents fail
 closed. Recover with a new explicit-home `--fresh` call. Legacy unpinned Codex
 calls retain their existing dead-agent resume behavior.
 
+Herdr's [Codex integration](https://herdr.dev/docs/integrations/#codex) reports
+session identity from a `SessionStart` hook over its local socket. Codex's
+`--disable hooks` disables that reporting too, so an absent `agent_session` is
+expected on this path. Hotline does not install or enable hooks to repair it.
+Selected-account continuation supports that runtime by requiring the live
+kind/name/pane, intact home/thread metadata and session header, and unique
+foreground process ownership of the exact pinned rollout. A PID alone never
+proves identity. Missing ownership evidence refuses before input delivery.
+Operators needing Herdr's hook-based session reporting/native restore must
+separately review its integration and configured hooks in the selected
+`CODEX_HOME`, including any shared `hooks.json` symlink, and resolve real Codex
+trust decisions themselves. Enabling hooks or reporting a matching thread never
+waives Hotline's rollout-ownership verification.
+
 An explicit home refuses split launches, remote calls, explicit resume, cmux,
 headless and non-Codex agents. An empty, relative, missing or inaccessible home is
 an error. New calls without an override preserve the existing defaults.
