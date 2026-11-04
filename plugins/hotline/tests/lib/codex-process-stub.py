@@ -34,6 +34,18 @@ dev = os.environ.get("LSOF_STUB_DEVICE", hex(st.st_dev) if st else "0x0")
 ino = os.environ.get("LSOF_STUB_INODE", str(st.st_ino) if st else "0")
 out = ("p" + os.environ.get("LSOF_STUB_PID", pid) + "\0ccodex\0\n"
        + "f7\0tREG\0D" + dev + "\0i" + ino + "\0n" + rollout + "\0\n")
+native_record = os.environ.get("LSOF_STUB_NATIVE_NPOLICY", "")
+if native_record:
+    out += {
+        "1": "f37\0tNPOLICY\0n\0\n",
+        "missing-name": "f37\0tNPOLICY\0\n",
+        "regular": "f37\0tREG\0n\0\n",
+        "unknown": "f37\0tUNKNOWN\0n\0\n",
+        "duplicate": "f37\0tNPOLICY\0n\0n\0\n",
+        "contradictory": "f37\0tNPOLICY\0n\0i123\0\n",
+        "nonnumeric": "fcwd\0tNPOLICY\0n\0\n",
+        "truncated": "f37\0tNPOLICY\0n",
+    }[native_record]
 if extra:
     out += "f" + os.environ.get("LSOF_STUB_EXTRA_FD", "8") + "\0t" + os.environ.get("LSOF_STUB_EXTRA_TYPE", "REG") + "\0D" + dev + "\0i" + ino + "\0n" + extra
     if not extra.endswith("rollout-incomplete"):

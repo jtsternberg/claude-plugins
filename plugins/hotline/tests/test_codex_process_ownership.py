@@ -59,6 +59,42 @@ class OwnershipTest(unittest.TestCase):
     def test_matching_current_descriptor(self):
         self.verify()
 
+    def test_captured_darwin_npolicy_descriptor_is_not_a_rollout(self):
+        # Exact record54 from pipeline-v2-smoke/followup-lsof.bin, including
+        # its present-but-empty NAME field. All rollout/process evidence stays
+        # independently required by the existing positive/negative controls.
+        self.output += b"f37\0tNPOLICY\0n\0\n"
+        self.verify()
+
+    def test_empty_regular_or_untyped_file_name_still_refuses(self):
+        good = self.output
+        for record in (
+            b"f37\0tREG\0n\0\n", b"f37\0n\0\n", b"f37\0tNPOLICY\0\n",
+            b"f37\0tUNKNOWN\0n\0\n", b"fcwd\0tNPOLICY\0n\0\n",
+            b"f\0tNPOLICY\0n\0\n", b"f37\0t\0n\0\n",
+            b"f37\0tNPOLICY\0n\0n\0\n",
+            b"f37\0tNPOLICY\0n\0D0x1000010\0\n",
+            b"f37\0tNPOLICY\0n\0i123\0\n",
+            b"f37\0tNPOLICY\0n", b"f37\0tNPOLICY\0n\0",
+            b"f37\0tNPOLICY\0n/tmp/rollout-other.jsonl\0\n",
+        ):
+            with self.subTest(record=record):
+                self.output = good + record
+                with self.assertRaises(ValueError):
+                    self.verify()
+
+    def test_npolicy_alone_does_not_prove_rollout_ownership(self):
+        self.output = b"p5151\0ccodex\0\nf37\0tNPOLICY\0n\0\n"
+        with self.assertRaises(ValueError):
+            self.verify()
+
+    def test_npolicy_does_not_override_regular_file_identity(self):
+        self.output = self.output.replace(
+            b"i" + str(self.descriptor.st_ino).encode(), b"i0"
+        ) + b"f37\0tNPOLICY\0n\0\n"
+        with self.assertRaises(ValueError):
+            self.verify()
+
     def test_ordinary_cwd_and_file_with_rollout_named_ancestor(self):
         parent = self.path.parent / "rollout-tools"
         parent.mkdir()
