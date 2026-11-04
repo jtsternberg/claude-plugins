@@ -1,0 +1,25 @@
+title: claude-plugins
+description: Skills, hooks, and automation for Claude Code and Codex.
+url: https://jtsternberg.github.io
+baseurl: /claude-plugins
+repository: jtsternberg/claude-plugins
+lang: en
+
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-readme-index
+  - jekyll-relative-links
+  - jekyll-titles-from-headings
+  - jekyll-seo-tag
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+exclude:
+  - node_modules
+  - vendor
+  - Gemfile
+  - Gemfile.lock
