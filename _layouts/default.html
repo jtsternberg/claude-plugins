@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="{{ site.lang | default: 'en' }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    {% seo %}
+    <script>
+      (() => {
+        let theme;
+        try { theme = localStorage.getItem('claude-plugins-theme'); } catch {}
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ '/assets/css/site.css' | relative_url }}">
+    <script src="{{ '/assets/js/site.js' | relative_url }}" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="site-shell">
+      <header class="site-header">
+        <a class="brand" href="{{ '/' | relative_url }}" aria-label="claude-plugins home"><span class="brand-mark" aria-hidden="true">jt</span><span>claude-plugins</span></a>
+        <nav aria-label="Main navigation">
+          <a class="plugins-nav" href="{{ '/#plugins' | relative_url }}">Plugins</a>
+          <a href="{{ '/docs/compatibility.html' | relative_url }}">Compatibility</a>
+          <button class="theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme" hidden>
+            <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z"/></svg>
+          </button>
+          <a class="github-nav" href="https://github.com/jtsternberg/claude-plugins">GitHub <span aria-hidden="true">↗</span></a>
+        </nav>
+      </header>
+      <main id="main"{% unless page.home %} class="document"{% endunless %}>
+        {% unless page.home %}<a class="back-link" href="{{ '/' | relative_url }}">← Back to the collection</a>{% endunless %}
+        {{ content }}
+      </main>
+      <footer class="site-footer"><span>Made by <a href="https://jtsternberg.com/">Justin Sternberg</a>.</span><span class="license">Open source. <a href="https://github.com/jtsternberg/claude-plugins/blob/main/LICENSE">MIT licensed.</a></span></footer>
+    </div>
+  </body>
+</html>

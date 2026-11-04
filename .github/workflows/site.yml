@@ -1,0 +1,33 @@
+name: site
+
+on:
+  pull_request:
+    paths:
+      - '_config.yml'
+      - '_layouts/**'
+      - 'assets/**'
+      - 'index.html'
+      - 'docs/**'
+      - 'README.md'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/jekyll-build-pages@v1.0.13
+        with:
+          source: ./
+          destination: ./_site
+      - name: Check public entry points
+        run: |
+          test -s _site/index.html
+          test -s _site/docs/compatibility.html
+          test -s _site/plugins/hotline/index.html
+          test -s _site/assets/css/site.css
+          test -s _site/assets/js/site.js

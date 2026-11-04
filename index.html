@@ -1,0 +1,48 @@
+---
+layout: default
+title: Claude Code & Codex plugins
+home: true
+---
+<section class="hero" aria-labelledby="hero-title">
+  <p class="eyebrow">JTSTERNBERG / OPEN SOURCE TOOLKIT</p>
+  <h1 id="hero-title">Claude Code<br>&amp; Codex plugins.</h1>
+  <div class="hero-description"><p>A curated collection of skills, hooks, and automation<br class="desktop-break"> for the way you work with coding agents.</p><p class="hero-note">MIT LICENSE<br>BUILT TO BE SHARED</p></div>
+  <div class="hero-actions"><a class="button button-primary" href="#get-started">Get started <span aria-hidden="true">↓</span></a><a class="button" href="#plugins">Browse plugins <span aria-hidden="true">↗</span></a></div>
+</section>
+
+<section class="quick-start" id="get-started" aria-labelledby="quick-start-title">
+  <p class="section-index">01 / QUICK START</p>
+  <div class="section-heading"><h2 id="quick-start-title">Pick your harness.</h2><a href="{{ '/docs/compatibility.html' | relative_url }}">Check compatibility <span aria-hidden="true">↗</span></a></div>
+  <div class="install-grid">
+    <article class="install-card">
+      <h3>Claude Code</h3>
+      <p>Add the marketplace. Install a plugin.</p>
+      <pre><code><span>claude plugin marketplace add \
+  jtsternberg/claude-plugins</span>
+<span class="command-accent">claude plugin install git-tree@jtsternberg</span></code></pre>
+      <a href="{{ '/docs/compatibility.html#claude-code' | relative_url }}">Installation guide <span aria-hidden="true">↗</span></a>
+    </article>
+    <article class="install-card">
+      <h3>Codex</h3>
+      <p>Add the marketplace. Install a plugin.</p>
+      <pre><code><span>codex plugin marketplace add \
+  jtsternberg/claude-plugins</span>
+<span class="command-accent">codex plugin add codex@jtsternberg</span></code></pre>
+      <a href="{{ '/docs/compatibility.html#codex' | relative_url }}">Installation guide <span aria-hidden="true">↗</span></a>
+    </article>
+  </div>
+  <p class="availability-note">Availability differs by harness. The <a href="{{ '/docs/compatibility.html#plugin-support-matrix' | relative_url }}">support matrix</a> is the complete inventory.</p>
+</section>
+
+<section class="plugin-highlights" id="plugins" aria-labelledby="plugins-title">
+  <p class="section-index">02 / PLUGIN HIGHLIGHTS</p>
+  <div class="section-heading"><h2 id="plugins-title">Small tools. Useful workflows.</h2><a href="{{ '/docs/compatibility.html#plugin-support-matrix' | relative_url }}">View support matrix <span aria-hidden="true">↗</span></a></div>
+  <ul class="plugin-list">
+    <li><a href="https://github.com/jtsternberg/claude-plugins/tree/main/plugins/hotline"><h3>hotline</h3><p>Call another agent workspace. Keep the context.</p><span class="plugin-category">Collaboration</span><span class="plugin-arrow" aria-hidden="true">↗</span></a></li>
+    <li><a href="https://github.com/jtsternberg/claude-plugins/tree/main/plugins/git-tree"><h3>git-tree</h3><p>Create Git worktrees with symlinked dependencies.</p><span class="plugin-category">Development</span><span class="plugin-arrow" aria-hidden="true">↗</span></a></li>
+    <li><a href="https://github.com/jtsternberg/claude-plugins/tree/main/plugins/cmux-cli"><h3>cmux-cli</h3><p>Drive your terminal workspaces, panes, and tabs.</p><span class="plugin-category">Terminal</span><span class="plugin-arrow" aria-hidden="true">↗</span></a></li>
+    <li><a href="https://github.com/jtsternberg/claude-plugins/tree/main/plugins/pr-workflow"><h3>pr-workflow</h3><p>Review, address comments, and keep PRs moving.</p><span class="plugin-category">Code review</span><span class="plugin-arrow" aria-hidden="true">↗</span></a></li>
+    <li><a href="https://github.com/jtsternberg/claude-plugins/tree/main/plugins/obsidian-cli"><h3>obsidian-cli</h3><p>Work with your Obsidian vault from the terminal.</p><span class="plugin-category">Knowledge</span><span class="plugin-arrow" aria-hidden="true">↗</span></a></li>
+  </ul>
+  <a class="all-plugins" href="https://github.com/jtsternberg/claude-plugins#plugin-highlights">Explore the full collection on GitHub <span aria-hidden="true">↗</span></a>
+</section>

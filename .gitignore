@@ -45,3 +45,8 @@ __pycache__/
 /.visual-review/
 /.visual-review-*/
 /.beads.gate.lock
+
+# Jekyll output
+/_site/
+/.jekyll-cache/
+/.jekyll-metadata

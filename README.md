@@ -10,6 +10,9 @@ Codex. The two harnesses use different catalogs in this repository, so check
 the [support matrix](docs/compatibility.md#plugin-support-matrix) before
 installing.
 
+Browse the [website](https://jtsternberg.github.io/claude-plugins/) for a quick
+start and selected plugins. See [site maintenance](docs/site.md) for the Jekyll theme.
+
 ---
 
 ## Quick Start
