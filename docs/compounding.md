@@ -188,6 +188,11 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   burned its full budget and proceeded blind on every call. When flipping a flag
   changes what attaches a resource, re-derive the wait's signal instead of keeping it.
   (claude-plugins-r465.4, -r465.2)
+- **Gate a first write on the ready state being drawn, never on a blocking state being
+  absent.** herdr reports an agent interactive-ready while a startup dialog takes
+  keystrokes, and Codex draws its hooks-review dialog seconds after that report — so a
+  one-shot "no dialog on screen" read passes and the opening Enter answers the
+  dialog. Poll for the composer; refuse on a known dialog. (claude-plugins-59ry, 550f150)
 - **A probe answers only about the one thing it varied.** Two trust-dialog verdicts
   came from probes that differed from the claim in a second way: a `git init` dir
   under a trusted parent read as "trust does not inherit from a *directory*", and a

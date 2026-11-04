@@ -1,7 +1,7 @@
 ---
 name: hotline-dial
-description: "Call another Claude Code workspace — quick calls, work orders, conference calls. 'Call/dial/message/delegate to <workspace or project>'. Also dials a workspace on ANOTHER machine over SSH (--remote <ssh-target>, herdr on that box)."
-argument-hint: "--label <2-4 words> [--headless] [--herdr] [--remote <ssh-target>] [--detached] [--window <name|ref>] [workspace] [task/question...]"
+description: "Call another Claude Code or Codex workspace — quick calls, work orders, conference calls, follow-ups, and Codex thread adoption. 'Call/dial/message/delegate to <workspace or project>'. Also dials a workspace on ANOTHER machine over SSH (--remote <ssh-target>, herdr on that box)."
+argument-hint: "--label <2-4 words> [--headless] [--herdr] [--codex] [--remote <ssh-target>] [--detached] [--window <name|ref>] [workspace] [task/question...]"
 allowed-tools: Bash, ListAgents, SendMessage
 ---
 
@@ -18,19 +18,22 @@ status it returns.
 
 - **`$0`** (optional): Where to dial — a dirmap ID, path, fuzzy name, or a
   **session ID**, which dials that *conversation*: the callee resumes it, forked by
-  default. To reach only the repo a session lives in, pass the workspace.
+  default for Claude; Codex continues its thread directly. To reach only the repo
+  a session lives in, pass the workspace.
 - **`$1+`** (optional): The task/question for the remote workspace.
 - **`--resume <session-id>`**: continue a conversation that is not the target —
   a session in one repo while the callee is dialed into another. A session ID passed
   as the target already implies this, so you rarely need the flag. Forks by default,
   so hotline protocol noise stays out of the original transcript; `--no-fork`
-  contributes to it instead. → `--resume <session-id>` `[--no-fork]`
+  contributes to it instead. With `--agent codex`, continues a Codex thread
+  directly, without a fork. → `--resume <session-id>` `[--no-fork]`
 - **`--headless`**: force the headless transport (`claude -p`) for this dial even when cmux is up. Debugging the headless path, A/B-ing transports, or wanting `claude -p`'s structured output. Costs programmatic-usage credit; the cmux default doesn't. → `--headless`
 - **`--detached`** / **`--new-workspace`**: spawn the callee in a disconnected new workspace tab instead of a side-by-side surface. The tab auto-closes once the response is captured, so nothing is left to watch or clean up. → `--placement detached`
 - **`--window <name|ref>`**: land the callee as a surface in a specific cmux window (find-or-create), for grouping workers by project. A `window:<n>` ref targets that window; a bare name reuses the window holding a workspace titled `<name>`. Wins over `--detached` if both are given. → `--window <name|ref>`
 - **`--label <text>`** — **REQUIRED on every dial**, and normally yours to write rather than the user's: 2-4 words naming what this callee is *doing*, e.g. `fix-hotline-titles`, `review pr 2393`, `audit the cache gate`. It becomes the callee's session name, which is what you read in the cmux tab strip — `◑ hotline: fix-hotline-titles (work_order)`, glyph and all. Nothing else tells two callees in one repo apart. Missing, empty, or whitespace-only is an args error. On a **follow-up** it is ignored: the callee keeps the name first contact gave it. → `--label <text>`
 - **`--herdr`**: host the callee as a **herdr agent** instead of a cmux surface — a persistent pane owned by the herdr server, so the callee **survives a detach, a closed lid, or a dropped SSH session**. That is the reason to ask for it: a long work order you do not want tied to the life of a window. Requires herdr running, here or — with `--remote` below — on another box. Takes any mode, including `conference`, and either the side or detached placement (herdr splits a pane off yours for both). → `--transport herdr`
 - **`--remote <ssh-target>`**: run the callee **on another box** — herdr splits a pane and starts claude *there*, and hotline reads its answer back over ssh. For work that belongs on that machine: its checkout, its GPU, its network. It **selects herdr on its own** (nothing else can host anywhere but here) and is detached by nature, so `--remote <target>` alone is the whole invocation. Needs a non-interactive ssh hop plus herdr *and* claude on that box; if any of that is missing the dial is an **error**, never a quiet local call. → `--remote <ssh-target>`
+- **`--codex`**: the callee is a **Codex** agent instead of claude, hosted over local or remote herdr (it selects herdr on its own), with cached follow-ups and Codex thread adoption. Its answer comes back through the same response wait. See **`--agent codex`** below. → `--agent codex`
 
 ```
 /hotline:hotline-dial dotfiles what branch are you on?
@@ -42,6 +45,7 @@ status it returns.
 /hotline:hotline-dial --window lindris backend tests, please
 /hotline:hotline-dial --herdr dotfiles run the 40-minute migration
 /hotline:hotline-dial --remote jt@buildbox lindris run the integration suite
+/hotline:hotline-dial --codex cmb2 fix the failing field test
 ```
 
 Strip those flags out of the args before reading `$0` and `$1+`, and pass the
@@ -103,6 +107,7 @@ Flags: `--mode quick|work_order|conference` (required),
 `--label <text>` (required — 2-4 words naming what the callee is doing),
 `--prompt-file <path>` (or `--prompt <text>` for a one-liner),
 `--headless`, `--transport cmux|herdr|headless`, `--remote <ssh-target>`,
+`--agent claude|codex`,
 `--placement side|detached`,
 `--window <name|ref>`, `--resume <session-id>` `[--no-fork]`,
 `--refresh-identity`,
@@ -178,7 +183,7 @@ conference mode both work here.
 |---|---|
 | `--transport herdr`, any mode, `--placement side` or `--detached` | supported — first contact and follow-ups |
 | `--placement window` / `--window <ref>` | refused — hotline creates no herdr workspaces or tabs, so there is no window to place a callee in. Not a phase gate; a feature nobody has built |
-| `--resume <someone-else's-session-id>` | refused — herdr hosts a callee it *starts*, with a session id hotline presets so the transcript is readable; `claude --resume` cannot take that preset. Continuing a session **you** dialed needs no flag (see below) |
+| `--resume <someone-else's-session-id>` | refused for Claude sessions — herdr hosts a Claude callee with a session id hotline presets so the transcript is readable; `claude --resume` cannot take that preset. Codex thread adoption is supported with `--agent codex`. Continuing a session **you** dialed needs no flag (see below) |
 | `--remote <ssh-target>` | supported — see below. Implies `--transport herdr` and, unless a placement was typed, `--detached` |
 | `--remote` with an explicit `--placement side` | refused — a pane on another box is beside nothing here. Side placement is accepted for a *local* herdr dial only |
 | `--remote` with `--transport cmux`/`headless` | refused — remote hosting is herdr-only; a cmux surface lives in this machine's window server and `claude -p` is a local process |
@@ -323,6 +328,46 @@ away.
 `.awaiting_response` is `false` for a conference call **on first contact**, on either
 transport — that session is handed to the user in a visible surface (cmux) or a
 focused pane (herdr), so there is nothing to poll. Report it and stop.
+
+### `--agent codex` — a Codex callee
+
+`--agent codex` starts `codex` instead of claude — in a herdr pane by default
+(`herdr agent start --kind codex`), a cmux surface, or headless — delivers the work order as a `$hotline:hotline-ringing` mention
+(Codex loads the same ringing skill from the installed hotline plugin) plus a
+one-line STATUS reminder, and reads the answer from the callee's **Codex rollout**
+(`~/.codex/sessions/…/rollout-*-<thread>.jsonl`), found by the call nonce. The
+rollout is normalized into the rows the Claude transcript reader already parses, so
+`wait-for-response.sh`'s exit codes and `response.json` are unchanged.
+`.agent` is `"codex"` in the connected JSON, `.confirmed` is `"rollout"`, and
+`.remote_session_id` is the codex thread id.
+
+| Combination | Result |
+|---|---|
+| `--agent codex` over herdr (default), any mode, side or detached | supported. A re-dial of the same target reuses the cached live codex agent with a `$hotline:hotline-ringing [FOLLOW_UP]` message and a new nonce; if that agent died, a new one runs `codex resume <thread>` so the conversation continues (`herdr-agent-reuse→resumed` in `.fallbacks`) |
+| `--agent codex --remote <ssh-target>` | supported (herdr) — checks remote `codex` on PATH, confirms the nonce on that box, and mirrors the rollout from its `$HOME/.codex/sessions` each response poll |
+| `--resume <codex-thread-id>`, or a thread id as the target | supported over herdr — launches `codex resume <id>` and continues that thread, unforked; a thread-id target gets its workspace from the rollout. Claude session ids are refused (`args`), as is `--resume` over cmux/headless |
+| `--agent codex --transport cmux`, quick/work_order, side/detached/window | supported — `codex` runs in the surface; first contact waits for codex's composer (refusing on a dialog) and is confirmed by the nonce in the rollout. First contact only: a re-dial starts a new callee |
+| `--transport cmux --mode conference` | refused (`args`) — the cmux conference path is claude-only; use herdr |
+| `--agent codex --headless` (or `--transport headless`) | supported — runs `codex exec --json -o <file> -` with the prompt on stdin; the reply is codex's last message, with bare STATUS lines (no nonce) as for claude headless. First contact only |
+| `HOTLINE_CALLEE_ENV*` | supported on every host — delivered as `-c shell_environment_policy.set.<KEY>=<value>`, which reaches the commands codex runs |
+| `--tools` | refused (`args`) — claude's allowlist has no honest codex mapping; use `HOTLINE_CODEX_ARGS="-s read-only"` for a sandbox |
+| a cached callee of the other kind | starts fresh with an agent-kind mismatch in `.fallbacks`; claude and codex never follow up into each other's callees. Only herdr codex calls are cached at all — cmux and headless ones go to dial history only |
+
+Local thread lookup uses `${CODEX_HOME:-~/.codex}/sessions`; with `--remote`, it
+runs on the remote box under its `$HOME/.codex/sessions`.
+
+Startup gates are refused before anything is typed (`stage: deliver`, `sent:false`):
+Codex's folder-trust dialog, its **hooks-review** dialog (shown whenever hooks are
+new or changed — herdr reports that one as ready, so hotline waits for Codex's
+composer to appear before typing), and the update prompt (suppressed with
+`-c check_for_update_on_startup=false`). hotline never answers a trust decision:
+run `codex` in the directory once and answer it, or pass
+`HOTLINE_CODEX_ARGS="--disable hooks"` to skip hooks for that callee only.
+`codex exec` (headless) shows no dialogs at all — and it **persists folder trust**
+for the target directory in `~/.codex/config.toml` without asking (verified on
+codex-cli 0.165.0), so a later interactive codex there skips the trust dialog too.
+Approvals and sandbox come from your `~/.codex/config.toml`;
+`HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1` adds `--dangerously-bypass-approvals-and-sandbox`.
 
 ## Your judgment calls
 
@@ -576,6 +621,10 @@ the caller took over."
 ## Environment knobs
 
 Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
+
+- **`HOTLINE_CODEX_MODEL=<model>`** — `--agent codex` only: passed as `codex -m`.
+- **`HOTLINE_CODEX_ARGS="<args>"`** — `--agent codex` only: extra codex argv,
+  whitespace-split (no quoting), e.g. `--disable hooks` or `-p <profile>`.
 
 - **`HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1`** — adds
   `--dangerously-skip-permissions` to the receiver's `claude`. **Off by default,

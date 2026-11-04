@@ -7,7 +7,12 @@
 # Usage:
 #   herdr-prompt.sh --agent <name> --payload-file <path> --call-id <nonce>
 #                   [--cwd <callee-cwd>] [--session <callee-session-id>]
-#                   [--timeout <ms>] [--first-contact]
+#                   [--timeout <ms>] [--first-contact] [--agent-kind claude|codex]
+#
+# --agent-kind codex: the proof is the nonce in the callee's Codex ROLLOUT, found by
+# that nonce (scripts/codex-rollout.sh) — --session is unknown until it lands, and on
+# success the JSON adds "rollout" and "thread_id" so dial.sh can record both. The
+# first-contact screen gate checks Codex's startup dialogs instead of Claude's.
 #
 #   # → {"delivered":true,"sent":true,"confirmed":"transcript","agent":"…"}
 #   # → {"delivered":false,"sent":false,"reason":"…"}   nothing reached the callee
@@ -133,6 +138,7 @@ CWD=""
 SESSION_ID=""
 TIMEOUT_MS=""
 FIRST_CONTACT=false
+AGENT_KIND="claude"
 # Same confirmation budget as cmux-paste.sh, and the same reasoning: generous
 # enough for a transcript flush, short enough that a genuinely lost payload is
 # reported in seconds rather than discovered a minute later by the response wait.
@@ -159,6 +165,7 @@ while [[ $# -gt 0 ]]; do
     --session)      SESSION_ID="$2";   shift 2 ;;
     --timeout)      TIMEOUT_MS="$2";   shift 2 ;;
     --first-contact) FIRST_CONTACT=true; shift ;;
+    --agent-kind)   AGENT_KIND="$2";   shift 2 ;;
     *)              shift ;;
   esac
 done
@@ -241,8 +248,27 @@ if $FIRST_CONTACT; then
   # interactive_ready: this probe can prove a dialog is there, never that one is not,
   # and turning "could not look" into a refusal would make delivery impossible instead
   # of unproven the day `agent read` changes shape.
-  herdr_agent_screen "$AGENT"
-  if repl_trust_dialog_present "$HERDR_AGENT_SCREEN"; then
+  herdr_agent_screen "$AGENT" "$([[ "$AGENT_KIND" == codex ]] && echo visible || echo recent)"
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    # shellcheck source=../../../scripts/codex-rollout.sh
+    source "$HOTLINE_SCRIPTS/codex-rollout.sh"
+    # WAIT FOR THE COMPOSER, not merely for the absence of a dialog — see
+    # codex_composer_ready. An unreadable screen proceeds, as for claude below.
+    COMPOSER_TRIES="${HOTLINE_CODEX_COMPOSER_TRIES:-60}"
+    composer_try=0
+    while [[ -n "$HERDR_AGENT_SCREEN" ]]; do
+      if CODEX_DIALOG=$(codex_startup_dialog "$HERDR_AGENT_SCREEN"); then
+        undelivered "$(codex_startup_dialog_recovery "$CODEX_DIALOG" "$CWD") NOTHING WAS SUBMITTED: herdr reported agent $AGENT ready, but a work order typed into that dialog would answer it instead of becoming a turn. \`${HERDR_HOP}herdr agent attach $AGENT\` shows it." false
+      fi
+      codex_composer_ready "$HERDR_AGENT_SCREEN" && break
+      composer_try=$((composer_try + 1))
+      if [[ $composer_try -ge $COMPOSER_TRIES ]]; then
+        undelivered "codex agent $AGENT never drew its input composer within the readiness budget, and no known startup dialog is on screen either — \`${HERDR_HOP}herdr agent attach $AGENT\` shows what is there. Nothing was submitted, so re-dialing is safe. Screen tail: $(printf '%s' "$HERDR_AGENT_SCREEN" | grep -v '^[[:space:]]*$' | tail -3 | tr '\n' ' ' | cut -c1-200)" false
+      fi
+      sleep "$CONFIRM_SLEEP"
+      herdr_agent_screen "$AGENT" visible
+    done
+  elif repl_trust_dialog_present "$HERDR_AGENT_SCREEN"; then
     # THE FIX GOES FIRST in this string, deliberately. dial.sh forwards a detail
     # whole now (claude-plugins-e3xr), but the reader of a failed dial scans the
     # front of it, and this reason's first wording led with the diagnosis and buried
@@ -264,7 +290,9 @@ fi
 # herdr-remote.sh. What does NOT differ is the rule: the nonce in the callee's own
 # transcript is the only proof, and there is still no second tier.
 TRANSCRIPTS=()
-if hotline_remote_active; then
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  :  # found by nonce after the submit — see --agent-kind in the header
+elif hotline_remote_active; then
   while IFS= read -r _p; do
     [[ -n "$_p" ]] && TRANSCRIPTS+=("$_p")
   done < <(hotline_remote_transcript_candidates "$CWD" "$SESSION_ID")
@@ -315,7 +343,9 @@ confirm_nonce() {  # confirm_nonce <nonce> <tries> <sleep> <path>...
 # transcript, delivery would report confirmed, and the caller would then wait forever
 # for a protocol that never engaged.
 PROMPT_TEXT=$(cat "$PAYLOAD_FILE")
-if hotline_payload_needs_split_delivery "$PAYLOAD_FILE"; then
+# Codex has no slash-command parse to protect (dial.sh invokes the skill as a
+# `$hotline:…` mention, which works anywhere in the message), so it is never split.
+if [[ "$AGENT_KIND" != "codex" ]] && hotline_payload_needs_split_delivery "$PAYLOAD_FILE"; then
   if [[ -z "$AGENT_PANE" ]]; then
     undelivered "herdr agent $AGENT reports no pane_id, and this payload is a slash command with a body — which has to be delivered as an invocation line (\`pane send-text\`) followed by the body (\`agent prompt\`), or the slash command never parses and the callee reads the work order as plain text. Nothing was submitted; re-dial is safe." false
   fi
@@ -373,6 +403,31 @@ PROMPT_SENT=true
 # herdr's ok is its own ack, not delivery proof — the same no-trusting-exit-codes
 # rule cmux delivery lives by. The nonce reaching the callee's transcript is proof;
 # nothing else here is.
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  source "$HOTLINE_SCRIPTS/codex-rollout.sh"
+  if hotline_remote_active; then
+    if ROLLOUT=$(codex_find_rollout "$CALL_ID" 240 "$CONFIRM_TRIES" "$CONFIRM_SLEEP"); then
+      jq -nc --arg a "$AGENT" --arg s "${AGENT_STATUS:-unknown}" --arg r "$ROLLOUT" --arg t "$(codex_thread_id_of "$ROLLOUT")" \
+        '{delivered:true,sent:true,confirmed:"rollout",agent:$a,agent_status:$s,rollout:$r,thread_id:$t}'
+      exit 0
+    fi
+    undelivered "submitted to remote herdr agent $AGENT but nonce $CALL_ID never appeared in any Codex rollout on $(hotline_remote_target). Read that box's ~/.codex/sessions before re-dialing; a re-dial may run the work order twice."
+  fi
+  try=0
+  while [[ $try -lt $CONFIRM_TRIES ]]; do
+    if ROLLOUT=$(codex_find_rollout "$CALL_ID"); then
+      jq -nc --arg a "$AGENT" --arg s "${AGENT_STATUS:-unknown}" --arg r "$ROLLOUT" \
+             --arg t "$(codex_thread_id_of "$ROLLOUT")" \
+        '{delivered: true, sent: true, confirmed: "rollout", agent: $a, agent_status: $s,
+          rollout: $r, thread_id: $t}'
+      exit 0
+    fi
+    try=$((try + 1))
+    sleep "$CONFIRM_SLEEP"
+  done
+  undelivered "submitted to herdr agent $AGENT but nonce $CALL_ID never appeared in any Codex rollout under $(codex_sessions_root) within the confirmation budget. Look for it there (or \`herdr agent attach $AGENT\`) before re-dialing — a re-dial would run the work order twice."
+fi
+
 if [[ ${#TRANSCRIPTS[@]} -eq 0 ]]; then
   undelivered "submitted to herdr agent $AGENT but delivery is unconfirmable: no transcript path could be derived (need both --cwd and --session). Read the callee's transcript for call_id $CALL_ID before re-dialing — a re-dial would run the work order twice."
 fi

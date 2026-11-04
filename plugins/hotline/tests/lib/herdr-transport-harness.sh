@@ -514,8 +514,12 @@ fi
 [[ -z "$CMD" ]] && exit 0
 [[ "${SSH_STUB_NO_HERDR:-}" == "1" ]] && PATH="/usr/bin:/bin"
 [[ -n "${SSH_STUB_HOME:-}" ]] && export HOME="$SSH_STUB_HOME"
-if [[ "${SSH_STUB_NO_CLAUDE:-}" == "1" ]]; then
-  command() { if [[ "${2:-}" == "claude" ]]; then return 1; fi; builtin command "$@"; }
+if [[ "${SSH_STUB_NO_CLAUDE:-}" == "1" || "${SSH_STUB_NO_CODEX:-}" == "1" ]]; then
+  command() {
+    [[ "${2:-}" == claude && "${SSH_STUB_NO_CLAUDE:-}" == 1 ]] && return 1
+    [[ "${2:-}" == codex && "${SSH_STUB_NO_CODEX:-}" == 1 ]] && return 1
+    builtin command "$@"
+  }
 fi
 eval "$CMD"
 STUB

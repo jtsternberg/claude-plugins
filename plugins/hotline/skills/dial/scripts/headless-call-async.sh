@@ -16,6 +16,12 @@
 #
 # Usage:
 #   headless-call-async.sh --cwd <path> --prompt <text> [--resume <id>] [--name <name>] [--fork-session]
+#                          [--agent claude|codex]
+#
+# --agent codex runs `codex exec --json -o <last-message> -` instead: the same
+# stdin prompt, the same call-dir files, session_id.txt from its thread.started
+# event (the codex thread id) and response.json from the last-message file. No
+# resume/fork/--name/--tools for codex: dial.sh refuses them before this runs.
 #   # Returns immediately with: {"call_dir": "/tmp/hotline-call-xxxxx"}
 #   # Then poll for done file and read response.json
 # =============================================================================
@@ -39,6 +45,7 @@ RESUME_ID=""
 SESSION_NAME=""
 FORK_SESSION=false
 ALLOWED_TOOLS="Bash Read Edit Write Grep Glob"
+AGENT_KIND="claude"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -49,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --name) SESSION_NAME="$2"; shift 2 ;;
     --fork-session) FORK_SESSION=true; shift ;;
     --tools) ALLOWED_TOOLS="$2"; shift 2 ;;
+    --agent) AGENT_KIND="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -98,6 +106,7 @@ CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 # handle — this file is the only positive evidence of its backend a reader gets.
 # See wait-for-session.sh's dispatch block for the whole contract.
 echo headless > "$CALL_DIR/transport.txt"
+echo "$AGENT_KIND" > "$CALL_DIR/agent_kind.txt"
 # Persist receiver cwd + [MODE:]/[CALLER:]/[SESSION:] tags from the ringing
 # prompt so wait-for-session.sh can register the call in the sessions registry.
 # The prompt goes on STDIN, so it needs a file inside the call dir either way:
@@ -126,6 +135,25 @@ CMD=(claude -p --allowedTools $ALLOWED_TOOLS --output-format stream-json --verbo
 
 if [[ -n "$RESUME_ID" ]]; then
   CMD+=(--resume "$RESUME_ID")
+fi
+
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  if [[ -n "$RESUME_ID" ]] || $FORK_SESSION; then
+    echo '{"error": "--agent codex headless starts a new codex exec; --resume/--fork-session are claude-only here"}'
+    rm -rf "$CALL_DIR"; exit 1
+  fi
+  CMD=(codex exec --json -o "$CALL_DIR/last_message.txt" -c check_for_update_on_startup=false)
+  [[ -n "${HOTLINE_CODEX_MODEL:-}" ]] && CMD+=(-m "$HOTLINE_CODEX_MODEL")
+  case "${HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS:-}" in
+    1|true|TRUE|yes|YES) CMD+=(--dangerously-bypass-approvals-and-sandbox) ;;
+  esac
+  while IFS= read -r -d '' _codex_env; do CMD+=(-c "$_codex_env"); done < <(callee_env_codex_config)
+  if [[ -n "${HOTLINE_CODEX_ARGS:-}" ]]; then
+    read -r -a _codex_extra <<<"$HOTLINE_CODEX_ARGS"
+    CMD+=("${_codex_extra[@]}")
+  fi
+  CMD+=(-)
+  SESSION_NAME=""
 fi
 
 if [[ -n "$SESSION_NAME" ]]; then
@@ -158,7 +186,7 @@ fi
     (cd "$EXEC_DIR" && "${CMD[@]}" <"$STDIN_PROMPT" 2>"$STDERR_FILE") | while IFS= read -r line; do
       echo "$line" >> "$STREAM_FILE"
       if ! $SID_WRITTEN; then
-        SID=$(echo "$line" | jq -r '.session_id // empty' 2>/dev/null || true)
+        SID=$(echo "$line" | jq -r '.session_id // .thread_id // empty' 2>/dev/null || true)
         if [[ -n "$SID" ]]; then
           echo "$SID" > "$CALL_DIR/session_id.txt"
           SID_WRITTEN=true
@@ -197,7 +225,25 @@ fi
     exit 0
   fi
 
-  RESULT_LINE=$(grep '"type":"result"' "$STREAM_FILE" 2>/dev/null | tail -1 || true)
+  # codex exec has no claude `result` event: its turn ends with turn.completed (or
+  # turn.failed), and -o wrote the final message. Shaped into the same RESULT_LINE
+  # so everything below — fallbacks, STATUS markers, response.json — is shared.
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    CODEX_SID=$(jq -r 'select(.type == "thread.started") | .thread_id' "$STREAM_FILE" 2>/dev/null | head -1 || true)
+    if grep -q '"type":"turn.completed"' "$STREAM_FILE" 2>/dev/null && [[ -f "$CALL_DIR/last_message.txt" ]]; then
+      RESULT_LINE=$(jq -nc --arg sid "$CODEX_SID" --rawfile r "$CALL_DIR/last_message.txt" \
+        '{type: "result", session_id: $sid, result: ($r | sub("\\n+$"; "")), num_turns: 1}' 2>/dev/null || true)
+    else
+      RESULT_LINE=""
+      FAILED=$(jq -r 'select(.type == "turn.failed" or .type == "error") | (.error.message // .message // empty)' "$STREAM_FILE" 2>/dev/null | tail -1 || true)
+      if [[ -n "$FAILED" ]]; then
+        echo "codex exec failed: $FAILED" > "$STDERR_FILE.codex"
+        STDERR_FILE="$STDERR_FILE.codex"
+      fi
+    fi
+  else
+    RESULT_LINE=$(grep '"type":"result"' "$STREAM_FILE" 2>/dev/null | tail -1 || true)
+  fi
 
   if [[ -z "$RESULT_LINE" ]]; then
     STDERR_MSG=$(cat "$STDERR_FILE" 2>/dev/null || true)

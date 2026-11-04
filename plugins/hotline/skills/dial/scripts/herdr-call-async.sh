@@ -70,10 +70,19 @@
 #
 # Usage:
 #   herdr-call-async.sh --cwd <path> (--prompt <text> | --prompt-file <path>)
+#                       [--agent claude|codex] [--resume <codex-thread-id>]
 #                       [--name <session-name>] [--label <text>] [--tools <list>]
 #                       [--boot-timeout <seconds>] [--detached]
 #   # → {"call_dir":"…","agent":"hotline-…","pane":"w6:p2","session_id":"…"}
 #   #   plus "remote":"<ssh-target>" when $HOTLINE_HERDR_REMOTE hosted it
+#
+# --agent codex starts `codex` instead of `claude` (herdr `--kind codex`). Codex
+# cannot be handed a session id up front, so the call dir gets agent_kind.txt=codex
+# and NO session_id.txt/session_id_preset.txt: the thread id is learned from the
+# rollout once the prompt lands (dial.sh writes it after delivery; see
+# scripts/codex-rollout.sh for why the rollout is the response channel). --name is
+# dropped and --tools refused (claude-only); HOTLINE_CALLEE_ENV is delivered as
+# codex shell_environment_policy overrides (callee_env_codex_config).
 #
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
 # --detached is accepted and ignored, and so is a side placement: dial.sh's
@@ -118,13 +127,16 @@ SESSION_NAME=""
 BOOT_TIMEOUT=""
 RESUME_ID=""
 FORK_SESSION=false
+AGENT_KIND="claude"
+TOOLS_GIVEN=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cwd)          CWD="$2";           shift 2 ;;
     --prompt)       PROMPT="$2";        shift 2 ;;
     --prompt-file)  PROMPT_FILE="$2";   shift 2 ;;
-    --tools)        ALLOWED_TOOLS="$2"; shift 2 ;;
+    --tools)        ALLOWED_TOOLS="$2"; TOOLS_GIVEN=true; shift 2 ;;
+    --agent)        AGENT_KIND="$2";    shift 2 ;;
     --label)        LABEL="$2";         shift 2 ;;
     --name)         SESSION_NAME="$2";  shift 2 ;;
     --boot-timeout) BOOT_TIMEOUT="$2";  shift 2 ;;
@@ -187,9 +199,20 @@ fi
 # This is NOT the follow-up path and never was: a follow-up re-targets the herdr
 # agent that already hosts the session (herdr-reuse-agent.sh), so it launches
 # nothing and needs no resume.
-if [[ -n "$RESUME_ID" ]] || $FORK_SESSION; then
+if { [[ -n "$RESUME_ID" ]] || $FORK_SESSION; } && [[ "$AGENT_KIND" != codex ]]; then
   die "herdr cannot re-host an existing claude session: --resume/--fork-session are incompatible with the --session-id preset the transcript path is derived from. To continue a session hotline already dialed, re-dial the target and the live herdr agent is re-targeted by name; to adopt an unrelated session id, dial with --transport cmux."
 fi
+
+case "$AGENT_KIND" in
+  claude) ;;
+  codex)
+    # dial.sh refuses these at its args gate; repeated for a direct invocation.
+    $TOOLS_GIVEN && die "--tools is a claude --allowedTools list; a codex callee has no equivalent, so it is refused rather than ignored"
+    command -v codex >/dev/null 2>&1 || hotline_remote_active \
+      || die "--agent codex: codex is not on PATH, so herdr would have nothing to start"
+    ;;
+  *) die "--agent must be claude or codex, got '$AGENT_KIND'" ;;
+esac
 
 if [[ -n "$BOOT_TIMEOUT" && ! "$BOOT_TIMEOUT" =~ ^[0-9]+$ ]]; then
   die "--boot-timeout must be a whole number of seconds, got '$BOOT_TIMEOUT'"
@@ -226,6 +249,9 @@ CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 # Which backend owns this call dir. Written with the dir, before a host exists, so
 # it is there for every later reader even if this launcher dies mid-placement.
 echo herdr > "$CALL_DIR/transport.txt"
+# Which program answers in that pane. Absent = claude, the shape of every call dir
+# written before codex callees existed; every reader keys its transcript source on it.
+echo "$AGENT_KIND" > "$CALL_DIR/agent_kind.txt"
 # See WHY NOTHING IS CLOSED in the header.
 echo true > "$CALL_DIR/keep_workspace.txt"
 echo "$CWD" > "$CALL_DIR/cwd.txt"
@@ -253,9 +279,12 @@ fi
 # the callee boots. (Verified live on herdr 0.8.0: `agent start … -- --session-id
 # <uuid>` reaches claude verbatim.) herdr ALSO reports the session id it observed,
 # and that observation wins over this preset if the two ever disagree — see below.
-SESSION_ID_PRESET=$(hotline_mint_session_uuid)
-[[ -z "$SESSION_ID_PRESET" ]] && die "could not mint a session UUID (no uuidgen, /proc uuid, or /dev/urandom)"
-echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id_preset.txt"
+SESSION_ID_PRESET=""
+if [[ "$AGENT_KIND" == "claude" ]]; then
+  SESSION_ID_PRESET=$(hotline_mint_session_uuid)
+  [[ -z "$SESSION_ID_PRESET" ]] && die "could not mint a session UUID (no uuidgen, /proc uuid, or /dev/urandom)"
+  echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id_preset.txt"
+fi
 
 # Per-call nonce. Same protocol as every other transport — the receiver echoes it
 # back as `STATUS: <signal> call_id=<nonce>`, delivery confirmation proves itself
@@ -411,6 +440,32 @@ case "${HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS:-}" in
 esac
 CLAUDE_ARGS+=("--allowedTools=$ALLOWED_TOOLS")
 
+# The codex argv. The update check is off because its "Update available" prompt is a
+# startup dialog that blocks the pane (herdr: `blocked`, so `agent start` fails) —
+# verified live on codex-cli 0.165.0. Approvals/sandbox are left to the user's own
+# config.toml unless the same opt-in that skips claude's permission gates is set.
+CODEX_ARGS=(-c check_for_update_on_startup=false)
+[[ -n "$RESUME_ID" ]] && CODEX_ARGS+=(resume "$RESUME_ID")
+[[ -n "${HOTLINE_CODEX_MODEL:-}" ]] && CODEX_ARGS+=(-m "$HOTLINE_CODEX_MODEL")
+# Extra codex argv, whitespace-split (no quoting). The escape hatch for whatever this
+# launcher does not model — a profile, `--disable hooks` to get past a hooks-review
+# gate without persisting a trust decision, a feature flag.
+while IFS= read -r -d '' _codex_env; do
+  CODEX_ARGS+=(-c "$_codex_env")
+done < <(callee_env_codex_config)
+if [[ -n "${HOTLINE_CODEX_ARGS:-}" ]]; then
+  read -r -a _codex_extra <<<"$HOTLINE_CODEX_ARGS"
+  CODEX_ARGS+=("${_codex_extra[@]}")
+fi
+case "${HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS:-}" in
+  1|true|TRUE|yes|YES) CODEX_ARGS+=(--dangerously-bypass-approvals-and-sandbox) ;;
+esac
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  AGENT_ARGS=("${CODEX_ARGS[@]}")
+else
+  AGENT_ARGS=("${CLAUDE_ARGS[@]}")
+fi
+
 # herdr's own startup budget. It blocks until the agent is interactive-ready, so
 # this IS the boot timeout — the caller's --boot-timeout governs it, in ms, capped
 # at herdr's documented 300s maximum.
@@ -472,8 +527,8 @@ while [[ $attempt -lt $START_ATTEMPTS ]]; do
   AGENT_NAME=$(herdr_mint_agent_name "$AGENT_SLUG_TARGET")
   herdr_agent_name_free "$AGENT_NAME" || AGENT_NAME=$(herdr_mint_agent_name "$AGENT_SLUG_TARGET")
 
-  if herdr_cli agent start "$AGENT_NAME" --kind claude --pane "$NEW_PANE" \
-       --timeout "$START_TIMEOUT_MS" -- "${CLAUDE_ARGS[@]}"; then
+  if herdr_cli agent start "$AGENT_NAME" --kind "$AGENT_KIND" --pane "$NEW_PANE" \
+       --timeout "$START_TIMEOUT_MS" -- "${AGENT_ARGS[@]}"; then
     START_OUT="$HERDR_CLI_OUT"
     START_ERR=""
     break
@@ -493,6 +548,16 @@ while [[ $attempt -lt $START_ATTEMPTS ]]; do
   backoff=$(awk -v b="$backoff" 'BEGIN{ b *= 2; if (b > 4) b = 4; printf "%g", b }')
 done
 
+# A codex start refused as `blocked` is nearly always a startup dialog, and the
+# generic error ("blocked during startup") does not say which or what to do. The
+# pane is read before fail_async closes it, because after that nothing can.
+if [[ -n "$START_ERR" && "$AGENT_KIND" == "codex" && "$START_ERR" == *blocked* ]]; then
+  source "$HOTLINE_SCRIPTS/codex-rollout.sh"
+  if herdr_cli pane read "$NEW_PANE" --source visible \
+     && CODEX_DIALOG=$(codex_startup_dialog "$HERDR_CLI_OUT"); then
+    fail_async "$(codex_startup_dialog_recovery "$CODEX_DIALOG" "$CWD") Nothing was delivered, so re-dialing is safe. (herdr: $START_ERR)"
+  fi
+fi
 [[ -n "$START_ERR" ]] && fail_async "herdr agent start failed in pane $NEW_PANE after ${attempt} attempt(s): $START_ERR"
 echo "$AGENT_NAME" > "$CALL_DIR/herdr_agent.txt"
 
@@ -512,6 +577,14 @@ READY=$(jq -r '.result.agent // {} | if has("interactive_ready") then (.interact
 AGENT_STATUS=$(jq -r '.result.agent.agent_status // empty' <<<"$START_OUT" 2>/dev/null)
 if [[ "$READY" == "false" ]]; then
   fail_async "herdr started agent $AGENT_NAME in pane $NEW_PANE but reported interactive_ready:false (agent_status=${AGENT_STATUS:-unknown}); a prompt delivered now would go to whatever IS there"
+fi
+
+# A codex callee has no session to read yet — see --agent codex in the header. The
+# boot-wait contract (session_id.txt = "the REPL is up") is dial.sh's to skip for it.
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  jq -nc --arg dir "$CALL_DIR" --arg agent "$AGENT_NAME" --arg pane "$NEW_PANE" \
+    '{call_dir: $dir, agent: $agent, pane: $pane, agent_kind: "codex"}'
+  exit 0
 fi
 
 # ---- Which session did it actually open? ------------------------------------

@@ -446,9 +446,11 @@ herdr_agent_status() {  # <name>
 # herdr_cli's error sniffing finds nothing to report — which is correct, since only a
 # real error response is JSON.
 HERDR_AGENT_SCREEN=""
-herdr_agent_screen() {  # <name>
+# [source] defaults to `recent`. A codex caller passes `visible`: for codex's full-
+# screen dialogs `recent` returned only the footer line, so no dialog could be named.
+herdr_agent_screen() {  # <name> [source]
   HERDR_AGENT_SCREEN=""
-  herdr_cli agent read "$1" --source recent --format text || return 0
+  herdr_cli agent read "$1" --source "${2:-recent}" --format text || return 0
   HERDR_AGENT_SCREEN="$HERDR_CLI_OUT"
   return 0
 }

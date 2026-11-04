@@ -92,13 +92,28 @@ if [[ -s "$CALL_DIR/remote_target.txt" ]]; then
   TRANSPORT_ARGS+=(--remote "$(tr -d '[:space:]' < "$CALL_DIR/remote_target.txt")")
 fi
 
-bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
-  --caller-session "$CALLER_SESSION" \
-  --session "$SESSION_ID" \
-  --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} \
-  ${CALL_ID_ARGS[@]+"${CALL_ID_ARGS[@]}"} \
-  ${CALL_DIR_ARGS[@]+"${CALL_DIR_ARGS[@]}"} \
-  ${TRANSPORT_ARGS[@]+"${TRANSPORT_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
+AGENT_KIND=claude
+[[ -s "$CALL_DIR/agent_kind.txt" ]] && AGENT_KIND=$(tr -d '[:space:]' < "$CALL_DIR/agent_kind.txt")
+
+# A codex callee is cached for follow-up ONLY over herdr — the one host whose reuse
+# path speaks codex (herdr-reuse-agent.sh --agent-kind). cmux surface reuse and the
+# headless `claude -p --resume` follow-up are claude-only, so a cached cmux/headless
+# codex entry would be re-addressed by the wrong protocol. Those go to history only.
+CACHE_CALL=true
+if [[ "$AGENT_KIND" == codex && "$(tr -d '[:space:]' < "$CALL_DIR/transport.txt" 2>/dev/null)" != herdr ]]; then
+  CACHE_CALL=false
+fi
+
+if $CACHE_CALL; then
+  bash "$SCRIPT_DIR/session-cache.sh" set "$TARGET" \
+    --agent-kind "$AGENT_KIND" \
+    --caller-session "$CALLER_SESSION" \
+    --session "$SESSION_ID" \
+    --mode "$MODE" ${SURFACE_ARGS[@]+"${SURFACE_ARGS[@]}"} \
+    ${CALL_ID_ARGS[@]+"${CALL_ID_ARGS[@]}"} \
+    ${CALL_DIR_ARGS[@]+"${CALL_DIR_ARGS[@]}"} \
+    ${TRANSPORT_ARGS[@]+"${TRANSPORT_ARGS[@]}"} >/dev/null 2>&1 || debug "session-cache.sh set failed"
+fi
 
 # Dial history: "who called THIS workspace", keyed by the RECEIVER's cwd.
 # --session keeps its historical meaning (the CALLER's session id); the callee's

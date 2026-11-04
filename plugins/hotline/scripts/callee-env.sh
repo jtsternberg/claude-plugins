@@ -138,3 +138,17 @@ callee_env_settings_json() {
   jq -nc --argjson d "$derived" --argjson e "$explicit" \
     'if ($d + $e) == {} then empty else {env: ($d + $e)} end'
 }
+
+# callee_env_codex_config — the same env, as codex `-c` overrides, NUL-delimited:
+# one `shell_environment_policy.set.<KEY>=<value>` per entry, ready for `-c`.
+#
+# Codex has no settings env block; shell_environment_policy.set is what reaches the
+# commands a codex callee runs (verified live on codex-cli 0.165.0: a set HL_PROBE
+# was echoed back by `codex exec`). The value is a JSON string literal, which TOML
+# reads as a basic string, so spaces and quotes from a FORWARDed variable survive.
+callee_env_codex_config() {
+  local settings
+  settings=$(callee_env_settings_json) || return 1
+  [[ -n "$settings" ]] || return 0
+  jq -j '.env | to_entries[] | "shell_environment_policy.set.\(.key)=\(.value | tojson)\u0000"' <<<"$settings"
+}

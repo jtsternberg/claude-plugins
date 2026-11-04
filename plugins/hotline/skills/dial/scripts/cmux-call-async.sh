@@ -75,6 +75,7 @@
 #   cmux-call-async.sh --cwd <path> (--prompt <text> | --prompt-file <path>)
 #                      [--resume <id>] [--name <name>] [--label <text>]
 #                      [--fork-session] [--tools <list>] [--keep-workspace]
+#                      [--agent claude|codex]
 #   # Returns immediately with: {"call_dir": "/tmp/hotline-call-xxxxx"}
 #
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
@@ -85,7 +86,7 @@ if [[ "${1:-}" == "--help" ]]; then
   cat <<'EOF'
 Usage: cmux-call-async.sh --cwd <path> --prompt <text> [--resume <id>]
                           [--name <name>] [--label <text>] [--fork-session]
-                          [--tools <list>] [--keep-workspace]
+                          [--tools <list>] [--keep-workspace] [--agent claude|codex]
 
 Opens an interactive claude session in a cmux workspace and returns immediately
 with {"call_dir": "/tmp/hotline-call-XXXXX"}. The caller then drives polling
@@ -99,6 +100,8 @@ Options:
                      --detached; a surface placement reads it off --name, which
                      claude emits as its own live terminal title.
   --tools <list>     Allowed tools (default: "Bash Read Edit Write Grep Glob")
+  --agent codex      Run codex instead of claude: no session preset, no claude
+                     flags. cmux-paste.sh --agent-kind codex gates and confirms it.
   --keep-workspace   Do not close the cmux workspace after STATUS. Used by
                      conference-call mode to hand the workspace off to the
                      user. wait-for-response.sh reads keep_workspace.txt.
@@ -131,6 +134,10 @@ KEEP_WORKSPACE=false
 #   window               — a surface in a specific window (open-window-surface.sh).
 PLACEMENT="sidebyside"
 WINDOW_REF=""
+# --agent codex: the surface runs `codex` instead of `claude`. No session preset (codex
+# cannot take one; the thread id is learned from the rollout after delivery) and no
+# claude flags. Readiness and delivery are cmux-paste.sh --agent-kind codex's.
+AGENT_KIND="claude"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -142,6 +149,7 @@ while [[ $# -gt 0 ]]; do
     --label)          LABEL="$2";          shift 2 ;;
     --fork-session)   FORK_SESSION=true;   shift   ;;
     --tools)          ALLOWED_TOOLS="$2";  shift 2 ;;
+    --agent)          AGENT_KIND="$2";     shift 2 ;;
     --keep-workspace) KEEP_WORKSPACE=true; shift   ;;
     # Opt out of side-by-side: restore the original new-workspace placement.
     --detached|--new-workspace) PLACEMENT="detached"; shift ;;
@@ -214,6 +222,7 @@ CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 # Coarse selector only: it names cmux, not which cmux sub-mode. See
 # wait-for-session.sh's dispatch block for the whole contract.
 echo cmux > "$CALL_DIR/transport.txt"
+echo "$AGENT_KIND" > "$CALL_DIR/agent_kind.txt"
 echo "$KEEP_WORKSPACE" > "$CALL_DIR/keep_workspace.txt"
 # Persist CWD so wait-for-session.sh can compute the claude transcript path
 # (~/.claude/projects/<encoded-cwd>/<session-id>.jsonl) as a second REPL-boot
@@ -276,6 +285,7 @@ else
     || true
   )
 fi
+[[ "$AGENT_KIND" == "codex" ]] && SESSION_ID_PRESET=""
 [[ -n "$SESSION_ID_PRESET" ]] && echo "$SESSION_ID_PRESET" > "$CALL_DIR/session_id_preset.txt"
 
 # Per-call nonce. Prevents replayed STATUS lines (e.g. `claude --resume`
@@ -370,6 +380,28 @@ chmod 700 "$LAUNCH_SCRIPT"
   # could boot into "No conversation yet". That whole failure mode is gone.)
   printf ' --allowedTools=%q\n' "$ALLOWED_TOOLS"
 } > "$LAUNCH_SCRIPT"
+
+# The codex launch line replaces the claude one wholesale. Same argv as the herdr
+# codex launcher (see the comments there); each word %q-quoted for this script.
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  CODEX_ARGS=(-c check_for_update_on_startup=false)
+  [[ -n "${HOTLINE_CODEX_MODEL:-}" ]] && CODEX_ARGS+=(-m "$HOTLINE_CODEX_MODEL")
+  case "${HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS:-}" in
+    1|true|TRUE|yes|YES) CODEX_ARGS+=(--dangerously-bypass-approvals-and-sandbox) ;;
+  esac
+  while IFS= read -r -d '' _codex_env; do CODEX_ARGS+=(-c "$_codex_env"); done < <(callee_env_codex_config)
+  if [[ -n "${HOTLINE_CODEX_ARGS:-}" ]]; then
+    read -r -a _codex_extra <<<"$HOTLINE_CODEX_ARGS"
+    CODEX_ARGS+=("${_codex_extra[@]}")
+  fi
+  {
+    printf '#!/usr/bin/env bash\n'
+    [[ -n "$CWD" ]] && printf 'cd %q || exit 1\n' "$CWD"
+    printf 'codex'
+    printf ' %q' "${CODEX_ARGS[@]}"
+    printf '\n'
+  } > "$LAUNCH_SCRIPT"
+fi
 echo "$LAUNCH_SCRIPT" > "$CALL_DIR/launch_script.txt"
 
 # Common early-failure exit: write error.txt + done, drop the launch script,
