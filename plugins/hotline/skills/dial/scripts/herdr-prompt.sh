@@ -7,7 +7,7 @@
 # Usage:
 #   herdr-prompt.sh --agent <name> --payload-file <path> --call-id <nonce>
 #                   [--cwd <callee-cwd>] [--session <callee-session-id>]
-#                   [--timeout <ms>] [--first-contact] [--agent-kind claude|codex]
+#                   [--timeout <ms>] [--first-contact] [--agent-kind claude|codex] [--pane <id>]
 #
 # --agent-kind codex: the proof is the nonce in the callee's Codex ROLLOUT, found by
 # that nonce (scripts/codex-rollout.sh) — --session is unknown until it lands, and on
@@ -136,6 +136,7 @@ PAYLOAD_FILE=""
 CALL_ID=""
 CWD=""
 SESSION_ID=""
+EXPECTED_PANE=""
 TIMEOUT_MS=""
 FIRST_CONTACT=false
 AGENT_KIND="claude"
@@ -163,6 +164,7 @@ while [[ $# -gt 0 ]]; do
     --call-id)      CALL_ID="$2";      shift 2 ;;
     --cwd)          CWD="$2";          shift 2 ;;
     --session)      SESSION_ID="$2";   shift 2 ;;
+    --pane)         EXPECTED_PANE="$2"; shift 2 ;;
     --timeout)      TIMEOUT_MS="$2";   shift 2 ;;
     --first-contact) FIRST_CONTACT=true; shift ;;
     --agent-kind)   AGENT_KIND="$2";   shift 2 ;;
@@ -202,7 +204,8 @@ herdr_agent_probe "$AGENT"
 AGENT_STATUS="$HERDR_AGENT_STATUS"
 AGENT_READY="$HERDR_AGENT_READY"
 AGENT_PANE="$HERDR_AGENT_PANE"
-if [[ -z "$AGENT_STATUS" ]]; then
+if [[ "$AGENT_KIND" == codex && -n "$EXPECTED_PANE" ]]; then AGENT_PANE="$EXPECTED_PANE"; fi
+if [[ -z "$AGENT_STATUS" ]] && ! { $FIRST_CONTACT && [[ "$AGENT_KIND" == codex ]]; }; then
   undelivered "herdr agent $AGENT could not be read (${HERDR_CLI_ERR:-no such live agent}); the callee may have exited before delivery" false
 fi
 
@@ -213,7 +216,16 @@ fi
 # A follow-up skips this deliberately. Its agent has already taken a prompt and
 # answered one, which is a stronger fact than any probe, and its refusals live in
 # herdr-reuse-agent.sh where the caller can still fall back.
-if $FIRST_CONTACT; then
+if $FIRST_CONTACT && [[ "$AGENT_KIND" == codex ]]; then
+  source "$HOTLINE_SCRIPTS/codex-readiness.sh"
+  sleep "$FIRST_SETTLE"
+  codex_wait_composer "$AGENT" "$AGENT_PANE" "$CWD" "$HOTLINE_BOOT_TIMEOUT_CMUX" \
+    "${HOTLINE_CODEX_COMPOSER_TRIES:-60}" "$CONFIRM_SLEEP" \
+    || undelivered "$CODEX_READINESS_ERR" false
+  AGENT_STATUS=$(jq -r '.result.agent.agent_status' <<<"$CODEX_READY_AGENT")
+  AGENT_PANE=$(jq -r '.result.agent.pane_id' <<<"$CODEX_READY_AGENT")
+  CONFIRM_TRIES="$FIRST_CONFIRM_TRIES"
+elif $FIRST_CONTACT; then
   sleep "$FIRST_SETTLE"
   ready_try=0
   while :; do
@@ -249,26 +261,7 @@ if $FIRST_CONTACT; then
   # and turning "could not look" into a refusal would make delivery impossible instead
   # of unproven the day `agent read` changes shape.
   herdr_agent_screen "$AGENT" "$([[ "$AGENT_KIND" == codex ]] && echo visible || echo recent)"
-  if [[ "$AGENT_KIND" == "codex" ]]; then
-    # shellcheck source=../../../scripts/codex-rollout.sh
-    source "$HOTLINE_SCRIPTS/codex-rollout.sh"
-    # WAIT FOR THE COMPOSER, not merely for the absence of a dialog — see
-    # codex_composer_ready. An unreadable screen proceeds, as for claude below.
-    COMPOSER_TRIES="${HOTLINE_CODEX_COMPOSER_TRIES:-60}"
-    composer_try=0
-    while [[ -n "$HERDR_AGENT_SCREEN" ]]; do
-      if CODEX_DIALOG=$(codex_startup_dialog "$HERDR_AGENT_SCREEN"); then
-        undelivered "$(codex_startup_dialog_recovery "$CODEX_DIALOG" "$CWD") NOTHING WAS SUBMITTED: herdr reported agent $AGENT ready, but a work order typed into that dialog would answer it instead of becoming a turn. \`${HERDR_HOP}herdr agent attach $AGENT\` shows it." false
-      fi
-      codex_composer_ready "$HERDR_AGENT_SCREEN" && break
-      composer_try=$((composer_try + 1))
-      if [[ $composer_try -ge $COMPOSER_TRIES ]]; then
-        undelivered "codex agent $AGENT never drew its input composer within the readiness budget, and no known startup dialog is on screen either — \`${HERDR_HOP}herdr agent attach $AGENT\` shows what is there. Nothing was submitted, so re-dialing is safe. Screen tail: $(printf '%s' "$HERDR_AGENT_SCREEN" | grep -v '^[[:space:]]*$' | tail -3 | tr '\n' ' ' | cut -c1-200)" false
-      fi
-      sleep "$CONFIRM_SLEEP"
-      herdr_agent_screen "$AGENT" visible
-    done
-  elif repl_trust_dialog_present "$HERDR_AGENT_SCREEN"; then
+  if repl_trust_dialog_present "$HERDR_AGENT_SCREEN"; then
     # THE FIX GOES FIRST in this string, deliberately. dial.sh forwards a detail
     # whole now (claude-plugins-e3xr), but the reader of a failed dial scans the
     # front of it, and this reason's first wording led with the diagnosis and buried

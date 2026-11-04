@@ -13,6 +13,9 @@
 # still runs (it is what registers the call); for herdr it confirms and returns an
 # answer that is already on disk.
 #
+# Codex agent_not_ready may precede its final startup frame: the same process is
+# observed within the remaining boot budget without retrying start or typing.
+#
 # Call-dir interface — the same backend-agnostic contract as
 # cmux-call-async.sh / headless-call-async.sh, plus one herdr-specific handle:
 #   transport.txt         — 'herdr'. Read FIRST by the wait-for-* scripts.
@@ -515,6 +518,7 @@ AGENT_NAME=""
 START_OUT=""
 START_ERR=""
 attempt=0
+CODEX_BOOT_DEADLINE=""
 START_DEADLINE=$(( $(date +%s) + START_BUDGET ))
 backoff="$SETTLE"
 while [[ $attempt -lt $START_ATTEMPTS ]]; do
@@ -539,6 +543,9 @@ while [[ $attempt -lt $START_ATTEMPTS ]]; do
   AGENT_NAME=$(herdr_mint_agent_name "$AGENT_SLUG_TARGET")
   herdr_agent_name_free "$AGENT_NAME" || AGENT_NAME=$(herdr_mint_agent_name "$AGENT_SLUG_TARGET")
 
+  if [[ "$AGENT_KIND" == codex && -z "$CODEX_BOOT_DEADLINE" ]]; then
+    CODEX_BOOT_DEADLINE=$(( $(date +%s) + START_TIMEOUT_MS / 1000 ))
+  fi
   if herdr_cli agent start "$AGENT_NAME" --kind "$AGENT_KIND" --pane "$NEW_PANE" \
        --timeout "$START_TIMEOUT_MS" -- "${AGENT_ARGS[@]}"; then
     START_OUT="$HERDR_CLI_OUT"
@@ -560,14 +567,19 @@ while [[ $attempt -lt $START_ATTEMPTS ]]; do
   backoff=$(awk -v b="$backoff" 'BEGIN{ b *= 2; if (b > 4) b = 4; printf "%g", b }')
 done
 
-# A codex start refused as `blocked` is nearly always a startup dialog, and the
-# generic error ("blocked during startup") does not say which or what to do. The
-# pane is read before fail_async closes it, because after that nothing can.
-if [[ -n "$START_ERR" && "$AGENT_KIND" == "codex" && "$START_ERR" == *blocked* ]]; then
-  source "$HOTLINE_SCRIPTS/codex-rollout.sh"
-  if herdr_cli pane read "$NEW_PANE" --source visible \
-     && CODEX_DIALOG=$(codex_startup_dialog "$HERDR_CLI_OUT"); then
-    fail_async "$(codex_startup_dialog_recovery "$CODEX_DIALOG" "$CWD") Nothing was delivered, so re-dialing is safe. (herdr: $START_ERR)"
+# A blocked-start response may precede the final startup frame. Observe this
+# SAME process, never restart it or type into a trust decision.
+if [[ "$AGENT_KIND" == codex ]] && { [[ "$START_ERR" == *agent_not_ready* ]] \
+    || { [[ -z "$START_ERR" ]] && [[ "$(jq -r '.result.agent.interactive_ready' <<<"$START_OUT")" == false ]]; }; }; then
+  source "$HOTLINE_SCRIPTS/codex-readiness.sh"
+  remaining=$(( CODEX_BOOT_DEADLINE - $(date +%s) ))
+  [[ $remaining -ge 0 ]] || remaining=0
+  if codex_wait_composer "$AGENT_NAME" "$NEW_PANE" "$CWD" "$remaining" \
+       "${HOTLINE_CODEX_COMPOSER_TRIES:-60}" "${HOTLINE_PASTE_CONFIRM_SLEEP:-0.3}"; then
+    START_OUT="$CODEX_READY_AGENT"
+    START_ERR=""
+  else
+    fail_async "$CODEX_READINESS_ERR (herdr: $START_ERR)"
   fi
 fi
 [[ -n "$START_ERR" ]] && fail_async "herdr agent start failed in pane $NEW_PANE after ${attempt} attempt(s): $START_ERR"
