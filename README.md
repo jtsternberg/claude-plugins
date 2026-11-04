@@ -284,7 +284,7 @@ Some plugins check for a `CODE_CONVENTIONS` environment variable pointing to a p
 
 The file is plain markdown — no special format required. If the env var is unset, plugins behave as normal.
 
-**Supported by:** [pr-workflow](#-pr-workflow), [beads-workflow](#-beads-workflow)
+**Supported by:** [pr-workflow](#-pr-workflow--plugin-group), [beads-workflow](#-beads-workflow)
 
 ---
 
