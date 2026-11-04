@@ -36,6 +36,14 @@ fi
 exec bash "$t/bin/herdr-real" "\$@"
 STUBW
   chmod +x "$t/bin/herdr"
+  # Captured native process-info + lsof filename ownership, never real PIDs.
+  cat > "$t/bin/lsof" <<STUB
+#!/usr/bin/env bash
+[[ "\$*" == "-nP -a -p \${HERDR_STUB_CODEX_PID:-5151} -Fn" ]] || exit 1
+PROCESS_HOME=\$(cat "\$HERDR_STATE/process_home" 2>/dev/null || printf '%s' "\${CODEX_HOME:-\$HOME/.codex}")
+printf 'p5151\\nn%s/sessions/2026/11/03/rollout-2026-11-03T12-56-13-$THREAD.jsonl\\n' "\$PROCESS_HOME"
+STUB
+  chmod +x "$t/bin/lsof"
 }
 
 # Every codex dial in this file: the herdr preflight's pane, and a confirmation budget

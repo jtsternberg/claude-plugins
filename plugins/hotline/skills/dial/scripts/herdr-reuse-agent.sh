@@ -186,10 +186,8 @@ fi
 # A name alone can outlive a changed pane occupant. Match the pinned launch's
 # pane and thread to herdr's live identity before any input is submitted.
 if $PINNED_CODEX_CALL; then
-  jq -e --arg thread "$SESSION_ID" --arg pane "$CODEX_PINNED_PANE" \
-    '.result.agent | .agent == "codex" and .pane_id == $pane and .agent_session.agent == "codex" and .agent_session.value == $thread' \
-    <<<"$HERDR_CLI_OUT" >/dev/null 2>&1 \
-    || account_error 'Pinned Codex account home continuation refused: live agent kind, pane or thread differs from the launch record; no input was delivered'
+  codex_home_live_validate "$HERDR_CLI_OUT" "$AGENT" "$SESSION_ID" \
+    || account_error "$CODEX_HOME_ERR"
 fi
 
 # --- Wire a call dir exactly as the herdr launcher leaves one. ---------------

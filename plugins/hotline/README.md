@@ -593,7 +593,10 @@ A cached continuation to the same target/caller uses `--agent codex` without
 `--fresh`. Supply the same home or omit the override: the cache retains its
 selected account regardless of ambient `CODEX_HOME`. Follow-up call directories
 copy `codex_home.txt`, `codex_rollout.txt` and host metadata. Reuse validates the
-pinned rollout and live Codex pane/thread before delivery; explicit home
+pinned rollout and live Codex pane before delivery. Herdr may omit its thread
+field; local `lsof` must show one foreground Codex process holding exactly
+that rollout even when a matching thread is reported; missing or ambiguous
+ownership refuses reuse. Explicit home
 mismatches, inconsistent/missing metadata and dead selected-account agents fail
 closed. Recover with a new explicit-home `--fresh` call. Legacy unpinned Codex
 calls retain their existing dead-agent resume behavior.
@@ -609,3 +612,9 @@ with the sender's name or role, for example `[Hotline builder] Tested contract
 ready; no live smoke started.` Use the same prefix for checkpoints, completion
 reports, blockers and callbacks. Queue acceptance does not prove delivery or
 that the receiver acted on the message.
+
+Codex startup readiness uses bounded read-only observations of the same callee.
+It waits for two current composer/ready snapshots, without retrying agent start
+or typing into a gate. Isolated older gate headings above the composer are stale
+evidence; a complete trust-choice UI remains a refusal. Unknown or unreadable
+startup state times out without asserting that a human trust decision is needed.

@@ -359,6 +359,14 @@ on the remote box under its `$HOME/.codex/sessions`. An explicit selected home
 supports fresh local herdr tab/workspace calls and verified same-home cached
 continuations; see Environment knobs.
 
+Herdr Codex startup observes the same callee within a wall-clock budget and a
+probe cap; a blocked start never triggers a second agent launch. Two current
+composer snapshots must agree with the live agent's readiness before delivery.
+An isolated earlier gate header above that composer is stale evidence; a complete
+visible choice UI remains a refusal, including when a background composer is
+visible. Unreadable or unresolved frames time out without claiming a human trust
+choice is required. Hotline never sends a trust response or changes trust config.
+
 Startup gates are refused before anything is typed (`stage: deliver`, `sent:false`):
 Codex's folder-trust dialog, its **hooks-review** dialog (shown whenever hooks are
 new or changed — herdr reports that one as ready, so hotline waits for Codex's
@@ -646,7 +654,10 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   the selected home from the cache/call metadata, independent of ambient
   `CODEX_HOME`. Each follow-up copies `codex_home.txt`, `codex_rollout.txt` and
   host metadata, and validates the live Codex pane/thread against the launch
-  record before submitting input. Missing/inconsistent metadata, a different
+  record before submitting input. Native herdr may omit `agent_session`; local
+  `lsof` must prove that one foreground Codex process owns exactly the pinned
+  rollout even when a matching thread ID is reported. Missing, different or
+  ambiguous rollout ownership refuses reuse. Missing/inconsistent metadata, a different
   account or a dead selected-account agent refuses the call before delivery;
   start a new explicit-home `--fresh` call to recover. Unpinned legacy calls keep
   their existing dead-agent resume behavior.

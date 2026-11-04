@@ -52,3 +52,35 @@ codex_home_reuse_validate() { # <previous-call-dir> <agent-name> <thread-id> <cw
   export HOTLINE_CODEX_HOME="$pinned"
   CODEX_HOME_ERR=""
 }
+
+# Native Codex agent-get can omit agent_session entirely. Require a unique
+# foreground Codex process owning the exact pinned rollout. lsof reads
+# filenames only, never credentials or process environment contents.
+codex_home_live_validate() { # <live-agent-json> <agent-name> <thread-id>
+  local live="$1" agent="$2" thread="$3" observed pid files line
+  CODEX_HOME_ERR='Pinned Codex account home continuation refused: live agent kind, name or pane differs from the launch record; no input was delivered'
+  jq -e --arg a "$agent" --arg p "$CODEX_PINNED_PANE" \
+    '.result.agent | .agent == "codex" and .name == $a and .pane_id == $p' \
+    <<<"$live" >/dev/null 2>&1 || return 1
+  observed=$(jq -r '.result.agent.agent_session.value // empty' <<<"$live")
+  if [[ -n "$observed" ]]; then
+    CODEX_HOME_ERR='Pinned Codex account home continuation refused: live thread differs from the pinned rollout; no input was delivered'
+    [[ "$observed" == "$thread" && "$(jq -r '.result.agent.agent_session.agent // empty' <<<"$live")" == codex ]] || return 1
+  fi
+  CODEX_HOME_ERR='Pinned Codex account home continuation cannot verify foreground process/rollout ownership; nothing was delivered (local lsof and one owning Codex process are required)'
+  command -v lsof >/dev/null 2>&1 || return 1
+  herdr_cli pane process-info --pane "$CODEX_PINNED_PANE" || return 1
+  pid=$(jq -er '[.result.process_info.foreground_processes[]?
+       | select(.name == "codex" and (.pid | type) == "number" and .pid > 0)
+       | .pid] | unique | select(length == 1) | .[0]' <<<"$HERDR_CLI_OUT") || return 1
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  files=$(lsof -nP -a -p "$pid" -Fn 2>/dev/null) || return 1
+  local rollouts=()
+  while IFS= read -r line; do
+    case "$line" in n*/rollout-*.jsonl) rollouts+=("${line#n}") ;; esac
+  done < <(printf '%s\n' "$files" | sort -u)
+  CODEX_HOME_ERR='Pinned Codex account home continuation refused: foreground rollout ownership is missing, ambiguous or differs from the pinned account/thread; nothing was delivered'
+  [[ ${#rollouts[@]} -eq 1 && "${rollouts[0]}" == "$CODEX_PINNED_ROLLOUT" ]] || return 1
+  CODEX_HOME_ERR=""
+  return 0
+}

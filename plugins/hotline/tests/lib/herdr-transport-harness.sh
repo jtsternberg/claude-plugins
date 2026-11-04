@@ -76,7 +76,7 @@ ROOT="$(mktemp -d "$TMP_ROOT"/hotline-herdr-test-XXXXXX)"
 POISON_BIN="$ROOT/poison-bin"
 POISON_LOG="$ROOT/violations"
 mkdir -p "$POISON_BIN"
-for _poison in herdr cmux claude dirmap ssh; do
+for _poison in herdr cmux claude dirmap ssh lsof; do
   cat > "$POISON_BIN/$_poison" <<POISON
 #!/usr/bin/env bash
 echo "$_poison \$*" >> "$POISON_LOG"
@@ -228,6 +228,7 @@ case "$1 ${2:-}" in
 
   "pane split")
     [[ "${HERDR_STUB_SPLIT_FAIL:-}" == "1" ]] && err pane_split_failed "no room to split"
+    rm -f "$ST/foreground_codex"
     jq -nc --arg p "${HERDR_STUB_NEW_PANE:-w1:p9}" \
       '{id:"cli:pane:split",result:{pane:{pane_id:$p}}}'
     exit 0 ;;
@@ -246,11 +247,17 @@ case "$1 ${2:-}" in
       echo $((PSEEN + 1)) > "$ST/pane_busy"
       FG=9999
     fi
-    jq -nc --arg p "$PANE_ARG" --argjson fg "$FG" \
+    CPID=""
+    if [[ "${HERDR_STUB_NO_CODEX_PROCESS:-}" != 1 ]] && { [[ -n "$PANE_ARG" && "$(cat "$ST/foreground_codex" 2>/dev/null)" == "$PANE_ARG" ]] || [[ -n "${HERDR_STUB_CODEX_PID:-}" ]]; }; then
+      CPID="${HERDR_STUB_CODEX_PID:-5151}"; FG="$CPID"
+    fi
+    jq -nc --arg p "$PANE_ARG" --argjson fg "$FG" --arg cp "$CPID" \
            --argjson sh "${HERDR_STUB_SHELL_PID:-4242}" \
       '{id:"cli:pane:process_info",result:{type:"pane_process_info",
          process_info:{pane_id:$p,shell_pid:$sh,foreground_process_group_id:$fg,
-                       foreground_processes:[]}}}'
+                       foreground_processes:(if $cp != "" then
+                         [{name:"codex",argv0:"codex",pid:($cp | tonumber)}]
+                         else [] end)}}}'
     exit 0 ;;
 
   "pane close") echo '{"id":"cli:pane:close","result":{"closed":true}}'; exit 0 ;;
@@ -266,6 +273,7 @@ case "$1 ${2:-}" in
 
   "tab create")
     [[ "${HERDR_STUB_TAB_FAIL:-}" == "1" ]] && err tab_create_failed "no such workspace"
+    rm -f "$ST/foreground_codex"
     TP="${HERDR_STUB_TAB_PANE:-w1:p7}"
     [[ "${HERDR_STUB_TAB_NO_PANE:-}" == "1" ]] && TP=""
     jq -nc --arg p "$TP" --arg tid "${HERDR_STUB_TAB_ID:-w1:t7}" \
@@ -317,6 +325,20 @@ case "$1 ${2:-}" in
       exit 1
     fi
     [[ "${HERDR_STUB_START_FAIL:-}" == "1" ]] && err agent_start_failed "claude was not detected in the pane"
+    # Record the actual requested kind; native Codex get omits agent_session.
+    KIND=claude; START_PANE=""; _prev=""
+    for _arg in "$@"; do
+      [[ "$_prev" != --kind ]] || KIND="$_arg"
+      [[ "$_prev" != --pane ]] || START_PANE="$_arg"
+      _prev="$_arg"
+    done
+    printf '%s' "$KIND" > "$ST/kind"
+    printf '%s' "$START_PANE" > "$ST/agent_pane"
+    if [[ "$KIND" == codex ]]; then
+      printf '%s' "$START_PANE" > "$ST/foreground_codex"
+    else
+      rm -f "$ST/foreground_codex"
+    fi
     # The session id claude was told to use — the passthrough under test.
     SID=""
     while [[ $# -gt 0 ]]; do
@@ -368,7 +390,7 @@ case "$1 ${2:-}" in
       GETS=$((GETS + 1)); echo "$GETS" > "$ST/gets"
       if [[ "$GETS" -le "$HERDR_STUB_READY_AFTER" ]]; then READY=false; else READY=true; fi
     fi
-    PANE="${HERDR_STUB_AGENT_PANE:-w1:p9}"
+    PANE="${HERDR_STUB_AGENT_PANE:-$(cat "$ST/agent_pane" 2>/dev/null || echo w1:p9)}"
     [[ "${HERDR_STUB_NO_PANE_ID:-}" == "1" ]] && PANE=""
     # tab_id, which the real CLI reports on every agent. Derived from the pane's
     # workspace prefix by default, as a split's pane is: a split SHARES the
@@ -376,12 +398,14 @@ case "$1 ${2:-}" in
     TAB="${HERDR_STUB_AGENT_TAB:-${PANE%%:*}:t1}"
     [[ -z "$PANE" ]] && TAB="${HERDR_STUB_AGENT_TAB:-}"
     jq -nc --arg n "$NAME" --arg s "$STATUS" --arg sid "$SID" \
-           --arg ready "$READY" --arg pane "$PANE" --arg tab "$TAB" --arg kind "${HERDR_STUB_AGENT_KIND:-claude}" \
+           --arg ready "$READY" --arg pane "$PANE" --arg tab "$TAB" --arg kind "${HERDR_STUB_AGENT_KIND:-$(cat "$ST/kind" 2>/dev/null || echo claude)}" \
       '{id:"cli:agent:get",result:{agent:({name:$n,agent:$kind,agent_status:$s,
          agent_session:{agent:$kind,kind:"id",source:("herdr:" + $kind),value:$sid}}
          + (if $ready == "omit" then {} else {interactive_ready:($ready == "true")} end)
          + (if $tab == "" then {} else {tab_id:$tab} end)
-         + (if $pane == "" then {} else {pane_id:$pane} end))}}'
+         + (if $pane == "" then {} else {pane_id:$pane} end))}}
+       | if env.HERDR_STUB_OMIT_SESSION == "1" or ($kind == "codex" and env.HERDR_STUB_INCLUDE_SESSION != "1")
+         then del(.result.agent.agent_session) else . end'
     exit 0 ;;
 
   "tab get")
