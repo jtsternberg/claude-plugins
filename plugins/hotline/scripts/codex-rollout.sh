@@ -26,7 +26,15 @@
 # Verified live on codex-cli 0.165.0 / herdr 0.9.5.
 # =============================================================================
 
-codex_sessions_root() { printf '%s/sessions' "${CODEX_HOME:-$HOME/.codex}"; }
+codex_sessions_root() {
+  local selected="${HOTLINE_CODEX_HOME:-${CODEX_HOME:-$HOME/.codex}}"
+  # A waiter may run outside its dialer's environment, even under another account.
+  # Persisted call identity takes precedence over every ambient default.
+  if [[ -n "${CALL_DIR:-}" && -s "$CALL_DIR/codex_home.txt" ]]; then
+    selected=$(cat "$CALL_DIR/codex_home.txt") || return 1
+  fi
+  printf '%s/sessions' "$selected"
+}
 
 # codex_find_rollout <nonce> [max-age-minutes] [remote-tries] [remote-sleep]
 # → the rollout path on stdout, exit 0;

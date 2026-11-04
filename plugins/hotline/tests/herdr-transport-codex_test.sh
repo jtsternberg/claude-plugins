@@ -23,8 +23,14 @@ codex_env() {  # codex_env <scratch> [reply: done|none]
   mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
   cat > "$t/bin/herdr" <<STUBW
 #!/usr/bin/env bash
+if [[ "\$1 \${2:-}" == "tab create" ]]; then
+  for arg in "\$@"; do
+    [[ "\$arg" == CODEX_HOME=* ]] && printf '%s' "\${arg#CODEX_HOME=}" > "\$HERDR_STATE/process_home"
+  done
+fi
 if [[ "\$1 \${2:-}" == "agent prompt" && "\${HERDR_STUB_CODEX_NO_ROLLOUT:-}" != 1 ]]; then
-  R="\${CODEX_HOME:-\$HOME/.codex}/sessions/2026/11/03/rollout-2026-11-03T12-56-13-$THREAD.jsonl"
+  PROCESS_HOME=\$(cat "\$HERDR_STATE/process_home" 2>/dev/null || printf '%s' "\${CODEX_HOME:-\$HOME/.codex}")
+  R="\$PROCESS_HOME/sessions/2026/11/03/rollout-2026-11-03T12-56-13-$THREAD.jsonl"
   mkdir -p "\$(dirname "\$R")"
   N=\$(grep -oE 'CALL_ID: [0-9a-f]+' <<<"\$4" | head -1 | cut -d' ' -f2)
   jq -nc --arg s "$THREAD" '{type:"session_meta",payload:{id:\$s}}' >> "\$R"
@@ -354,4 +360,25 @@ out=$(dial "$t" "${CENV[@]}" HERDR_STUB_GONE_NAMES="$agent" -- --target "$t/targ
    && "$(grep 'agent start' "$t/herdr.log" | tail -1)" == *"resume $THREAD"* ]]
 check "an explicit --resume of a cached thread whose agent died resumes it" $? "out=$out"
 
+echo "Explicit process home, discovery and independent response waiter:"
+t=$(new_env); codex_env "$t"; mkdir -p "$t/work"
+selected=$(cd "$t/work" && pwd -P)
+out=$(dial "$t" "${CENV[@]}" HOTLINE_CODEX_HOME="$t/work" HOTLINE_HERDR_PLACEMENT=tab -- \
+  --target "$t/target" --mode work_order --prompt "selected-account" --agent codex --fresh)
+CD=$(jq -r '.call_dir // empty' <<<"$out")
+[[ "$(jq -r .status <<<"$out")" == connected && "$(jq -r .confirmed <<<"$out")" == rollout \
+   && "$(cat "$t/state/process_home")" == "$(cd "$t/work" && pwd -P)" \
+   && "$(cat "$CD/codex_rollout.txt")" == "$selected/"* ]]
+check "selected home reaches process via pane env, then delivery discovers its rollout" $? "out=$out"
+if [[ -n "$CD" && -d "$CD" ]]; then
+  rm -f "$CD/codex_rollout.txt"
+  wout=$(env -u HOTLINE_CODEX_HOME CODEX_HOME="$t/personal" PATH="$t/bin:$PATH" HOME="$t/home" \
+    HERDR_LOG="$t/herdr.log" HERDR_STATE="$t/state" HERDR_STUB_AGENT_ANY=1 \
+    bash "$WAIT_RESPONSE" "$CD" --timeout 2 2>"$t/werr.txt"); wrc=$?
+  [[ $wrc == 0 && "$(jq -r .response <<<"$wout")" == 'codex did it' \
+     && "$(cat "$CD/codex_rollout.txt")" == "$selected/"* ]]
+  check "waiter with another ambient home rediscovers selected rollout from call metadata" $? "out=$wout err=$(cat "$t/werr.txt")"
+else
+  fail "waiter needs launched call dir"
+fi
 herdr_suite_finish

@@ -84,6 +84,10 @@
 # dropped and --tools refused (claude-only); HOTLINE_CALLEE_ENV is delivered as
 # codex shell_environment_policy overrides (callee_env_codex_config).
 #
+# HOTLINE_CODEX_HOME=<absolute-dir> selects the Codex process account via tab
+# creation --env CODEX_HOME. Local fresh tab/workspace only; split/remote/resume
+# are refused. codex_home.txt pins the same home for independent response readers.
+#
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
 # --detached is accepted and ignored, and so is a side placement: dial.sh's
 # placement vocabulary only changes what it reports. `--window` never reaches here;
@@ -151,6 +155,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 die() { jq -nc --arg err "$1" '{error: $err}'; exit 1; }
+
+source "$HOTLINE_SCRIPTS/codex-home.sh"
+codex_home_validate "$AGENT_KIND" herdr "${HOTLINE_HERDR_REMOTE:-}" "$RESUME_ID" || die "$CODEX_HOME_ERR"
 
 # `pane split --cwd` needs a real directory: unlike cmux's launch script, there is
 # no `cd` step to fail later and no ambient cwd to inherit from the caller.
@@ -252,6 +259,9 @@ echo herdr > "$CALL_DIR/transport.txt"
 # Which program answers in that pane. Absent = claude, the shape of every call dir
 # written before codex callees existed; every reader keys its transcript source on it.
 echo "$AGENT_KIND" > "$CALL_DIR/agent_kind.txt"
+if [[ ${HOTLINE_CODEX_HOME+x} ]]; then
+  printf '%s\n' "$HOTLINE_CODEX_HOME" > "$CALL_DIR/codex_home.txt"
+fi
 # See WHY NOTHING IS CLOSED in the header.
 echo true > "$CALL_DIR/keep_workspace.txt"
 echo "$CWD" > "$CALL_DIR/cwd.txt"
@@ -379,7 +389,9 @@ else
     TAB_LABEL=$(herdr_tab_label "${LABEL:-$(basename "$CWD")}" "$CALL_ID")
   fi
 
-  herdr_cli tab create --workspace "$HOST_WORKSPACE" --cwd "$CWD" \
+  PANE_ENV=()
+  [[ ${HOTLINE_CODEX_HOME+x} ]] && PANE_ENV+=(--env "CODEX_HOME=$HOTLINE_CODEX_HOME")
+  herdr_cli tab create "${PANE_ENV[@]}" --workspace "$HOST_WORKSPACE" --cwd "$CWD" \
       --label "$TAB_LABEL" --no-focus \
     || fail_async "herdr tab create in workspace $HOST_WORKSPACE failed: ${HERDR_CLI_ERR:-no diagnostic}"
   # The tab's ROOT PANE is the host: `agent start` addresses a pane, and a fresh

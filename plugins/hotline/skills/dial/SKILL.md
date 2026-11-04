@@ -353,8 +353,10 @@ rollout is normalized into the rows the Claude transcript reader already parses,
 | `--tools` | refused (`args`) — claude's allowlist has no honest codex mapping; use `HOTLINE_CODEX_ARGS="-s read-only"` for a sandbox |
 | a cached callee of the other kind | starts fresh with an agent-kind mismatch in `.fallbacks`; claude and codex never follow up into each other's callees. Only herdr codex calls are cached at all — cmux and headless ones go to dial history only |
 
-Local thread lookup uses `${CODEX_HOME:-~/.codex}/sessions`; with `--remote`, it
-runs on the remote box under its `$HOME/.codex/sessions`.
+Local lookup uses the selected `HOTLINE_CODEX_HOME` (and persisted call home for
+waiters), otherwise `${CODEX_HOME:-~/.codex}/sessions`; with `--remote`, it runs
+on the remote box under its `$HOME/.codex/sessions`. An explicit selected home
+is supported only for fresh local herdr tab/workspace calls; see Environment knobs.
 
 Startup gates are refused before anything is typed (`stage: deliver`, `sent:false`):
 Codex's folder-trust dialog, its **hooks-review** dialog (shown whenever hooks are
@@ -592,6 +594,16 @@ re-wrapping the ringing command).
 
 ## Reporting to the user
 
+For Codex reports sent to another agent through `codex queue`, prefix every
+message with the sender's name or role in brackets. Apply this to checkpoints,
+completion reports, blockers and callbacks, so the receiving thread can identify
+who is speaking. For example:
+
+> [Hotline builder] Tested account-home contract is ready; see the report for the source command and validation results. No live smoke has started.
+
+Queue acceptance confirms enqueueing; it does not prove the receiving agent has
+read or acted on the report.
+
 First exchange — surface the connection details:
 
 > Connected to **[workspace name]** (session: `[session-id]`).
@@ -621,6 +633,18 @@ the caller took over."
 ## Environment knobs
 
 Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
+
+- **`HOTLINE_CODEX_HOME=<absolute-directory>`** — select the Codex process account.
+  Requires `--agent codex --fresh` and `HOTLINE_HERDR_PLACEMENT=tab` or `workspace`
+  on local herdr. The directory must already exist and be readable/writable; spaces
+  are supported. Hotline passes `--env CODEX_HOME=...` when creating the tab, before
+  starting Codex, and records the canonical home in `codex_home.txt` so later waiters
+  discover rollouts in the same account even outside the caller environment.
+  Split, remote, resume, cache reuse, cmux and headless are refused when set.
+  Unset preserves existing behavior. `HOTLINE_CALLEE_ENV` configures Codex tool
+  subprocesses through `shell_environment_policy`; it does not select the account
+  that authenticates the Codex process. Keep the home on every new selected-account
+  dial; use the call directory with `wait-for-response.sh` for the existing call.
 
 - **`HOTLINE_CODEX_MODEL=<model>`** — `--agent codex` only: passed as `codex -m`.
 - **`HOTLINE_CODEX_ARGS="<args>"`** — `--agent codex` only: extra codex argv,

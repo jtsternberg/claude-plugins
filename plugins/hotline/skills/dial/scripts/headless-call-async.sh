@@ -61,6 +61,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# A running process or this transport cannot guarantee the requested account.
+if [[ ${HOTLINE_CODEX_HOME+x} ]]; then
+  echo '{"error":"HOTLINE_CODEX_HOME requires a fresh local herdr tab/workspace launch; this entry point cannot guarantee process identity"}'
+  exit 1
+fi
+
 # --prompt-file is preferred, and dial.sh always uses it. `claude -p` reads its
 # prompt from STDIN when no positional prompt is given (verified live against
 # claude 2.1.226 with --output-format stream-json), so the payload can reach the

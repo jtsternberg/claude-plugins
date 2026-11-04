@@ -23,6 +23,9 @@
 #   legacy cache miss → plant, persist, emit {"status":"replay", ...}, exit 2
 #   re-run            → discover from the pending fingerprint, continue as above
 #
+# HOTLINE_CODEX_HOME=<absolute-dir>: select a fresh local Codex account; requires
+# --agent codex --fresh and HOTLINE_HERDR_PLACEMENT=tab|workspace.
+#
 # Usage:
 #   dial.sh --target <reference> --mode quick|work_order|conference
 #           (--prompt-file <path> | --prompt <text>)
@@ -495,6 +498,17 @@ case "$AGENT_KIND" in
     ;;
   *) emit_error args "Unknown --agent '$AGENT_KIND'" "Valid agents: claude (default), codex." ;;
 esac
+
+# Account selection must be settled before discovery, cache reuse or launch.
+source "$PLUGIN_SCRIPTS/codex-home.sh"
+CODEX_HOME_TRANSPORT="$TRANSPORT_REQ"
+$FORCE_HEADLESS && CODEX_HOME_TRANSPORT=headless
+if ! codex_home_validate "$AGENT_KIND" "$CODEX_HOME_TRANSPORT" "$REMOTE_TARGET" "$RESUME_ARG"; then
+  emit_error args "$CODEX_HOME_ERR" "Use --agent codex --fresh with HOTLINE_HERDR_PLACEMENT=tab or workspace, or unset HOTLINE_CODEX_HOME."
+fi
+if [[ ${HOTLINE_CODEX_HOME+x} ]] && ! $FRESH; then
+  emit_error args "HOTLINE_CODEX_HOME requires --fresh: a cached process cannot change accounts" "Pass --fresh to create a new process with the selected home."
+fi
 
 # --- Transport request, validated BEFORE anything has a side effect ----------
 # Every refusal here is a REFUSAL, not a downgrade. `--transport herdr` is an
