@@ -594,3 +594,9 @@ cmux, headless and non-Codex agents. An empty, relative, missing or inaccessible
 home is an error. Leaving the variable unset preserves existing defaults.
 For both Claude Code and Codex callers, run the bundled `dial.sh` with the same
 options; no credential contents need to be read or forwarded.
+
+When reporting to another Codex agent through `codex queue`, start every message
+with the sender's name or role, for example `[Hotline builder] Tested contract
+ready; no live smoke started.` Use the same prefix for checkpoints, completion
+reports, blockers and callbacks. Queue acceptance does not prove delivery or
+that the receiver acted on the message.

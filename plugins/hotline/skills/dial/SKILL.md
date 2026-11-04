@@ -594,6 +594,16 @@ re-wrapping the ringing command).
 
 ## Reporting to the user
 
+For Codex reports sent to another agent through `codex queue`, prefix every
+message with the sender's name or role in brackets. Apply this to checkpoints,
+completion reports, blockers and callbacks, so the receiving thread can identify
+who is speaking. For example:
+
+> [Hotline builder] Tested account-home contract is ready; see the report for the source command and validation results. No live smoke has started.
+
+Queue acceptance confirms enqueueing; it does not prove the receiving agent has
+read or acted on the report.
+
 First exchange — surface the connection details:
 
 > Connected to **[workspace name]** (session: `[session-id]`).
