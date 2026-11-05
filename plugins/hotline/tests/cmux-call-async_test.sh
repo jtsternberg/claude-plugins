@@ -1583,6 +1583,26 @@ else
   fail "--agent codex: launch line is codex (update check off, env + extra args), no claude flags, no preset" "launch=$launch"
 fi
 
+# Account-pinned resume: inspect the actual launcher output, including spaces.
+[[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+tmp=$(mktemp -d "$TMP_ROOT"/hotline-codex-resume-XXXXXX)
+mkdir -p "$tmp/work home/sessions" "$tmp/bin"
+printf '{}\n' > "$tmp/work home/sessions/rollout-x-$RESUME_TARGET.jsonl"
+printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/lsof"; chmod +x "$tmp/bin/lsof"
+selected=$(cd "$tmp/work home" && pwd -P)
+call_dir=$(HOTLINE_CODEX_HOME="$selected" run_detached_launch "$tmp" --agent codex --resume "$RESUME_TARGET")
+launch=$(cat "$(cat "$call_dir/launch_script.txt" 2>/dev/null)" 2>/dev/null || echo "")
+printf -v expected_home '%q' "$selected"
+if [[ "$launch" == *"export CODEX_HOME=$expected_home"* && "$launch" == *"resume $RESUME_TARGET"* \
+      && "$(cat "$call_dir/codex_home.txt" 2>/dev/null)" == "$selected" && ! -e "$call_dir/session_id_preset.txt" ]]; then
+  pass 'cmux resume exports selected home, passes thread, and persists account without Claude preset'
+else
+  fail 'cmux resume exports selected home, passes thread, and persists account without Claude preset' "launch=$launch out=$(cat "$tmp/out.json")"
+fi
+[[ -f "$call_dir/launch_script.txt" ]] && rm -f "$(cat "$call_dir/launch_script.txt")"
+rm -rf "$tmp" "$call_dir"
+
 if [[ -s "$POISON_LOG" ]]; then
   fail "no test reaches the real cmux or claude" "$(cat "$POISON_LOG")"
 else

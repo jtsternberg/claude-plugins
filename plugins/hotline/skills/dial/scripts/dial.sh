@@ -464,7 +464,7 @@ if [[ -z "$RESUME_ARG" && "$TARGET_REF" =~ $HOTLINE_SESSION_UUID_RE ]]; then
 fi
 
 # --- --agent codex, validated before the transport it selects ----------------
-# Herdr is the only host that can run a codex callee today, so codex selects it
+# Herdr is the default host for a codex callee, so codex selects it
 # (like --remote) and every combination it cannot honour is an ARGS error that
 # names the gap — never a quiet claude callee instead.
 case "$AGENT_KIND" in
@@ -480,9 +480,9 @@ case "$AGENT_KIND" in
       emit_error args "--agent codex --transport cmux does not support --mode conference yet" \
         "Use --transport herdr for a codex conference (it focuses the pane once the prompt lands), or a work_order/quick mode over cmux."
     fi
-    if [[ -n "$RESUME_ARG" ]] && { $FORCE_HEADLESS || [[ "$TRANSPORT_REQ" == cmux || "$TRANSPORT_REQ" == headless ]]; }; then
-      emit_error args "--agent codex continues a thread over herdr only" \
-        "Drop --transport/--headless: \`codex resume\` is run in a herdr pane, which --agent codex selects by default."
+    if [[ -n "$RESUME_ARG" ]] && { $FORCE_HEADLESS || [[ "$TRANSPORT_REQ" == headless ]]; }; then
+      emit_error args "--agent codex continues a thread over herdr or cmux only" \
+        "Use --transport herdr or cmux; drop --headless: \`codex resume\` is run in a herdr pane, which --agent codex selects by default."
     fi
     if [[ -n "$TOOLS" ]]; then
       emit_error args "--tools is claude's --allowedTools list; a codex callee has no equivalent" \
@@ -506,9 +506,9 @@ source "$PLUGIN_SCRIPTS/codex-home.sh"
 CODEX_HOME_TRANSPORT="$TRANSPORT_REQ"
 $FORCE_HEADLESS && CODEX_HOME_TRANSPORT=headless
 CODEX_HOME_MODE=reuse
-$FRESH && CODEX_HOME_MODE=launch
+if $FRESH || [[ -n "$RESUME_ARG" || "$CODEX_HOME_TRANSPORT" == cmux ]]; then CODEX_HOME_MODE=launch; fi
 if ! codex_home_validate "$AGENT_KIND" "$CODEX_HOME_TRANSPORT" "$REMOTE_TARGET" "$RESUME_ARG" "$CODEX_HOME_MODE"; then
-  emit_error args "$CODEX_HOME_ERR" "Use --agent codex --fresh with HOTLINE_HERDR_PLACEMENT=tab or workspace, or unset HOTLINE_CODEX_HOME."
+  emit_error args "$CODEX_HOME_ERR" "Use local --agent codex with cmux or herdr tab/workspace placement, or unset HOTLINE_CODEX_HOME."
 fi
 
 # --- Transport request, validated BEFORE anything has a side effect ----------
@@ -603,9 +603,27 @@ fi
 
 if [[ "$AGENT_KIND" == "codex" && -n "$RESUME_ARG" ]]; then
   source "$PLUGIN_SCRIPTS/codex-rollout.sh"
-  CODEX_ADOPT_ROLLOUT=$(codex_find_thread "$RESUME_ARG") || emit_error args \
-    "--agent codex cannot continue '$RESUME_ARG': no Codex thread with that id exists on ${REMOTE_TARGET:-this machine}" \
-    "A Claude session cannot be adopted by Codex. Use --agent claude for a Claude session, or supply a Codex thread id from the callee's sessions directory."
+  CODEX_ADOPT_ROLLOUT=$(codex_find_thread "$RESUME_ARG") || {
+    if [[ -z "$REMOTE_TARGET" && ! ${HOTLINE_CODEX_HOME+x} ]]; then
+      if codex_home_autodetect "$RESUME_ARG"; then
+        codex_home_validate "$AGENT_KIND" "$CODEX_HOME_TRANSPORT" "$REMOTE_TARGET" "$RESUME_ARG" launch \
+          || emit_error args "$CODEX_HOME_ERR" "Select a local cmux or herdr tab/workspace launch."
+        add_fallback "codex-home→auto($HOTLINE_CODEX_HOME)"
+        CODEX_ADOPT_ROLLOUT=$(codex_find_thread "$RESUME_ARG")
+      elif [[ -n "$CODEX_HOME_ERR" ]]; then
+        emit_error args "$CODEX_HOME_ERR" "Set HOTLINE_CODEX_HOME to the intended account."
+      fi
+    fi
+    [[ -n "$CODEX_ADOPT_ROLLOUT" ]] || emit_error args \
+      "--agent codex cannot continue '$RESUME_ARG': no Codex thread with that id exists on ${REMOTE_TARGET:-this machine}" \
+      "A Claude session cannot be adopted by Codex. Use --agent claude for a Claude session, or supply a Codex thread id from the callee's sessions directory."
+  }
+  # cmux Codex calls have no cached-process delivery. Herdr checks at the
+  # launcher instead, so verified cached follow-ups can still reuse their owner.
+  if [[ -z "$REMOTE_TARGET" && "$CODEX_HOME_TRANSPORT" == cmux ]]; then
+    codex_home_resume_validate "$CODEX_ADOPT_ROLLOUT" "$RESUME_ARG" \
+      || emit_error transport "$CODEX_HOME_ERR" "Close the existing Codex pane/surface and retry when its process exits."
+  fi
   if [[ -z "$TARGET_REF" || "$TARGET_REF" == "$RESUME_ARG" ]]; then
     TARGET_REF=$(codex_thread_cwd "$CODEX_ADOPT_ROLLOUT") || emit_error resolve \
       "The Codex thread has no recorded workspace" "Pass --target <workspace-path> alongside --resume <thread-id>."
@@ -1248,7 +1266,9 @@ fi
 
 # Selected-account reuse is stricter than legacy reuse: no mismatch may turn
 # into a fresh launch under an ambient account. Recover the pin before payloads.
-if ! $FRESH && { [[ ${HOTLINE_CODEX_HOME+x} || -n "$PREV_CODEX_HOME" ]] || [[ -s "$PREV_CALL_DIR/codex_home.txt" ]]; }; then
+CODEX_HOME_NEW_HOST=false
+if $FIRST_CONTACT && [[ "$AGENT_KIND" == codex && -z "$REMOTE_TARGET" && ( -n "$RESUME_ARG" || "$TRANSPORT" == cmux ) ]]; then CODEX_HOME_NEW_HOST=true; fi
+if ! $FRESH && ! $CODEX_HOME_NEW_HOST && { [[ ${HOTLINE_CODEX_HOME+x} || -n "$PREV_CODEX_HOME" ]] || [[ -s "$PREV_CALL_DIR/codex_home.txt" ]]; }; then
   if $FIRST_CONTACT || [[ "$AGENT_KIND" != codex || "$TRANSPORT" != herdr || -n "$REMOTE_TARGET" ]]; then
     emit_error transport "HOTLINE_CODEX_HOME continuation has no matching local cached Codex agent" "Use --fresh with an explicit HOTLINE_CODEX_HOME and tab/workspace placement to start a new call. Nothing was delivered."
   fi
@@ -1829,6 +1849,10 @@ fi
 # Step 5c — Fire asynchronously (quick calls, work orders, headless conference)
 # ---------------------------------------------------------------------------
 fire_headless() {
+  if [[ "$AGENT_KIND" == codex && -n "$EFFECTIVE_RESUME" ]]; then
+    jq -nc '{error:"Codex thread resume requires herdr or cmux; headless fallback refused; nothing was delivered",stage:"transport"}'
+    return 1
+  fi
   local ARGS=(--cwd "$TARGET_PATH")
   $FIRST_CONTACT && ARGS+=(--name "$SESSION_NAME")
   [[ -n "$EFFECTIVE_RESUME" ]] && ARGS+=(--resume "$EFFECTIVE_RESUME")
@@ -1913,7 +1937,8 @@ CALL_DIR=$(jq -r '.call_dir // empty' <<<"$CALL_RESULT" 2>/dev/null)
 if [[ -z "$CALL_DIR" ]]; then
   LAUNCH_ERR=$(jq -r '.error // empty' <<<"$CALL_RESULT" 2>/dev/null)
   [[ -z "$LAUNCH_ERR" ]] && LAUNCH_ERR="launcher returned no call_dir: ${CALL_RESULT:-<no stdout>} $(cat "$ERR_FILE")"
-  emit_error fire "$LAUNCH_ERR" \
+  LAUNCH_STAGE=$(jq -r ' .stage // "fire"' <<<"$CALL_RESULT" 2>/dev/null)
+  emit_error "$LAUNCH_STAGE" "$LAUNCH_ERR" \
     "See references/error-recovery.md. A --fork-session/--resume mismatch, a bad --cwd, or an unavailable transport are the usual causes."
 fi
 

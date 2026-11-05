@@ -5,9 +5,9 @@
 codex_home_validate() { # <agent> <transport> <remote> <resume> [launch|reuse]
   CODEX_HOME_ERR=""
   [[ ${HOTLINE_CODEX_HOME+x} ]] || return 0
-  if [[ "$1" != codex || "$2" != herdr || -n "$3" || -n "$4" \
-        || ( "${5:-launch}" == launch && "${HOTLINE_HERDR_PLACEMENT:-split}" != tab && "${HOTLINE_HERDR_PLACEMENT:-split}" != workspace ) ]]; then
-    CODEX_HOME_ERR='HOTLINE_CODEX_HOME requires local Codex herdr: a fresh tab/workspace or verified same-home cached continuation; remote and explicit resume are unsupported'
+  if [[ "$1" != codex || ( "$2" != herdr && "$2" != cmux ) || -n "$3" \
+        || ( "$2" == herdr && ( "${5:-launch}" == launch || -n "$4" ) && "${HOTLINE_HERDR_PLACEMENT:-split}" != tab && "${HOTLINE_HERDR_PLACEMENT:-split}" != workspace ) ]]; then
+    CODEX_HOME_ERR='HOTLINE_CODEX_HOME requires local Codex: cmux, a herdr tab/workspace launch, or verified same-home cached continuation; remote and headless are unsupported'
     return 1
   fi
   if [[ "$HOTLINE_CODEX_HOME" != /* || "$HOTLINE_CODEX_HOME" == *$'\n'* || "$HOTLINE_CODEX_HOME" == *$'\r'* \
@@ -84,4 +84,49 @@ codex_home_live_validate() { # <live-agent-json> <agent-name> <thread-id>
   [[ "$verified_pid" == "$pid" ]] || return 1
   CODEX_HOME_ERR=""
   return 0
+}
+
+# Called only after lookup in the default home misses. Do not override an explicit
+# selection or search remote accounts. Directory globs never inspect credentials.
+codex_home_autodetect() { # <thread-id>; codex-rollout.sh must be sourced
+  local id="$1" home homes=()
+  CODEX_HOME_ERR=""
+  [[ ! ${HOTLINE_CODEX_HOME+x} && -z "${HOTLINE_HERDR_REMOTE:-}" ]] || return 1
+  for home in "$HOME"/.codex*; do
+    [[ -d "$home/sessions" ]] || continue
+    HOTLINE_CODEX_HOME="$home" codex_find_thread "$id" >/dev/null || continue
+    home=$(cd "$home" && pwd -P) || continue
+    # Symlink aliases for one account are one candidate.
+    local seen=false prior
+    for prior in "${homes[@]+"${homes[@]}"}"; do [[ "$prior" == "$home" ]] && seen=true; done
+    $seen && continue
+    homes+=("$home")
+  done
+  if [[ ${#homes[@]} -gt 1 ]]; then
+    CODEX_HOME_ERR="Codex thread '$id' has ambiguous account homes: ${homes[*]}; select HOTLINE_CODEX_HOME explicitly"
+    return 1
+  fi
+  [[ ${#homes[@]} -eq 1 ]] || return 1
+  export HOTLINE_CODEX_HOME="${homes[0]}"
+  [[ ${HOTLINE_HERDR_PLACEMENT+x} ]] || export HOTLINE_HERDR_PLACEMENT=tab
+}
+
+# A resume opens a writer on an existing rollout. Refuse before creating a host
+# when another Codex already owns it. lsof inspects descriptors, not account files.
+codex_home_resume_validate() { # <rollout> <thread-id>
+  local rollout="$1" thread="$2" records rc pid="" row owners=""
+  CODEX_HOME_ERR="Cannot verify live Codex owners for '$thread'; local lsof and a readable rollout are required; nothing was delivered"
+  [[ -f "$rollout" && -r "$rollout" ]] && command -v lsof >/dev/null 2>&1 || return 1
+  records=$(lsof -Fpc -- "$rollout" 2>/dev/null); rc=$?
+  # lsof returns 1 when nobody holds the file. Other errors fail closed.
+  [[ $rc -eq 0 || ( $rc -eq 1 && -z "$records" ) ]] || return 1
+  while IFS= read -r row; do
+    case "$row" in
+      p*) pid="${row#p}" ;;
+      ccodex*) [[ "$pid" =~ ^[1-9][0-9]*$ ]] && owners+=" $pid" ;;
+    esac
+  done <<<"$records"
+  CODEX_HOME_ERR="Codex thread '$thread' is already open in live Codex pid(s)$owners; close its existing pane/surface before resuming; nothing was delivered"
+  [[ -z "$owners" ]] || return 1
+  CODEX_HOME_ERR=""
 }

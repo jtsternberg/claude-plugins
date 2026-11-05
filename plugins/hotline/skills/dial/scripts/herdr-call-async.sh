@@ -88,7 +88,7 @@
 # codex shell_environment_policy overrides (callee_env_codex_config).
 #
 # HOTLINE_CODEX_HOME=<absolute-dir> selects the Codex process account via tab
-# creation --env CODEX_HOME. Local fresh tab/workspace only; split/remote/resume
+# creation --env CODEX_HOME. Local tab/workspace launches, including resume; split/remote
 # are refused. codex_home.txt pins the same home for independent response readers.
 #
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
@@ -161,6 +161,16 @@ die() { jq -nc --arg err "$1" '{error: $err}'; exit 1; }
 
 source "$HOTLINE_SCRIPTS/codex-home.sh"
 codex_home_validate "$AGENT_KIND" herdr "${HOTLINE_HERDR_REMOTE:-}" "$RESUME_ID" || die "$CODEX_HOME_ERR"
+
+if [[ "$AGENT_KIND" == codex && -n "$RESUME_ID" && -z "${HOTLINE_HERDR_REMOTE:-}" ]]; then
+  source "$SCRIPT_DIR/../../../scripts/codex-rollout.sh"
+  _resume_rollout=$(codex_find_thread "$RESUME_ID")
+  if ! codex_home_resume_validate "$_resume_rollout" "$RESUME_ID"; then
+    jq -nc --arg e "$CODEX_HOME_ERR" '{error:$e,stage:"transport"}'
+    exit 1
+  fi
+fi
+
 
 # `pane split --cwd` needs a real directory: unlike cmux's launch script, there is
 # no `cd` step to fail later and no ambient cwd to inherit from the caller.

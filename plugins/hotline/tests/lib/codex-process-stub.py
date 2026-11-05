@@ -15,6 +15,10 @@ if mode == "ps":
     print("Wed Nov  4 12:00:01 2026" if os.environ.get("PS_STUB_CHANGE") == "1" and reads % 2 else "Wed Nov  4 12:00:00 2026")
     sys.exit(0)
 
+# Resume-launch discovery: fixture agents do not own an open rollout descriptor.
+if len(args) == 3 and args[:2] == ["-Fpc", "--"]:
+    sys.exit(1)
+
 if args not in (["-nP", "-a", "-p", pid, "-Fn"], ["-nP", "-a", "-p", pid, "-F0pcfDint"]):
     sys.exit(1)
 if os.environ.get("LSOF_STUB_FAIL") == "1":

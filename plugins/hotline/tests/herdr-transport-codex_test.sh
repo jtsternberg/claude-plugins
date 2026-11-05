@@ -23,7 +23,7 @@ refuses() {  # refuses <label> <detail-substring> <dial args...>
   check "$label" $? "out=$out"
 }
 refuses "--transport cmux --mode conference" "does not support --mode conference" --transport cmux --mode conference
-refuses "--resume <id> --headless" "herdr only"     --resume 11111111-2222-3333-4444-555555555555 --headless
+refuses "--resume <id> --headless" "herdr or cmux only"     --resume 11111111-2222-3333-4444-555555555555 --headless
 refuses "--resume <id>"           "cannot continue"   --resume 11111111-2222-3333-4444-555555555555
 refuses "--tools"                 "--allowedTools"    --tools "Read"
 t=$(new_env); codex_env "$t"
@@ -226,6 +226,23 @@ for shape in resume target; do
   [[ "$(jq -r .status <<<"$out")" == connected && "$(grep 'agent start' "$t/herdr.log")" == *"resume $THREAD"* ]]
   check "$shape adopts an old Codex thread from CODEX_HOME via codex resume" $? "out=$out err=$(cat "$t/err.txt")"
 done
+
+# Default lookup misses: dial must carry auto-detected home across the server
+# boundary, not merely discover a rollout in the caller process.
+t=$(new_env); codex_env "$t"; seed_thread "$t/home/.codex-work" "$t/target"
+out=$(dial "$t" "${CENV[@]}" -- --target "$THREAD" --mode quick --prompt auto-adopt --agent codex)
+CD=$(jq -r '.call_dir // empty' <<<"$out")
+[[ "$(jq -r .status <<<"$out")" == connected && "$(cat "$CD/codex_home.txt" 2>/dev/null)" == "$(cd "$t/home/.codex-work" && pwd -P)" \
+   && "$(jq -r '.fallbacks | join(" ")' <<<"$out")" == *'codex-home→auto('* ]]
+check 'dial auto-detects unique account, launches there and persists its home' $? "out=$out"
+t=$(new_env); codex_env "$t"; seed_thread "$t/home/.codex-work" "$t/target"; seed_thread "$t/home/.codex-other" "$t/target"
+out=$(dial "$t" "${CENV[@]}" -- --target "$THREAD" --mode quick --prompt auto-adopt --agent codex)
+[[ "$(jq -r .stage <<<"$out")" == args && "$(jq -r .detail <<<"$out")" == *ambiguous* ]] && ! grep -q 'agent start' "$t/herdr.log"
+check 'dial refuses ambiguous account discovery before launch' $? "out=$out"
+t=$(new_env); codex_env "$t"; seed_thread "$t/home/.codex" "$t/target"
+out=$(dial "$t" "${CENV[@]}" -- --target "$THREAD" --mode quick --prompt no-fallback --agent codex --transport cmux)
+[[ "$(jq -r .stage <<<"$out")" == transport && "$(jq -r .detail <<<"$out")" == *'headless fallback refused'* ]]
+check 'unavailable cmux cannot degrade thread resume into a headless new thread' $? "out=$out"
 
 echo "7. Remote Codex: remote HOME, remote confirmation, and a refreshed local mirror:"
 t=$(new_env); codex_env "$t"; mkdir -p "$t/remote-home"

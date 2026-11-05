@@ -345,7 +345,7 @@ rollout is normalized into the rows the Claude transcript reader already parses,
 |---|---|
 | `--agent codex` over herdr (default), any mode, side or detached | supported. A re-dial of the same target reuses the cached live codex agent with a `$hotline:hotline-ringing [FOLLOW_UP]` message and a new nonce; if that agent died, a new one runs `codex resume <thread>` so the conversation continues (`herdr-agent-reuse→resumed` in `.fallbacks`) |
 | `--agent codex --remote <ssh-target>` | supported (herdr) — checks remote `codex` on PATH, confirms the nonce on that box, and mirrors the rollout from its `$HOME/.codex/sessions` each response poll |
-| `--resume <codex-thread-id>`, or a thread id as the target | supported over herdr — launches `codex resume <id>` and continues that thread, unforked; a thread-id target gets its workspace from the rollout. Claude session ids are refused (`args`), as is `--resume` over cmux/headless |
+| `--resume <codex-thread-id>`, or a thread id as the target | supported over local herdr and cmux (and default-home remote herdr) — launches `codex resume <id>` and continues that thread, unforked; a thread-id target gets its workspace from the rollout. Claude session ids are refused (`args`), as is `--resume` over headless |
 | `--agent codex --transport cmux`, quick/work_order, side/detached/window | supported — `codex` runs in the surface; first contact waits for codex's composer (refusing on a dialog) and is confirmed by the nonce in the rollout. First contact only: a re-dial starts a new callee |
 | `--transport cmux --mode conference` | refused (`args`) — the cmux conference path is claude-only; use herdr |
 | `--agent codex --headless` (or `--transport headless`) | supported — runs `codex exec --json -o <file> -` with the prompt on stdin; the reply is codex's last message, with bare STATUS lines (no nonce) as for claude headless. First contact only |
@@ -355,9 +355,14 @@ rollout is normalized into the rows the Claude transcript reader already parses,
 
 Local lookup uses the selected `HOTLINE_CODEX_HOME` (and persisted call home for
 waiters), otherwise `${CODEX_HOME:-~/.codex}/sessions`; with `--remote`, it runs
-on the remote box under its `$HOME/.codex/sessions`. An explicit selected home
-supports fresh local herdr tab/workspace calls and verified same-home cached
-continuations; see Environment knobs.
+on the remote box under its `$HOME/.codex/sessions`. When local default lookup
+misses and no explicit home was selected, hotline searches directories matching
+`$HOME/.codex*/sessions`. One matching account selects that home and records
+`codex-home→auto(<home>)` in `.fallbacks`; multiple matching accounts are refused
+with their paths. Auto-selection defaults unset `HOTLINE_HERDR_PLACEMENT` to `tab`.
+Before a local resume launch, `lsof` must show no Codex process holding that
+rollout; an existing owner refuses the launch with its PID and nothing delivered.
+Close the existing pane/surface before retrying. See Environment knobs.
 
 Herdr Codex startup observes the same callee within a wall-clock budget and a
 probe cap; a blocked start never triggers a second agent launch. Two current
@@ -644,10 +649,10 @@ the caller took over."
 Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
 
 - **`HOTLINE_CODEX_HOME=<absolute-directory>`** — select the Codex process account.
-  New calls require `--agent codex --fresh` and `HOTLINE_HERDR_PLACEMENT=tab` or
-  `workspace` on local herdr. The directory must already exist and be readable/writable; spaces
+  New calls require `--agent codex` over local cmux, or `--fresh`/explicit
+  thread resume with `HOTLINE_HERDR_PLACEMENT=tab` or `workspace` on local herdr. The directory must already exist and be readable/writable; spaces
   are supported. Hotline passes `--env CODEX_HOME=...` when creating the tab, before
-  starting Codex, and records the canonical home in `codex_home.txt` so later waiters
+  starting Codex (cmux exports it in the launch script), and records the canonical home in `codex_home.txt` so later waiters
   discover rollouts in the same account even outside the caller environment.
   Re-dial the same target/caller with `--agent codex` and without `--fresh` to
   continue the cached process. An explicit home must match; omitting it inherits
@@ -668,7 +673,8 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   hooks or answers trust gates to obtain identity. Native hook-based reporting
   requires a separately reviewed Herdr integration and hook configuration in
   the selected home; check shared `hooks.json` symlinks before any installation.
-  Split launches, remote, explicit resume, cmux and headless are refused when set.
+  Herdr split launches, remote and headless are refused when set. Explicit
+  local resume is supported over cmux and herdr tab/workspace placement.
   New calls with no override retain the default account behavior.
   `HOTLINE_CALLEE_ENV` configures Codex tool
   subprocesses through `shell_environment_policy`; it does not select the account

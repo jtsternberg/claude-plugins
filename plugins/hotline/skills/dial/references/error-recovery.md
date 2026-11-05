@@ -540,6 +540,12 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
 ### Codex callees (`--agent codex`)
 
 **`stage: args` — "no Codex thread with that id exists"**
+
+  Local lookup first checks the selected/default account, then directories matching
+  `$HOME/.codex*/sessions` when no home was explicitly selected. An ambiguous match
+  names the candidate homes: set `HOTLINE_CODEX_HOME` to the intended one. Local
+  resume works over cmux or herdr tab/workspace; headless resume remains refused.
+
 - `--resume <id>` and a session-id target require a Codex rollout whose filename
   ends in that id. Local lookup uses `${CODEX_HOME:-~/.codex}/sessions`; remote
   lookup uses the remote `$HOME/.codex/sessions`. A Claude session requires

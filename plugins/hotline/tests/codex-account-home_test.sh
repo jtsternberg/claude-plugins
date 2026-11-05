@@ -33,17 +33,16 @@ for bad in relative "$t/missing" ''; do
 done
 stub_headless_claude "$t"
 mkdir -p "$t/work"
-for extra in 'split' 'remote' 'resume'; do
+for extra in 'split' 'remote'; do
   : > "$t/herdr.log"
   case "$extra" in
     split) out=$(launch HOTLINE_CODEX_HOME="$t/work") ;;
     remote) out=$(launch HOTLINE_CODEX_HOME="$t/work" HOTLINE_HERDR_PLACEMENT=tab HOTLINE_HERDR_REMOTE=remote) ;;
-    resume) out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CODEX_HOME="$t/work" HOTLINE_HERDR_PLACEMENT=tab bash "$HERDR_ASYNC" --cwd "$t/target" --prompt x --agent codex --resume 11111111-2222-3333-4444-555555555555) ;;
   esac
   [[ "$(jq -r '.error // empty' <<<"$out")" == *HOTLINE_CODEX_HOME* ]] && ! grep -q 'agent start' "$t/herdr.log"
   check "$extra refused before launch" $? "out=$out"
 done
-for flags in '--agent claude --fresh' '--agent codex' '--agent codex --fresh --headless' '--agent codex --fresh --transport cmux'; do
+for flags in '--agent claude --fresh' '--agent codex' '--agent codex --fresh --headless'; do
   out=$(dial "$t" HOTLINE_CODEX_HOME="$t/work" HOTLINE_HERDR_PLACEMENT=tab -- --target "$t/target" --mode quick --prompt x $flags)
   expected_stage=args
   [[ "$flags" != '--agent codex' ]] || expected_stage=transport
@@ -51,12 +50,65 @@ for flags in '--agent claude --fresh' '--agent codex' '--agent codex --fresh --h
   check "dial rejects unsupported selection: $flags" $? "out=$out"
 done
 
-for entry in headless-call-async.sh cmux-call-async.sh herdr-reuse-agent.sh; do
+for entry in headless-call-async.sh herdr-reuse-agent.sh; do
   out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HOTLINE_CODEX_HOME="$t/work" \
     bash "$SCRIPTS/$entry" --cwd "$t/target" --prompt x --agent codex 2>/dev/null)
   [[ "$(jq -r '.error // empty' <<<"$out")" == *HOTLINE_CODEX_HOME* ]]
   check "direct $entry refuses unsupported account selection" $? "out=$out"
 done
+
+# Resume guards operate on the exact rollout and fail before transport creation.
+t=$(new_env)
+thread=11111111-2222-3333-4444-555555555555
+printf '#!/bin/sh\nexit 0\n' > "$t/bin/codex"; chmod +x "$t/bin/codex"
+mkdir -p "$t/home/.codex-work/sessions" "$t/home/.codex-other/sessions"
+rollout="$t/home/.codex-work/sessions/rollout-x-$thread.jsonl"
+jq -nc --arg id "$thread" --arg cwd "$t/target" '{type:"session_meta",payload:{id:$id,cwd:$cwd}}' > "$rollout"
+cat > "$t/bin/lsof" <<'STUB'
+#!/usr/bin/env bash
+case "${RESUME_OWNER:-none}" in
+  none) exit 1 ;;
+  codex) printf 'p12345\nccodex\n' ;;
+  other) printf 'p12345\nctail\n' ;;
+  broken) exit 127 ;;
+esac
+STUB
+chmod +x "$t/bin/lsof"
+source "$HOTLINE_DIR/scripts/codex-home.sh"
+source "$HOTLINE_DIR/scripts/codex-rollout.sh"
+HOME_SAVE="$HOME"; HOME="$t/home"
+codex_home_autodetect "$thread"
+[[ "$HOTLINE_CODEX_HOME" == "$(cd "$t/home/.codex-work" && pwd -P)" && "$HOTLINE_HERDR_PLACEMENT" == tab ]]
+check 'single non-default home selected with safe herdr placement' $?
+unset HOTLINE_CODEX_HOME HOTLINE_HERDR_PLACEMENT
+cp "$rollout" "$t/home/.codex-other/sessions/rollout-x-$thread.jsonl"
+! codex_home_autodetect "$thread" && [[ "$CODEX_HOME_ERR" == *ambiguous* && "$CODEX_HOME_ERR" == *'.codex-work'* && "$CODEX_HOME_ERR" == *'.codex-other'* ]]
+check 'ambiguous homes refused with both candidates' $?
+rm "$t/home/.codex-other/sessions/rollout-x-$thread.jsonl"
+HOME="$HOME_SAVE"
+for owner in none other codex broken; do
+  ( export PATH="$t/bin:$PATH" RESUME_OWNER="$owner"
+    codex_home_resume_validate "$rollout" "$thread"
+  ); rc=$?
+  case "$owner" in none|other) [[ $rc == 0 ]] ;; *) [[ $rc != 0 ]] ;; esac
+  check "resume ownership guard: $owner" $?
+done
+for transport in herdr cmux; do
+  out=$(dial "$t" RESUME_OWNER=codex -- --agent codex --transport "$transport" --target "$thread" --mode quick --prompt x)
+  [[ "$(jq -r .stage <<<"$out")" == transport && "$(jq -r .detail <<<"$out")" == *12345* && "$(jq -r .detail <<<"$out")" == *'nothing was delivered'* ]]
+  check "$transport refuses live duplicate before launch" $? "out=$out"
+done
+# Herdr launch must receive both the selected account and explicit resume argv.
+: > "$t/herdr.log"
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" HERDR_STATE="$t/state" \
+  HOTLINE_HERDR_PANE=w1:p1 HOTLINE_CODEX_HOME="$t/home/.codex-work" HOTLINE_HERDR_PLACEMENT=tab \
+  bash "$HERDR_ASYNC" --cwd "$t/target" --prompt x --agent codex --resume "$thread")
+grep 'agent start' "$t/herdr.log" | grep -Fq "resume $thread"
+check 'selected-home herdr launch carries resume id' $? "out=$out"
+printf -v expected_env '%q' "CODEX_HOME=$(cd "$t/home/.codex-work" && pwd -P)"
+grep 'tab create' "$t/herdr.log" | grep -Fq -- "--env $expected_env"
+check 'selected-home resume passes account before startup' $?
+unset HOTLINE_CODEX_HOME HOTLINE_HERDR_PLACEMENT
 
 # A waiter outside the caller environment must rediscover in the persisted home.
 # Its ambient home contains a decoy with the SAME nonce; metadata must win.

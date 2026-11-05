@@ -159,10 +159,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# A running process or this transport cannot guarantee the requested account.
-if [[ ${HOTLINE_CODEX_HOME+x} ]]; then
-  echo '{"error":"HOTLINE_CODEX_HOME requires a fresh local herdr tab/workspace launch; this entry point cannot guarantee process identity"}'
-  exit 1
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../../../scripts/codex-home.sh"
+codex_home_validate "$AGENT_KIND" cmux "" "$RESUME_ID" launch || {
+  jq -nc --arg e "$CODEX_HOME_ERR" '{error:$e,stage:"args"}'; exit 1;
+}
+
+if [[ "$AGENT_KIND" == codex && -n "$RESUME_ID" ]]; then
+  source "$SCRIPT_DIR/../../../scripts/codex-rollout.sh"
+  _resume_rollout=$(codex_find_thread "$RESUME_ID")
+  if ! codex_home_resume_validate "$_resume_rollout" "$RESUME_ID"; then
+    jq -nc --arg e "$CODEX_HOME_ERR" '{error:$e,stage:"transport"}'
+    exit 1
+  fi
 fi
 
 if [[ -z "$CWD" && -z "$RESUME_ID" ]]; then
@@ -194,7 +203,6 @@ if $FORK_SESSION && [[ -z "$RESUME_ID" ]]; then
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../../scripts/repl-state.sh
 source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
 
@@ -222,6 +230,7 @@ fi
 # HOTLINE_CALL_HOME overrides the base dir (default /tmp) so test suites can own
 # and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
 CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
+if [[ ${HOTLINE_CODEX_HOME+x} ]]; then printf '%s\n' "$HOTLINE_CODEX_HOME" > "$CALL_DIR/codex_home.txt"; fi
 # Which backend owns this call dir. Written here, with the dir, so it is present
 # for every later reader no matter where this launcher gets to — the host handle
 # (surface_ref.txt / workspace_ref.txt) is not placed until much further down.
@@ -400,9 +409,11 @@ if [[ "$AGENT_KIND" == "codex" ]]; then
     read -r -a _codex_extra <<<"$HOTLINE_CODEX_ARGS"
     CODEX_ARGS+=("${_codex_extra[@]}")
   fi
+  [[ -n "$RESUME_ID" ]] && CODEX_ARGS+=(resume "$RESUME_ID")
   {
     printf '#!/usr/bin/env bash\n'
     [[ -n "$CWD" ]] && printf 'cd %q || exit 1\n' "$CWD"
+    [[ ${HOTLINE_CODEX_HOME+x} ]] && printf 'export CODEX_HOME=%q\n' "$HOTLINE_CODEX_HOME"
     printf 'codex'
     printf ' %q' "${CODEX_ARGS[@]}"
     printf '\n'

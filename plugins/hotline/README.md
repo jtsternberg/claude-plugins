@@ -583,11 +583,22 @@ Hotline also still ships the fingerprint-and-grep discovery it was built on, as 
 ### Selecting a Codex account
 
 Set `HOTLINE_CODEX_HOME` to the account's existing absolute Codex home and dial
-with `--agent codex --fresh` plus `HOTLINE_HERDR_PLACEMENT=tab` (or `workspace`
-with `HOTLINE_HERDR_WORKSPACE`). The tab receives `CODEX_HOME` before Codex starts;
+with `--agent codex --transport cmux`, or `--agent codex --fresh` plus
+`HOTLINE_HERDR_PLACEMENT=tab` (or `workspace` with `HOTLINE_HERDR_WORKSPACE`).
+Explicit thread resume also works over local cmux and herdr tab/workspace.
+The tab receives `CODEX_HOME` before Codex starts; cmux exports it in its launch script;
 `HOTLINE_CALLEE_ENV` only configures tool subprocesses and cannot select the
 process account. The home is canonicalized and stored as `codex_home.txt` in the
 call directory for rollout discovery and independent response waiters.
+
+When a thread-id lookup misses the default account, hotline searches local
+`$HOME/.codex*/sessions` directories unless an explicit home was selected.
+A unique matching account is selected and reported in `.fallbacks`; multiple
+accounts are refused with their paths. Automatic selection defaults unset herdr
+placement to `tab`. Local resume launches require `lsof` to check that no live
+Codex process already owns that rollout; an existing owner is refused with its
+PID before delivery. Close that pane/surface before retrying. Headless resume
+and explicit account selection over headless/remote remain unsupported.
 
 A cached continuation to the same target/caller uses `--agent codex` without
 `--fresh`. Supply the same home or omit the override: the cache retains its
@@ -621,8 +632,8 @@ separately review its integration and configured hooks in the selected
 trust decisions themselves. Enabling hooks or reporting a matching thread never
 waives Hotline's rollout-ownership verification.
 
-An explicit home refuses split launches, remote calls, explicit resume, cmux,
-headless and non-Codex agents. An empty, relative, missing or inaccessible home is
+An explicit home refuses herdr split launches, remote calls, headless and
+non-Codex agents. An empty, relative, missing or inaccessible home is
 an error. New calls without an override preserve the existing defaults.
 For both Claude Code and Codex callers, run the bundled `dial.sh` with the same
 options; no credential contents need to be read or forwarded.
