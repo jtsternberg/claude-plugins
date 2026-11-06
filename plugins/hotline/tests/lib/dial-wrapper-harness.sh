@@ -276,6 +276,10 @@ EOF
 make_side_opener() {
   cat > "$1" <<'EOF'
 #!/usr/bin/env bash
+if [[ -n "${SIDE_OPENER_IDENTITY_LOG:-}" ]]; then
+  jq -nc --arg session "${CMUX_CALLER_SESSION_ID:-}" --arg agent "${CMUX_CALLER_AGENT:-}" \
+    '{session:$session, agent:$agent}' > "$SIDE_OPENER_IDENTITY_LOG"
+fi
 [[ -n "${SIDE_OPENER_LOG:-}" ]] && printf '%s\n' "$*" >> "$SIDE_OPENER_LOG"
 TITLE=""
 while [[ $# -gt 0 ]]; do

@@ -5,6 +5,8 @@
 #
 # Algorithm:
 #   1. `cmux identify --json` → subject's pane_ref + workspace_ref.
+#      If unavailable: recover from CMUX_SURFACE_ID, then a validated exact
+#      native agent session (live ancestor PID + executable + tty/tree match).
 #   2. `cmux tree --all --json --id-format both` → enumerate panes in that
 #      workspace, WITH their UUIDs (see step 3 for why the UUIDs matter).
 #   3. If subject's workspace has only ONE pane:
@@ -173,13 +175,23 @@ if [[ "$SUBJECT" == "caller" && ( -z "$subject_pane" || -z "$subject_ws" ) \
   fi
 fi
 
-if [[ -z "${identify_json:-}" ]]; then
+# Native agent sessions can lack all CMUX_* context in tool shells. Recover
+# through one shared resolver only after identify/environment recovery failed.
+# Unknown, stale or ambiguous callers still return the context error below.
+if [[ "$SUBJECT" == caller && ( -z "$subject_pane" || -z "$subject_ws" ) ]] \
+    && command -v python3 >/dev/null 2>&1; then
+  IFS=$'\t' read -r subject_pane subject_ws subject_win subject_surf < <(
+    python3 "$(dirname "$0")/resolve-caller-session.py" 2>/dev/null || true
+  ) || true
+fi
+
+if [[ -z "${identify_json:-}" && ( -z "$subject_pane" || -z "$subject_ws" ) ]]; then
   echo "open-side-surface: 'cmux identify' failed — are you inside cmux? is the socket reachable?" >&2
   exit 2
 fi
 
 if [[ -z "$subject_pane" || -z "$subject_ws" ]]; then
-  echo "open-side-surface: could not resolve $SUBJECT.pane_ref / workspace_ref from identify or CMUX_SURFACE_ID (retried 5×; caller surface not registered?)" >&2
+  echo "open-side-surface: could not resolve $SUBJECT.pane_ref / workspace_ref from identify, CMUX_SURFACE_ID or validated agent session (retried 5×; caller surface not registered?)" >&2
   exit 2
 fi
 

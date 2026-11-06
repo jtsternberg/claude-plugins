@@ -1880,7 +1880,14 @@ fire_cmux() {
   [[ -n "$TOOLS" ]] && ARGS+=(--tools "$TOOLS")
   ARGS+=(--agent "$AGENT_KIND")
   ARGS+=(--prompt-file "$SEND_PROMPT_FILE")
-  bash "$DIAL_SCRIPTS/cmux-call-async.sh" "${ARGS[@]}" 2>"$ERR_FILE"
+  # Caller identity is independent of --agent (the CALLEE kind). The shared
+  # cmux-cli resolver validates this hint against native identity and ancestry.
+  local caller_agent=""
+  if [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then caller_agent=claude
+  elif [[ -n "${CODEX_THREAD_ID:-}" ]]; then caller_agent=codex
+  fi
+  CMUX_CALLER_SESSION_ID="$MY_SESSION_ID" CMUX_CALLER_AGENT="$caller_agent" \
+    bash "$DIAL_SCRIPTS/cmux-call-async.sh" "${ARGS[@]}" 2>"$ERR_FILE"
 }
 
 # herdr's launcher BLOCKS until the callee's REPL is interactive-ready (that is what
