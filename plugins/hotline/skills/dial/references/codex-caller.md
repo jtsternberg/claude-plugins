@@ -41,6 +41,21 @@ Store `session_id` as `MY_SESSION_ID` and continue the dial flow normally. There
 nothing extra to do — the ID flows through `session-cache.sh` (as a filename key)
 and into the `[SESSION:]` ringing tag exactly like a Claude session ID would.
 
+## Side placement without CMUX environment
+
+Hotline passes its established caller session and native agent kind to cmux-cli's
+shared side-surface helper. If `cmux identify` and `CMUX_SURFACE_ID` cannot resolve
+the caller, the helper queries the exact agent session and validates its PID as a
+live ancestor of the tool shell, with the expected executable and a tty matching
+the surface in the current tree. Placement uses the surface's current containers,
+including after a move; saved active flags need not be true.
+
+Dead or reused PIDs, mismatched identities or ttys, and ambiguous session records
+cannot recover placement. Hotline retains its recorded `surface-context→detached`
+fallback for those callers. Focus on another surface never supplies caller proof.
+Both plugins must be refreshed to receive the full integration; caller account
+selection alone does not resolve placement.
+
 ## Why `$CODEX_THREAD_ID` is the right source
 
 Verified against codex-cli 0.142.5:

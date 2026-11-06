@@ -276,6 +276,20 @@ cmux read-screen --surface "$SID" --scrollback --lines 20
 > send is what attaches the PTY.** Probe first, then read; do not reach for
 > `cmux focus-pane`, which attaches by stealing the user's focus.
 
+The default `--caller` first uses `cmux identify`, then a live tree lookup of
+`CMUX_SURFACE_ID`. When those cannot resolve placement, native Codex and Claude
+callers can recover through their exact agent session in `cmux sessions`. Recovery
+requires one record, its PID in the tool shell's ancestry with the matching agent
+executable, and its tty matching that surface in the current tree. Saved workspace
+and active flags do not determine placement. Missing, stale or ambiguous proof
+returns a context error; the focused surface is never a substitute.
+
+Wrappers that already know caller identity may supply invocation-scoped
+`CMUX_CALLER_SESSION_ID` and `CMUX_CALLER_AGENT` (`codex` or `claude`). These are
+validated hints and must agree with native session identity when it is present;
+they describe the caller, independently of any agent being launched. Recovery
+requires Python 3; existing identify/environment placement works without it.
+
 Use `--focused` on `open-side-surface.sh` when the user says "next to the tab I'm looking at" instead of "next to yours" — the defaults diverge when the user is viewing a different tab than the one the agent lives in.
 
 ### Name it, then report it by name (required)

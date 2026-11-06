@@ -26,6 +26,8 @@ make_cmux "$t/bin"; make_side_opener "$t/side.sh"
 : > "$OK_REQUESTS"
 out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
   HOTLINE_CALLER_SESSION_ID="caller-1111" \
+  CLAUDE_CODE_SESSION_ID="" CODEX_THREAD_ID="caller-1111" \
+  SIDE_OPENER_IDENTITY_LOG="$t/caller-identity.json" \
   HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
   bash "$DIAL" --target "$t/target" --mode work_order --label "probe label" \
     --prompt "run the suite" --boot-timeout 5 2>"$t/err.txt")
@@ -33,6 +35,10 @@ rc=$?
 call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
 [[ -n "$call_dir" ]] && note_leak "$call_dir"
 launch=$(launch_script_of "$call_dir")
+
+# Caller kind stays Codex even though the default CALLEE is Claude.
+jq -e '.session == "caller-1111" and .agent == "codex"' "$t/caller-identity.json" >/dev/null
+check "shared opener receives established caller identity, independently of callee kind" $?
 
 [[ "$rc" -eq 0 && "$(jq -r .status <<<"$out")" == "connected" ]]
 check "cached identity connects in ONE invocation (exit 0, status=connected)" $? \
