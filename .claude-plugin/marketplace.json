@@ -184,7 +184,7 @@
     {
       "name": "delayed-work",
       "source": "./plugins/delayed-work",
-      "description": "Hit a session limit mid-task? Stop for now and have this same session resume the work at the reset, with the context it already has and zero tokens spent waiting. Also plain timed work: run X at 9pm, or in 30 minutes."
+      "description": "Schedule work in this session or wake other existing Claude Code and Codex sessions after a quota reset, with zero tokens spent waiting."
     },
     {
       "name": "runway",

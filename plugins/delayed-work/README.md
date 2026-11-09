@@ -54,9 +54,22 @@ up rather than nothing.
   payload storage, cancellation, logs, and daemon/sleep limits.
 
 **Related:** the `patient-waiting` ladder (in the `maestro` plugin) with the
-clock as the watched condition. For timed delivery of a prompt *into another cmux
-surface*, use the `send-at` skill instead — `until` targets the current session and
-needs no cmux.
+clock as the watched condition. For a simple timed prompt to one exact cmux surface,
+use `cmux-cli:send-at`. To plan and wake other Claude or Codex sessions at a reset,
+use `wake-sessions` below. `until` itself targets the current session.
+
+### `wake-sessions`
+
+Schedule this session to wake other existing Claude Code or Codex sessions after a
+quota reset. It investigates their identities and available routes first, tells you
+the proposed route and time, then uses `until` to wake the caller. At fire time it
+rechecks the targets, delivers to the same sessions, and reports what was actually
+observed. If a target is gone, it offers a separate resume choice for each known
+session rather than automatically opening one.
+
+The caller needs usable quota and its timer receiver at fire time. A scheduled
+wake-up is best effort: machine sleep, a missing target, an unavailable transport,
+or a rate-limited caller can prevent delivery.
 
 ## Example Usage
 
@@ -67,6 +80,7 @@ Claude Code:
 /delayed-work:until --caffeinate at 9pm resume the review of PR 701 where we left off
 /delayed-work:until 9:05pm run /review-pr on https://github.com/OWNER/REPO/pull/701
 /delayed-work:until in 2h run the full test suite and report failures
+/delayed-work:wake-sessions at 3pm wake the Codex session on surface <uuid>
 ```
 
 Codex:
@@ -74,8 +88,10 @@ Codex:
 ```text
 $delayed-work:until in 30 minutes run the full test suite and report failures
 $delayed-work:until --caffeinate in 30 minutes run the full test suite and report failures
+$delayed-work:wake-sessions at 3pm wake the Claude session on surface <uuid>
 ```
 
 ## Additional Documentation
 
 - [skills/until/SKILL.md](skills/until/SKILL.md) - Stop for now and resume the queued work in this session at a set time
+- [skills/wake-sessions/SKILL.md](skills/wake-sessions/SKILL.md) - Schedule a wake-up for other existing sessions
