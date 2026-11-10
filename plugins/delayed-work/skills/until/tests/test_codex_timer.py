@@ -75,6 +75,38 @@ class ResolveHomeTest(unittest.TestCase):
         self.assertEqual(config["payload"], "go $HOME `x` \\n")
 
 
+class ResolveCodexTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+        self.shim_dir = self.root / "cmux-cli-shims" / "4790B522"
+        self.real_dir = self.root / "bin"
+        self.shim_dir.mkdir(parents=True)
+        self.real_dir.mkdir()
+        # Shape of the real shim: a bash script that execs cmux-codex-wrapper.
+        fake_codex(self.shim_dir, "exec /Applications/cmux.app/Contents/Resources/bin/cmux-codex-wrapper\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_skips_the_cmux_shim_ahead_of_the_real_binary(self):
+        real = fake_codex(self.real_dir, "exit 0\n")
+        path = os.pathsep.join([str(self.shim_dir), str(self.real_dir)])
+        self.assertEqual(codex_timer.resolve_codex({"PATH": path}), real)
+
+    def test_skips_a_wrapper_script_outside_the_shim_directory(self):
+        moved = self.root / "elsewhere"
+        moved.mkdir()
+        fake_codex(moved, "exec cmux-codex-wrapper \"$@\"\n")
+        real = fake_codex(self.real_dir, "exit 0\n")
+        path = os.pathsep.join([str(moved), str(self.real_dir)])
+        self.assertEqual(codex_timer.resolve_codex({"PATH": path}), real)
+
+    def test_refuses_when_only_the_wrapper_is_on_path(self):
+        with self.assertRaisesRegex(codex_timer.ArmError, "cmux codex wrapper"):
+            codex_timer.resolve_codex({"PATH": str(self.shim_dir)})
+
+
 class FireTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

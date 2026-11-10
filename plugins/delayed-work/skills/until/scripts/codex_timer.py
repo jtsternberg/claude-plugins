@@ -41,10 +41,36 @@ def resolve_codex_home(thread, env, user_home):
                    f"and not in current {current}; set CODEX_HOME explicitly")
 
 
+def is_cmux_wrapper(path):
+    try:
+        with open(path, "rb") as handle:
+            return b"cmux-codex-wrapper" in handle.read(16384)
+    except OSError:
+        return False
+
+
+def resolve_codex(env):
+    """First real `codex` on PATH, skipping cmux's shim.
+
+    Inside cmux, PATH starts with a shim that execs cmux-codex-wrapper, which adds
+    --dangerously-bypass-hook-trust to `codex queue`; queue rejects it (exit 2)
+    while `queue --help` still passes, so the shim must be skipped, not probed.
+    """
+    skipped = False
+    for directory in env.get("PATH", "").split(os.pathsep):
+        candidate = shutil.which("codex", path=directory) if directory else None
+        if not candidate:
+            continue
+        if "cmux-cli-shims" in pathlib.Path(candidate).parts or is_cmux_wrapper(candidate):
+            skipped = True
+            continue
+        return candidate
+    raise ArmError("only the cmux codex wrapper is on PATH, and it breaks `codex queue`; "
+                   "put the real codex binary on PATH" if skipped else "codex unavailable")
+
+
 def prepare(when_text, payload_file, env, user_home, codex=None):
-    codex = codex or shutil.which("codex")
-    if not codex:
-        raise ArmError("codex unavailable")
+    codex = codex or resolve_codex(env)
     help_result = subprocess.run([codex, "queue", "--help"], capture_output=True, text=True)
     if help_result.returncode or not all(x in help_result.stdout for x in ("--thread", "--message")):
         raise ArmError("installed codex lacks queue capability")

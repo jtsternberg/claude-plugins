@@ -299,7 +299,10 @@ python3 "$SKILL_DIR/scripts/codex_timer.py" arm --when "2026-10-07T21:05:00-04:0
 ```
 
 The script fails closed before arming on a missing `codex`, no queue capability, a
-missing or malformed `CODEX_THREAD_ID`, or a past or timezone-less target. It also
+missing or malformed `CODEX_THREAD_ID`, or a past or timezone-less target. It skips
+cmux's `codex` shim when resolving the binary: inside cmux, `PATH` starts with a shim
+whose wrapper adds a flag `codex queue` rejects (exit 2) while `queue --help` still
+passes, so it takes the next real `codex` and refuses if none exists. It also
 **pins the Codex home**: queue reads the thread from `$CODEX_HOME`'s store, and a
 machine can run several homes (e.g. `~/.codex` and `~/.codex-work`, each with its own
 daemon), so a timer resolving the wrong one fails at fire time with `no rollout found`.
