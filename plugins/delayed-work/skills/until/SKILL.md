@@ -281,80 +281,34 @@ substitute. If current identity is unavailable or conflicts, resolve it before
 arming. If queue is unavailable, report that missing capability and offer a manual
 nudge or a short active-turn wait; do not claim all Codex versions require blocking.
 
-Use a detached one-shot Python process that polls wall time and invokes queue once.
-The example below is a **Codex-only** executable block. Replace the explicit ISO
-calendar time (including UTC offset) and payload-file path. First use a literal
-file-writing tool to save the exact payload as UTF-8 in a private file (0600),
-outside git; do not embed it in Python or shell source. For a relative delay,
-resolve and report its absolute target
+Arm with the bundled `scripts/codex_timer.py`, a detached one-shot process that polls
+wall time and invokes queue once. Replace the explicit ISO calendar time (including
+UTC offset) and payload-file path. First use a literal file-writing tool to save the
+exact payload as UTF-8 in a private file (0600), outside git; do not embed it in
+Python or shell source. For a relative delay, resolve and report its absolute target
 at arm time. Do not recompute the delay when the timer fires.
 Apply the **Codex queued sender labels** rule in `$maestro:conduct` to the
 saved payload: use the caller-supplied exact prefix, or `[Delayed-work timer]`
 when none was supplied.
 
+Codex: this path resolves under Claude Code; substitute the directory containing this `SKILL.md`.
+
 ```bash
-python3 - <<'ARM_CODEX_TIMER'
-import datetime, json, os, pathlib, shutil, subprocess, sys, tempfile, uuid
-codex = shutil.which("codex")
-if not codex:
-    raise SystemExit("codex unavailable")
-help_result = subprocess.run([codex, "queue", "--help"], capture_output=True, text=True)
-if help_result.returncode or not all(x in help_result.stdout for x in ("--thread", "--message")):
-    raise SystemExit("installed codex lacks queue capability")
-thread = os.environ.get("CODEX_THREAD_ID", "")
-uuid.UUID(thread)  # fail closed on missing/malformed current identity
-when = datetime.datetime.fromisoformat("2026-10-07T21:05:00-04:00")
-if when.tzinfo is None or when.timestamp() <= datetime.datetime.now().timestamp():
-    raise SystemExit("resolve a future target with an explicit timezone first")
-payload = pathlib.Path("/absolute/path/to/private-payload.txt").read_bytes().decode("utf-8")
-os.umask(0o077)
-job = pathlib.Path(tempfile.mkdtemp(prefix="codex-until-"))
-(job / "job.json").write_text(json.dumps({"codex": codex, "thread": thread,
-    "target": when.timestamp(), "payload": payload}), encoding="utf-8")
-runner = job / "timer.py"
-runner.write_text(r'''
-import datetime, json, pathlib, signal, subprocess, sys, time
-job = pathlib.Path(sys.argv[1])
-config = json.loads((job / "job.json").read_text(encoding="utf-8"))
-def status(value):
-    (job / "status").write_text(value + "\n", encoding="utf-8")
-    print(datetime.datetime.now(datetime.timezone.utc).isoformat(), value, flush=True)
-def cancel(signum, frame):
-    status("cancelled")
-    raise SystemExit(0)
-signal.signal(signal.SIGTERM, cancel)
-status("armed")
-while True:
-    if (job / "cancel").exists():
-        status("cancelled")
-        raise SystemExit(0)
-    remaining = config["target"] - time.time()
-    if remaining <= 0:
-        break
-    time.sleep(min(1.0, remaining))
-if (job / "cancel").exists():
-    status("cancelled")
-    raise SystemExit(0)
-status("enqueue_started")
-try:
-    result = subprocess.run([config["codex"], "queue", "--thread", config["thread"],
-        "--message", config["payload"]], stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, timeout=60)
-    status("enqueued" if result.returncode == 0 else "enqueue_failed rc=" + str(result.returncode))
-except subprocess.TimeoutExpired:
-    status("enqueue_timeout outcome_unknown")
-except OSError as error:
-    status("enqueue_failed " + type(error).__name__)
-''', encoding="utf-8")
-with (job / "timer.log").open("ab") as log:
-    process = subprocess.Popen([sys.executable, str(runner), str(job)],
-        stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-        start_new_session=True, close_fds=True)
-(job / "pid").write_text(str(process.pid) + "\n", encoding="utf-8")
-print(json.dumps({"job": str(job), "pid": process.pid, "thread": thread,
-    "target": when.isoformat()}))
-ARM_CODEX_TIMER
+SKILL_DIR="${CLAUDE_SKILL_DIR}"
+python3 "$SKILL_DIR/scripts/codex_timer.py" arm --when "2026-10-07T21:05:00-04:00" --payload-file "/absolute/path/to/private-payload.txt"
 ```
+
+The script fails closed before arming on a missing `codex`, no queue capability, a
+missing or malformed `CODEX_THREAD_ID`, or a past or timezone-less target. It also
+**pins the Codex home**: queue reads the thread from `$CODEX_HOME`'s store, and a
+machine can run several homes (e.g. `~/.codex` and `~/.codex-work`, each with its own
+daemon), so a timer resolving the wrong one fails at fire time with `no rollout found`.
+It uses the current home (`CODEX_HOME`, else `~/.codex`) when that home holds the
+thread's rollout; otherwise exactly one other `~/.codex*` home holding it; otherwise
+it refuses — none found, or several — and names the homes. The pinned home is stored
+in `job.json` and passed as `CODEX_HOME` to queue. Report `codex_home` and
+`home_source` from its JSON output; on `alternative`, say the current home did not
+own the thread.
 
 Payload storage is private (directory 0700, files 0600); keep it out of git and
 credentials. Reading the literal UTF-8 file as bytes and storing it in JSON preserve
@@ -362,7 +316,9 @@ backslashes, quotes, dollars, backticks and line endings without shell evaluatio
 or Python string-escape decoding. `subprocess` uses an argument list,
 never `shell=True`. This CLI exposes only `--message`, so the payload is briefly
 visible in the queue process's argv and subject to OS argument-size limits; keep it
-small and do not put secrets in it. Logs record state, not payload or CLI output.
+small and do not put secrets in it. `timer.log` and `status` record state, never the payload. Queue's stdout and stderr
+are kept privately as `queue.stdout`/`queue.stderr` (first 8 KB each), and a failed
+enqueue puts the first stderr line in `status`, e.g. `enqueue_failed rc=1: Error: …`.
 
 After launch, read the job's `status` and confirm `armed` (or a terminal state for a
 very short delay); spawning a PID alone is not proof of successful arming. Report the

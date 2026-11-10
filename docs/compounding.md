@@ -348,6 +348,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   the detached timer only enqueues, and the resumed cmux-resident agent sends. Do not mistake an accepted persistence
   option for a guarantee: Claude Code 2.1.272 accepts `persistent: true` while retaining
   a 30-minute `Monitor` cap. (claude-plugins-o4us, claude-plugins-33ct, 0005347)
+- **A Codex thread id is valid only inside the `CODEX_HOME` that owns its rollout; pin
+  that home before anything acts on the thread later.** One machine runs several homes
+  (`~/.codex`, `~/.codex-work`), each with its own daemon and thread store, so a resume
+  or queue that inherits the wrong home fails with `no rollout found` (queue exits 1 in
+  under half a second). Resolve the owning home from `sessions/**/rollout-*-<id>.jsonl`
+  at arm/dial time, refuse on none or several, and pass it explicitly.
+  (d3cb65b, delayed-work 0.3.1 `codex_timer.py`)
 - **A wall-clock wait polls the clock; one long `sleep` fires late by however long the
   machine slept.** `sleep 11280` does not advance while the lid is shut, and it is the
   form an agent reaches for first — a baseline agent asked to fire at 9:05pm proposed

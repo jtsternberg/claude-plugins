@@ -49,7 +49,8 @@ up rather than nothing.
   30 minutes or less remain; its accepted `persistent: true` field does not remove that
   cap in Claude Code 2.1.272.
 - Codex CLI 0.160.1 supports a detached one-shot wall-clock timer calling
-  `codex queue` into the exact current thread. Detect capability before arming;
+  `codex queue` into the exact current thread, pinned to the Codex home that owns
+  that thread. Detect capability before arming;
   enqueue success is separate from observed delivery. See the skill for private
   payload storage, cancellation, logs, and daemon/sleep limits.
 
