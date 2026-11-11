@@ -38,6 +38,8 @@
 #   (a session id as <reference> continues that conversation; --no-fork applies)
 #           [--caller-session <id>] [--refresh-identity]
 #           [--boot-timeout <seconds>] --label <text>
+# --expected-session cannot be combined with --fresh, --resume, or
+# --refresh-identity (identity refresh launches a separate Claude call).
 #
 # --transport picks the multiplexer that HOSTS the callee. cmux is the default and
 # nothing about it changes; `herdr` is opt-in, and it hosts the callee HERE unless
@@ -341,6 +343,9 @@ if [[ "${EXPECTED_SESSION_SET:-false}" == true && -z "$EXPECTED_SESSION" ]]; the
 fi
 if [[ -n "$EXPECTED_SESSION" ]] && { $FRESH || [[ -n "$RESUME_ARG" ]]; }; then
   identity_refusal '--expected-session requires cached reuse and cannot be combined with --fresh or --resume'
+fi
+if [[ -n "$EXPECTED_SESSION" ]] && $REFRESH_IDENTITY; then
+  identity_refusal '--expected-session cannot be combined with --refresh-identity because identity refresh launches a separate Claude call; omit --refresh-identity for guarded reuse'
 fi
 
 # --window implies the window placement and outranks --detached, per SKILL.md.
