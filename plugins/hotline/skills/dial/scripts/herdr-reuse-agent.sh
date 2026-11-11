@@ -109,6 +109,7 @@ PROMPT_FILE=""
 CWD=""
 AGENT_KIND=claude
 PREVIOUS_CALL_DIR=""
+EXPECTED_SESSION=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -119,6 +120,7 @@ while [[ $# -gt 0 ]]; do
     --cwd)         CWD="$2";         shift 2 ;;
     --agent-kind)  AGENT_KIND="$2";  shift 2 ;;
     --previous-call-dir) PREVIOUS_CALL_DIR="$2"; shift 2 ;;
+    --expected-session) EXPECTED_SESSION="$2"; shift 2 ;;
     *)             shift ;;
   esac
 done
@@ -129,7 +131,7 @@ account_error() {
   exit 0
 }
 source "$HOTLINE_SCRIPTS/codex-home.sh"
-if [[ ${HOTLINE_CODEX_HOME+x} || -s "$PREVIOUS_CALL_DIR/codex_home.txt" ]]; then
+if [[ ${HOTLINE_CODEX_HOME+x} || -s "$PREVIOUS_CALL_DIR/codex_home.txt" || ( -n "$EXPECTED_SESSION" && "$AGENT_KIND" == codex ) ]]; then
   [[ "$AGENT_KIND" == codex ]] || account_error 'HOTLINE_CODEX_HOME continuation requires a Codex agent'
   codex_home_reuse_validate "$PREVIOUS_CALL_DIR" "$AGENT" "$SESSION_ID" "$CWD" \
     || account_error "HOTLINE_CODEX_HOME: $CODEX_HOME_ERR"

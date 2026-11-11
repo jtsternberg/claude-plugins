@@ -15,6 +15,84 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/dial-wrapper-harness.s
 
 echo "dial.sh wrapper regression:"
 
+# Identity refresh itself launches Claude. Reject it with expected-session even
+# when the cache matches, and before any transport activity. Exercise both native
+# caller identities; every external operation stays behind the harness stubs.
+for caller_kind in claude codex; do
+  t=$(new_env); note_leak "$t"
+  make_cmux "$t/bin"
+  cat > "$t/bin/claude" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CMUX_FAKE_STATE/claude_calls"
+cat >> "$CMUX_FAKE_STATE/claude_prompts"
+printf '\n' >> "$CMUX_FAKE_STATE/claude_prompts"
+printf '%s\n' '{"type":"system","session_id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}' \
+  '{"type":"result","session_id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee","result":"ok","num_turns":1}'
+EOF
+  chmod +x "$t/bin/claude"
+  expected=11111111-1111-4111-8111-111111111111
+  cached=55555555-5555-4555-8555-555555555555
+  caller=22222222-2222-4222-8222-222222222222
+  native_claude=""; native_codex="$caller"
+  if [[ "$caller_kind" == claude ]]; then
+    native_claude="$caller"; native_codex=""; cached="$expected"
+  fi
+  HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+    --caller-session "$caller" --session "$cached" --mode work_order --surface SURFACE-UUID-777
+  before=$(cat "$t/home/.agents-hotline/sessions/$caller.json")
+  : > "$OK_REQUESTS"
+  out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+    CLAUDE_CODE_SESSION_ID="$native_claude" CODEX_THREAD_ID="$native_codex" \
+    HOTLINE_CALL_HOME="$t" HOTLINE_PENDING_DIR="$t/pending" \
+    bash "$DIAL" --target "$t/target" --mode quick --label probe --prompt 'must not arrive' \
+      --refresh-identity --expected-session "$expected" 2>"$t/err.txt")
+  rc=$?
+  [[ "$rc" -eq 9 ]] && jq -e '.status == "error" and .stage == "identity" and
+    (.detail | contains("--refresh-identity"))' <<<"$out" >/dev/null
+  check "$caller_kind caller rejects expected-session plus refresh at argument validation" $? "rc=$rc out=$out"
+  [[ ! -e "$t/claude_calls" && ! -e "$t/claude_prompts" ]]
+  check "$caller_kind refusal invokes no Claude and submits no pickup prompt" $? \
+    "calls=$(cat "$t/claude_calls" 2>/dev/null) prompts=$(cat "$t/claude_prompts" 2>/dev/null)"
+  [[ ! -s "$OK_REQUESTS" && ! -e "$t/cmux_calls" && ! -e "$t/send_calls" ]] \
+    && [[ "$(cat "$t/home/.agents-hotline/sessions/$caller.json")" == "$before" ]]
+  check "$caller_kind refusal performs no transport delivery or launch and preserves cache" $? "out=$out"
+
+  # Positive control: the same refresh works without the guard and reaches the
+  # stub twice (pickup, then delegated work), proving the recorder is live.
+  rm -f "$t/claude_calls" "$t/claude_prompts"
+  out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+    CLAUDE_CODE_SESSION_ID="$native_claude" CODEX_THREAD_ID="$native_codex" \
+    HOTLINE_CALL_HOME="$t" HOTLINE_PENDING_DIR="$t/pending" \
+    bash "$DIAL" --target "$t/target" --mode quick --label probe --prompt 'ordinary refresh' \
+      --headless --refresh-identity 2>"$t/err.txt")
+  rc=$?
+  [[ "$rc" -eq 0 && "$(wc -l < "$t/claude_calls" | tr -d ' ')" -eq 2 ]] \
+    && jq -e '.status == "connected" and (.fallbacks | index("identity→refreshed"))' <<<"$out" >/dev/null \
+    && grep -qF '/hotline:hotline-pickup --fresh' "$t/claude_prompts" \
+    && grep -qF 'ordinary refresh' "$t/claude_prompts"
+  check "$caller_kind ordinary refresh still launches pickup and delegated work" $? "rc=$rc out=$out"
+done
+
+# A different call has replaced this caller/target cache entry. The expected
+# identity must stop the dial before the socket sees any prompt or launch.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\n' > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session caller-expect --session 55555555-5555-4555-8555-555555555555 \
+  --mode work_order --surface SURFACE-UUID-777
+before=$(paste_count)
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID=caller-expect HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --label probe \
+    --prompt 'must not arrive' --expected-session 11111111-1111-4111-8111-111111111111 2>"$t/err.txt")
+rc=$?
+refused_dir=$(jq -r '.call_dir // empty' <<<"$out")
+[[ -n "$refused_dir" ]] && note_leak "$refused_dir"
+[[ "$rc" -eq 9 && "$(jq -r .status <<<"$out")" == error && "$(paste_count)" -eq "$before" \
+   && "$(cat "$refused_dir/status.txt" 2>/dev/null)" == failed && ! -e "$refused_dir/done" ]]
+check "displaced cached session is refused without delivery" $? "rc=$rc out=$out"
+
 # ===========================================================================
 # 5. Follow-up reuses the surface the session already lives in.
 # ===========================================================================
