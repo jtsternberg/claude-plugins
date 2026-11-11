@@ -512,8 +512,10 @@ that it's up:
 > Connected to **[workspace name]** (session: `[session-id]`). Working on it —
 > I'll relay the response when it's ready.
 
-Then block on it. This is a separate step on purpose: a work order can outlast a
-tool-call timeout, and you needed to speak to the user in between.
+Then wait in the foreground, or explicitly arm the Codex completion watcher below.
+Report the connection in commentary while continuing to wait. Ending your turn
+with a shell waiter running does not arm a callback: a PTY/session handle and
+`response.json` cannot themselves start another model turn.
 
 ```bash
 # Codex: this path resolves under Claude Code; substitute the Hotline plugin directory.
@@ -524,15 +526,69 @@ RESPONSE=$(jq -r '.response' "$CALL_DIR/response.json")
 printf '%s\n' "$RESPONSE"
 ```
 
-**A wait that outruns your tool timeout gets backgrounded exactly once, by the
-harness.** The default budget (1800s on cmux/herdr) outlasts any foreground Bash
-call, so hand the blocking call to your harness's own backgrounding — Claude
-Code's `run_in_background` — and add nothing on top of it. Wrapping it in
-`nohup … &` as well leaves the harness tracking the wrapper shell, which exits
-in milliseconds: you get a plausible immediate "exit 0" and then no notification
-ever arrives when the waiter actually finishes. Where no backgrounding exists,
-don't improvise one — let the foreground call time out and re-run the wait,
-which resumes on a fresh budget and sends nothing (below).
+**Claude Code:** use `run_in_background` exactly once when a wait outlasts the
+tool timeout, and consume its task completion notification. Adding `nohup … &`
+leaves the harness tracking a wrapper that exits immediately. Preserve the
+callee's existing Claude `SendMessage` notice path.
+
+**Codex foreground:** continue awaiting the running tool/session until it exits;
+on a tool timeout, re-run the waiter on the same call directory. A tool returning
+a running-session handle requires another wait; it is not an armed notification.
+
+**Codex idle caller (opt-in):** before ending your turn, arm one watcher for the
+existing call. Resolve your exact thread ID and owning home first: the home must
+contain exactly one matching rollout with your session metadata. An unset home
+environment value is not evidence that the default home owns the thread. The
+command rejects a UUID that differs from your exported `CODEX_THREAD_ID`. This
+local-only path requires Python 3 and a running Codex daemon in that home with
+`queue --resume`; it does not start a daemon, install auth, or change trust.
+
+Codex: substitute the installed Hotline plugin directory for the path below.
+
+```bash
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+python3 "$PLUGIN_ROOT/scripts/completion-watch.py" arm "<call_dir>" --caller-thread "<your exact UUID>" --caller-home "<absolute owning Codex home>"
+```
+
+Only report background readiness after exit 0 with `state: armed` (the worker
+handshake and daemon probe passed), or a reused record with `watcher_live: true`.
+An arm refusal means keep waiting in the foreground and report the error. Do not
+run a second waiter alongside an armed watcher. It snapshots its bundled waiter
+runtime into the private call directory so plugin-cache reconciliation cannot
+remove its helpers; it invokes only the waiter, never the dialer.
+
+The watcher pins `queue --remote` to the verified local daemon socket and queues
+one `[Hotline completion] call_id=…` notice after the waiter exits, including
+waiter errors. It cannot fall back to an embedded server if that daemon dies.
+An idle caller starts a new turn; a busy caller
+receives queued input after its current turn. Read `response.json` if present and
+`completion/status.json` plus `completion/waiter.stderr`; relay the result or
+failure. A queue acknowledgment means `enqueued`; `arrived` requires that notice
+in the exact caller's submitted user transcript. Neither proves model action.
+`arrival_unconfirmed` means no arrival was observed within the bounded window,
+including a caller still busy, a resume warning, or a receiver lost after arming.
+
+The lifetime is bounded by `--timeout` (default 1800 seconds, maximum 86400), the
+waiter shutdown margin, bounded CLI checks, and `--arrival-timeout` (default 120,
+maximum 3600 seconds). Sleep, host exit, a killed watcher, CLI removal, or daemon
+failure can interrupt it. No recurring model wake or scheduled polling is used.
+
+For inspection (no re-enqueue):
+
+Codex: substitute the installed Hotline plugin directory for the path below.
+
+```bash
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+python3 "$PLUGIN_ROOT/scripts/completion-watch.py" status "<call_dir>"
+```
+
+Re-arming the same identity reuses a live worker or a recorded terminal outcome;
+a dead worker before enqueue can resume waiting. Once `completion/enqueue.started`
+exists, automatic re-enqueue is forbidden even after a crash or CLI failure: the
+delivery outcome may be unknown. Inspect the private diagnostics and caller
+transcript, then read the result or resume the foreground waiter on the SAME call
+directory. Never re-dial merely to recover a lost completion notice. Keep the call
+directory until recovery is finished.
 
 Read the response **from `response.json`**, as above — not from the script's
 captured stdout piped into `jq`. Under zsh (the Bash tool's shell) `echo` on

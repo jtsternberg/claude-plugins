@@ -446,6 +446,17 @@ full table of entries and what each one means for the caller.
 outlast a tool-call timeout, and the caller has to report the connection to the
 user in between boot and response.
 
+A shell waiter is a result reader, not a Codex callback. Codex callers can keep
+awaiting it in their current turn, or opt into `scripts/completion-watch.py arm`
+with the call directory, exact caller UUID and explicit owning Codex home. The
+watcher checks the running local daemon and its own startup handshake before
+reporting `armed`, retains its waiter helpers outside the versioned install cache,
+then queues one completion notice with `codex queue --resume`. Queue acceptance
+and receiver-side arrival are recorded separately in the private
+`<call_dir>/completion/` diagnostics. Recovery reads the same call; it never
+re-dials. See the dial skill's **Then wait for the response** section for commands,
+bounds and failure recovery. Claude's waiter and notification behavior is unchanged.
+
 ### Session identity (the "Know Thyself" step)
 
 Identity resolves inline, in the same `dial.sh` invocation as the rest of the

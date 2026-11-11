@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Wait for Response: poll until an async hotline call completes.
+# This reads a result; it does not arm a Codex callback. Keep awaiting the tool
+# session, or explicitly arm the plugin's scripts/completion-watch.py before
+# ending the caller's turn. Re-running this waiter never sends callee work.
 #
 # Three modes. The launcher names its backend in call_dir/transport.txt ('cmux',
 # 'herdr' or 'headless') and that is read first; an absent transport.txt names

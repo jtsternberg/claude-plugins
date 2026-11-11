@@ -3,7 +3,9 @@
 # Notify Caller: decide whether a callee should push "your call resolved" into the
 # caller's live Claude Code session, and print who to send it to.
 #
-# A waiter (wait-for-response.sh) reads the full answer for the caller.
+# A waiter (wait-for-response.sh) reads the full answer for the caller. Its process
+# alone does not wake an idle Codex caller: that caller must keep waiting in its
+# turn or arm scripts/completion-watch.py. This script preserves Claude behavior.
 # A caller that never started one, or whose waiter died,
 # never hears — a WORK_COMPLETE once sat unread until the human noticed it. The
 # push is Claude Code's cross-session messaging, and only a model can send it
