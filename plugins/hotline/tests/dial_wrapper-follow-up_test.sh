@@ -15,6 +15,26 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/dial-wrapper-harness.s
 
 echo "dial.sh wrapper regression:"
 
+# A different call has replaced this caller/target cache entry. The expected
+# identity must stop the dial before the socket sees any prompt or launch.
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"
+printf 'some earlier output\n\xe2\x9d\xaf\xc2\xa0\n' > "$t/screen.txt"
+HOME="$t/home" bash "$HOTLINE_DIR/skills/dial/scripts/session-cache.sh" set "$t/target" \
+  --caller-session caller-expect --session 55555555-5555-4555-8555-555555555555 \
+  --mode work_order --surface SURFACE-UUID-777
+before=$(paste_count)
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID=caller-expect HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --label probe \
+    --prompt 'must not arrive' --expected-session 11111111-1111-4111-8111-111111111111 2>"$t/err.txt")
+rc=$?
+refused_dir=$(jq -r '.call_dir // empty' <<<"$out")
+[[ -n "$refused_dir" ]] && note_leak "$refused_dir"
+[[ "$rc" -eq 9 && "$(jq -r .status <<<"$out")" == error && "$(paste_count)" -eq "$before" \
+   && "$(cat "$refused_dir/status.txt" 2>/dev/null)" == failed && ! -e "$refused_dir/done" ]]
+check "displaced cached session is refused without delivery" $? "rc=$rc out=$out"
+
 # ===========================================================================
 # 5. Follow-up reuses the surface the session already lives in.
 # ===========================================================================

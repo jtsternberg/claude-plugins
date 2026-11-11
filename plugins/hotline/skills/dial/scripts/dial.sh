@@ -34,7 +34,7 @@
 #           [--placement side|detached|window] [--window <name|ref>]
 #           [--transport cmux|herdr|headless] [--remote <ssh-target>]
 #           [--agent claude|codex] [--headless] [--tools <list>]
-#           [--resume <session-id> [--no-fork]] [--fresh]
+#           [--resume <session-id> [--no-fork]] [--fresh] [--expected-session <id>]
 #   (a session id as <reference> continues that conversation; --no-fork applies)
 #           [--caller-session <id>] [--refresh-identity]
 #           [--boot-timeout <seconds>] --label <text>
@@ -106,6 +106,7 @@
 #   replay               2   legacy fallback only: re-run this exact command to finish identity
 #   needs_disambiguation 3   ask the user to pick from .candidates, re-run
 #   error                1   .stage / .detail / .recovery say what and why
+#   identity refusal     9   --expected-session could not be safely reused
 #
 # DELIBERATELY NOT HERE: wait-for-response.sh. It is long-running (a work order
 # can outlast a tool-call timeout) and the model must report the connection to
@@ -233,7 +234,7 @@ emit_error() {  # emit_error <stage> <detail> <recovery> [<extra-json-object>]
       fallbacks:$fallbacks}
      + (if $call_dir == "" then {} else {call_dir:$call_dir} end)
      + $extra'
-  exit 1
+  exit "${5:-1}"
 }
 
 # The ONE recovery for a trust-dialog refusal, wherever it surfaces. Two gates catch
@@ -274,12 +275,13 @@ BOOT_TIMEOUT=""
 LABEL=""
 # Which program the callee is: claude (default) or codex. See --agent in the header.
 AGENT_KIND="claude"
+EXPECTED_SESSION=""
 
 # Every flag that consumes a value. A trailing one of these used to hang the
 # script forever: `shift 2` with a single arg left FAILS without shifting, and
 # with no `set -e` the loop just spun on the same $1 at full CPU, emitting no
 # JSON at all. Reachable from a plain `--prompt-file "$VAR"` with an empty VAR.
-VALUE_FLAGS=" --target --mode --prompt-file --prompt --placement --window --transport --remote --tools --resume --caller-session --boot-timeout --label --agent "
+VALUE_FLAGS=" --target --mode --prompt-file --prompt --placement --window --transport --remote --tools --resume --caller-session --boot-timeout --label --agent --expected-session "
 # --window is applied AFTER parsing (below) so it wins over --placement
 # regardless of the order the two were given in.
 WINDOW_REQUESTED=false
@@ -317,12 +319,29 @@ while [[ $# -gt 0 ]]; do
     --boot-timeout)    BOOT_TIMEOUT="$2";          shift 2 ;;
     --label)           LABEL="$2";                 shift 2 ;;
     --agent)           AGENT_KIND="$2";            shift 2 ;;
+    --expected-session) EXPECTED_SESSION="$2"; EXPECTED_SESSION_SET=true; shift 2 ;;
     # Silently ignoring an unrecognized flag turns a typo into a wrong call:
     # `--prompt-fil /tmp/x` would dial with no message at all.
     *) emit_error args "Unrecognized argument: $1" \
          "dial.sh takes flags only, no positionals. Run dial.sh --help for the list." ;;
   esac
 done
+
+identity_refusal() {
+  # Persist the refused attempt separately; never alter the selected cache entry.
+  CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXXX") || CALL_DIR=""
+  if [[ -n "$CALL_DIR" ]]; then
+    jq -nc --arg detail "$1" '{status:"failed",stage:"identity",detail:$detail}' > "$CALL_DIR/error.txt"
+    printf '%s\n' failed > "$CALL_DIR/status.txt"
+  fi
+  emit_error identity "$1" "Expected-session reuse was refused before delivery; nothing was launched." "$EMPTY_JSON_OBJECT" 9
+}
+if [[ "${EXPECTED_SESSION_SET:-false}" == true && -z "$EXPECTED_SESSION" ]]; then
+  identity_refusal '--expected-session requires a nonempty session ID'
+fi
+if [[ -n "$EXPECTED_SESSION" ]] && { $FRESH || [[ -n "$RESUME_ARG" ]]; }; then
+  identity_refusal '--expected-session requires cached reuse and cannot be combined with --fresh or --resume'
+fi
 
 # --window implies the window placement and outranks --detached, per SKILL.md.
 $WINDOW_REQUESTED && PLACEMENT="window"
@@ -1208,6 +1227,10 @@ if [[ -z "$RESUME_ARG" || "$AGENT_KIND" == "codex" ]] || $NO_FORK; then
     PREV_REMOTE=$(jq -r '.remote // empty' <<<"$CACHED")
     PREV_AGENT_KIND=$(jq -r '.agent_kind // "claude"' <<<"$CACHED")
 
+    if [[ -n "$EXPECTED_SESSION" ]] && { [[ "$PREV_SESSION_ID" != "$EXPECTED_SESSION" || "$PREV_AGENT_KIND" != "$AGENT_KIND" || "$PREV_TRANSPORT" != "$TRANSPORT" || "$PREV_REMOTE" != "$REMOTE_TARGET" || -z "$PREV_SURFACE_REF" ]]; }; then
+      identity_refusal 'Cached callee identity, transport or host differs from the expected session'
+    fi
+
     # A HANDLE FROM A DIFFERENT HOST IS NOT REUSABLE, and it is worse than useless:
     # surface_ref is an opaque string, so a herdr agent name from box A is
     # indistinguishable from one on box B and from a cmux surface handle. Re-address
@@ -1261,6 +1284,14 @@ if [[ -z "$RESUME_ARG" || "$AGENT_KIND" == "codex" ]] || $NO_FORK; then
       REMOTE_SESSION_ID="$PREV_SESSION_ID"
       SURFACE_REF="$PREV_SURFACE_REF"
     fi
+  fi
+fi
+
+if [[ -n "$EXPECTED_SESSION" ]]; then
+  ! $FIRST_CONTACT || identity_refusal 'No matching cached session is available'
+  if [[ "$AGENT_KIND" == codex ]]; then
+    [[ "$TRANSPORT" == herdr && -z "$REMOTE_TARGET" ]] || identity_refusal 'Expected Codex identity requires local herdr ownership verification'
+    codex_home_reuse_validate "$PREV_CALL_DIR" "$SURFACE_REF" "$EXPECTED_SESSION" "$TARGET_PATH" || identity_refusal "$CODEX_HOME_ERR"
   fi
 fi
 
@@ -1583,6 +1614,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
     # below (claude-plugins-zaus).
     add_fallback "surface-reuse-skipped(no-cached-surface)"
   elif detached_exchange_still_waiting; then
+    [[ -z "$EXPECTED_SESSION" ]] || identity_refusal 'The prior exchange is still waiting; cached reuse is unavailable'
     add_fallback "surface-reuse→fresh(detached-mid-turn: prior exchange still waiting)"
     SURFACE_REF=""
   else
@@ -1648,6 +1680,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
       emit_error deliver "session $RESUME_ARG is live in surface $ADOPTED_SURFACE and reuse refused it: $(reason_full "$REUSE")" \
         "Nothing was sent and nothing was launched — a fresh launch would start a second REPL on the same session. Wait for that REPL to go idle, or type into surface $ADOPTED_SURFACE yourself, then re-dial the same way. See references/error-recovery.md § Delivery."
     fi
+    [[ -z "$EXPECTED_SESSION" ]] || identity_refusal "Cached surface refused reuse: $(reason_full "$REUSE")"
     add_fallback "surface-reuse→fresh($(reason_of "$REUSE"))"
     SURFACE_REF=""
   fi
@@ -1695,15 +1728,17 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     # The file, never --prompt: same reason as the cmux path (claude-plugins-86ka).
     REUSE=$(bash "$DIAL_SCRIPTS/herdr-reuse-agent.sh" \
       --agent "$SURFACE_REF" --session "$REMOTE_SESSION_ID" --agent-kind "$AGENT_KIND" \
-      --previous-call-dir "$PREV_CALL_DIR" --prompt-file "$SEND_PROMPT_FILE" --cwd "$TARGET_PATH" 2>/dev/null)
+      --previous-call-dir "$PREV_CALL_DIR" --prompt-file "$SEND_PROMPT_FILE" --cwd "$TARGET_PATH" ${EXPECTED_SESSION:+--expected-session "$EXPECTED_SESSION"} 2>/dev/null)
 
     if [[ "$(jq -r '.account_error // false' <<<"$REUSE" 2>/dev/null)" == true ]]; then
+      [[ -z "$EXPECTED_SESSION" ]] || identity_refusal "$(reason_full "$REUSE")"
       emit_error transport "$(reason_full "$REUSE")" "No personal-account fallback was attempted. Restore the selected agent/metadata or use --fresh with an explicit HOTLINE_CODEX_HOME."
     fi
 
     # BLOCKED FIRST — before anything that could start a second callee. The agent
     # is live and confirmed waiting on input; nothing was submitted to it.
     if [[ "$(jq -r '.blocked // false' <<<"$REUSE" 2>/dev/null)" == "true" ]]; then
+      [[ -z "$EXPECTED_SESSION" ]] || identity_refusal "$(reason_full "$REUSE")"
       emit_error transport "herdr agent $SURFACE_REF is BLOCKED and cannot take a follow-up: $(reason_full "$REUSE")" \
         "A human has to clear it — \`herdr agent attach $SURFACE_REF\` shows what it is asking, and the state was confirmed by a second read, so this is not a blink. Nothing was submitted and nothing was started: once it is unblocked, re-dial exactly as you just did and the same agent is re-targeted with its context intact. hotline will NOT start a second callee for you, because that one would strand this agent and lose the conversation. (Unattended callees avoid the permission case by dialing with HOTLINE_DANGEROUSLY_SKIP_PERMISSIONS=1 — a real trust decision, see the plugin README.) See references/error-recovery.md § herdr Failures."
     fi
@@ -1738,6 +1773,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
       [[ -n "$CALLEE_ENV_PATH" ]] && CALLEE_ENV_PATH="not-redelivered"
       emit_connected true
     fi
+    [[ -z "$EXPECTED_SESSION" ]] || identity_refusal "Cached agent refused reuse: $(reason_full "$REUSE")"
     # {"fallback":"fresh"} — refused BEFORE anything was submitted (the agent is
     # gone, or blocked on input), so a fresh callee is safe. It just will not
     # remember anything.

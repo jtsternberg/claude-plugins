@@ -117,6 +117,17 @@ contradicts `--resume`), `--tools <list>`,
 
 Run `dial.sh --help` for the full contract.
 
+For a follow-up that must continue a particular call, pass `--expected-session <id>`
+with the original callee's recorded `session_id.txt` (the Codex thread ID or Claude
+session ID). It accepts cached reuse only: a missing, different, or unavailable
+entry returns JSON `status: error` and exit 9 before delivery, without launching a
+replacement. For Codex this guard currently supports local herdr only and requires
+intact call metadata and live process ownership of the recorded rollout and home.
+For Claude it checks the cache entry's ID; it cannot prove the pane has not since
+changed sessions. Do not combine the flag with `--fresh` or `--resume`. Automation
+must treat an unrecognized flag or any nonzero exit as failure, never as a completed
+call. Persist the call's original ID independently of Hotline's mutable cache.
+
 ## What it returns
 
 Exactly one JSON object on stdout, always. Read `.status`:

@@ -21,6 +21,20 @@ check 'cache records selected home independently of expiring call directory' $?
 follow() { dial "$t" "${FENV[@]}" "$@" -- --target "$t/target" --mode work_order --prompt second --agent codex; }
 no_input() { [[ $(grep -c 'agent prompt' "$t/herdr.log") == "$prompts" && $(grep -c 'agent start' "$t/herdr.log") == 1 ]]; }
 
+# The current cache entry is a valid, live Codex thread, but belongs to a
+# different phase. Refuse before prompting or launching even in the same home.
+prompts=$(grep -c 'agent prompt' "$t/herdr.log")
+out=$(dial "$t" "${FENV[@]}" HOTLINE_CODEX_HOME="$selected" -- \
+  --target "$t/target" --mode work_order --prompt 'must not arrive' --agent codex \
+  --expected-session 11111111-1111-4111-8111-111111111111); rc=$?
+[[ "$rc" == 9 && "$(jq -r .status <<<"$out")" == error ]] && no_input
+check 'expected thread rejects a different live cached thread before input or launch' $? "rc=$rc out=$out"
+
+out=$(dial "$t" "${FENV[@]}" HOTLINE_CODEX_HOME="$selected" -- \
+  --target "$t/target" --mode work_order --prompt second --agent codex --expected-session "$THREAD"); rc=$?
+[[ "$rc" == 0 && "$(jq -r .status <<<"$out")" == connected ]]
+check 'expected thread permits verified live cached agent' $? "rc=$rc out=$out"
+
 # The first landed contract wrote call metadata without a cache marker. Upgrade
 # that existing call on continuation, without requiring a second disposable callee.
 cache_file="$t/home/.agents-hotline/sessions/caller-dial-1.json"
