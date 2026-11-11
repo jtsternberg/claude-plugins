@@ -164,7 +164,12 @@ You can still re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` mid-response as a 
 
 The caller hears your answer only if something on its side is waiting for it, and sometimes nothing is. So when a turn will end on `DONE`, `WORK_COMPLETE`, `OUT_OF_SCOPE`, `AWAITING_REVIEW` or `BLOCKED`, and the prompt carried both `CALL_ID` and `SESSION`, check whether to push a short notice into the caller's session. Do it just before your final reply text, so your terminal STATUS line still comes last:
 
-Codex: skip this section — Codex has no `SendMessage`.
+Codex: skip the Claude `SendMessage` step below. The caller must either keep a
+foreground waiter active or explicitly arm the caller-side completion watcher
+described in the dial skill before going idle. A shell waiter alone cannot wake
+an idle Codex thread. Some Codex harnesses expose `send_message_to_thread`, but
+that tool is not a capability available to plugin scripts or every callee; do not
+invent a send or substitute an unverified queue acknowledgment for delivery.
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/notify-caller.sh --caller-session "<SESSION>" --call-id "<CALL_ID>" --status "<the STATUS you will end on>"
