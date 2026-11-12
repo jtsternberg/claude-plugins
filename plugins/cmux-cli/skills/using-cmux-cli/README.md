@@ -41,12 +41,17 @@ The skill activates on anything cmux-adjacent:
 - `SKILL.md` — the agent-facing playbook.
 - `scripts/find-surface.sh` — locate a surface by workspace / title / content; JSON output for chaining.
 - `scripts/open-side-surface.sh` — decide between `new-surface --pane <adjacent-UUID>` and `new-pane --direction right`, based on current layout.
+- `references/targeting.md` — UUID guards, bulk-operation safety, and find/read/send workflows.
+- `references/opening-surfaces.md` — visible placement, naming, readiness, caller recovery, and marking existing targets.
+- `references/terminal-io.md` — screen interpretation, shell vs REPL submission, delivery forensics, and key handling.
+- `references/command-reference.md` — command vocabulary, environment, sidebar metadata, mappings, and troubleshooting.
+- `references/layouts.md` — split geometry and layout reproduction.
 - `references/browser.md` — full embedded-browser automation reference (loaded on demand).
 - `references/ssh.md` — `cmux ssh` remote workspace reference — relay daemon, browser routing, drag-drop, reconnect semantics (loaded on demand).
 - `references/events.md` — the `cmux events` stream: full event catalog, payload shapes, and recipes for waiting on an agent's turn, confirming a send landed on the surface you meant, and resuming a watcher from a durable cursor (loaded on demand).
 - `references/progress-loops.md` — sidebar progress-loop recipe — when an event beats a loop, the two-loop pattern (updater + exit detector), clear/notify pairing (loaded on demand).
 
-The main `SKILL.md` stays lean by delegating the events, browser, and SSH subsystems to their reference docs. Agents only load those when the task actually involves them.
+The main `SKILL.md` keeps routing and core safeguards inline, with required read triggers for task-specific procedures. Agents load the matching references before acting. Claude Code resolves the dynamic context at load time; Codex runs those commands explicitly.
 
 ## Requirements
 

@@ -32,7 +32,15 @@ PASS=0
 FAIL=0
 FAILED_CASES=()
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-CMUX_DOC="$ROOT/plugins/cmux-cli/skills/using-cmux-cli/SKILL.md"
+CMUX_SKILL="$ROOT/plugins/cmux-cli/skills/using-cmux-cli/SKILL.md"
+# Follow the procedures moved out of the main skill, while checking the main
+# summary too: a reversed claim is a regression in either place.
+CMUX_DOC=$(mktemp)
+trap 'rm -f "$CMUX_DOC"' EXIT
+cat "$CMUX_SKILL" \
+  "${CMUX_SKILL%/*}/references/terminal-io.md" \
+  "${CMUX_SKILL%/*}/references/opening-surfaces.md" \
+  "${CMUX_SKILL%/*}/references/command-reference.md" >"$CMUX_DOC"
 # The hotline-side home of this prose is the dial skill's error-recovery
 # reference, not its SKILL.md. SKILL.md used to carry the whole flow inline; once
 # dial.sh took over the mechanics, the transport forensics moved to the file the
@@ -124,7 +132,7 @@ for f in "$CMUX_DOC" "$DIAL_DOC"; do
 done
 
 # --- 4. cmux-cli must OVERRIDE its own inlined help, not sit beside it -------
-# using-cmux-cli inlines `cmux send --help` live via a ```! block, so the
+# The terminal I/O reference asks readers to run `cmux send --help`, so the
 # reader sees cmux's unconditional "\n and \r send Enter" and our caveat in the
 # same page. Ours has to name the conflict (claude-plugins-3naq).
 grep -qiE 'unconditional' "$CMUX_DOC" \
