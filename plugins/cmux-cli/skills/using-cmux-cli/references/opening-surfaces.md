@@ -23,7 +23,7 @@ The one-call recipe:
 #    --wait-ready round-trips a probe (whose send is what attaches the PTY, with
 #    no focus steal), exiting 3 with a diagnostic rather than returning a
 #    non-ready ref.
-# Codex: this path resolves under Claude Code; substitute the installed cmux-cli plugin directory.
+# Both harnesses: substitute the installed cmux-cli plugin directory resolved from the invoking SKILL.md; do not rely on an exported variable.
 SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/using-cmux-cli"
 OUT=$("$SKILL_DIR/scripts/open-side-surface.sh" \
         --wait-ready --title "dev server :3000" --json) || exit 2
@@ -80,7 +80,7 @@ Visibility isn't just "the surface is on screen" — it's "the user can *find* t
 **1. Give it a meaningful human-visible title.** A fresh surface inherits a generic auto-title — `zsh`, the cwd basename, or the workspace's own name — which is indistinguishable from every other tab. Name it for the activity, 2–5 words, no trailing punctuation (`dev server :3000`, `ssh prod-web1`, `tail nginx logs`, `pytest watch`). Never leave it as the tool (`zsh`, `node`, `claude`) or as a placeholder word like `workspace` or `test`. The companion `auto-rename` skill has the full naming rubric.
 
 ```bash
-# Codex: this path resolves under Claude Code; substitute the installed cmux-cli plugin directory.
+# Both harnesses: substitute the installed cmux-cli plugin directory resolved from the invoking SKILL.md; do not rely on an exported variable.
 SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/using-cmux-cli"
 # Preferred — one call, title applied at creation:
 "$SKILL_DIR/scripts/open-side-surface.sh" --wait-ready --title "dev server :3000" --json
@@ -164,7 +164,7 @@ If the user's request is ambiguous ("ssh into host X"), default to the visible s
 This is the mechanics behind the [default visibility principle](#default-principle-make-new-work-visible-to-the-user) above. Use it for any "open / start / ssh / run" request that doesn't explicitly ask for a separate workspace. The bundled helper handles the decision tree (split vs. add-to-adjacent-pane) so you don't have to hand-roll it:
 
 ```bash
-# Codex: this path resolves under Claude Code; substitute the installed cmux-cli plugin directory.
+# Both harnesses: substitute the installed cmux-cli plugin directory resolved from the invoking SKILL.md; do not rely on an exported variable.
 SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/using-cmux-cli"
 "$SKILL_DIR/scripts/open-side-surface.sh" [OPTIONS]
 ```

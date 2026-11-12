@@ -66,6 +66,10 @@ prefix in the paths below. Read only the references needed for the task.
 | Ongoing sidebar progress loops | `${CLAUDE_SKILL_DIR}/references/progress-loops.md` |
 | Command inventory, canonical forms, environment, sidebar/status, natural-language mappings, errors | `${CLAUDE_SKILL_DIR}/references/command-reference.md` |
 
+In both harnesses, references read as ordinary file content. Resolve their path
+placeholders from this loaded skill/plugin location before executing examples;
+do not assume the corresponding environment variables are exported.
+
 The references retain full procedures, examples, and failure evidence. The rules
 below apply even when a task doesn't need the full procedure.
 

@@ -25,7 +25,7 @@ cmux accepts three handle formats anywhere a `window`, `workspace`, `pane`, or `
 
 This is the failure mode of the standard chaining idiom, because both halves fail quietly:
 
-Codex: substitute the installed cmux-cli plugin directory in the assignment below.
+Both harnesses: substitute the installed cmux-cli plugin directory resolved from the invoking SKILL.md in the assignment below.
 
 ```bash
 SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/using-cmux-cli"
@@ -39,7 +39,7 @@ back a null id, so the shape a caller has to handle is *no JSON and a non-zero
 exit* — and a caller that only tests the parsed id never notices, because an empty
 `$OUT` parses to an empty `$SID` exactly like a null one:
 
-Codex: substitute the installed cmux-cli plugin directory in the assignment below.
+Both harnesses: substitute the installed cmux-cli plugin directory resolved from the invoking SKILL.md in the assignment below.
 
 ```bash
 SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/using-cmux-cli"
@@ -99,7 +99,7 @@ One of the most common agent tasks: the user says *"read what's happening in the
 **When the user names a surface, just pass the name as a bare query — don't reach for `read-screen` or list everything.** The script picks the strategy:
 
 ```bash
-# Codex: this path resolves under Claude Code; substitute the installed cmux-cli plugin directory.
+# Both harnesses: substitute the installed cmux-cli plugin directory resolved from the invoking SKILL.md; do not rely on an exported variable.
 SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/using-cmux-cli"
 "$SKILL_DIR/scripts/find-surface.sh" "✳ hotline: claude-plugins → Automating (quick_call)" --json
 ```
@@ -114,7 +114,7 @@ Reach for an explicit flag only when the bare query isn't the right shape:
 Use the bundled helper rather than hand-parsing `cmux tree --all`:
 
 ```bash
-# Codex: this path resolves under Claude Code; substitute the installed cmux-cli plugin directory.
+# Both harnesses: substitute the installed cmux-cli plugin directory resolved from the invoking SKILL.md; do not rely on an exported variable.
 SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/using-cmux-cli"
 "$SKILL_DIR/scripts/find-surface.sh" [OPTIONS]
 ```
@@ -141,7 +141,7 @@ Under the hood, the script uses `cmux tree --all --json` for discovery. If you n
 Grab the target's UUIDs from the finder's JSON and target by those:
 
 ```bash
-# Codex: this path resolves under Claude Code; substitute the installed cmux-cli plugin directory.
+# Both harnesses: substitute the installed cmux-cli plugin directory resolved from the invoking SKILL.md; do not rely on an exported variable.
 SKILL_DIR="${CLAUDE_PLUGIN_ROOT}/skills/using-cmux-cli"
 match=$("$SKILL_DIR/scripts/find-surface.sh" -w cmux -c "500 error" --json | jq -r '.[0]')
 WS_ID=$(jq -r '.workspace_id' <<<"$match")
