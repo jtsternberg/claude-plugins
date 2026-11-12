@@ -16,7 +16,7 @@ codex_env() {  # codex_env <scratch> [reply: done|none]
   mkdir -p "$t/binsrc"; make_herdr_stub "$t/binsrc"; mv "$t/binsrc/herdr" "$t/bin/herdr-real"
   cat > "$t/bin/herdr" <<STUBW
 #!/usr/bin/env bash
-if [[ "\$1 \${2:-}" == "tab create" ]]; then
+if [[ "\$1 \${2:-}" == "tab create" || "\$1 \${2:-}" == "workspace create" ]]; then
   for arg in "\$@"; do
     [[ "\$arg" == CODEX_HOME=* ]] && printf '%s' "\${arg#CODEX_HOME=}" > "\$HERDR_STATE/process_home"
   done

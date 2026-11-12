@@ -354,4 +354,16 @@ if [[ -n "$CD" && -d "$CD" ]]; then
 else
   fail "waiter needs launched call dir"
 fi
+t=$(new_env); codex_env "$t"; mkdir -p "$t/work"
+out=$(dial "$t" "${CENV[@]}" HOTLINE_CODEX_HOME="$t/work" \
+  HOTLINE_HERDR_PLACEMENT=workspace HOTLINE_HERDR_WORKSPACE=account-test -- \
+  --target "$t/target" --mode work_order --prompt "selected-account" --agent codex --fresh)
+CD=$(jq -r '.call_dir // empty' <<<"$out")
+[[ "$(jq -r .status <<<"$out")" == connected && "$(jq -r .confirmed <<<"$out")" == rollout \
+   && "$(cat "$t/state/process_home" 2>/dev/null)" == "$(cd "$t/work" && pwd -P)" \
+   && "$(cat "$CD/herdr_pane.txt" 2>/dev/null)" == w5:p1 \
+   && "$(cat "$CD/herdr_tab.txt" 2>/dev/null)" == w5:t1 ]] \
+  && ! grep -q 'tab create' "$t/herdr.log"
+check "a new workspace delivers Codex work in its initial pane with the selected home" $? "out=$out"
+
 herdr_suite_finish
