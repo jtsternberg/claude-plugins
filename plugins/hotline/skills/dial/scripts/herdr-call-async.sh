@@ -87,8 +87,8 @@
 # dropped and --tools refused (claude-only); HOTLINE_CALLEE_ENV is delivered as
 # codex shell_environment_policy overrides (callee_env_codex_config).
 #
-# HOTLINE_CODEX_HOME=<absolute-dir> selects the Codex process account via tab
-# creation --env CODEX_HOME. Local tab/workspace launches, including resume; split/remote
+# HOTLINE_CODEX_HOME=<absolute-dir> selects the Codex process account via tab or
+# workspace creation --env CODEX_HOME. Local launches, including resume; split/remote
 # are refused. codex_home.txt pins the same home for independent response readers.
 #
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
@@ -358,6 +358,8 @@ fail_async() {  # fail_async <reason>
 NEW_PANE=""
 HOST_TAB=""
 HOST_WORKSPACE=""
+PANE_ENV=()
+[[ ${HOTLINE_CODEX_HOME+x} ]] && PANE_ENV+=(--env "CODEX_HOME=$HOTLINE_CODEX_HOME")
 
 if [[ "$HERDR_PLACEMENT" == "split" ]]; then
   SPLIT_DIRECTION="${HOTLINE_HERDR_SPLIT_DIRECTION:-right}"
@@ -379,10 +381,13 @@ else
       'first(.result.workspaces[]? | select(.label == $l) | .workspace_id) // empty' \
       <<<"$HERDR_CLI_OUT" 2>/dev/null)
     if [[ -z "$HOST_WORKSPACE" ]]; then
-      herdr_cli workspace create --label "$HOTLINE_HERDR_WORKSPACE" --cwd "$CWD" --no-focus \
+      herdr_cli workspace create "${PANE_ENV[@]}" --label "$HOTLINE_HERDR_WORKSPACE" --cwd "$CWD" --no-focus \
         || fail_async "herdr workspace create --label $HOTLINE_HERDR_WORKSPACE failed: ${HERDR_CLI_ERR:-no diagnostic}"
       HOST_WORKSPACE=$(jq -r '.result.workspace.workspace_id // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null)
+      HOST_TAB=$(jq -r '.result.tab.tab_id // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null)
+      NEW_PANE=$(jq -r '.result.root_pane.pane_id // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null)
       [[ -z "$HOST_WORKSPACE" ]] && fail_async "herdr workspace create returned no workspace id: $(printf '%s' "$HERDR_CLI_OUT" | tr -d '\n' | cut -c1-200)"
+      [[ -z "$HOST_TAB" || -z "$NEW_PANE" ]] && fail_async "herdr workspace create returned no initial tab or root pane id: $(printf '%s' "$HERDR_CLI_OUT" | tr -d '\n' | cut -c1-200)"
     fi
   else
     herdr_cli pane get "$SPLIT_FROM" \
@@ -402,17 +407,22 @@ else
     TAB_LABEL=$(herdr_tab_label "${LABEL:-$(basename "$CWD")}" "$CALL_ID")
   fi
 
-  PANE_ENV=()
-  [[ ${HOTLINE_CODEX_HOME+x} ]] && PANE_ENV+=(--env "CODEX_HOME=$HOTLINE_CODEX_HOME")
-  herdr_cli tab create "${PANE_ENV[@]}" --workspace "$HOST_WORKSPACE" --cwd "$CWD" \
+  if [[ -n "$HOST_TAB" ]]; then
+    # A new workspace already owns a tab and shell. Use those handles so closing
+    # the callee's tab cannot leave an unused initial `1` tab behind.
+    herdr_cli tab rename "$HOST_TAB" "$TAB_LABEL" \
+      || fail_async "herdr tab rename $HOST_TAB failed: ${HERDR_CLI_ERR:-no diagnostic}"
+  else
+    herdr_cli tab create "${PANE_ENV[@]}" --workspace "$HOST_WORKSPACE" --cwd "$CWD" \
       --label "$TAB_LABEL" --no-focus \
-    || fail_async "herdr tab create in workspace $HOST_WORKSPACE failed: ${HERDR_CLI_ERR:-no diagnostic}"
-  # The tab's ROOT PANE is the host: `agent start` addresses a pane, and a fresh
-  # tab has exactly one. (Verified on herdr 0.8.2 — `tab create` reports it at
-  # .result.root_pane.pane_id and the tab at .result.tab.tab_id.)
-  NEW_PANE=$(jq -r '.result.root_pane.pane_id // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null)
-  HOST_TAB=$(jq -r '.result.tab.tab_id // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null)
-  [[ -z "$NEW_PANE" ]] && fail_async "herdr tab create returned no root pane id, so there is nothing to start the callee in: $(printf '%s' "$HERDR_CLI_OUT" | tr -d '\n' | cut -c1-200)"
+      || fail_async "herdr tab create in workspace $HOST_WORKSPACE failed: ${HERDR_CLI_ERR:-no diagnostic}"
+    # The tab's ROOT PANE is the host: `agent start` addresses a pane, and a fresh
+    # tab has exactly one. (Verified on herdr 0.8.2 — `tab create` reports it at
+    # .result.root_pane.pane_id and the tab at .result.tab.tab_id.)
+    NEW_PANE=$(jq -r '.result.root_pane.pane_id // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null)
+    HOST_TAB=$(jq -r '.result.tab.tab_id // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null)
+    [[ -z "$NEW_PANE" ]] && fail_async "herdr tab create returned no root pane id, so there is nothing to start the callee in: $(printf '%s' "$HERDR_CLI_OUT" | tr -d '\n' | cut -c1-200)"
+  fi
 fi
 
 # Recorded so a caller can label, move or close the callee's host later — the

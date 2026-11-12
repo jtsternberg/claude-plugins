@@ -505,7 +505,7 @@ out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
 ! grep -q -- ' -n ' <(tr -d '\\' < "$t/herdr.log")
 check "no --name passes no -n at all" $? "herdr calls: $(tr -d '\\' < "$t/herdr.log")"
 
-# --- placement=workspace, label ABSENT: create it, then tab into it --------
+# --- placement=workspace, label ABSENT: reuse its initial tab and pane -----
 t=$(new_env)
 out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
       HERDR_STATE="$t/state" HERDR_PANE_ID="w1:p1" \
@@ -520,14 +520,29 @@ check "placement=workspace with an unknown label launches without error" $? \
   "out=$out error=$(cat "$cd_path/error.txt" 2>/dev/null) stderr=$(cat "$t/err.txt")"
 [[ "$log" == *"workspace list"* && "$log" == *"workspace create --label agentic-run-boss-group-1"* ]]
 check "…looks the label up, then creates the workspace it could not find" $? "herdr calls: $log"
-[[ "$log" == *"tab create --workspace w22"* ]]
-check "…and puts the callee's tab in the NEW workspace" $? "herdr calls: $log"
+[[ "$log" != *"tab create"* && "$log" == *"tab rename w22:t1 "* \
+   && "$log" == *"--pane w22:p1"* \
+   && "$(cat "$cd_path/herdr_tab.txt" 2>/dev/null)" == "w22:t1" \
+   && "$(cat "$cd_path/herdr_pane.txt" 2>/dev/null)" == "w22:p1" ]]
+check "…labels and uses the initial tab instead of leaving an unused 1 tab" $? "herdr calls: $log"
 [[ "$(cat "$cd_path/herdr_workspace.txt" 2>/dev/null)" == "w22" \
    && "$(cat "$cd_path/herdr_placement.txt" 2>/dev/null)" == "workspace" ]]
 check "…recording the group's workspace id" $? \
   "ws='$(cat "$cd_path/herdr_workspace.txt" 2>/dev/null)'"
 ! grep -q "pane split" "$t/herdr.log" 2>/dev/null
 check "…and still never splits the anchor" $? "herdr calls: $log"
+
+# Failure cleanup must close the reused initial tab, just as it closes a new tab.
+t=$(new_env)
+out=$(env PATH="$t/bin:$PATH" HOME="$t/home" HERDR_LOG="$t/herdr.log" \
+      HERDR_STATE="$t/state" HERDR_PANE_ID="w1:p1" \
+      HOTLINE_HERDR_PLACEMENT=workspace HOTLINE_HERDR_WORKSPACE="grp" \
+      HERDR_STUB_START_FAIL=1 \
+      bash "$HERDR_ASYNC" --cwd "$t/target" --prompt "hi" 2>/dev/null)
+log=$(tr -d '\\' < "$t/herdr.log")
+[[ "$log" == *"tab close w5:t1"* && "$log" != *"workspace close"* \
+   && "$log" != *"tab create"* ]]
+check "a failed launch closes the reused initial tab without closing sibling work" $? "herdr calls: $log"
 
 # --- placement=workspace, label PRESENT: join it, create nothing -----------
 t=$(new_env)

@@ -417,9 +417,8 @@ case "$1 ${2:-}" in
       '{id:"cli:tab:get",result:{type:"tab_info",tab:{tab_id:$t,pane_count:$n,label:"1"}}}'
     exit 0 ;;
 
-  # Kept although hotline never calls it: the "renames nothing" contract guards
-  # assert an ABSENCE from the log, and a stub that could not answer a rename
-  # would make those guards pass for the wrong reason.
+  # Fresh workspaces reuse and rename their initial tab; split placements must
+  # never rename the caller's tab.
   "tab rename")
     echo '{"id":"cli:tab:rename","result":{"type":"ok"}}'
     exit 0 ;;

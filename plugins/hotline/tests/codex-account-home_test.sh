@@ -15,7 +15,7 @@ for placement in tab workspace; do
   out=$(launch HOTLINE_CODEX_HOME="$selected" HOTLINE_HERDR_PLACEMENT="$placement" HOTLINE_HERDR_WORKSPACE=workers)
   cd_call=$(jq -r '.call_dir // empty' <<<"$out")
   printf -v quoted_home '%q' "CODEX_HOME=$selected"
-  grep 'tab create' "$t/herdr.log" | grep -Fq -- "--env $quoted_home"
+  grep "$placement create" "$t/herdr.log" | grep -Fq -- "--env $quoted_home"
   check "$placement passes selected home to pane environment" $? "out=$out"
   [[ -n "$cd_call" && "$(cat "$cd_call/codex_home.txt" 2>/dev/null)" == "$selected" ]]
   check "$placement persists account home for independent waiters" $?
