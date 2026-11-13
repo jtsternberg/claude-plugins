@@ -43,6 +43,18 @@ class SendTests(unittest.TestCase):
         self.assertEqual(send.resolve('native')[:2], ('t3', 'abc'))
         self.assertEqual(send.resolve('thread_abc')[:2], ('t3', 'abc'))
 
+    def test_t3_cli_thread_id_forms(self):
+        tid = 'mcp:61800683-3799-4b14-a14d-d7ca85726f8c'
+        native = '01a1d5a3-fae5-7311-88f2-441d3ae90f09'
+        self.row('thread_' + tid, native)
+        for ref in (tid, 'thread_' + tid, native):
+            with self.subTest(ref=ref):
+                self.assertEqual(send.resolve(ref)[:2], ('t3', tid))
+        bare = '11111111-2222-3333-4444-555555555555'
+        self.row('thread_' + bare, 'other-native')
+        for ref in (bare, 'thread_' + bare):
+            self.assertEqual(send.resolve(ref)[:2], ('t3', bare))
+
     def test_ambiguous_and_missing(self):
         self.registry(1, 'worker', 'one', '/tmp/one')
         self.registry(2, 'worker', 'two', '/tmp/two')
@@ -80,16 +92,28 @@ class SendTests(unittest.TestCase):
         self.assertEqual(received[0]['priority'], 'next')
         self.assertEqual(received[0]['fromMode'], 'bypass')
         self.assertEqual(received[0]['message']['role'], 'user')
+        self.assertIn(received[0]['msg_id'], received[0]['message']['content'][:60])
+        self.assertRegex(received[0]['message']['content'], r'^m-[0-9a-f]+ \[agent\]')
         self.assertIn('Reply: hotline send sender', received[0]['message']['content'])
         self.assertEqual(json.loads(output.call_args.args[0])['status'], 'delivered')
 
     def test_verification_states(self):
         p = self.home / 'log'
-        p.write_text(json.dumps({'type':'system','message':'Held peer message'}) + '\n')
+        p.write_text(json.dumps({'type':'system','content':'Held peer message — preview: «agent nonce hello»'}) + '\n')
         self.assertEqual(send.verify([p], {p:0}, 'nonce', 0, True)[0], 'held')
         self.assertEqual(send.verify([p], {p:p.stat().st_size}, 'nonce', 0, True)[0], 'unconfirmed')
         p.write_text(json.dumps({'type':'event','payload':'nonce'}) + '\n')
         self.assertEqual(send.verify([p], {p:0}, 'nonce', 0)[0], 'delivered')
+
+    def test_unrelated_hold_and_delivery_are_not_ours(self):
+        p = self.home / 'log'
+        p.write_text(json.dumps({'type':'system', 'content':'Held peer message — preview: «agent m-other hello»'}) + '\n' + json.dumps({'type':'user', 'message':'another message'}) + '\n')
+        self.assertEqual(send.verify([p], {p:0}, 'm-ours', 0, True)[0], 'unconfirmed')
+
+    def test_bracket_stripped_hold_preview_matches_our_id(self):
+        p = self.home / 'log'
+        p.write_text(json.dumps({'type':'system', 'subtype':'informational', 'content':'Held peer message — from an unidentified session; preview: «Sender m-ours hello» — not delivered to Claude'}) + '\n')
+        self.assertEqual(send.verify([p], {p:0}, 'm-ours', 0, True)[0], 'held')
 
     def test_codex_cli_receives_account_and_confirms_rollout(self):
         home = self.home / '.codex-alt'; rollout = home / 'sessions/2026/01/01/rollout-now-12345678-1234-1234-1234-123456789abc.jsonl'

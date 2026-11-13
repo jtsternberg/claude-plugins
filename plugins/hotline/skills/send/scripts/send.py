@@ -49,12 +49,11 @@ def unique(matches, description):
 def resolve(ref):
     rows = t3_rows()
     tid = ref.removeprefix('thread_')
-    if ref.startswith('thread_') or UUID.fullmatch(tid):
-        match = unique([t for t, _ in rows if t == tid], 'T3 thread')
-        if match:
-            return ('t3', match, None)
-        if ref.startswith('thread_'):
-            raise Refusal(f'no T3 thread matches {ref}; candidates: []')
+    match = unique([t for t, _ in rows if t == tid], 'T3 thread')
+    if match:
+        return ('t3', match, None)
+    if ref.startswith('thread_'):
+        raise Refusal(f'no T3 thread matches {ref}; candidates: []')
     match = unique([t for t, native in rows if native == ref], 'T3 native ID')
     if match:
         return ('t3', match, None)
@@ -101,8 +100,12 @@ def verify(paths, offsets, nonce, timeout, claude=False):
                 for line in data.splitlines():
                     try: row = json.loads(line)
                     except ValueError: continue
-                    if claude and row.get('type') == 'system' and ('held peer message' in line.lower() or 'did not attest its permission mode' in line.lower()):
-                        return 'held', str(path)
+                    if claude and row.get('type') == 'system':
+                        content = row.get('content', '')
+                        if isinstance(content, str) and 'held peer message' in content.lower():
+                            preview = re.search(r'preview:\s*«(.*?)»', content, re.DOTALL)
+                            if preview and nonce in preview.group(1):
+                                return 'held', str(path)
                     if nonce in line and (not claude or row.get('type') in ('user', 'queue-operation')):
                         return 'delivered', str(path)
             except OSError:
@@ -126,8 +129,8 @@ def main():
     hosted = unique([t for t, native in rows if native == sender or t == sender], 'sender T3 thread')
     if hosted: sender = 'thread_' + hosted
     route, target, detail = resolve(args.target)
-    nonce = str(uuid.uuid4())
-    message = f'[{args.sender_name}]\n{args.message}\n\nReply: hotline send {sender} …\nMessage ID: {nonce}'
+    nonce = 'm-' + uuid.uuid4().hex[:16]
+    message = f'{nonce} [{args.sender_name}]\n{args.message}\n\nReply: hotline send {sender} …\nMessage ID: {nonce}'
     evidence = ''
     if route == 't3':
         proc = subprocess.run(['t3', 'thread', 'send', target, '-'], input=message, capture_output=True, text=True)

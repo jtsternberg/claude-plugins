@@ -19,4 +19,4 @@ T3-hosted sessions use T3 even when addressed by their native ID. Native Claude 
 
 Claude receivers bypassing permissions may hold unidentified peer messages unless launched with `--settings '{"crossSessionInbound":"accept"}'`; changing settings after launch does not release them. Do not automatically retry an unconfirmed message.
 
-A sender can explicitly assert its permission class with `--attest-mode bypass` or `--attest-mode prompting` for a Claude socket target. Use the truthful class only when the sender intends this trust assertion. Any process running as the same user can claim either class, so this is not strong authentication. The default sends no assertion.
+A sender can explicitly assert its permission class with `--attest-mode bypass` or `--attest-mode prompting` for a Claude socket target. A live test found that `bypass` was still held as unattested, so do not rely on this flag to bypass the hold. Use the truthful class only when the sender intends this trust assertion. Any process running as the same user can claim either class, so this is not strong authentication. The default sends no assertion.
