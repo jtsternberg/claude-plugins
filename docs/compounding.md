@@ -79,6 +79,10 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
 
 ## Verification
 
+- **Do not infer a Codex session's host from its tool-shell environment alone.**
+  Codex tool-shell environment policy can filter host variables such as `HERDR_*`,
+  making a hosted session appear unhosted; verify against an independent host record.
+  (claude-plugins-c7dj)
 - **Exit codes and RPC acks are not delivery proof.** A transport can report
   success past failed chunks; confirm from the receiving side (transcript,
   on-screen state). (claude-plugins-jtti, -gxar)
