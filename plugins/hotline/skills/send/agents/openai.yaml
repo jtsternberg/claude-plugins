@@ -1,0 +1,3 @@
+interface:
+  display_name: Hotline Send
+  short_description: Message an already-running Claude, Codex, or T3 session
