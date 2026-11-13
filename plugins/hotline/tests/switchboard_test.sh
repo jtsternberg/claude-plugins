@@ -89,7 +89,16 @@ cat > "$CALLEE_T" <<'EOF'
 {"type":"assistant","timestamp":"2026-07-02T10:00:09Z","message":{"role":"assistant","content":[{"type":"text","text":"Callee response"}]}}
 EOF
 
-PORT=$(( (RANDOM % 2000) + 42000 ))
+# Ports come from the OS, never a fixed range: a random pick inside Linux's
+# ephemeral range (32768-60999) can land on a loopback socket another parallel
+# suite holds, and the server then dies with EADDRINUSE inside start's 0.5s check.
+free_port() {
+  node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'
+}
+# The sandbox is deleted on exit, so a failure must carry the log it points at.
+sb_log() { tail -n 5 "$1/.agents-hotline/switchboard.log" 2>/dev/null | tr '\n' ' '; }
+
+PORT=$(free_port)
 HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
   node "$SB_SCRIPTS/server.js" --port="$PORT" --stale-hours=24 > "$SANDBOX/server.log" 2>&1 &
 SERVER_PID=$!
@@ -535,7 +544,7 @@ fi
 
 # ---- case: start replaces prior instances (pidfile + ad-hoc port squatter) --------
 
-TAKEOVER_PORT=$(( PORT + 2 ))
+TAKEOVER_PORT=$(free_port)
 TK_HOME="$SANDBOX/tkhome"
 mkdir -p "$TK_HOME"
 # Squat the port with an ad-hoc server (no pidfile — simulates `node server.js` by hand)
@@ -549,7 +558,7 @@ sleep 0.3
 if [[ $(echo "$TK_OUT" | jq -r '.status') == "started" ]] && ! kill -0 "$SQUATTER_PID" 2>/dev/null; then
   pass "takeover: start kills ad-hoc port squatter and boots fresh"
 else
-  fail "takeover: start kills ad-hoc port squatter and boots fresh (got: $TK_OUT)"
+  fail "takeover: start kills ad-hoc port squatter and boots fresh (got: $TK_OUT, log: $(sb_log "$TK_HOME"))"
 fi
 FIRST_PID=$(echo "$TK_OUT" | jq -r '.pid')
 # Second start replaces the pidfile instance instead of reporting already_running
@@ -565,7 +574,7 @@ HOME="$TK_HOME" bash "$SB_SCRIPTS/switchboard.sh" stop > /dev/null
 
 # ---- case: switchboard.sh start/status/stop lifecycle -----------------------------
 
-SB_PORT=$(( PORT + 1 ))
+SB_PORT=$(free_port)
 LIFE_HOME="$SANDBOX/home"
 mkdir -p "$LIFE_HOME"
 START_OUT=$(HOME="$LIFE_HOME" HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
@@ -573,7 +582,7 @@ START_OUT=$(HOME="$LIFE_HOME" HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJE
 if [[ $(echo "$START_OUT" | jq -r '.status') == "started" ]]; then
   pass "lifecycle: start"
 else
-  fail "lifecycle: start (got: $START_OUT)"
+  fail "lifecycle: start (got: $START_OUT, log: $(sb_log "$LIFE_HOME"))"
 fi
 
 STATUS_OUT=$(HOME="$LIFE_HOME" bash "$SB_SCRIPTS/switchboard.sh" status)
@@ -631,7 +640,7 @@ else
   fail "stale pidfile: stop clears the stale pid file"
 fi
 
-STALE_PORT=$(( PORT + 3 ))
+STALE_PORT=$(free_port)
 echo "$STRANGER_PID" > "$STALE_HOME/.agents-hotline/switchboard.pid"
 SS_OUT=$(HOME="$STALE_HOME" HOTLINE_SESSIONS_DIR="$SESSIONS_DIR" HOTLINE_PROJECTS_ROOT="$PROJECTS_ROOT" \
   bash "$SB_SCRIPTS/switchboard.sh" start --port="$STALE_PORT" --no-open)
@@ -641,7 +650,7 @@ if [[ $(echo "$SS_OUT" | jq -r '.status') == "started" ]] && kill -0 "$STRANGER_
    && [[ $(cat "$STALE_HOME/.agents-hotline/switchboard.pid") == "$SS_PID" ]]; then
   pass "stale pidfile: start proceeds, replaces the file, spares the unrelated pid"
 else
-  fail "stale pidfile: start proceeds, replaces the file, spares the unrelated pid (got: $SS_OUT, alive=$(kill -0 "$STRANGER_PID" 2>/dev/null && echo yes || echo no))"
+  fail "stale pidfile: start proceeds, replaces the file, spares the unrelated pid (got: $SS_OUT, alive=$(kill -0 "$STRANGER_PID" 2>/dev/null && echo yes || echo no)), log: $(sb_log "$STALE_HOME"))"
 fi
 HOME="$STALE_HOME" bash "$SB_SCRIPTS/switchboard.sh" stop > /dev/null
 kill "$STRANGER_PID" 2>/dev/null
