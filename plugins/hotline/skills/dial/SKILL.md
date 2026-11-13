@@ -53,6 +53,8 @@ mapped wrapper flag shown above.
 
 ## Native fast path — Claude Code only
 
+For direct messages to an already-running session across Claude, Codex, or T3, use `hotline:hotline-send`.
+
 Launching is the default. Claude Code can also hand a message straight to a session
 that is *already running* (`ListAgents` + `SendMessage`) — that is the exception, and
 it needs positive evidence in the user's own words. Take it **only when both hold**:

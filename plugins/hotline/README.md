@@ -522,6 +522,7 @@ resolve-workspace.sh "<user's words>"
 
 ### The Skills
 
+- **`hotline-send`** — Send a direct message to a running Claude, Codex, or T3 session without opening a pane; reports transcript confirmation, a hold, an unconfirmed write, or T3 acceptance.
 - **`hotline-dial`** — The caller side. One `dial.sh` invocation runs the whole flow above (identity, resolve, transport, launch, boot wait) and returns one JSON payload; the skill supplies the judgment — which workspace, which mode, fork-vs-assist — and relays the response. Forks by default when dialing someone else's session ID.
 - **`hotline-ringing`** — The receiver-side handshake. Loaded via the `/hotline:hotline-ringing` prefix in the prompt. Tells Agent B what's happening, how to respond, and how to signal completion. Enforces workspace isolation.
 - **`hotline-pickup`** — Workspace identity introspection. Runs `gather-workspace-info.sh` to examine CLAUDE.md, package files, git history, then caches a concise identity to `~/.agents-hotline/identities/`. Used by workspace resolution for fuzzy matching.
