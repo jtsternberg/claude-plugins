@@ -16,6 +16,30 @@ claude plugin install delayed-work@jtsternberg
 
 ## Skills
 
+### `every`
+
+Recurring reminders or work in this session, with **zero model calls or tokens
+between pings**. Give it prose, including a first time or delay and a separate
+repeat interval:
+
+```text
+/delayed-work:every set a reminder to do X in 2.5 hours, then repeat every 1.5 hours
+$delayed-work:every at 4:30pm review progress toward this goal, then every 90 minutes
+```
+
+Claude Code uses one startup wake followed by native recurring jobs. Codex uses
+an independent repeating timer with at most one unacknowledged ping, so a busy
+session does not accumulate reminders. Neither needs the model to re-arm each
+occurrence. Pings themselves use tokens; waiting does not.
+
+The skill reports the first fire, cadence and cancellation handles. Ask it to list
+or cancel a reminder, or give a stop condition such as "until this goal is done".
+Claude's native scheduler has minute granularity and jitter; its planner supports
+whole-minute intervals dividing 24 hours, including 90 minutes, and refuses others.
+Codex supports whole-second intervals of at least 60 seconds. Both expire after
+seven days and need a live receiver; machine sleep delays delivery. No implicit
+caffeination or durable scheduling.
+
 ### `until`
 
 The lead use case: a session limit lands mid-task, so you stop for now and resume at the

@@ -1,7 +1,9 @@
 import json, os, pathlib, stat, sys, tempfile, time
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "scripts"))
 import codex_timer  # noqa: E402
 
 THREAD = "01a1c683-2797-7ea0-9bae-5e9da38af73d"
@@ -146,6 +148,101 @@ class FireTest(unittest.TestCase):
         status = self.run_fire(f'printf %s "$CODEX_HOME" > "{marker}"\nexit 0\n')
         self.assertEqual(status, "enqueued")
         self.assertEqual(marker.read_text(), str(self.home))
+
+
+class RecurringTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.job = pathlib.Path(self.tmp.name)
+        self.clock = 0
+        self.sent = []
+        self.config = {"codex": "/fake/codex", "thread": THREAD, "codex_home": "/fake/home",
+                       "target": 10, "every": 90, "expires": 500,
+                       "payload": "[Caller label] do X literally $HOME `x` \\n"}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_timer(self, sleep, enqueue=None):
+        (self.job / "job.json").write_text(json.dumps(self.config))
+
+        def send(argv, **kwargs):
+            self.sent.append((self.clock, argv))
+            if enqueue:
+                return enqueue(argv, **kwargs)
+            return SimpleNamespace(returncode=0, stdout=b"ok", stderr=b"")
+
+        with patch.object(codex_timer.time, "time", side_effect=lambda: self.clock), \
+                patch.object(codex_timer.time, "sleep", side_effect=sleep), \
+                patch.object(codex_timer.subprocess, "run", side_effect=send):
+            codex_timer.repeat(self.job)
+
+    def test_recurs_without_model_rearm_and_coalesces_until_acknowledged(self):
+        def sleep(seconds):
+            self.clock += seconds
+            if self.clock == 190:
+                (self.job / "pending").unlink()
+            if self.clock >= 280:
+                (self.job / "cancel").touch()
+
+        self.run_timer(sleep)
+        self.assertEqual([at for at, _ in self.sent], [10, 190])
+        payload = self.sent[0][1][-1]
+        self.assertTrue(payload.startswith(self.config["payload"]))
+        self.assertIn(str(self.job), payload)
+        self.assertIn("Do not re-arm", payload)
+        self.assertEqual((self.job / "status").read_text().strip(), "cancelled")
+
+    def test_sleep_skips_missed_intervals_and_keeps_original_phase(self):
+        def sleep(seconds):
+            self.clock = 245 if self.clock == 0 else self.clock + seconds
+            if self.clock >= 280:
+                (self.job / "cancel").touch()
+
+        self.run_timer(sleep)
+        self.assertEqual([at for at, _ in self.sent], [245])
+        self.assertEqual(json.loads((self.job / "job.json").read_text())["target"], 280)
+
+    def test_queue_failure_stops_instead_of_retrying(self):
+        def sleep(seconds):
+            self.clock += seconds
+
+        self.run_timer(sleep, lambda *a, **k: SimpleNamespace(returncode=1, stdout=b"", stderr=b"offline"))
+        self.assertEqual(len(self.sent), 1)
+        self.assertTrue((self.job / "pending").exists())
+        self.assertIn("enqueue_failed", (self.job / "status").read_text())
+
+    def test_timeout_stops_with_unknown_outcome(self):
+        def sleep(seconds):
+            self.clock += seconds
+
+        def timeout(*args, **kwargs):
+            raise codex_timer.subprocess.TimeoutExpired("queue", 60)
+
+        self.run_timer(sleep, timeout)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual((self.job / "status").read_text().strip(), "enqueue_timeout outcome_unknown")
+
+    def test_expiry_stops_even_while_a_ping_is_pending(self):
+        self.config["expires"] = 110
+
+        def sleep(seconds):
+            self.clock += seconds
+
+        self.run_timer(sleep)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual((self.job / "status").read_text().strip(), "expired")
+
+    def test_cancel_before_first_ping_never_enqueues(self):
+        (self.job / "cancel").touch()
+        self.run_timer(lambda seconds: self.fail("cancelled job slept"))
+        self.assertEqual(self.sent, [])
+
+    def test_subminute_and_invalid_intervals_are_rejected(self):
+        for value in ("0", "-1", "59", "nan", "1.5"):
+            with self.assertRaises(codex_timer.argparse.ArgumentTypeError):
+                codex_timer.interval(value)
+        self.assertEqual(codex_timer.interval("5400"), 5400)
 
 
 if __name__ == "__main__":

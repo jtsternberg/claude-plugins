@@ -12,7 +12,7 @@ when_to_use: |
   "queue these three reviews for tonight, spaced out". Also when a payload needs a
   human in the loop at fire time, which a headless or cloud run cannot give it.
   NOT for guaranteed schedules across receiver shutdown or machine restart. NOT for
-  repeating schedules (cron, the `schedule` skill). NOT for delivering a prompt into a
+  repeating schedules (use the sibling `every` skill). NOT for delivering a prompt into a
   different cmux surface, which is cmux-cli's `send-at`.
 argument-hint: "[--caffeinate] <when> <what to run>"
 allowed-tools:
@@ -281,7 +281,7 @@ substitute. If current identity is unavailable or conflicts, resolve it before
 arming. If queue is unavailable, report that missing capability and offer a manual
 nudge or a short active-turn wait; do not claim all Codex versions require blocking.
 
-Arm with the bundled `scripts/codex_timer.py`, a detached one-shot process that polls
+Arm with the shared plugin timer, a detached one-shot process that polls
 wall time and invokes queue once. Replace the explicit ISO calendar time (including
 UTC offset) and payload-file path. First use a literal file-writing tool to save the
 exact payload as UTF-8 in a private file (0600), outside git; do not embed it in
@@ -291,11 +291,11 @@ Apply the **Codex queued sender labels** rule in `$maestro:conduct` to the
 saved payload: use the caller-supplied exact prefix, or `[Delayed-work timer]`
 when none was supplied.
 
-Codex: this path resolves under Claude Code; substitute the directory containing this `SKILL.md`.
+Codex: this path resolves under Claude Code; substitute the installed plugin directory.
 
 ```bash
-SKILL_DIR="${CLAUDE_SKILL_DIR}"
-python3 "$SKILL_DIR/scripts/codex_timer.py" arm --when "2026-10-07T21:05:00-04:00" --payload-file "/absolute/path/to/private-payload.txt"
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+python3 "$PLUGIN_ROOT/scripts/codex_timer.py" arm --when "2026-10-07T21:05:00-04:00" --payload-file "/absolute/path/to/private-payload.txt"
 ```
 
 The script fails closed before arming on a missing `codex`, no queue capability, a
