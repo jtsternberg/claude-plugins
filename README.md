@@ -181,7 +181,7 @@ Orchestration stance for a main agent overseeing delegated work. Ships `conduct`
 **Install:** `claude plugin install maestro@jtsternberg`
 
 #### ⏰ [delayed-work](plugins/delayed-work)
-Hit the 5-hour session limit mid-task? Stop for now and have *this* session pick the work back up at the reset — context still loaded, zero tokens spent waiting, no resume note needed. Ships `until`: a `Monitor` polling the clock, so the notification wakes the current session, which runs the payload itself instead of handing it to a context-free headless or cloud run. Pairs with a budget watcher that reports a reset time — arm it at the warning, not at exhaustion, since a rate-limited request has no turn left to arm anything. Also covers the plain timed case: absolute times, relative delays, and queueing several spaced-out jobs. Not a durable scheduler — the watcher dies with the session, and the skill says so when it arms one. Rung 2 of [maestro](#-maestro)'s `patient-waiting` ladder with the clock as the watched condition.
+Schedule work in this session with zero tokens spent waiting. `until` runs once at a time or after a delay, including resuming after a quota reset. `every` accepts recurring work in prose: "in 2.5 hours do X, then repeat every 1.5 hours". It uses native Claude recurring jobs or an independent Codex timer, without model-driven re-arming between pings. `wake-sessions` coordinates waking other existing sessions. Pings run the work with the session's context; waiting uses no model calls. These are local schedules that need a live receiver, with explicit cancellation and sleep limits.
 
 **Install:** `claude plugin install delayed-work@jtsternberg`
 
