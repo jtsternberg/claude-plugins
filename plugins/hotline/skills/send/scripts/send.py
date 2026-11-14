@@ -14,6 +14,8 @@ import uuid
 
 HOME = Path.home()
 SCRIPTS = Path(__file__).resolve().parents[3] / 'scripts'
+sys.path.insert(0, str(SCRIPTS))
+from real_codex import real_codex  # noqa: E402
 UUID = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
 
 class Refusal(Exception):
@@ -145,7 +147,9 @@ def main():
         status, evidence = verify(paths, offsets, nonce, args.timeout, True)
     else:
         home, path = detail; paths = [path]; offsets = snapshot(paths)
-        proc = subprocess.run(['codex','queue','--thread',target,'--message',message], env={**os.environ, 'CODEX_HOME':str(home)}, capture_output=True, text=True)
+        try: codex = real_codex()
+        except ValueError as exc: raise Refusal(str(exc))
+        proc = subprocess.run([codex,'queue','--thread',target,'--message',message], env={**os.environ, 'CODEX_HOME':str(home)}, capture_output=True, text=True)
         if proc.returncode: raise Refusal(f'codex queue failed: {proc.stderr.strip()}')
         status, evidence = verify(paths, offsets, nonce, args.timeout)
     print(json.dumps({'status':status, 'route':route, 'target':target, 'evidence':evidence}))

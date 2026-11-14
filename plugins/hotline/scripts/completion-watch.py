@@ -24,6 +24,9 @@ import sys
 import time
 import uuid
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from real_codex import real_codex  # noqa: E402
+
 
 LIMIT = 8192
 TERMINAL = {"arrived", "arrival_unconfirmed", "enqueue_failed", "enqueue_unknown",
@@ -60,20 +63,6 @@ def owning_rollout(home, thread):
     if meta.get("type") != "session_meta" or meta.get("payload", {}).get("id") != thread:
         raise ValueError("caller rollout identity mismatch")
     return path
-
-
-def codex_binary():
-    # cmux's codex shim adds flags that queue rejects. Inspect executable wrappers,
-    # never credentials/config or process environments.
-    for directory in os.get_exec_path():
-        candidate = shutil.which("codex", path=directory) if directory else None
-        if not candidate or "cmux-cli-shims" in Path(candidate).parts:
-            continue
-        with open(candidate, "rb") as handle:
-            if b"cmux-codex-wrapper" in handle.read(16384):
-                continue
-        return os.path.abspath(candidate)
-    raise ValueError("real codex executable unavailable")
 
 
 def command(config, args, timeout=10):
@@ -118,7 +107,7 @@ def arm(args):
     home_arg = Path(args.caller_home)
     rollout = owning_rollout(home_arg, thread)
     config = {"thread": thread, "home": str(home_arg.resolve()), "call": str(call),
-              "nonce": nonce, "rollout": str(rollout), "codex": codex_binary(),
+              "nonce": nonce, "rollout": str(rollout), "codex": real_codex(),
               "timeout": args.timeout, "arrival_timeout": args.arrival_timeout}
     job = call / "completion"
     job.mkdir(mode=0o700, exist_ok=True)

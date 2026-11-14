@@ -128,6 +128,22 @@ class SendTests(unittest.TestCase):
         self.assertEqual((self.home / 'account').read_text().strip(), str(home.resolve()))
         self.assertEqual(json.loads(output.call_args.args[0])['status'], 'delivered')
 
+    def test_codex_queue_skips_cmux_shim_ahead_on_path(self):
+        home = self.home / '.codex'; rollout = home / 'sessions/2026/01/01/rollout-now-12345678-1234-1234-1234-123456789abc.jsonl'
+        rollout.parent.mkdir(parents=True); rollout.write_text('')
+        shim = self.home / '.cmuxterm/cmux-cli-shims/0000/codex'; shim.parent.mkdir(parents=True)
+        # Mirrors cmux's wrapper injecting a global flag that `codex queue` rejects.
+        shim.write_text('#!/bin/sh\necho "error: \\`codex queue\\` does not support \\`--dangerously-bypass-hook-trust\\`" >&2\nexit 2\n')
+        sniffed = self.home / 'wrapped'; sniffed.mkdir()
+        (sniffed / 'codex').write_text('#!/bin/sh\nexec /Applications/cmux.app/Contents/Resources/bin/cmux-codex-wrapper "$@"\n')
+        real = self.home / 'bin'; real.mkdir()
+        (real / 'codex').write_text('#!/usr/bin/env python3\nimport json, os, sys\nwith open(os.environ["ROLLOUT"], "a") as f: f.write(json.dumps({"payload": sys.argv[5]}) + "\\n")\n')
+        for cli in (shim, sniffed / 'codex', real / 'codex'): cli.chmod(0o755)
+        path = ':'.join([str(shim.parent), str(sniffed), str(real), os.environ['PATH']])
+        with patch.dict(os.environ, {'PATH':path, 'HOME':str(self.home), 'ROLLOUT':str(rollout)}), patch('sys.argv', ['send','12345678-1234-1234-1234-123456789abc','hello','--sender-id','sender','--timeout','0']), patch('builtins.print') as output:
+            send.main()
+        self.assertEqual(json.loads(output.call_args.args[0])['status'], 'delivered')
+
     def test_t3_cli_receives_envelope(self):
         self.row('abc', 'native')
         bindir = self.home / 'bin'; bindir.mkdir()
