@@ -13,7 +13,10 @@
 # is the deterministic part in front of that send.
 #
 # Usage:
-#   notify-caller.sh --caller-session <id> --call-id <nonce> --status <STATUS>
+#   notify-caller.sh --caller-session <id> --call-id <nonce> --status <STATUS> [--detail <ask>]
+#
+# --detail is the one-line ask or outcome behind the status (a NEEDS_OVERSEER's
+# question, a BLOCKED's blocker); it goes into the notice and into the dedupe key.
 #
 # Prints ONE JSON line and exits 0 for every outcome but a usage error (exit 2):
 #   {"send":true,"to":"<session name>","call_dir":"<dir or empty>","message":"…"}
@@ -33,22 +36,31 @@
 #      session is absent → nothing is sent.
 #   3. Its name must be unique among live sessions: SendMessage addresses by name,
 #      and this listing has no ref to disambiguate with.
-#   4. Once per nonce, via an atomic mkdir under ~/.agents-hotline/notified. Taken
-#      last, so a refusal above never spends the nonce.
+#   4. Once per (nonce, status, detail) within HOTLINE_NOTIFY_REPEAT_SECONDS, via
+#      an atomic mkdir under ~/.agents-hotline/notified/<nonce>/. A long-running
+#      callee reports many times per call, so a new status or a new ask always
+#      notifies. An identical repeat inside the window does not: re-running this
+#      check for the same ending, or a callee re-ending on the same status after
+#      each nudge, would otherwise push the same notice into the caller again and
+#      again. Taken last, so a refusal above never spends the key.
 #
 # Environment:
 #   HOTLINE_CLAUDE_BIN — the claude executable (default `claude`).
+#   HOTLINE_NOTIFY_REPEAT_SECONDS — how long an identical notice stays suppressed
+#     (default 1800). Past it, the same still-unanswered ask notifies again.
 # =============================================================================
 set -uo pipefail
 
 CALLER_SESSION=""
 CALL_ID=""
 STATUS=""
+DETAIL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --caller-session) CALLER_SESSION="${2-}"; shift 2 ;;
     --call-id)        CALL_ID="${2-}";        shift 2 ;;
     --status)         STATUS="${2-}";         shift 2 ;;
+    --detail)         DETAIL="${2-}";         shift 2 ;;
     *) echo "notify-caller: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -57,9 +69,11 @@ usage_error() { echo "notify-caller: $1" >&2; exit 2; }
 [[ -n "$CALLER_SESSION" ]] || usage_error "--caller-session is required"
 [[ "$CALL_ID" =~ ^[A-Za-z0-9_-]+$ ]] || usage_error "--call-id must be the call's nonce"
 case "$STATUS" in
-  DONE|WORK_COMPLETE|OUT_OF_SCOPE|AWAITING_REVIEW|BLOCKED) ;;
-  *) usage_error "--status must be a resolving STATUS (DONE, WORK_COMPLETE, OUT_OF_SCOPE, AWAITING_REVIEW, BLOCKED), got '${STATUS}'" ;;
+  DONE|WORK_COMPLETE|OUT_OF_SCOPE|AWAITING_REVIEW|BLOCKED|NEEDS_OVERSEER) ;;
+  *) usage_error "--status must be a resolving STATUS (DONE, WORK_COMPLETE, OUT_OF_SCOPE, AWAITING_REVIEW, BLOCKED, NEEDS_OVERSEER), got '${STATUS}'" ;;
 esac
+REPEAT_SECONDS="${HOTLINE_NOTIFY_REPEAT_SECONDS:-1800}"
+[[ "$REPEAT_SECONDS" =~ ^[0-9]+$ ]] || REPEAT_SECONDS=1800
 
 skip() { jq -nc --arg r "$1" '{send:false, reason:$r}'; exit 0; }
 
@@ -96,9 +110,23 @@ TO=$(jq -r --arg s "$CALLER_SESSION" \
 [[ "$(jq --arg n "$TO" '[.[] | select(.name == $n)] | length' <<<"$AGENTS")" -eq 1 ]] \
   || skip caller-name-ambiguous
 
-# 4. Once per nonce.
-mkdir -p "$STATE_DIR/notified" 2>/dev/null
-mkdir "$STATE_DIR/notified/$CALL_ID" 2>/dev/null || skip already-notified
+# 4. Once per (nonce, status, detail) within the repeat window. cksum, not
+#    shasum/sha256sum: it is POSIX, so the key is the same on macOS and Linux.
+KEY=$(printf '%s\n%s' "$STATUS" "$DETAIL" | cksum | awk '{print $1 "-" $2}')
+MARK="$STATE_DIR/notified/$CALL_ID/$STATUS-$KEY"
+mkdir -p "$STATE_DIR/notified/$CALL_ID" 2>/dev/null
+NOW=$(date +%s)
+if ! mkdir "$MARK" 2>/dev/null; then
+  SENT_AT=$(tr -dc '0-9' < "$MARK/at" 2>/dev/null)
+  if [[ -n "$SENT_AT" ]] && (( NOW - SENT_AT < REPEAT_SECONDS )); then
+    skip already-notified
+  fi
+  # Expired (or written without a time): re-take it, still through mkdir, so two
+  # concurrent checks cannot both win.
+  rm -rf "$MARK" 2>/dev/null
+  mkdir "$MARK" 2>/dev/null || skip already-notified
+fi
+echo "$NOW" > "$MARK/at"
 
 if [[ -n "$CALL_DIR" ]]; then
   WHERE="Call dir: $CALL_DIR — wait-for-response.sh on it returns the full answer."
@@ -106,5 +134,5 @@ else
   WHERE="Its call dir is the hotline-call-* dir whose call_id.txt holds $CALL_ID."
 fi
 jq -nc --arg to "$TO" --arg d "$CALL_DIR" \
-  --arg m "hotline: call_id=$CALL_ID resolved — STATUS: $STATUS. $WHERE" \
+  --arg m "hotline: call_id=$CALL_ID resolved — STATUS: $STATUS${DETAIL:+ — $DETAIL}. $WHERE" \
   '{send:true, to:$to, call_dir:$d, message:$m}'

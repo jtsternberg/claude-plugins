@@ -5,7 +5,7 @@
 #
 # The send itself is the callee model's SendMessage call; this script is the seam
 # in front of it, so every decision is pinned here with `claude` stubbed on PATH:
-# once per nonce, a caller that is not live (or not uniquely named) gets nothing,
+# one notice per (nonce, status, detail) within a repeat window, a caller that is not live (or not uniquely named) gets nothing,
 # a caller whose waiter is still running gets nothing (the waiter delivers), and
 # no failure is ever louder than {"send":false,...}.
 # =============================================================================
@@ -61,10 +61,36 @@ msg=$(field .message)
 [[ "$msg" == *"call_id=$NONCE"* && "$msg" == *"WORK_COMPLETE"* ]]
 check "the notice names the nonce and the status" $? "message=$msg"
 
-# 2. Same nonce again → once per nonce.
+# 2. Same nonce, same status, same detail again → an identical repeat is refused.
 notify "$t" --call-id "$NONCE" --status WORK_COMPLETE
 [[ $NRC -eq 0 && "$(field .send)" == "false" && "$(field .reason)" == "already-notified" ]]
-check "a second notice for the same nonce is refused" $? "out=$NOUT"
+check "an identical repeat on the same nonce is refused" $? "out=$NOUT"
+# A long-running callee reports many times per call: each NEW status or ask notifies.
+t=$(new_env); agents "$t" "$LIVE"
+notify "$t" --call-id "$NONCE" --status AWAITING_REVIEW
+[[ "$(field .send)" == "true" ]]
+check "a first AWAITING_REVIEW notifies" $? "out=$NOUT"
+notify "$t" --call-id "$NONCE" --status NEEDS_OVERSEER --detail "merge PR 12 or hold?"
+[[ $NRC -eq 0 && "$(field .send)" == "true" ]]
+check "a later NEEDS_OVERSEER on the same nonce still notifies" $? "rc=$NRC out=$NOUT err=$(cat "$t/err.txt")"
+msg=$(field .message)
+[[ "$msg" == *"NEEDS_OVERSEER"* && "$msg" == *"merge PR 12 or hold?"* ]]
+check "the notice carries the status and its ask" $? "message=$msg"
+notify "$t" --call-id "$NONCE" --status NEEDS_OVERSEER --detail "merge PR 12 or hold?"
+[[ "$(field .send)" == "false" && "$(field .reason)" == "already-notified" ]]
+check "the same ask repeated is refused" $? "out=$NOUT"
+notify "$t" --call-id "$NONCE" --status NEEDS_OVERSEER --detail "rerun CI on PR 12?"
+[[ "$(field .send)" == "true" ]]
+check "a new ask under the same status notifies" $? "out=$NOUT"
+notify "$t" --call-id "$NONCE" --status WORK_COMPLETE
+[[ "$(field .send)" == "true" ]]
+check "a WORK_COMPLETE after earlier notices notifies" $? "out=$NOUT"
+# The repeat window expires: an identical notice goes out again once it has passed.
+export HOTLINE_NOTIFY_REPEAT_SECONDS=0
+notify "$t" --call-id "$NONCE" --status WORK_COMPLETE
+unset HOTLINE_NOTIFY_REPEAT_SECONDS
+[[ "$(field .send)" == "true" ]]
+check "an identical repeat after the window notifies again" $? "out=$NOUT"
 # …and a different nonce in the same session is its own notice.
 notify "$t" --call-id "feedc0ffee000002" --status AWAITING_REVIEW
 [[ "$(field .send)" == "true" ]]
@@ -129,6 +155,9 @@ t=$(new_env); agents "$t" "$LIVE"
 notify "$t" --call-id "$NONCE" --status WORK_IN_PROGRESS
 [[ $NRC -eq 2 ]]
 check "WORK_IN_PROGRESS is not a resolution (usage error)" $? "rc=$NRC out=$NOUT"
+notify "$t" --call-id "$NONCE" --status NEEDS_OVERSEER
+[[ $NRC -eq 0 && "$(field .send)" == "true" ]]
+check "NEEDS_OVERSEER is accepted without a detail" $? "rc=$NRC out=$NOUT err=$(cat "$t/err.txt")"
 notify "$t" --status DONE
 [[ $NRC -eq 2 ]]
 check "a missing --call-id is a usage error" $? "rc=$NRC"

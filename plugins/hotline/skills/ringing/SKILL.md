@@ -162,7 +162,7 @@ You can still re-emit `STATUS: WORK_IN_PROGRESS call_id=<id>` mid-response as a 
 
 ## Tell the Caller You're Done (Claude Code only)
 
-The caller hears your answer only if something on its side is waiting for it, and sometimes nothing is. So when a turn will end on `DONE`, `WORK_COMPLETE`, `OUT_OF_SCOPE`, `AWAITING_REVIEW` or `BLOCKED`, and the prompt carried both `CALL_ID` and `SESSION`, check whether to push a short notice into the caller's session. Do it just before your final reply text, so your terminal STATUS line still comes last:
+The caller hears your answer only if something on its side is waiting for it, and sometimes nothing is. So when a turn will end on `DONE`, `WORK_COMPLETE`, `OUT_OF_SCOPE`, `AWAITING_REVIEW`, `BLOCKED` or `NEEDS_OVERSEER`, and the prompt carried both `CALL_ID` and `SESSION`, check whether to push a short notice into the caller's session. Check on every such ending, not only the first one in a call: a long-running callee reports many times per call, and each new status or new ask notifies. Do it just before your final reply text, so your terminal STATUS line still comes last:
 
 Codex: skip the Claude `SendMessage` step below. The caller must either keep a
 foreground waiter active or explicitly arm the caller-side completion watcher
@@ -172,12 +172,12 @@ that tool is not a capability available to plugin scripts or every callee; do no
 invent a send or substitute an unverified queue acknowledgment for delivery.
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/notify-caller.sh --caller-session "<SESSION>" --call-id "<CALL_ID>" --status "<the STATUS you will end on>"
+bash ${CLAUDE_SKILL_DIR}/scripts/notify-caller.sh --caller-session "<SESSION>" --call-id "<CALL_ID>" --status "<the STATUS you will end on>" --detail "<one line: the ask or outcome>"
 ```
 
 Run it exactly as written, on one line: the `allowed-tools` rule covers this command text, so a launcher that grants Bash only through this skill still runs it without a prompt. Quoting the path, or setting a variable on a line of its own, makes it a command the rule no longer matches.
 
-It prints one JSON line. On `"send":true`, call `SendMessage` once: `to` is the printed `to`, `message` is the printed `message` followed by a blank line and the first three to five lines of your answer, and `summary` is `hotline <CALL_ID> <STATUS>`. On `"send":false`, send nothing: the caller already has a waiter, isn't a live session here, or was already told. If `SendMessage` errors, leave it there — don't retry, and add a `HOTLINE_NOTE` to your reply. The script lives in your own plugin and reads only hotline's shared state under `~/.agents-hotline`, so running it doesn't break Workspace Isolation.
+It prints one JSON line. On `"send":true`, call `SendMessage` once: `to` is the printed `to`, `message` is the printed `message` followed by a blank line and the first three to five lines of your answer, and `summary` is `hotline <CALL_ID> <STATUS>`. On `"send":false`, send nothing: the caller already has a waiter, isn't a live session here, or was already told this same status and detail within the last 30 minutes (`already-notified`). `--detail` is part of that dedupe, so give a new ask its own wording and it goes out. If `SendMessage` errors, leave it there — don't retry, and add a `HOTLINE_NOTE` to your reply. The script lives in your own plugin and reads only hotline's shared state under `~/.agents-hotline`, so running it doesn't break Workspace Isolation.
 
 ## Logging — Already Handled
 
