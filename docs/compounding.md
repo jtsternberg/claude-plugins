@@ -134,8 +134,8 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   reads as a long turn, so the wait spends its whole budget and reports a timeout a
   resume could have fixed in seconds. Classify from what the callee's side shows —
   settled state, an error row read twice, transcript and subagent growth — and give
-  each a distinct resumable exit (hotline's wait: 5 blocked, 6 stalled).
-  (be408ca, claude-plugins-vw0f, #42)
+  each a distinct resumable exit (hotline's wait: 5 blocked, 6 stalled, 9 a STATUS
+  word the dial never declared). (be408ca, claude-plugins-vw0f, #42, 9428d2a)
 - **Accept/reject guards get one fixture per direction.** A recency check tested
   only against stale markers silently asserts the false-negative bug, and a
   parked-payload retry fixtured only where screen confirmation already failed let the

@@ -93,6 +93,10 @@ run_headless $'billing PR\nSTATUS: NEEDS_OVERSEER'
 [[ $RC -eq 0 ]] && ! jq -e 'has("blocked")' <<<"$OUT" >/dev/null 2>&1 \
   && pass "headless: an undeclared word is not an ending (exit 0, unmarked)" \
   || fail "headless: an undeclared word is not an ending" "rc=$RC out=$OUT"
+run_headless $'billing PR\nSTATUS: NEEDS_OVERSEER merge PR 12? call_id=0123abcd0123abcd'
+[[ $RC -eq 9 && "$(jq -r '.class' <<<"$OUT")" == "unknown" && "$(jq -r '.status' <<<"$OUT")" == "NEEDS_OVERSEER" && "$(jq -r '.detail' <<<"$OUT")" == "merge PR 12?" ]] \
+  && pass "headless: an undeclared word ending in call_id= → exit 9, class unknown, word and detail" \
+  || fail "headless: an undeclared word ending in call_id= → exit 9" "rc=$RC out=$OUT"
 run_headless $'question?\nSTATUS: BLOCKED'
 jq -e '(has("detail") or has("status")) | not' <<<"$OUT" >/dev/null 2>&1 \
   && pass "headless: a plain BLOCKED adds no detail/status keys" \

@@ -129,8 +129,9 @@ work order defines its own word, declare it on the dial:
 in the environment of whatever wraps dial.sh (a flag wins over the env for the same
 word). Declare it on every dial, follow-ups included: the map is per call dir
 (`status_classes.txt`), and the waiter and the callee's caller notice both read it.
-An undeclared word does not end the wait; the callee's push notice still reports it
-as class `unknown`. Any STATUS line may carry free text before `call_id=`
+An undeclared word that ends the callee's turn, on a line ending in `call_id=`,
+ends the wait on exit 9 with class `unknown` (see below); the callee's push notice
+reports it the same way. A bare `STATUS: WORD` with no call_id is read as prose. Any STATUS line may carry free text before `call_id=`
 (`STATUS: NEEDS_OVERSEER merge PR 12 or hold? call_id=<nonce>`), which the response
 JSON returns as `.detail`; a non-built-in word also sets `.status`.
 
@@ -671,6 +672,13 @@ Exit codes that are not failures:
   callee's own words. On headless there is no live surface; the follow-up resumes the
   session. A BLOCKED the callee later worked past (a later WORK_IN_PROGRESS or
   terminal STATUS) does not count, and neither does one written mid-turn.
+- **Exit 9 — the callee ended on a STATUS word this dial never declared.** Its
+  last STATUS, ending its turn, was a word in no class, on a line ending in
+  `call_id=<nonce>`. The JSON carries `"class": "unknown"`, the raw word as
+  `.status`, any `.detail`, and `.response` as on exit 0; the surface and session
+  are left live, as on exit 7. Read the word: the callee follows a convention your
+  work order defines. Act on it, and declare it (`--status-class WORD=class`) on
+  later dials so the wait classifies it.
 - **Exit 8 — your own follow-up superseded this call.** You dialed a follow-up
   into the same session before this call resolved, and the callee has started on it
   (the follow-up's prompt reached it, or it emitted a STATUS under the follow-up's

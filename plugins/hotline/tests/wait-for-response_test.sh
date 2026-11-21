@@ -1051,6 +1051,53 @@ else
 fi
 rm -rf "$HBD" "$CDBD" "$SDBD"
 
+# The same ending undeclared is class unknown: exit 9, in transcript mode and off the screen.
+BU=$(setup_await_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] ship it"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nPR 12 touches billing.\nSTATUS: NEEDS_OVERSEER merge PR 12 or hold? call_id='"$TNONCE"'"}]}}')
+HBU=${BU%%|*}; rBU=${BU#*|}; CDBU=${rBU%%|*}; rBUb=${rBU#*|}; SDBU=${rBUb%%|*}; LOGBU=${rBUb#*|}
+START_BU=$SECONDS
+set +e
+OUTBU=$(HOME="$HBU" PATH="$SDBU:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDBU" --timeout 30 --submit-deadline 4 2>/dev/null)
+RCBU=$?
+set -e
+if [[ $RCBU -eq 9 && $((SECONDS - START_BU)) -lt 15 && "$(jq -r '.class // empty' <<<"$OUTBU")" == "unknown" \
+      && "$(jq -r '.status // empty' <<<"$OUTBU")" == "NEEDS_OVERSEER" && "$(jq -r '.detail // empty' <<<"$OUTBU")" == "merge PR 12 or hold?" \
+      && "$(jq -r '.class // empty' "$CDBU/response.json" 2>/dev/null)" == "unknown" && -f "$CDBU/done" ]]; then
+  pass "transcript: an undeclared word → exit 9 fast, class unknown with word and detail"
+else
+  fail "transcript: an undeclared word → exit 9 fast" "rc=$RCBU out=$OUTBU"
+fi
+if grep -qE "close-surface|close-workspace" "$LOGBU" 2>/dev/null; then
+  fail "an unknown ending leaves the surface live" "cmux calls: $(cat "$LOGBU")"
+else
+  pass "an unknown ending leaves the surface live"
+fi
+rm -rf "$HBU" "$CDBU" "$SDBU"
+
+BV=$(setup_await_call '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unused"}}')
+HBV=${BV%%|*}; rBV=${BV#*|}; CDBV=${rBV%%|*}; rBVb=${rBV#*|}; SDBV=${rBVb%%|*}; LOGBV=${rBVb#*|}
+rm -f "$CDBV/session_id.txt"
+{
+  echo '#!/usr/bin/env bash'
+  echo "printf '%s\\n' \"\$*\" >> '$LOGBV'"
+  echo 'if [[ "$1" == "read-screen" ]]; then'
+  echo "  printf '%s\\n' 'STATUS: WORK_IN_PROGRESS call_id=$TNONCE' 'PR 12 touches billing.' '⏺ STATUS: NEEDS_OVERSEER merge PR 12 or hold? call_id=$TNONCE'"
+  echo 'fi'
+  echo 'exit 0'
+} > "$SDBV/cmux"
+set +e
+OUTBV=$(HOME="$HBV" PATH="$SDBV:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDBV" --timeout 20 --submit-deadline 4 2>/dev/null)
+RCBV=$?
+set -e
+if [[ $RCBV -eq 9 && "$(jq -r '.class // empty' <<<"$OUTBV")" == "unknown" && "$(jq -r '.detail // empty' <<<"$OUTBV")" == "merge PR 12 or hold?" \
+      && "$(jq -r .response <<<"$OUTBV")" == *"PR 12 touches billing."* ]]; then
+  pass "scrape fallback: an undeclared word → exit 9 with class unknown and detail"
+else
+  fail "scrape fallback: an undeclared word → exit 9" "rc=$RCBV out=$OUTBV"
+fi
+rm -rf "$HBV" "$CDBV" "$SDBV"
+
 BN=$(setup_await_call '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unused"}}')
 HBN=${BN%%|*}; rBN=${BN#*|}; CDBN=${rBN%%|*}; rBNb=${rBN#*|}; SDBN=${rBNb%%|*}; LOGBN=${rBNb#*|}
 rm -f "$CDBN/session_id.txt"

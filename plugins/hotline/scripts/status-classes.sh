@@ -13,7 +13,8 @@
 # (dial.sh --status-class WORD=class, or HOTLINE_STATUS_CLASSES), and dial
 # writes them to <call_dir>/status_classes.txt, one WORD=class per line, so
 # every reader of that call sees one map. A word in neither is class unknown:
-# the waiter keeps polling past it, and notify-caller still notifies it.
+# ending a turn on a call_id line, the waiter returns it on exit 9, and
+# notify-caller notifies it.
 # WORK_IN_PROGRESS is the body-start marker, not an ending, and takes no class.
 #
 # Sourced, never run. No associative arrays: macOS ships bash 3.2. Every function

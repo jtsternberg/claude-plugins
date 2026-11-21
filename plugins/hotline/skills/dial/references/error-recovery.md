@@ -508,6 +508,13 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
 - Exit 5 is the different case: herdr's lifecycle says `blocked` and the transcript
   has no STATUS for the nonce, so there is no question to read — look at the agent.
 
+**The response wait exits 9 — the callee ended on an undeclared STATUS word**
+- Not a failure. The turn ended on a STATUS word in no class (`.status` names it,
+  `"class": "unknown"`), so the wait returned instead of running on. Read
+  `.response` and `.detail` and act on the word; the session is live. Declare the
+  word on later dials (`--status-class WORD=class`, or `HOTLINE_STATUS_CLASSES`) and
+  the wait gives it its class's exit instead.
+
 **`stage: transport` — "herdr agent … is BLOCKED and cannot take a follow-up"**
 - The cached agent is alive and confirmed (two reads) waiting on **input** — a
   permission gate, or a question. Nothing was submitted to it and nothing was

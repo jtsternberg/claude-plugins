@@ -488,9 +488,34 @@ OUT=$(bash "$SCRIPT" "$F" "$NONCE" "$SC" 2>&1); RC=$?
 [[ "$(jq -r '.detail' <<<"$OUT")" == "merge PR 12 or hold?" && "$(jq -r '.response' <<<"$OUT")" == "PR 12 is green but touches billing." ]] \
   && pass "the free text rides as detail; the sentinel is dropped from the body" \
   || fail "the free text rides as detail" "out=$OUT"
+# Undeclared, the same ending is class unknown: it still ends the wait, on its own
+# exit, so a convention the caller never declared wakes it instead of hiding.
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
+[[ $RC -eq 15 && "$(jq -r '.class' <<<"$OUT")" == "unknown" && "$(jq -r '.status' <<<"$OUT")" == "NEEDS_OVERSEER" \
+   && "$(jq -r '.detail' <<<"$OUT")" == "merge PR 12 or hold?" && "$(jq -r '.response' <<<"$OUT")" == "PR 12 is green but touches billing." ]] \
+  && pass "an undeclared word ending the turn → exit 15, class unknown, word, detail and body" \
+  || fail "an undeclared word ending the turn → exit 15" "rc=$RC out=$OUT"
+! jq -e 'has("blocked")' <<<"$OUT" >/dev/null 2>&1 \
+  && pass "an unknown ending is not marked blocked" || fail "an unknown ending is not marked blocked" "out=$OUT"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$NO_REC
+$WIP")
 bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
-[[ $RC -eq 10 ]] && pass "the same word undeclared is unknown: keep polling (exit 10)" \
-  || fail "the same word undeclared is unknown: keep polling" "rc=$RC"
+[[ $RC -eq 10 ]] && pass "an unknown word the callee worked past → exit 10" || fail "an unknown word worked past → exit 10" "rc=$RC"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$(jq -nc --arg t "STATUS: WORK_IN_PROGRESS call_id=$NONCE
+q?
+STATUS: NEEDS_OVERSEER ok? call_id=$NONCE" '{type:"assistant",isSidechain:false,sessionId:"sess-1",message:{id:"m1",stop_reason:"tool_use",content:[{type:"text",text:$t},{type:"tool_use",id:"t",name:"Read",input:{}}]}}')")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "an unknown word mid-turn (tool_use) → exit 10" || fail "an unknown word mid-turn → exit 10" "rc=$RC"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$BODY
+$NO_REC")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 0 ]] && pass "an earlier DONE wins over a later unknown word" || fail "an earlier DONE wins over a later unknown word" "rc=$RC"
 rm -f "$F"
 F=$(mkf "$USER_NONCE
 $(arec "q?

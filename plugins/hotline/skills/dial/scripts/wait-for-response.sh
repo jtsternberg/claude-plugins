@@ -104,6 +104,14 @@
 #       follow-up dial. Not exit 5: that one is herdr's lifecycle reporting a gate
 #       with NO answer in the transcript, so it carries no response; this one has
 #       the callee's own words. Not 0, because callers read 0 as "work done".
+#   9 — UNKNOWN STATUS (every transport): the callee ended its turn on a STATUS
+#       word in no class — neither a built-in nor one the dial declared with
+#       --status-class — on a line ending in call_id=<nonce>. Delivered and left
+#       LIVE exactly as exit 7, with `"class": "unknown"`, the raw word as
+#       `.status`, and any `.detail`. Read the word: the callee follows a
+#       convention this dial did not declare. Declare it (--status-class WORD=class)
+#       on the next dial to get its real class. A bare `STATUS: WORD` with no
+#       call_id is never read this way, since prose can say the same.
 #   8 — SUPERSEDED: the caller dialed a follow-up into this same session before
 #       this call resolved, and dial.sh recorded it in call_dir/superseded_by.json
 #       (`call_dir`, `call_id` of the follow-up), AND the callee has started on it:
@@ -113,7 +121,7 @@
 #       on stderr: wait on IT, because the callee's answer now arrives under the
 #       follow-up's nonce. No response.json, no error.txt; the surface/session
 #       is left LIVE — the follow-up is running in it. An answer for THIS nonce
-#       already in the transcript still wins (exit 0/4/7).
+#       already in the transcript still wins (exit 0/4/7/9).
 #
 # Why 8 exists: the follow-up's ringing prompt is, in the transcript, a genuine
 # prompt after ours — the exact shape of a human reassigning the callee — so the
@@ -756,7 +764,7 @@ if $HERDR_MODE; then
       T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$LIVE_TRANSCRIPT" "$CALL_ID" "$STATUS_CLASSES_FILE" 2>/dev/null)
       T_RC=$?
       set -e
-      case $T_RC in 0|13|14) ;; *) superseded_exit "$LIVE_TRANSCRIPT" ;; esac
+      case $T_RC in 0|13|14|15) ;; *) superseded_exit "$LIVE_TRANSCRIPT" ;; esac
       case $T_RC in
         0)   # turn complete
           printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
@@ -775,6 +783,12 @@ if $HERDR_MODE; then
           touch "$CALL_DIR/done"
           emit_response_json
           exit 7
+          ;;
+        15)  # the turn ended on a STATUS word in no class — agent live, as on 14
+          printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
+          touch "$CALL_DIR/done"
+          emit_response_json
+          exit 9
           ;;
         10) H_SUBMITTED=true ;;   # submitted, model working — be patient
         12)                       # preempted: a new human prompt landed after ours
@@ -1291,7 +1305,7 @@ if $CMUX_MODE; then
       T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$TRANSCRIPT_PATH" "$CALL_ID" "$STATUS_CLASSES_FILE" 2>/dev/null)
       T_RC=$?
       set -e
-      case $T_RC in 0|13|14) ;; *) superseded_exit "$TRANSCRIPT_PATH" ;; esac
+      case $T_RC in 0|13|14|15) ;; *) superseded_exit "$TRANSCRIPT_PATH" ;; esac
       case $T_RC in
         0)  # turn complete — T_OUT is {"session_id":..,"response":..}
           printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
@@ -1317,6 +1331,13 @@ if $CMUX_MODE; then
           cleanup_script_only
           emit_response_json
           exit 7
+          ;;
+        15)  # an undeclared STATUS word ended the turn: same delivery as 14
+          printf '%s' "$T_OUT" > "$CALL_DIR/response.json"
+          touch "$CALL_DIR/done"
+          cleanup_script_only
+          emit_response_json
+          exit 9
           ;;
         10)                       # submitted, model working — be patient
           T_SUBMITTED=true
@@ -1498,7 +1519,8 @@ if $CMUX_MODE; then
     # which is the only time this loop runs.
     LATEST_WORD=$(awk '{print $2}' <<<"$LATEST_STATUS")
     LATEST_CLASS=$(hotline_status_class "$LATEST_WORD" "$STATUS_CLASSES_FILE")
-    if [[ "$LATEST_CLASS" == blocked ]]; then
+    # An unknown ending yields the same way.
+    if [[ "$LATEST_CLASS" == blocked || "$LATEST_CLASS" == unknown ]]; then
       LATEST_TERMINAL=$(echo "$CLEAN" | awk -v re="STATUS: (${SC_TERM_WORDS})${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}" '
         match($0, re) {
           s=substr($0, RSTART)
@@ -1513,9 +1535,9 @@ if $CMUX_MODE; then
       fi
     fi
 
-    # An unknown word is not an ending: the scrape keeps polling past it, as the
-    # transcript path does.
-    if [[ "$LATEST_CLASS" != unknown ]]; then
+    # An unknown word ends the wait (exit 9) only on a line ending in our call_id,
+    # as the transcript path's exit 15 does; with no nonce a bare line may be prose.
+    if [[ "$LATEST_CLASS" != unknown || -n "$STATUS_TEXT_AWK" ]]; then
       # Strip terminal chrome before extracting the response. Aggressive
       # prefix match strips lines starting with claude's box-drawing
       # characters (the REPL renders its idle prompt as a multi-line box
@@ -1536,7 +1558,9 @@ if $CMUX_MODE; then
       # BLOCKED ends a body only when it won detection; when a terminal won, a
       # BLOCKED line is just a sentinel to drop.
       BLK_RE="STATUS: (${SC_BLK_WORDS})${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}"
-      if [[ "$LATEST_CLASS" == blocked ]]; then
+      if [[ "$LATEST_CLASS" == unknown ]]; then
+        TERM_RE="STATUS: (${SC_TERM_WORDS}|${LATEST_WORD})${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}"
+      elif [[ "$LATEST_CLASS" == blocked ]]; then
         TERM_RE="STATUS: (${SC_TERM_WORDS}|${SC_BLK_WORDS})${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}"
       else
         TERM_RE="STATUS: (${SC_TERM_WORDS})${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}"
@@ -1579,6 +1603,14 @@ if $CMUX_MODE; then
         cleanup_script_only
         emit_response_json
         exit 7
+      fi
+      if [[ "$LATEST_CLASS" == unknown ]]; then
+        jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" --argjson x "$SC_EXTRA" \
+          '{session_id: $sid, response: $resp, class: "unknown"} + $x' > "$CALL_DIR/response.json"
+        touch "$CALL_DIR/done"
+        cleanup_script_only
+        emit_response_json
+        exit 9
       fi
 
       jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" --argjson x "$SC_EXTRA" \
@@ -1634,5 +1666,6 @@ fi
 # resumable either way, so "left live" is a follow-up dial with --resume.
 emit_response_json
 jq -e '.blocked == true' "$CALL_DIR/response.json" >/dev/null 2>&1 && exit 7
+jq -e '.class == "unknown"' "$CALL_DIR/response.json" >/dev/null 2>&1 && exit 9
 jq -e '.awaiting_review == true' "$CALL_DIR/response.json" >/dev/null 2>&1 && exit 4
 exit 0
