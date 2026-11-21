@@ -15,11 +15,16 @@
 # Usage:
 #   notify-caller.sh --caller-session <id> --call-id <nonce> --status <STATUS> [--detail <ask>]
 #
-# --detail is the one-line ask or outcome behind the status (a NEEDS_OVERSEER's
-# question, a BLOCKED's blocker); it goes into the notice and into the dedupe key.
+# --detail is the one-line ask or outcome behind the status (a blocked ending's
+# question); it goes into the notice and into the dedupe key.
+#
+# <STATUS> is any UPPER_SNAKE word but WORK_IN_PROGRESS. Its class comes from the
+# call's status_classes.txt (scripts/status-classes.sh): the built-ins, plus what
+# the caller declared at dial time. A word in neither still notifies, as class
+# unknown, so a convention the caller never declared is not dropped silently.
 #
 # Prints ONE JSON line and exits 0 for every outcome but a usage error (exit 2):
-#   {"send":true,"to":"<session name>","call_dir":"<dir or empty>","message":"…"}
+#   {"send":true,"to":"<name>","call_dir":"<dir or empty>","status":"<WORD>","class":"<class>","message":"…"}
 #   {"send":false,"reason":"<why>"}
 # Reasons: waiter-live, claude-unavailable, caller-not-live,
 # caller-name-ambiguous, already-notified.
@@ -68,10 +73,10 @@ done
 usage_error() { echo "notify-caller: $1" >&2; exit 2; }
 [[ -n "$CALLER_SESSION" ]] || usage_error "--caller-session is required"
 [[ "$CALL_ID" =~ ^[A-Za-z0-9_-]+$ ]] || usage_error "--call-id must be the call's nonce"
-case "$STATUS" in
-  DONE|WORK_COMPLETE|OUT_OF_SCOPE|AWAITING_REVIEW|BLOCKED|NEEDS_OVERSEER) ;;
-  *) usage_error "--status must be a resolving STATUS (DONE, WORK_COMPLETE, OUT_OF_SCOPE, AWAITING_REVIEW, BLOCKED, NEEDS_OVERSEER), got '${STATUS}'" ;;
-esac
+[[ "$STATUS" =~ ^[A-Z][A-Z0-9_]*$ && "$STATUS" != WORK_IN_PROGRESS ]] \
+  || usage_error "--status must be the UPPER_SNAKE STATUS word you will end on (not WORK_IN_PROGRESS), got '${STATUS}'"
+# shellcheck source=../../../scripts/status-classes.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/status-classes.sh"
 REPEAT_SECONDS="${HOTLINE_NOTIFY_REPEAT_SECONDS:-1800}"
 [[ "$REPEAT_SECONDS" =~ ^[0-9]+$ ]] || REPEAT_SECONDS=1800
 
@@ -128,11 +133,15 @@ if ! mkdir "$MARK" 2>/dev/null; then
 fi
 echo "$NOW" > "$MARK/at"
 
+CLASS=$(hotline_status_class "$STATUS" "${CALL_DIR:+$CALL_DIR/$HOTLINE_STATUS_FILE_NAME}")
+LABEL="STATUS: $STATUS"
+hotline_status_is_builtin "$STATUS" || LABEL+=" (class: $CLASS)"
+
 if [[ -n "$CALL_DIR" ]]; then
   WHERE="Call dir: $CALL_DIR — wait-for-response.sh on it returns the full answer."
 else
   WHERE="Its call dir is the hotline-call-* dir whose call_id.txt holds $CALL_ID."
 fi
-jq -nc --arg to "$TO" --arg d "$CALL_DIR" \
-  --arg m "hotline: call_id=$CALL_ID resolved — STATUS: $STATUS${DETAIL:+ — $DETAIL}. $WHERE" \
-  '{send:true, to:$to, call_dir:$d, message:$m}'
+jq -nc --arg to "$TO" --arg d "$CALL_DIR" --arg st "$STATUS" --arg cl "$CLASS" \
+  --arg m "hotline: call_id=$CALL_ID resolved — $LABEL${DETAIL:+ — $DETAIL}. $WHERE" \
+  '{send:true, to:$to, call_dir:$d, status:$st, class:$cl, message:$m}'

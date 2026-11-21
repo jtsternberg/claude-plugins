@@ -990,4 +990,59 @@ check "a --no-fork re-dial of the cached session id is a follow-up" $? \
 check "…pasted into the surface that session lives in, launching nothing" $? \
   "call_dir=$nf_cd surface=$(last_paste surface_id) out=$NF_OUT"
 
+# ===========================================================================
+# 17. --status-class / HOTLINE_STATUS_CLASSES declare extra STATUS words, and the
+#     map lands in the call dir where every STATUS parser reads it.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+make_cmux "$t/bin"; make_side_opener "$t/side.sh"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-1111" CLAUDE_CODE_SESSION_ID="" CODEX_THREAD_ID="caller-1111" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_STATUS_CLASSES="SHIPPED=done,PARKED=awaiting_review" \
+  bash "$DIAL" --target "$t/target" --mode work_order --label "classes" \
+    --status-class NEEDS_OVERSEER=blocked --status-class PARKED=blocked \
+    --prompt "run it" --boot-timeout 5 2>"$t/err.txt")
+sc_cd=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$sc_cd" ]] && note_leak "$sc_cd"
+[[ "$(jq -r .status <<<"$out")" == "connected" \
+   && "$(cat "$sc_cd/status_classes.txt" 2>/dev/null)" == $'SHIPPED=done\nPARKED=blocked\nNEEDS_OVERSEER=blocked' ]]
+check "env and --status-class declarations land in the call dir, flags winning" $? \
+  "out=$out file=$(cat "$sc_cd/status_classes.txt" 2>&1) stderr=$(cat "$t/err.txt")"
+# A follow-up into the same surface gets its own call dir, and its own map.
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-1111" CLAUDE_CODE_SESSION_ID="" CODEX_THREAD_ID="caller-1111" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --label "classes" \
+    --status-class NEEDS_OVERSEER=blocked --prompt "next" --boot-timeout 5 2>"$t/err.txt")
+fu_cd=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$fu_cd" ]] && note_leak "$fu_cd"
+[[ "$(jq -r .first_contact <<<"$out")" == "false" && "$fu_cd" != "$sc_cd" \
+   && "$(cat "$fu_cd/status_classes.txt" 2>/dev/null)" == "NEEDS_OVERSEER=blocked" ]]
+check "a follow-up's declarations land in its own call dir" $? \
+  "out=$out file=$(cat "$fu_cd/status_classes.txt" 2>&1)"
+# No declarations → no file; every reader falls back to the built-ins.
+[[ ! -e "$(jq -r '.call_dir' <<<"$(PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+  HOTLINE_CALLER_SESSION_ID="caller-1111" CLAUDE_CODE_SESSION_ID="" CODEX_THREAD_ID="caller-1111" \
+  HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" \
+  bash "$DIAL" --target "$t/target" --mode work_order --label "classes" --prompt "again" --boot-timeout 5 2>/dev/null)")/status_classes.txt" ]]
+check "a dial with no declarations writes no status_classes.txt" $?
+# A bad declaration is an args error before anything launches. Stubbed like the
+# cases above, so a regression that let one through still reaches only the stubs.
+dial_sc() {  # [env assignments...] -- [dial args...]
+  local envs=(); while [[ $# -gt 0 && "$1" != "--" ]]; do envs+=("$1"); shift; done; shift
+  env PATH="$t/bin:$PATH" HOME="$t/home" CMUX_FAKE_STATE="$t" \
+    HOTLINE_CALLER_SESSION_ID="caller-1111" CLAUDE_CODE_SESSION_ID="" CODEX_THREAD_ID="caller-1111" \
+    HOTLINE_OPEN_SIDE_SURFACE="$t/side.sh" HOTLINE_PENDING_DIR="$t/pending" ${envs[@]+"${envs[@]}"} \
+    bash "$DIAL" --target "$t/target" --mode work_order --label x --prompt y --boot-timeout 5 "$@" 2>/dev/null
+}
+for bad in needs=blocked FOO=stuck WORK_IN_PROGRESS=done; do
+  o=$(dial_sc -- --status-class "$bad"); rc=$?
+  [[ $rc -eq 1 && "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" == "args" ]]
+  check "--status-class $bad is refused at the args stage" $? "rc=$rc out=$o"
+done
+o=$(dial_sc HOTLINE_STATUS_CLASSES=FOO --); rc=$?
+[[ $rc -eq 1 && "$(jq -r '.stage // empty' <<<"$o" 2>/dev/null)" == "args" ]]
+check "a bad HOTLINE_STATUS_CLASSES is refused at the args stage" $? "rc=$rc out=$o"
+
 dial_wrapper_finish

@@ -155,12 +155,33 @@ t=$(new_env); agents "$t" "$LIVE"
 notify "$t" --call-id "$NONCE" --status WORK_IN_PROGRESS
 [[ $NRC -eq 2 ]]
 check "WORK_IN_PROGRESS is not a resolution (usage error)" $? "rc=$NRC out=$NOUT"
+# Status words are free-form UPPER_SNAKE: an undeclared one still notifies, as
+# class unknown with its raw word, so a new convention is never dropped silently.
 notify "$t" --call-id "$NONCE" --status NEEDS_OVERSEER
-[[ $NRC -eq 0 && "$(field .send)" == "true" ]]
-check "NEEDS_OVERSEER is accepted without a detail" $? "rc=$NRC out=$NOUT err=$(cat "$t/err.txt")"
+[[ $NRC -eq 0 && "$(field .send)" == "true" && "$(field .class)" == "unknown" && "$(field .status)" == "NEEDS_OVERSEER" ]]
+check "an undeclared status notifies as class unknown, naming the word" $? "rc=$NRC out=$NOUT err=$(cat "$t/err.txt")"
+[[ "$(field .message)" == *"NEEDS_OVERSEER"*"unknown"* ]]
+check "the unknown notice says so in its message" $? "out=$NOUT"
+notify "$t" --call-id "$NONCE" --status DONE
+[[ "$(field .class)" == "done" ]]
+check "a built-in carries its class" $? "out=$NOUT"
+notify "$t" --call-id "$NONCE" --status needs-overseer
+[[ $NRC -eq 2 ]]
+check "a word that is not UPPER_SNAKE is a usage error" $? "rc=$NRC out=$NOUT"
 notify "$t" --status DONE
 [[ $NRC -eq 2 ]]
 check "a missing --call-id is a usage error" $? "rc=$NRC"
+
+# 8b. The call's declared classes (status_classes.txt in its call dir) decide the class.
+t=$(new_env); agents "$t" "$LIVE"
+cd8="$t/call8"; mkdir -p "$cd8"; printf 'NEEDS_OVERSEER=blocked\n' > "$cd8/status_classes.txt"
+mkdir -p "$t/home/.agents-hotline/sessions"
+jq -n --arg d "$cd8" --arg n "$NONCE" \
+  '{connections:{"/some/target":{session_id:"s",last_call_id:$n,last_call_dir:$d}}}' \
+  > "$t/home/.agents-hotline/sessions/$CALLER.json"
+notify "$t" --call-id "$NONCE" --status NEEDS_OVERSEER --detail "merge PR 12 or hold?"
+[[ "$(field .send)" == "true" && "$(field .class)" == "blocked" && "$(field .message)" != *"unknown"* ]]
+check "a status the caller declared carries the declared class" $? "out=$NOUT"
 
 # 9. The waiter records its pid in the call dir, which is what case 7 reads.
 t=$(new_env)

@@ -1031,6 +1031,52 @@ else
 fi
 rm -rf "$HBS" "$CDBS" "$SDBS"
 
+# A word the caller declared blocked (status_classes.txt in the call dir) ends the
+# wait like BLOCKED, in transcript mode and off the screen, free text and all.
+BD=$(setup_await_call \
+'{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"[CALL_ID: '"$TNONCE"'] ship it"}}
+{"type":"assistant","isSidechain":false,"sessionId":"sess-tcm","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"STATUS: WORK_IN_PROGRESS call_id='"$TNONCE"'\nPR 12 touches billing.\nSTATUS: NEEDS_OVERSEER merge PR 12 or hold? call_id='"$TNONCE"'"}]}}')
+HBD=${BD%%|*}; rBD=${BD#*|}; CDBD=${rBD%%|*}; rBDb=${rBD#*|}; SDBD=${rBDb%%|*}
+printf 'NEEDS_OVERSEER=blocked\n' > "$CDBD/status_classes.txt"
+set +e
+OUTBD=$(HOME="$HBD" PATH="$SDBD:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDBD" --timeout 20 --submit-deadline 4 2>/dev/null)
+RCBD=$?
+set -e
+if [[ $RCBD -eq 7 && "$(jq -r '.status // empty' <<<"$OUTBD")" == "NEEDS_OVERSEER" \
+      && "$(jq -r '.detail // empty' <<<"$OUTBD")" == "merge PR 12 or hold?" \
+      && "$(jq -r .response <<<"$OUTBD")" == "PR 12 touches billing." ]]; then
+  pass "transcript: a declared blocked word → exit 7 with status, detail and the body"
+else
+  fail "transcript: a declared blocked word → exit 7 with status, detail and the body" "rc=$RCBD out=$OUTBD"
+fi
+rm -rf "$HBD" "$CDBD" "$SDBD"
+
+BN=$(setup_await_call '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unused"}}')
+HBN=${BN%%|*}; rBN=${BN#*|}; CDBN=${rBN%%|*}; rBNb=${rBN#*|}; SDBN=${rBNb%%|*}; LOGBN=${rBNb#*|}
+rm -f "$CDBN/session_id.txt"
+printf 'NEEDS_OVERSEER=blocked\n' > "$CDBN/status_classes.txt"
+{
+  echo '#!/usr/bin/env bash'
+  echo "printf '%s\\n' \"\$*\" >> '$LOGBN'"
+  echo 'if [[ "$1" == "read-screen" ]]; then'
+  echo "  printf '%s\\n' 'STATUS: WORK_IN_PROGRESS call_id=$TNONCE' 'PR 12 touches billing.' '⏺ STATUS: NEEDS_OVERSEER merge PR 12 or hold? call_id=$TNONCE'"
+  echo 'fi'
+  echo 'exit 0'
+} > "$SDBN/cmux"
+set +e
+OUTBN=$(HOME="$HBN" PATH="$SDBN:$PATH" bash "$DIAL_SCRIPTS/wait-for-response.sh" "$CDBN" --timeout 20 --submit-deadline 4 2>/dev/null)
+RCBN=$?
+set -e
+if [[ $RCBN -eq 7 && "$(printf '%s' "$OUTBN" | jq -r '.blocked // false' 2>/dev/null)" == "true" ]] \
+   && [[ "$(printf '%s' "$OUTBN" | jq -r '.detail // empty' 2>/dev/null)" == "merge PR 12 or hold?" ]] \
+   && [[ "$(printf '%s' "$OUTBN" | jq -r '.status // empty' 2>/dev/null)" == "NEEDS_OVERSEER" ]] \
+   && [[ "$(printf '%s' "$OUTBN" | jq -r .response 2>/dev/null)" == *"PR 12 touches billing."* ]]; then
+  pass "scrape fallback: a declared blocked word → exit 7 with blocked:true, status and detail"
+else
+  fail "scrape fallback: a declared blocked word → exit 7 with blocked:true, status and detail" "rc=$RCBN out=$OUTBN"
+fi
+rm -rf "$HBN" "$CDBN" "$SDBN"
+
 # Scrape fallback, DONE then BLOCKED for the same nonce: the transcript path
 # resolves on the earlier terminal (exit 0), so the scrape must too, not exit 7.
 BT=$(setup_await_call '{"type":"user","isSidechain":false,"sessionId":"sess-tcm","message":{"content":"unused"}}')

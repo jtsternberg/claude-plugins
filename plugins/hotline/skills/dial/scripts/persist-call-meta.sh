@@ -3,7 +3,8 @@
 # Persist Call Meta: Write call metadata into the call_dir at launch time.
 #
 # Parses the ringing prompt's [MODE:], [CALLER:], and [SESSION:] tags and
-# writes them (plus the receiver cwd) as files in the call_dir. This lets
+# writes them (plus the receiver cwd) as files in the call_dir, along with the
+# caller's declared STATUS classes (status_classes.txt, from HOTLINE_STATUS_CLASSES). This lets
 # wait-for-session.sh / register-call.sh record the call in the sessions
 # registry deterministically — previously registration relied on the dialing
 # agent running session-cache.sh set after wait-for-response.sh, a step
@@ -34,6 +35,15 @@ fi
 
 if [[ -n "$RECV_CWD" && ! -f "$CALL_DIR/cwd.txt" ]]; then
   echo "$RECV_CWD" > "$CALL_DIR/cwd.txt"
+fi
+
+# The caller's declared STATUS words (dial.sh exports them normalized). Written
+# before the follow-up exit below: a follow-up's call dir needs its map too.
+# shellcheck source=../../../scripts/status-classes.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/status-classes.sh"
+if [[ -n "${HOTLINE_STATUS_CLASSES:-}" && ! -e "$CALL_DIR/$HOTLINE_STATUS_FILE_NAME" ]] \
+   && SC=$(hotline_status_classes_parse "$HOTLINE_STATUS_CLASSES" 2>/dev/null) && [[ -n "$SC" ]]; then
+  printf '%s\n' "$SC" > "$CALL_DIR/$HOTLINE_STATUS_FILE_NAME"
 fi
 
 # A [FOLLOW_UP] invocation carries the same tags, but it continues a call that is

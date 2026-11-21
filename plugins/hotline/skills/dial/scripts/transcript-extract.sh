@@ -41,7 +41,8 @@
 #   13 — AWAITING_REVIEW: this step's reply is complete but the work order is not
 #        finished. Same JSON as exit 0 plus `"awaiting_review": true`.
 #        → caller stops waiting and keeps the session live for a follow-up.
-#   14 — BLOCKED: the callee ended its turn on `STATUS: BLOCKED` — it needs an
+#   14 — BLOCKED: the callee ended its turn on a blocked-class STATUS (`BLOCKED`,
+#        or a word the caller declared blocked) — it needs an
 #        answer before it can go on. Same JSON as exit 0 plus `"blocked": true`.
 #        → caller stops waiting and keeps the session live for the answer.
 #   1  — usage / unreadable transcript error (message on stderr)
@@ -54,6 +55,16 @@
 # resolves ONLY as the last STATUS for our nonce: a callee can write BLOCKED and
 # then work past it, and a later WORK_IN_PROGRESS or terminal supersedes it. A
 # terminal anywhere in the text still wins, exactly as before.
+#
+# STATUS WORDS AND CLASSES
+# What a STATUS word means is its class (scripts/status-classes.sh): the built-ins
+# plus whatever the caller declared at dial time, passed here as the call's
+# status_classes.txt. done/out_of_scope resolve exit 0, awaiting_review 13, blocked
+# 14 under the BLOCKED rule above. A word in no class (unknown) is not an ending:
+# it stays in the body and the wait goes on. Any STATUS line may carry free text
+# between the word and call_id (`STATUS: BLOCKED merge PR 12? call_id=<nonce>`);
+# the resolving line's text is the payload's "detail", and a non-built-in word adds
+# "status", so a bare built-in payload stays byte-identical.
 #
 # AWAITING_REVIEW (claude-plugins-n4vy)
 # "Is the work finished" and "is the reply ready" are two different facts, and the
@@ -148,10 +159,18 @@ TRANSCRIPT="${1:-}"
 NONCE="${2:-}"
 
 [[ -z "$TRANSCRIPT" || -z "$NONCE" ]] && {
-  echo "usage: transcript-extract.sh <transcript.jsonl> <call_id-nonce>" >&2
+  echo "usage: transcript-extract.sh <transcript.jsonl> <call_id-nonce> [<status_classes.txt>]" >&2
   exit 1
 }
 [[ -r "$TRANSCRIPT" ]] || { echo "transcript not readable: $TRANSCRIPT" >&2; exit 1; }
+
+# shellcheck source=../../../scripts/status-classes.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/status-classes.sh"
+SC_FILE="${3:-}"
+# An empty class gets a word no STATUS line can carry (it must start A-Z), so an
+# empty alternation never turns into a pattern that matches everything.
+TERM_WORDS=$(hotline_status_words "$SC_FILE" done out_of_scope awaiting_review); TERM_WORDS=${TERM_WORDS:-_NONE_}
+BLK_WORDS=$(hotline_status_words "$SC_FILE" blocked); BLK_WORDS=${BLK_WORDS:-_NONE_}
 
 # One jq slurp pass: locate the record that proves our message reached the
 # callee (see SUBMIT EVIDENCE in the header), then gather every non-sidechain
@@ -160,9 +179,11 @@ NONCE="${2:-}"
 #   .submitted  — does ANY submit evidence carry the nonce?
 #   .session_id — the anchor record's session (fallback: last seen)
 #   .text       — concatenated assistant prose from the anchor record onward
-PARSED=$(jq -s -c --arg nonce "$NONCE" '
+PARSED=$(jq -s -c --arg nonce "$NONCE" --arg blk "$BLK_WORDS" '
   ("CALL_ID: " + $nonce) as $tag
   | ("call_id=" + $nonce) as $stag
+  # A STATUS line naming our nonce, free text allowed before the call_id.
+  | ("(^|\n)STATUS: [A-Z][A-Z0-9_]*( [^\n]*)? " + $stag) as $sline
   # (1) a genuine user record carrying the nonce — an idle-REPL send, or a
   #     queued follow-up flushed after the busy turn ended (delivery path (b)).
   | (map(.type == "user"
@@ -181,7 +202,7 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
   | (map(.type == "assistant"
          and ((.isSidechain // false) != true)
          and (([.message.content[]? | select(.type == "text") | .text] | join("\n"))
-              | test("(^|\n)STATUS: [A-Z_]+ " + $stag)))
+              | test($sline)))
      | index(true)) as $ai
   # (4) the enqueue record — the REPL accepted the keystrokes, delivery pending.
   | (map(.type == "queue-operation"
@@ -223,7 +244,7 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
      else ([ $rest[($pe.i + 1):][]
              | select(.type == "assistant" and ((.isSidechain // false) != true))
              | ([.message.content[]? | select(.type == "text") | .text] | join("\n"))
-             | select(test("(^|\n)STATUS: [A-Z_]+ " + $stag))
+             | select(test($sline))
            ] | length) > 0
      end) as $still_ours
   # Did the turn END on a BLOCKED for our nonce? Claude writes one record per
@@ -242,7 +263,7 @@ PARSED=$(jq -s -c --arg nonce "$NONCE" '
                       else .message.id == $la.message.id end)
              | [.message.content[]? | select(.type == "text") | .text] | join("\n") ]
            | join("\n")
-           | test("(^|\n)STATUS: BLOCKED " + $stag + "[[:space:]]*($|\n)"))
+           | test("(^|\n)STATUS: (" + $blk + ")( [^\n]*)? " + $stag + "[[:space:]]*($|\n)"))
      end) as $blocked_end
   | if $ui == null then
       {submitted: false, session_id: "", text: "", preempt: "", blocked_end: false}
@@ -290,15 +311,18 @@ BLOCKED_END=$(printf '%s' "$PARSED" | jq -r '.blocked_end')
 # Checked BEFORE preemption on purpose: a receiver that answered our call and was
 # THEN handed something else has still answered, and that response is owed to the
 # caller. Preemption only decides what to do when no resolving STATUS exists.
-TERM_RE="^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=${NONCE}[[:space:]]*$"
+TERM_RE="^STATUS: (${TERM_WORDS})( .*)? call_id=${NONCE}[[:space:]]*$"
+RESOLVED_LINE=""
 if printf '%s\n' "$TEXT" | grep -qE "$TERM_RE"; then
   # Which resolving STATUS stopped us? The FIRST one in the text wins, matching the
   # awk below (which stops at the first `term` match), so the body and the exit code
   # always describe the same sentinel.
-  RESOLVED=$(printf '%s\n' "$TEXT" | grep -oE "$TERM_RE" | head -1 | awk '{print $2}')
+  RESOLVED_LINE=$(printf '%s\n' "$TEXT" | grep -oE "$TERM_RE" | head -1)
 elif [[ "$BLOCKED_END" == "true" ]] \
-  && [[ "$(printf '%s\n' "$TEXT" | grep -oE "^STATUS: [A-Z_]+ call_id=${NONCE}[[:space:]]*$" | tail -1 | awk '{print $2}')" == "BLOCKED" ]]; then
-  RESOLVED=BLOCKED
+  && LAST_STATUS=$(printf '%s\n' "$TEXT" \
+       | grep -oE "^STATUS: [A-Z][A-Z0-9_]*( .*)? call_id=${NONCE}[[:space:]]*$" | tail -1) \
+  && [[ "$(awk '{print $2}' <<<"$LAST_STATUS")" =~ ^(${BLK_WORDS})$ ]]; then
+  RESOLVED_LINE=$LAST_STATUS
 else
   if [[ -n "$PREEMPT" ]]; then
     printf '%s\n' "${PREEMPT:0:200}"
@@ -306,6 +330,10 @@ else
   fi
   exit 10     # submitted, still working
 fi
+RESOLVED=$(awk '{print $2}' <<<"$RESOLVED_LINE")
+RESOLVED_CLASS=$(hotline_status_class "$RESOLVED" "$SC_FILE")
+# The free text between the word and the call_id, if any.
+DETAIL=$(hotline_status_detail "$RESOLVED_LINE")
 
 # Extract the response body: reset the buffer at each WORK_IN_PROGRESS (so only
 # the final attempt's prose counts — matches the screen-scrape semantics), stop
@@ -313,18 +341,18 @@ fi
 # blank lines.
 # A BLOCKED line is a sentinel too: dropped from the body, and on the BLOCKED path
 # (where it is the last STATUS) it is where the body ends.
-BODY=$(printf '%s\n' "$TEXT" | awk -v nonce="$NONCE" -v resolved="$RESOLVED" '
+BODY=$(printf '%s\n' "$TEXT" | awk -v nonce="$NONCE" -v rclass="$RESOLVED_CLASS" -v tw="$TERM_WORDS" -v bw="$BLK_WORDS" '
   BEGIN {
-    wip  = "^STATUS: WORK_IN_PROGRESS call_id=" nonce "[[:space:]]*$"
-    term = "^STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW) call_id=" nonce "[[:space:]]*$"
-    blk  = "^STATUS: BLOCKED call_id=" nonce "[[:space:]]*$"
+    wip  = "^STATUS: WORK_IN_PROGRESS( .*)? call_id=" nonce "[[:space:]]*$"
+    term = "^STATUS: (" tw ")( .*)? call_id=" nonce "[[:space:]]*$"
+    blk  = "^STATUS: (" bw ")( .*)? call_id=" nonce "[[:space:]]*$"
   }
   $0 ~ wip  { n=0; delete L; next }
   $0 ~ term { stop=1; exit }
-  $0 ~ blk  { if (resolved == "BLOCKED") kept = n; next }
+  $0 ~ blk  { if (rclass == "blocked") kept = n; next }
   { L[++n] = $0 }
   END {
-    if (resolved == "BLOCKED") n = kept
+    if (rclass == "blocked") n = kept
     # trim leading blanks
     s=1; while (s<=n && L[s] ~ /^[[:space:]]*$/) s++
     e=n; while (e>=s && L[e] ~ /^[[:space:]]*$/) e--
@@ -332,22 +360,18 @@ BODY=$(printf '%s\n' "$TEXT" | awk -v nonce="$NONCE" -v resolved="$RESOLVED" '
   }
 ')
 
-if [[ "$RESOLVED" == "AWAITING_REVIEW" ]]; then
-  # Additive marker — present ONLY on this path, so every existing status keeps
-  # emitting byte-identical JSON. It exists because the documented caller pattern
-  # reads response.json from the call_dir, where `$?` is long gone; the record
-  # itself has to say the work order is unfinished.
-  jq -n -c --arg sid "$SESSION_ID" --arg resp "$BODY" \
-    '{session_id: $sid, response: $resp, awaiting_review: true}'
-  exit 13
-fi
-
-if [[ "$RESOLVED" == "BLOCKED" ]]; then
-  # Additive marker, for the same reason as awaiting_review above.
-  jq -n -c --arg sid "$SESSION_ID" --arg resp "$BODY" \
-    '{session_id: $sid, response: $resp, blocked: true}'
-  exit 14
-fi
-
-jq -n -c --arg sid "$SESSION_ID" --arg resp "$BODY" '{session_id: $sid, response: $resp}'
-exit 0
+# Additive markers only: a bare built-in payload stays byte-identical. The class
+# marker exists because the documented caller pattern reads response.json from the
+# call_dir, where `$?` is long gone; the record itself has to say the work order is
+# unfinished (awaiting_review) or waiting on an answer (blocked).
+emit() {  # $1 = marker object, $2 = exit code
+  jq -n -c --arg sid "$SESSION_ID" --arg resp "$BODY" --argjson mark "$1" \
+    --argjson extra "$(hotline_status_payload_extra "$RESOLVED" "$DETAIL")" \
+    '{session_id: $sid, response: $resp} + $mark + $extra'
+  exit "$2"
+}
+case "$RESOLVED_CLASS" in
+  awaiting_review) emit '{"awaiting_review":true}' 13 ;;
+  blocked)         emit '{"blocked":true}' 14 ;;
+  *)               emit '{}' 0 ;;
+esac

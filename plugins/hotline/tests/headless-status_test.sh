@@ -70,6 +70,34 @@ run_headless $'question?\nSTATUS: BLOCKED call_id=0123abcd0123abcd'
 [[ $RC -eq 7 ]] && pass "headless: a STATUS carrying a call_id suffix still classifies" \
   || fail "headless: a STATUS carrying a call_id suffix still classifies" "rc=$RC out=$OUT"
 
+# A word the caller declared (dial.sh exports HOTLINE_STATUS_CLASSES; the launcher
+# writes the call's status_classes.txt) classifies by its class.
+export HOTLINE_STATUS_CLASSES="NEEDS_OVERSEER=blocked,SHIPPED=done"
+run_headless $'billing PR\nSTATUS: NEEDS_OVERSEER'
+[[ $RC -eq 7 && "$(jq -r '.blocked' <<<"$OUT")" == "true" && "$(jq -r '.status' <<<"$OUT")" == "NEEDS_OVERSEER" ]] \
+  && pass "headless: a declared blocked word → exit 7, blocked:true, status named" \
+  || fail "headless: a declared blocked word → exit 7, blocked:true, status named" "rc=$RC out=$OUT"
+[[ "$(cat "$CD/status_classes.txt" 2>/dev/null)" == $'NEEDS_OVERSEER=blocked\nSHIPPED=done' ]] \
+  && pass "headless: the launcher writes the declared map into the call dir" \
+  || fail "headless: the launcher writes the declared map into the call dir" "$(cat "$CD/status_classes.txt" 2>&1)"
+run_headless $'billing PR\nSTATUS: NEEDS_OVERSEER merge PR 12? call_id=0123abcd0123abcd'
+[[ $RC -eq 7 && "$(jq -r '.detail' <<<"$OUT")" == "merge PR 12?" ]] \
+  && pass "headless: free text before call_id rides as detail" \
+  || fail "headless: free text before call_id rides as detail" "rc=$RC out=$OUT"
+run_headless $'billing PR\nSTATUS: NEEDS_OVERSEER merge PR 12?'
+[[ $RC -eq 0 ]] && ! jq -e 'has("blocked")' <<<"$OUT" >/dev/null 2>&1 \
+  && pass "headless: a bare line with trailing text is prose, not a STATUS" \
+  || fail "headless: a bare line with trailing text is prose, not a STATUS" "rc=$RC out=$OUT"
+unset HOTLINE_STATUS_CLASSES
+run_headless $'billing PR\nSTATUS: NEEDS_OVERSEER'
+[[ $RC -eq 0 ]] && ! jq -e 'has("blocked")' <<<"$OUT" >/dev/null 2>&1 \
+  && pass "headless: an undeclared word is not an ending (exit 0, unmarked)" \
+  || fail "headless: an undeclared word is not an ending" "rc=$RC out=$OUT"
+run_headless $'question?\nSTATUS: BLOCKED'
+jq -e '(has("detail") or has("status")) | not' <<<"$OUT" >/dev/null 2>&1 \
+  && pass "headless: a plain BLOCKED adds no detail/status keys" \
+  || fail "headless: a plain BLOCKED adds no detail/status keys" "out=$OUT"
+
 run_headless $'the docs show:\n> STATUS: BLOCKED'
 [[ $RC -eq 0 ]] && ! jq -e 'has("blocked")' <<<"$OUT" >/dev/null 2>&1 \
   && pass "headless: a quoted BLOCKED is not the callee's STATUS" \

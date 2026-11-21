@@ -96,7 +96,8 @@
 #       move: a follow-up dial into the same target re-targets the same agent and
 #       continues its session. Left live and marked RESUMABLE like 5.
 #   7 — BLOCKED QUESTION (every transport): the callee ended its turn
-#       on `STATUS: BLOCKED call_id=<nonce>` — it needs an answer before it can go
+#       on a blocked-class STATUS (`STATUS: BLOCKED call_id=<nonce>`, or a word the
+#       caller declared blocked with dial.sh --status-class) — it needs an answer before it can go
 #       on. Same valid JSON on stdout as exit 0, carrying the callee's question as
 #       `.response`, plus `"blocked": true`; response.json + done are written and the
 #       surface/session is left LIVE, exactly as on exit 4. Answer it with a
@@ -206,6 +207,13 @@ source "$HOTLINE_SCRIPTS/repl-state.sh"
 source "$HOTLINE_SCRIPTS/transport.sh"
 
 CALL_DIR="${1:-}"
+# The call's STATUS word → class map (dial.sh wrote any declarations here); the
+# extractor and the screen scrape both read it, so they classify alike.
+# shellcheck source=../../../scripts/status-classes.sh
+source "$HOTLINE_SCRIPTS/status-classes.sh"
+STATUS_CLASSES_FILE="$CALL_DIR/$HOTLINE_STATUS_FILE_NAME"
+SC_TERM_WORDS=$(hotline_status_words "$STATUS_CLASSES_FILE" done out_of_scope awaiting_review); SC_TERM_WORDS=${SC_TERM_WORDS:-_NONE_}
+SC_BLK_WORDS=$(hotline_status_words "$STATUS_CLASSES_FILE" blocked); SC_BLK_WORDS=${SC_BLK_WORDS:-_NONE_}
 TIMEOUT=""
 # Two separate numbers on purpose:
 #   POLL_INTERVAL — the tick the timeout budget is accounted in. Must stay an
@@ -367,9 +375,9 @@ follow_up_started() {  # $1 = next nonce  $2 = transcript path or ""  $3 = scree
         (.type == "user" and ((.message.content | tostring) | contains($tag)))
         or (.type == "assistant" and ((.isSidechain // false) != true)
             and (([.message.content[]? | select(.type == "text") | .text] | join("\n"))
-                 | test("(^|\n)STATUS: [A-Z_]+ " + $stag + "\\b"))))' "$2" >/dev/null 2>&1
+                 | test("(^|\n)STATUS: [A-Z][A-Z0-9_]*( [^\n]*)? " + $stag + "\\b"))))' "$2" >/dev/null 2>&1
   else
-    printf '%s\n' "$3" | grep -Eq "STATUS: [A-Z_]+ ${stag}([^A-Za-z0-9_-]|\$)"
+    printf '%s\n' "$3" | grep -Eq "STATUS: [A-Z][A-Z0-9_]*( .*)? ${stag}([^A-Za-z0-9_-]|\$)"
   fi
 }
 superseded_exit() {  # $1 = transcript path or ""  $2 = screen text (screen path only)
@@ -745,7 +753,7 @@ if $HERDR_MODE; then
     fi
     if [[ -n "$LIVE_TRANSCRIPT" ]]; then
       set +e
-      T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$LIVE_TRANSCRIPT" "$CALL_ID" 2>/dev/null)
+      T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$LIVE_TRANSCRIPT" "$CALL_ID" "$STATUS_CLASSES_FILE" 2>/dev/null)
       T_RC=$?
       set -e
       case $T_RC in 0|13|14) ;; *) superseded_exit "$LIVE_TRANSCRIPT" ;; esac
@@ -1009,9 +1017,13 @@ if $CMUX_MODE; then
   if [[ -n "$CALL_ID" ]]; then
     STATUS_TAIL=" call_id=${CALL_ID}[[:space:]]*\$"
     STATUS_TAIL_AWK=" call_id=${CALL_ID}[[:space:]]*$"
+    # Free text between the word and the call_id. Only with a nonce: a bare line's
+    # end-of-line anchor is all that tells a STATUS from prose that mentions one.
+    STATUS_TEXT_AWK="( .*)?"
   else
     STATUS_TAIL="[[:space:]]*\$"
     STATUS_TAIL_AWK="[[:space:]]*$"
+    STATUS_TEXT_AWK=""
   fi
 
   # AWAITING_REVIEW leaves the surface alone: a follow-up is expected, so closing
@@ -1276,7 +1288,7 @@ if $CMUX_MODE; then
       fi
 
       set +e
-      T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$TRANSCRIPT_PATH" "$CALL_ID" 2>/dev/null)
+      T_OUT=$(bash "$TRANSCRIPT_EXTRACT" "$TRANSCRIPT_PATH" "$CALL_ID" "$STATUS_CLASSES_FILE" 2>/dev/null)
       T_RC=$?
       set -e
       case $T_RC in 0|13|14) ;; *) superseded_exit "$TRANSCRIPT_PATH" ;; esac
@@ -1463,7 +1475,7 @@ if $CMUX_MODE; then
     # terminal STATUS that comes after them.
     #
     # Trim everything before the matched STATUS for the comparison value.
-    STATUS_RE="STATUS: [A-Z_]+${STATUS_TAIL_AWK}"
+    STATUS_RE="STATUS: [A-Z][A-Z0-9_]*${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}"
     LATEST_STATUS=$(echo "$CLEAN" | awk -v re="$STATUS_RE" '
       match($0, re) {
         s=substr($0, RSTART)
@@ -1484,18 +1496,26 @@ if $CMUX_MODE; then
     # So a BLOCKED the callee is about to work past (a tool call next, no STATUS
     # yet) can still resolve here. The gap is confined to calls with no transcript,
     # which is the only time this loop runs.
-    if [[ "$LATEST_STATUS" =~ ^STATUS:\ BLOCKED ]]; then
-      LATEST_TERMINAL=$(echo "$CLEAN" | awk -v re="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)${STATUS_TAIL_AWK}" '
+    LATEST_WORD=$(awk '{print $2}' <<<"$LATEST_STATUS")
+    LATEST_CLASS=$(hotline_status_class "$LATEST_WORD" "$STATUS_CLASSES_FILE")
+    if [[ "$LATEST_CLASS" == blocked ]]; then
+      LATEST_TERMINAL=$(echo "$CLEAN" | awk -v re="STATUS: (${SC_TERM_WORDS})${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}" '
         match($0, re) {
           s=substr($0, RSTART)
           sub(/[[:space:]]+$/, "", s)
         }
         END {print s}
       ')
-      [[ -n "$LATEST_TERMINAL" ]] && LATEST_STATUS=$LATEST_TERMINAL
+      if [[ -n "$LATEST_TERMINAL" ]]; then
+        LATEST_STATUS=$LATEST_TERMINAL
+        LATEST_WORD=$(awk '{print $2}' <<<"$LATEST_STATUS")
+        LATEST_CLASS=$(hotline_status_class "$LATEST_WORD" "$STATUS_CLASSES_FILE")
+      fi
     fi
 
-    if [[ "$LATEST_STATUS" =~ ^STATUS:\ (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW|BLOCKED) ]]; then
+    # An unknown word is not an ending: the scrape keeps polling past it, as the
+    # transcript path does.
+    if [[ "$LATEST_CLASS" != unknown ]]; then
       # Strip terminal chrome before extracting the response. Aggressive
       # prefix match strips lines starting with claude's box-drawing
       # characters (the REPL renders its idle prompt as a multi-line box
@@ -1512,14 +1532,14 @@ if $CMUX_MODE; then
       # Walk lines, reset buffer on every WORK_IN_PROGRESS, save buffer on
       # every terminal STATUS, emit the LAST saved buffer — matches the
       # LATEST_STATUS we chose for detection.
-      WIP_RE="STATUS: WORK_IN_PROGRESS${STATUS_TAIL_AWK}"
+      WIP_RE="STATUS: WORK_IN_PROGRESS${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}"
       # BLOCKED ends a body only when it won detection; when a terminal won, a
       # BLOCKED line is just a sentinel to drop.
-      BLK_RE="STATUS: BLOCKED${STATUS_TAIL_AWK}"
-      if [[ "$LATEST_STATUS" =~ ^STATUS:\ BLOCKED ]]; then
-        TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW|BLOCKED)${STATUS_TAIL_AWK}"
+      BLK_RE="STATUS: (${SC_BLK_WORDS})${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}"
+      if [[ "$LATEST_CLASS" == blocked ]]; then
+        TERM_RE="STATUS: (${SC_TERM_WORDS}|${SC_BLK_WORDS})${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}"
       else
-        TERM_RE="STATUS: (WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)${STATUS_TAIL_AWK}"
+        TERM_RE="STATUS: (${SC_TERM_WORDS})${STATUS_TEXT_AWK}${STATUS_TAIL_AWK}"
       fi
       RESPONSE=$(echo "$CLEAN" \
         | grep -v "^bash /tmp/hotline-launch" \
@@ -1533,13 +1553,18 @@ if $CMUX_MODE; then
             END {printf "%s", result}
           ')
 
+      # Same additive status/detail keys as transcript-extract.sh: a non-built-in
+      # word names itself, and the resolving line's free text is its detail.
+      SC_DETAIL=""
+      [[ -z "$STATUS_TEXT_AWK" ]] || SC_DETAIL=$(hotline_status_detail "$LATEST_STATUS")
+      SC_EXTRA=$(hotline_status_payload_extra "$LATEST_WORD" "$SC_DETAIL")
       # Scrape path mirrors the transcript path's AWAITING_REVIEW contract, or a
       # callee that checkpoints would hang here exactly as it used to: the status
       # matched neither the WIP `continue` nor the terminal branch, so the loop ran
       # to timeout with the report on screen. (claude-plugins-n4vy)
-      if [[ "$LATEST_STATUS" =~ ^STATUS:\ AWAITING_REVIEW ]]; then
-        jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
-          '{session_id: $sid, response: $resp, awaiting_review: true}' > "$CALL_DIR/response.json"
+      if [[ "$LATEST_CLASS" == awaiting_review ]]; then
+        jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" --argjson x "$SC_EXTRA" \
+          '{session_id: $sid, response: $resp, awaiting_review: true} + $x' > "$CALL_DIR/response.json"
         touch "$CALL_DIR/done"
         cleanup_script_only
         emit_response_json
@@ -1547,17 +1572,17 @@ if $CMUX_MODE; then
       fi
       # BLOCKED is LATEST_STATUS here only when it is the last STATUS on screen and
       # no terminal precedes it — the transcript path's rule, minus its end_turn check.
-      if [[ "$LATEST_STATUS" =~ ^STATUS:\ BLOCKED ]]; then
-        jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
-          '{session_id: $sid, response: $resp, blocked: true}' > "$CALL_DIR/response.json"
+      if [[ "$LATEST_CLASS" == blocked ]]; then
+        jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" --argjson x "$SC_EXTRA" \
+          '{session_id: $sid, response: $resp, blocked: true} + $x' > "$CALL_DIR/response.json"
         touch "$CALL_DIR/done"
         cleanup_script_only
         emit_response_json
         exit 7
       fi
 
-      jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" \
-        '{session_id: $sid, response: $resp}' > "$CALL_DIR/response.json"
+      jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" --argjson x "$SC_EXTRA" \
+        '{session_id: $sid, response: $resp} + $x' > "$CALL_DIR/response.json"
       touch "$CALL_DIR/done"
       cleanup_workspace_and_script force
 

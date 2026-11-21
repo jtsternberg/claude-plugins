@@ -467,6 +467,97 @@ bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
   || fail "an earlier DONE wins over a later BLOCKED" "got exit $RC"
 rm -f "$F"
 
+# Case 33b: STATUS words beyond the built-ins come from the call's declared map
+# (status_classes.txt, the optional third argument), and any STATUS line may carry
+# free text between the word and call_id. The text rides in the payload as
+# "detail"; a non-built-in word adds "status". A bare built-in payload is unchanged.
+SC="$(mktemp -d)/status_classes.txt"
+printf 'NEEDS_OVERSEER=blocked\nSHIPPED=done\nPARKED=awaiting_review\n' > "$SC"
+arec() {  # <text> → an end_turn assistant record (text may use \n)
+  jq -nc --arg t "$1" '{type:"assistant",isSidechain:false,sessionId:"sess-1",message:{stop_reason:"end_turn",content:[{type:"text",text:$t}]}}'
+}
+NO_REC=$(arec "STATUS: WORK_IN_PROGRESS call_id=$NONCE
+PR 12 is green but touches billing.
+STATUS: NEEDS_OVERSEER merge PR 12 or hold? call_id=$NONCE")
+F=$(mkf "$USER_NONCE
+$NO_REC")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" "$SC" 2>&1); RC=$?
+[[ $RC -eq 14 && "$(jq -r '.blocked' <<<"$OUT")" == "true" && "$(jq -r '.status' <<<"$OUT")" == "NEEDS_OVERSEER" ]] \
+  && pass "a declared blocked word with free text → exit 14, blocked:true, status named" \
+  || fail "a declared blocked word with free text → exit 14" "rc=$RC out=$OUT"
+[[ "$(jq -r '.detail' <<<"$OUT")" == "merge PR 12 or hold?" && "$(jq -r '.response' <<<"$OUT")" == "PR 12 is green but touches billing." ]] \
+  && pass "the free text rides as detail; the sentinel is dropped from the body" \
+  || fail "the free text rides as detail" "out=$OUT"
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "the same word undeclared is unknown: keep polling (exit 10)" \
+  || fail "the same word undeclared is unknown: keep polling" "rc=$RC"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$(arec "q?
+STATUS: BLOCKED which schema? call_id=$NONCE")")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
+[[ $RC -eq 14 && "$(jq -r '.detail' <<<"$OUT")" == "which schema?" ]] && ! jq -e 'has("status")' <<<"$OUT" >/dev/null \
+  && pass "a built-in BLOCKED with free text carries detail and no status key" \
+  || fail "a built-in BLOCKED with free text carries detail" "rc=$RC out=$OUT"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$(arec "STATUS: WORK_IN_PROGRESS call_id=$NONCE
+merged
+STATUS: DONE all green call_id=$NONCE")")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1); RC=$?
+[[ $RC -eq 0 && "$(jq -r '.detail' <<<"$OUT")" == "all green" && "$(jq -r '.response' <<<"$OUT")" == "merged" ]] \
+  && pass "a terminal with free text resolves (exit 0) with its detail" \
+  || fail "a terminal with free text resolves with its detail" "rc=$RC out=$OUT"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$(arec "shipped it
+STATUS: SHIPPED call_id=$NONCE")")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" "$SC" 2>&1); RC=$?
+[[ $RC -eq 0 && "$(jq -r '.status' <<<"$OUT")" == "SHIPPED" && "$(jq -r '.response' <<<"$OUT")" == "shipped it" ]] \
+  && pass "a declared done word resolves exit 0, naming its status" \
+  || fail "a declared done word resolves exit 0" "rc=$RC out=$OUT"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$(arec "step 1 done
+STATUS: PARKED call_id=$NONCE")")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" "$SC" 2>&1); RC=$?
+[[ $RC -eq 13 && "$(jq -r '.awaiting_review' <<<"$OUT")" == "true" ]] \
+  && pass "a declared awaiting_review word resolves exit 13" \
+  || fail "a declared awaiting_review word resolves exit 13" "rc=$RC out=$OUT"
+rm -f "$F"
+printf 'BLOCKED=done\n' > "$SC.re"
+F=$(mkf "$USER_NONCE
+$BLOCKED_REC")
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" "$SC.re" 2>&1); RC=$?
+[[ $RC -eq 0 ]] && pass "a call map can reclass a built-in (BLOCKED=done → exit 0)" \
+  || fail "a call map can reclass a built-in" "rc=$RC out=$OUT"
+OUT=$(bash "$SCRIPT" "$F" "$NONCE" 2>&1)
+jq -e 'keys == ["blocked","response","session_id"]' <<<"$OUT" >/dev/null 2>&1 \
+  && pass "a plain BLOCKED payload keeps its exact keys" || fail "a plain BLOCKED payload keeps its exact keys" "out=$OUT"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$NO_REC
+$WIP")
+bash "$SCRIPT" "$F" "$NONCE" "$SC" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "a declared blocked word the callee worked past → exit 10" || fail "a declared blocked word worked past → exit 10" "rc=$RC"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$WIP
+$(arec "STATUS: NEEDS_OVERSEER ok? call_id=ffff0000ffff0000")")
+bash "$SCRIPT" "$F" "$NONCE" "$SC" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "a sibling call's declared blocked word does not resolve ours" || fail "a sibling call's blocked word does not resolve ours" "rc=$RC"
+rm -f "$F"
+F=$(mkf "$NO_REC")
+bash "$SCRIPT" "$F" "$NONCE" "$SC" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 14 ]] && pass "a STATUS line with free text counts as submit evidence" || fail "a STATUS line with free text counts as submit evidence" "rc=$RC"
+rm -f "$F"
+F=$(mkf "$USER_NONCE
+$(arec "the docs say: STATUS: DONE call_id=$NONCE")")
+bash "$SCRIPT" "$F" "$NONCE" >/dev/null 2>&1; RC=$?
+[[ $RC -eq 10 ]] && pass "a STATUS mid-line is still not a sentinel" || fail "a STATUS mid-line is still not a sentinel" "rc=$RC"
+rm -f "$F"
+rm -rf "$(dirname "$SC")"
+
 # Case 34: BLOCKED mid-turn must not resolve. The callee wrote the BLOCKED line,
 # then kept going in the same message (a tool call): the record's stop_reason is
 # tool_use and the turn is not over, so a poll landing here keeps waiting.

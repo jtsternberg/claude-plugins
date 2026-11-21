@@ -500,8 +500,10 @@ would be a lie they discover hours later. Report `.detail` and `.recovery` as-is
   that work that way.
 
 **The response wait exits 7 — the callee asked a question**
-- Not a failure. The callee's turn ended on `STATUS: BLOCKED call_id=<nonce>`, and
-  `.response` (stdout and response.json, which also carry `"blocked": true`) is its
+- Not a failure. The callee's turn ended on a blocked-class STATUS
+  (`STATUS: BLOCKED call_id=<nonce>`, or a word the dial declared with
+  `--status-class WORD=blocked`), and `.response` (stdout and response.json, which
+  also carry `"blocked": true`, plus `.detail` for text before `call_id=`) is its
   question. Answer it with a follow-up dial to the same target; the session is live.
 - Exit 5 is the different case: herdr's lifecycle says `blocked` and the transcript
   has no STATUS for the nonce, so there is no question to read — look at the agent.

@@ -115,9 +115,24 @@ Flags: `--mode quick|work_order|conference` (required),
 `--refresh-identity`,
 `--fresh` (ignore the cached session for this target and start a new one —
 contradicts `--resume`), `--tools <list>`,
-`--boot-timeout <seconds>`, `--caller-session <id>`.
+`--boot-timeout <seconds>`, `--caller-session <id>`,
+`--status-class <WORD>=<class>` (repeatable).
 
 Run `dial.sh --help` for the full contract.
+
+**STATUS words the callee may end on.** A STATUS word is any UPPER_SNAKE token, and
+its class decides what the wait does: `done` and `out_of_scope` exit 0,
+`awaiting_review` exits 4, `blocked` exits 7. The built-ins are `DONE`,
+`WORK_COMPLETE` (done), `OUT_OF_SCOPE`, `AWAITING_REVIEW` and `BLOCKED`. When your
+work order defines its own word, declare it on the dial:
+`--status-class NEEDS_OVERSEER=blocked`, or `HOTLINE_STATUS_CLASSES="NEEDS_OVERSEER=blocked,SHIPPED=done"`
+in the environment of whatever wraps dial.sh (a flag wins over the env for the same
+word). Declare it on every dial, follow-ups included: the map is per call dir
+(`status_classes.txt`), and the waiter and the callee's caller notice both read it.
+An undeclared word does not end the wait; the callee's push notice still reports it
+as class `unknown`. Any STATUS line may carry free text before `call_id=`
+(`STATUS: NEEDS_OVERSEER merge PR 12 or hold? call_id=<nonce>`), which the response
+JSON returns as `.detail`; a non-built-in word also sets `.status`.
 
 For a follow-up that must continue a particular call, pass `--expected-session <id>`
 with the original callee's recorded `session_id.txt` (the Codex thread ID or Claude
@@ -646,10 +661,12 @@ Exit codes that are not failures:
   background work, re-run the wait on the same `CALL_DIR` instead. `error.txt` names
   which condition fired.
 - **Exit 7 — the callee asked a question.** Its turn ended on
-  `STATUS: BLOCKED call_id=<nonce>` — not a ringing-protocol status, but one your
-  own work order may define for "I need an answer before I can go on". Read
-  `.response` as on exit 0: it is the callee's question (the JSON also carries
-  `"blocked": true`). The surface and session are left live, as on exit 4 — answer
+  a blocked-class STATUS: `STATUS: BLOCKED call_id=<nonce>`, or a word you
+  declared with `--status-class WORD=blocked` — not ringing-protocol statuses, but
+  ones your own work order may define for "I need an answer before I can go on".
+  Read `.response` as on exit 0: it is the callee's question (the JSON also carries
+  `"blocked": true`, `.status` for a declared word, and `.detail` when the STATUS
+  line carried text before `call_id=`). The surface and session are left live, as on exit 4 — answer
   with a follow-up dial to the same target. Unlike exit 5, the transcript holds the
   callee's own words. On headless there is no live surface; the follow-up resumes the
   session. A BLOCKED the callee later worked past (a later WORK_IN_PROGRESS or

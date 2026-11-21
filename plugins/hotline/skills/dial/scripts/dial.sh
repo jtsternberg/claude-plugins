@@ -38,6 +38,7 @@
 #   (a session id as <reference> continues that conversation; --no-fork applies)
 #           [--caller-session <id>] [--refresh-identity]
 #           [--boot-timeout <seconds>] --label <text>
+#           [--status-class <WORD>=<class>]...
 # --expected-session cannot be combined with --fresh, --resume, or
 # --refresh-identity (identity refresh launches a separate Claude call).
 #
@@ -76,6 +77,13 @@
 #
 # --prompt-file is preferred: it keeps the message out of argv, so quoting,
 # newlines and shell metacharacters are never in play.
+#
+# --status-class WORD=class (repeatable) declares a STATUS word this call's callee
+# may end on, and how the caller treats it: done, out_of_scope, awaiting_review or
+# blocked. HOTLINE_STATUS_CLASSES="WORD=class,..." declares the same for callers
+# that wrap dial.sh; flags win over it per word. Built-ins need no declaration. The map is written to
+# <call_dir>/status_classes.txt, which the waiter and the callee's notify-caller.sh
+# both read; scripts/status-classes.sh has the classes. A bad entry is an args error.
 #
 # --label <text> is REQUIRED — 2-4 words naming what the callee is DOING. It is the
 # callee's session name, which claude emits as its terminal title, which cmux renders
@@ -278,12 +286,13 @@ LABEL=""
 # Which program the callee is: claude (default) or codex. See --agent in the header.
 AGENT_KIND="claude"
 EXPECTED_SESSION=""
+STATUS_CLASS_ARGS=()
 
 # Every flag that consumes a value. A trailing one of these used to hang the
 # script forever: `shift 2` with a single arg left FAILS without shifting, and
 # with no `set -e` the loop just spun on the same $1 at full CPU, emitting no
 # JSON at all. Reachable from a plain `--prompt-file "$VAR"` with an empty VAR.
-VALUE_FLAGS=" --target --mode --prompt-file --prompt --placement --window --transport --remote --tools --resume --caller-session --boot-timeout --label --agent --expected-session "
+VALUE_FLAGS=" --target --mode --prompt-file --prompt --placement --window --transport --remote --tools --resume --caller-session --boot-timeout --label --agent --expected-session --status-class "
 # --window is applied AFTER parsing (below) so it wins over --placement
 # regardless of the order the two were given in.
 WINDOW_REQUESTED=false
@@ -322,12 +331,30 @@ while [[ $# -gt 0 ]]; do
     --label)           LABEL="$2";                 shift 2 ;;
     --agent)           AGENT_KIND="$2";            shift 2 ;;
     --expected-session) EXPECTED_SESSION="$2"; EXPECTED_SESSION_SET=true; shift 2 ;;
+    --status-class)    STATUS_CLASS_ARGS+=("$2");  shift 2 ;;
     # Silently ignoring an unrecognized flag turns a typo into a wrong call:
     # `--prompt-fil /tmp/x` would dial with no message at all.
     *) emit_error args "Unrecognized argument: $1" \
          "dial.sh takes flags only, no positionals. Run dial.sh --help for the list." ;;
   esac
 done
+
+# Declared STATUS words. Exported normalized, so the launcher's persist-call-meta.sh
+# writes status_classes.txt into the call dir before the callee can answer (a
+# headless call classifies its ending inside the launcher); reuse paths, which
+# make their call dir without it, get the file from persist_status_classes below.
+# shellcheck source=../../../scripts/status-classes.sh
+source "$PLUGIN_SCRIPTS/status-classes.sh"
+# On failure the parser prints nothing on stdout, so 2>&1 captures just its reason.
+if ! STATUS_CLASSES=$(hotline_status_classes_parse "${HOTLINE_STATUS_CLASSES:-}" ${STATUS_CLASS_ARGS[@]+"${STATUS_CLASS_ARGS[@]}"} 2>&1); then
+  emit_error args "$STATUS_CLASSES" \
+    "Declare each status as --status-class WORD=class (or HOTLINE_STATUS_CLASSES=WORD=class,...), WORD in UPPER_SNAKE, class one of done, out_of_scope, awaiting_review, blocked."
+fi
+export HOTLINE_STATUS_CLASSES="$STATUS_CLASSES"
+persist_status_classes() {  # $1 = call dir
+  [[ -n "$STATUS_CLASSES" && -d "${1:-}" && ! -e "$1/$HOTLINE_STATUS_FILE_NAME" ]] || return 0
+  printf '%s\n' "$STATUS_CLASSES" > "$1/$HOTLINE_STATUS_FILE_NAME"
+}
 
 identity_refusal() {
   # Persist the refused attempt separately; never alter the selected cache entry.
@@ -1659,6 +1686,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "cmux" ]]; then
     fi
     if [[ -n "$REUSE_DIR" ]]; then
       CALL_DIR="$REUSE_DIR"
+      persist_status_classes "$CALL_DIR"
       # cmux-paste.sh's confidence, forwarded rather than dropped.
       DELIVERY_CONFIRMED=$(jq -r '.confirmed // empty' <<<"$REUSE" 2>/dev/null)
       DELIVERY_RETRIED=$(jq -r 'if has("retried_enter") then (.retried_enter|tostring) else "" end' <<<"$REUSE" 2>/dev/null)
@@ -1760,6 +1788,7 @@ if ! $FIRST_CONTACT && [[ "$TRANSPORT" == "herdr" ]]; then
     REUSE_DIR=$(jq -r '.call_dir // empty' <<<"$REUSE" 2>/dev/null)
     if [[ -n "$REUSE_DIR" ]]; then
       CALL_DIR="$REUSE_DIR"
+      persist_status_classes "$CALL_DIR"
       # herdr-reuse-agent.sh's proof tier, forwarded rather than dropped — the cmux
       # twin above emits it, and a reader comparing two transports cannot tell a
       # missing field from an unproven delivery.
@@ -1982,6 +2011,7 @@ else
 fi
 
 CALL_DIR=$(jq -r '.call_dir // empty' <<<"$CALL_RESULT" 2>/dev/null)
+persist_status_classes "$CALL_DIR"
 if [[ -z "$CALL_DIR" ]]; then
   LAUNCH_ERR=$(jq -r '.error // empty' <<<"$CALL_RESULT" 2>/dev/null)
   [[ -z "$LAUNCH_ERR" ]] && LAUNCH_ERR="launcher returned no call_dir: ${CALL_RESULT:-<no stdout>} $(cat "$ERR_FILE")"

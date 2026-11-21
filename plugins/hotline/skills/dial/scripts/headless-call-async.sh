@@ -279,22 +279,35 @@ fi
   # claude -p has exited, so the turn is over and the text is final. A headless
   # call carries no nonce, so the callee's STATUS lines are bare; a call_id suffix
   # is tolerated anyway. Anchored to line start, as in transcript-extract.sh (a
-  # STATUS that does not start its line is quoted). The first terminal wins;
-  # BLOCKED counts only as the last STATUS with no terminal before it.
-  STATUSES=$(printf '%s\n' "$RESPONSE" \
-    | grep -oE '^STATUS: [A-Z_]+( call_id=[^[:space:]]+)?[[:space:]]*$' \
-    | awk '{print $2}' || true)
-  FIRST_TERM=$(printf '%s\n' "$STATUSES" \
-    | grep -m1 -E '^(WORK_COMPLETE|OUT_OF_SCOPE|DONE|AWAITING_REVIEW)$' || true)
-  MARKER=""
-  if [[ "$FIRST_TERM" == "AWAITING_REVIEW" ]]; then
-    MARKER=awaiting_review
-  elif [[ -z "$FIRST_TERM" && "$(printf '%s\n' "$STATUSES" | tail -1)" == "BLOCKED" ]]; then
-    MARKER=blocked
+  # STATUS that does not start its line is quoted). The first done/out_of_scope/
+  # awaiting_review-class STATUS wins; a blocked-class one counts only as the last
+  # STATUS with no terminal before it. Classes come from the call's
+  # status_classes.txt (persist-call-meta.sh wrote the caller's declarations), and
+  # an unknown word is not an ending. Free text between the word and the call_id is
+  # taken only when the suffix is there: a bare line ending in text is prose.
+  # shellcheck source=../../../scripts/status-classes.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/status-classes.sh"
+  SC_FILE="$CALL_DIR/$HOTLINE_STATUS_FILE_NAME"
+  STATUS_LINES=$(printf '%s\n' "$RESPONSE" \
+    | grep -oE '^STATUS: [A-Z][A-Z0-9_]*(( .*)? call_id=[^[:space:]]+)?[[:space:]]*$' || true)
+  FIRST_TERM=""; LAST_LINE=""; LAST_CLASS=""
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    cls=$(hotline_status_class "$(awk '{print $2}' <<<"$line")" "$SC_FILE")
+    LAST_LINE=$line; LAST_CLASS=$cls
+    [[ -z "$FIRST_TERM" && "$cls" =~ ^(done|out_of_scope|awaiting_review)$ ]] && FIRST_TERM=$line && FIRST_CLASS=$cls
+  done <<<"$STATUS_LINES"
+  MARKER=""; MARK_LINE=""
+  if [[ -n "$FIRST_TERM" ]]; then
+    MARK_LINE=$FIRST_TERM
+    [[ "$FIRST_CLASS" == awaiting_review ]] && MARKER=awaiting_review
+  elif [[ "$LAST_CLASS" == blocked ]]; then
+    MARKER=blocked; MARK_LINE=$LAST_LINE
   fi
+  MARK_EXTRA=$(hotline_status_payload_extra "$(awk '{print $2}' <<<"$MARK_LINE")" "$(hotline_status_detail "$MARK_LINE")")
 
-  jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" --arg mark "$MARKER" \
-    '{session_id: $sid, response: $resp} + (if $mark == "" then {} else {($mark): true} end)' \
+  jq -n --arg sid "$SESSION_ID" --arg resp "$RESPONSE" --arg mark "$MARKER" --argjson extra "$MARK_EXTRA" \
+    '{session_id: $sid, response: $resp} + (if $mark == "" then {} else {($mark): true} end) + $extra' \
     > "$CALL_DIR/response.json"
 
   touch "$CALL_DIR/done"
