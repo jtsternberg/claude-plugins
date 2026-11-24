@@ -48,6 +48,18 @@ def unique(matches, description):
         raise Refusal(f'ambiguous {description}: {matches}')
     return matches[0] if matches else None
 
+def claude_config_dirs():
+    primary = os.getenv('CLAUDE_CONFIG_DIR')
+    dirs = [Path(primary) if primary else HOME / '.claude']
+    dirs += [Path(d) for d in os.getenv('HOTLINE_CLAUDE_CONFIG_DIRS', '').split(':') if d]
+    seen, result = set(), []
+    for d in dirs:
+        # One registry reached by two spellings would otherwise refuse its own sessions as ambiguous.
+        key = d.resolve()
+        if key not in seen:
+            seen.add(key); result.append(d)
+    return result
+
 def resolve(ref):
     rows = t3_rows()
     tid = ref.removeprefix('thread_')
@@ -60,18 +72,20 @@ def resolve(ref):
     if match:
         return ('t3', match, None)
     sessions = []
-    for path in (HOME / '.claude/sessions').glob('*.json'):
-        try:
-            data = json.loads(path.read_text())
-            if ref in (str(data.get('pid')), data.get('name'), data.get('sessionId')):
-                sessions.append(data)
-        except (OSError, ValueError):
-            continue
-    session = unique(sessions, 'Claude sessions')
-    if session:
+    for config in claude_config_dirs():
+        for path in (config / 'sessions').glob('*.json'):
+            try:
+                data = json.loads(path.read_text())
+                if ref in (str(data.get('pid')), data.get('name'), data.get('sessionId')):
+                    sessions.append((data, config))
+            except (OSError, ValueError):
+                continue
+    match = unique(sessions, 'Claude sessions')
+    if match:
+        session, _ = match
         if not session.get('messagingSocketPath') or not session.get('cwd') or not session.get('sessionId'):
             raise Refusal('Claude registry entry lacks socket, cwd or session ID')
-        return ('claude', session['sessionId'], session)
+        return ('claude', session['sessionId'], match)
     if UUID.fullmatch(ref):
         cmd = 'source "$1/codex-rollout.sh"; source "$1/codex-home.sh"; codex_home_autodetect "$2"; rc=$?; printf "%s\\n%s\\n" "$HOTLINE_CODEX_HOME" "$CODEX_HOME_ERR"; exit "$rc"'
         proc = subprocess.run(['bash', '-c', cmd, 'send', str(SCRIPTS), ref], capture_output=True, text=True, env={k:v for k,v in os.environ.items() if k not in ('HOTLINE_CODEX_HOME','HOTLINE_HERDR_REMOTE')})
@@ -85,8 +99,8 @@ def resolve(ref):
             return ('codex', ref, (home, Path(rollout)))
     raise Refusal(f'no target matches {ref}; candidates: []')
 
-def transcript(session):
-    proc = subprocess.run(['bash', '-c', 'source "$1/transcript-confirm.sh"; hotline_transcript_candidates "$2" "$3"', 'send', str(SCRIPTS), session['cwd'], session['sessionId']], capture_output=True, text=True, check=True)
+def transcript(session, config):
+    proc = subprocess.run(['bash', '-c', 'source "$1/transcript-confirm.sh"; hotline_transcript_candidates "$2" "$3"', 'send', str(SCRIPTS), session['cwd'], session['sessionId']], capture_output=True, text=True, check=True, env={**os.environ, 'HOTLINE_CLAUDE_CONFIG_DIR': str(config)})
     return [Path(p) for p in proc.stdout.splitlines()]
 
 def snapshot(paths):
@@ -139,11 +153,12 @@ def main():
         if proc.returncode: raise Refusal(f't3 send failed: {proc.stderr.strip()}')
         status, evidence = 'sent', proc.stdout.strip()
     elif route == 'claude':
-        paths = transcript(detail); offsets = snapshot(paths)
+        session, config = detail
+        paths = transcript(session, config); offsets = snapshot(paths)
         frame = {'type':'user', 'message':{'role':'user', 'content':message}, 'priority':'next', 'msg_id':nonce}
         if args.attest_mode: frame['fromMode'] = args.attest_mode
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5); sock.connect(detail['messagingSocketPath']); sock.sendall((json.dumps(frame)+'\n').encode())
+            sock.settimeout(5); sock.connect(session['messagingSocketPath']); sock.sendall((json.dumps(frame)+'\n').encode())
         status, evidence = verify(paths, offsets, nonce, args.timeout, True)
     else:
         home, path = detail; paths = [path]; offsets = snapshot(paths)

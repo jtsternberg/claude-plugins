@@ -203,6 +203,24 @@ that *is* there, and delivery submits with Return, so the shell would run it. Wh
 the box never appears, hotline refuses to deliver and reports
 `stage: "deliver"` with the prompt still on disk.
 
+### Extra Claude config dirs for `hotline send` (`HOTLINE_CLAUDE_CONFIG_DIRS`)
+
+`hotline send` finds a running Claude session in its config dir's `sessions/`
+registry and confirms delivery from that dir's `projects/` transcripts. It looks
+in `$CLAUDE_CONFIG_DIR` (default `~/.claude`) first. Sessions on a second account
+live in another config dir, so list those dirs, colon-separated:
+
+```json
+{
+  "env": {
+    "HOTLINE_CLAUDE_CONFIG_DIRS": "/Users/you/.claude-alt"
+  }
+}
+```
+
+A dir named twice (directly or through a symlink) is searched once. A target
+found in two different dirs refuses as ambiguous rather than picking one.
+
 ### Skip permission prompts in cmux receivers (opt-in)
 
 When Hotline routes a call through `cmux` (interactive `claude`), the receiver runs in an unattended pane. Any permission gate the receiver hits — skill invocation, a Bash command not on `--allowedTools`, etc. — stalls the call until a human clicks "Yes." There's no human watching.

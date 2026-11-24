@@ -23,6 +23,11 @@ class SendTests(unittest.TestCase):
         self.home_patch = patch.object(send, 'HOME', self.home)
         self.home_patch.start()
         self.addCleanup(self.home_patch.stop)
+        self.env_patch = patch.dict(os.environ)
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
+        os.environ.pop('CLAUDE_CONFIG_DIR', None)
+        os.environ.pop('HOTLINE_CLAUDE_CONFIG_DIRS', None)
         self.db = self.home / '.t3/userdata/statev2.sqlite'
         self.db.parent.mkdir(parents=True)
         with closing(sqlite3.connect(self.db)) as db, db:
@@ -32,8 +37,8 @@ class SendTests(unittest.TestCase):
         with closing(sqlite3.connect(self.db)) as db, db:
             db.execute('insert into orchestration_v2_projection_provider_threads values (?, ?)', (thread, json.dumps({'nativeThreadRef': {'nativeId': native}})))
 
-    def registry(self, pid, name, session, sock):
-        p = self.home / '.claude/sessions'
+    def registry(self, pid, name, session, sock, config='.claude'):
+        p = self.home / config / 'sessions'
         p.mkdir(parents=True, exist_ok=True)
         (p / f'{pid}.json').write_text(json.dumps({'pid': pid, 'name': name, 'sessionId': session, 'cwd': str(self.home), 'messagingSocketPath': str(sock)}))
 
@@ -63,6 +68,40 @@ class SendTests(unittest.TestCase):
         with self.assertRaisesRegex(send.Refusal, 'candidates'):
             send.resolve('missing')
         self.assertEqual(send.resolve('1')[:2], ('claude', 'one'))
+
+    def test_extra_config_dirs_var(self):
+        (self.home / '.claude/sessions').mkdir(parents=True)
+        self.registry(42, 'alt-worker', 'alt-sid', '/tmp/alt', config='.claude-alt')
+        os.environ.pop('HOTLINE_CLAUDE_CONFIG_DIRS', None)
+        with self.assertRaisesRegex(send.Refusal, 'no target matches'):
+            send.resolve('alt-sid')
+        os.environ['HOTLINE_CLAUDE_CONFIG_DIRS'] = f"{self.home / 'missing'}:{self.home / '.claude-alt'}"
+        route, target, (session, config) = send.resolve('alt-sid')
+        self.assertEqual((route, target, session['pid']), ('claude', 'alt-sid', 42))
+        self.assertEqual(config, self.home / '.claude-alt')
+        self.registry(7, 'main-worker', 'alt-sid', '/tmp/main')
+        with self.assertRaisesRegex(send.Refusal, 'ambiguous'):
+            send.resolve('alt-sid')
+
+    def test_claude_config_dir_replaces_default_and_dedupes(self):
+        custom = self.home / 'elsewhere'
+        self.registry(9, 'w', 'env-sid', '/tmp/env', config='elsewhere')
+        self.registry(3, 'w', 'main-sid', '/tmp/m')
+        os.environ['CLAUDE_CONFIG_DIR'] = str(custom)
+        self.assertEqual(send.resolve('env-sid')[2][1], custom)
+        with self.assertRaisesRegex(send.Refusal, 'no target matches'):
+            send.resolve('main-sid')
+        # The same registry named twice must not read as a duplicate.
+        (self.home / 'link').symlink_to(custom)
+        os.environ['HOTLINE_CLAUDE_CONFIG_DIRS'] = f"{custom}:{self.home / 'link'}"
+        self.assertEqual(send.resolve('env-sid')[1], 'env-sid')
+
+    def test_transcript_reads_matched_config_dir_projects(self):
+        cwd = self.home / 'proj'; cwd.mkdir()
+        paths = send.transcript({'cwd': str(cwd), 'sessionId': 'sid'}, self.home / '.claude-alt')
+        self.assertTrue(paths)
+        for p in paths:
+            self.assertTrue(str(p).startswith(str(self.home / '.claude-alt/projects/')), p)
 
     def test_schema_failure(self):
         with closing(sqlite3.connect(self.db)) as db, db:

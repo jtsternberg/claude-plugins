@@ -34,4 +34,6 @@ done
 [[ -z "$SESSION" ]] && { echo "transcript-path.sh: --session required" >&2; exit 1; }
 
 ENCODED_CWD=$(printf '%s' "$CWD" | sed 's|[^a-zA-Z0-9]|-|g')
-printf '%s/.claude/projects/%s/%s.jsonl\n' "$HOME" "$ENCODED_CWD" "$SESSION"
+# HOTLINE_CLAUDE_CONFIG_DIR: the receiver's config dir when it is not ~/.claude
+# (a second account); its transcripts live under that dir's projects/.
+printf '%s/projects/%s/%s.jsonl\n' "${HOTLINE_CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$ENCODED_CWD" "$SESSION"
