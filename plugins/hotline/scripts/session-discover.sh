@@ -49,10 +49,14 @@ if [[ -z "$FINGERPRINT" ]]; then
   exit 1
 fi
 
-PROJECTS_ROOT="$HOME/.claude/projects"
+source "$(dirname "${BASH_SOURCE[0]}")/claude-config-dirs.sh"
+PROJECTS_ROOTS=()
+while IFS= read -r d; do
+  [[ -d "$d/projects" ]] && PROJECTS_ROOTS+=("$d/projects")
+done < <(hotline_claude_config_dirs)
 
-if [[ ! -d "$PROJECTS_ROOT" ]]; then
-  echo "Error: No projects directory found at $PROJECTS_ROOT" >&2
+if [[ ${#PROJECTS_ROOTS[@]} -eq 0 ]]; then
+  echo "Error: No projects directory found in: $(hotline_claude_config_dirs | tr '\n' ' ')" >&2
   exit 1
 fi
 
@@ -60,28 +64,35 @@ fi
 # asynchronously, so the fingerprint may not be flushed to disk yet
 # by the time this runs in the next tool call.
 MAX_RETRIES=3
-COMPUTED_DIR="${PROJECTS_ROOT}/$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')"
+ENCODED_PWD="$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')"
 
 TRANSCRIPT=""
 for attempt in $(seq 1 $MAX_RETRIES); do
-  # Fast path: check computed project dir
-  if [[ -d "$COMPUTED_DIR" ]]; then
-    for f in $(ls -t "$COMPUTED_DIR"/*.jsonl 2>/dev/null | head -5); do
-      if grep -q "$FINGERPRINT" "$f"; then
-        TRANSCRIPT="$f"
-        break
-      fi
-    done
-  fi
-
-  # Fallback: search the 10 most recently modified project dirs
-  if [[ -z "$TRANSCRIPT" ]]; then
-    for dir in $(ls -dt "$PROJECTS_ROOT"/*/ 2>/dev/null | head -10); do
-      for f in $(ls -t "$dir"*.jsonl 2>/dev/null | head -3); do
+  # The fingerprint is a one-off nonce, so the first transcript holding it is
+  # the only one: no cross-dir ambiguity to check.
+  for PROJECTS_ROOT in "${PROJECTS_ROOTS[@]}"; do
+    # Fast path: check computed project dir
+    COMPUTED_DIR="${PROJECTS_ROOT}/${ENCODED_PWD}"
+    if [[ -d "$COMPUTED_DIR" ]]; then
+      for f in $(ls -t "$COMPUTED_DIR"/*.jsonl 2>/dev/null | head -5); do
         if grep -q "$FINGERPRINT" "$f"; then
           TRANSCRIPT="$f"
           break 2
         fi
+      done
+    fi
+  done
+
+  # Fallback: search the 10 most recently modified project dirs of each root
+  if [[ -z "$TRANSCRIPT" ]]; then
+    for PROJECTS_ROOT in "${PROJECTS_ROOTS[@]}"; do
+      for dir in $(ls -dt "$PROJECTS_ROOT"/*/ 2>/dev/null | head -10); do
+        for f in $(ls -t "$dir"*.jsonl 2>/dev/null | head -3); do
+          if grep -q "$FINGERPRINT" "$f"; then
+            TRANSCRIPT="$f"
+            break 3
+          fi
+        done
       done
     done
   fi

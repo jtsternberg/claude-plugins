@@ -111,16 +111,11 @@ if [[ "${CLAUDE_CODE_SESSION_ID:-}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F
       fi
     fi
     if [[ -z "$TRANSCRIPT_PATH" ]]; then
-      for f in "$HOME/.claude/projects"/*/"${CLAUDE_CODE_SESSION_ID}.jsonl"; do
-        if [[ -f "$f" ]]; then
-          TRANSCRIPT_PATH="$f"
-          break
-        fi
-      done
+      source "$SCRIPT_DIR/claude-config-dirs.sh"
+      TRANSCRIPT_PATH=$(hotline_claude_find_transcript "$CLAUDE_CODE_SESSION_ID") || TRANSCRIPT_PATH=""
     fi
     if [[ -z "$TRANSCRIPT_PATH" ]]; then
-      PROJECT_HASH=$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')
-      TRANSCRIPT_PATH="$HOME/.claude/projects/${PROJECT_HASH}/${CLAUDE_CODE_SESSION_ID}.jsonl"
+      TRANSCRIPT_PATH=$(bash "$SCRIPT_DIR/transcript-path.sh" --cwd "$(pwd)" --session "$CLAUDE_CODE_SESSION_ID") || TRANSCRIPT_PATH=""
     fi
     jq -nc --arg id "$CLAUDE_CODE_SESSION_ID" --arg path "$TRANSCRIPT_PATH" \
       --arg pid "$CLAUDE_PID" --arg dir "$(dirname "$TRANSCRIPT_PATH")" \
@@ -194,8 +189,7 @@ case $EXIT_CODE in
         TRANSCRIPT_PATH=$(cat "$TRANSCRIPT_CACHE")
       else
         # Reconstruct from convention
-        PROJECT_HASH=$(pwd | sed 's|[^a-zA-Z0-9-]|-|g')
-        TRANSCRIPT_PATH="$HOME/.claude/projects/${PROJECT_HASH}/${RESULT}.jsonl"
+        TRANSCRIPT_PATH=$(bash "$SCRIPT_DIR/transcript-path.sh" --cwd "$(pwd)" --session "$RESULT") || TRANSCRIPT_PATH=""
       fi
       PROJECT_DIR=$(dirname "$TRANSCRIPT_PATH")
       jq -n --arg sid "$RESULT" --arg path "$TRANSCRIPT_PATH" --arg pid "${CLAUDE_PID:-}" --arg dir "$PROJECT_DIR" \

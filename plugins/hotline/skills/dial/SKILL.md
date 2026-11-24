@@ -745,6 +745,12 @@ the caller took over."
 
 Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
 
+- **`HOTLINE_CLAUDE_CONFIG_DIRS=<dir>[:<dir>...]`** — extra Claude config dirs
+  (a second account) searched after `$CLAUDE_CONFIG_DIR` (default `~/.claude`).
+  Dial uses them to resolve a session-id target to its workspace, to find the
+  caller's own transcript, and to watch a callee's transcript. A session id found
+  in two dirs refuses as ambiguous. Dial still launches `claude` without setting
+  `CLAUDE_CONFIG_DIR`, so a new or resumed callee runs under the primary account.
 - **`HOTLINE_CODEX_HOME=<absolute-directory>`** — select the Codex process account.
   New calls require `--agent codex` over local cmux, or `--fresh`/explicit
   thread resume with `HOTLINE_HERDR_PLACEMENT=tab` or `workspace` on local herdr. The directory must already exist and be readable/writable; spaces

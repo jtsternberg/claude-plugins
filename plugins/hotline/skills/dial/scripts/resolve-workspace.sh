@@ -99,10 +99,15 @@ if [[ "$REFERENCE" =~ $UUID_REGEX ]]; then
   fi
 
   # 2b. Reverse lookup: find the transcript file for this session ID
-  # The transcript lives at ~/.claude/projects/<encoded-path>/<session-id>.jsonl
+  # The transcript lives at <config-dir>/projects/<encoded-path>/<session-id>.jsonl
   # The parent directory name decodes to the workspace path
-  PROJECTS_ROOT="$HOME/.claude/projects"
-  TRANSCRIPT=$(find "$PROJECTS_ROOT" -name "${REFERENCE}.jsonl" -type f 2>/dev/null | head -1)
+  source "$PLUGIN_SCRIPTS/claude-config-dirs.sh"
+  FIND_RC=0
+  TRANSCRIPT=$(hotline_claude_find_transcript "$REFERENCE") || FIND_RC=$?
+  if [[ $FIND_RC -eq 2 ]]; then
+    echo "Error: session $REFERENCE is ambiguous: its transcript is in more than one Claude config dir" >&2
+    exit 1
+  fi
   if [[ -n "$TRANSCRIPT" ]]; then
     # Preferred: read the real cwd straight from the transcript. Claude Code
     # records a "cwd" field on nearly every event line, so we avoid reversing

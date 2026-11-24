@@ -203,12 +203,12 @@ that *is* there, and delivery submits with Return, so the shell would run it. Wh
 the box never appears, hotline refuses to deliver and reports
 `stage: "deliver"` with the prompt still on disk.
 
-### Extra Claude config dirs for `hotline send` (`HOTLINE_CLAUDE_CONFIG_DIRS`)
+### Extra Claude config dirs (`HOTLINE_CLAUDE_CONFIG_DIRS`)
 
-`hotline send` finds a running Claude session in its config dir's `sessions/`
-registry and confirms delivery from that dir's `projects/` transcripts. It looks
-in `$CLAUDE_CONFIG_DIR` (default `~/.claude`) first. Sessions on a second account
-live in another config dir, so list those dirs, colon-separated:
+Hotline reads Claude Code's own state from a config dir: the `sessions/`
+registry and the `projects/` transcripts. It looks in `$CLAUDE_CONFIG_DIR`
+(default `~/.claude`) first. Sessions on a second account live in another config
+dir, so list those dirs, colon-separated:
 
 ```json
 {
@@ -218,8 +218,22 @@ live in another config dir, so list those dirs, colon-separated:
 }
 ```
 
-A dir named twice (directly or through a symlink) is searched once. A target
-found in two different dirs refuses as ambiguous rather than picking one.
+These honor it, all through `scripts/claude-config-dirs.sh`:
+
+- `send`: finds the target in each dir's registry and confirms delivery from
+  the matched dir's transcripts.
+- `dial`: resolves a session id to its workspace, finds the caller's own
+  transcript, and watches the callee's transcript for boot and response.
+- `switchboard`: lists and tails transcripts from every dir.
+
+A dir named twice (directly or through a symlink) is searched once. A session
+found in two different dirs refuses as ambiguous rather than picking one; a
+`projects/` symlinked to the other account's is one file, not two. A
+session that doesn't exist yet is looked for in the first dir, where a fresh
+launch writes it. Two gaps remain. `dial` launches and resumes `claude` without
+setting `CLAUDE_CONFIG_DIR`, so `--resume` of a second-account session still
+starts under the primary account. `--remote` calls read `~/.claude` on the
+remote box.
 
 ### Skip permission prompts in cmux receivers (opt-in)
 

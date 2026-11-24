@@ -236,6 +236,12 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
 
 ## Code shape
 
+- **Compare lookup roots and their hits by resolved path, because aliased roots are the
+  common case.** A second Claude account's `projects/` is routinely a symlink to the
+  first's. So an ambiguity check that compares spellings refuses every real session, and
+  a scan over both roots lists each item twice. Resolve with `cd -P` or `realpathSync`
+  before comparing. `plugins/hotline/tests/claude-config-dirs_test.sh` pins both cases.
+  (9a2101e, hotline 0.51.0)
 - **Extract the helper the moment a second caller appears.** The repo contract for
   this is CLAUDE.md § "Sharing Code or Docs Between Sibling Skills" and § "The
   parser drift guard" — this entry adds only the evidence that it keeps happening:

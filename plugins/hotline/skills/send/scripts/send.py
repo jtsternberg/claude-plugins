@@ -49,16 +49,9 @@ def unique(matches, description):
     return matches[0] if matches else None
 
 def claude_config_dirs():
-    primary = os.getenv('CLAUDE_CONFIG_DIR')
-    dirs = [Path(primary) if primary else HOME / '.claude']
-    dirs += [Path(d) for d in os.getenv('HOTLINE_CLAUDE_CONFIG_DIRS', '').split(':') if d]
-    seen, result = set(), []
-    for d in dirs:
-        # One registry reached by two spellings would otherwise refuse its own sessions as ambiguous.
-        key = d.resolve()
-        if key not in seen:
-            seen.add(key); result.append(d)
-    return result
+    # The list's one definition is claude-config-dirs.sh, shared with dial and the switchboard.
+    proc = subprocess.run(['bash', str(SCRIPTS / 'claude-config-dirs.sh')], capture_output=True, text=True, check=True, env={**os.environ, 'HOME': str(HOME)})
+    return [Path(d) for d in proc.stdout.splitlines() if d]
 
 def resolve(ref):
     rows = t3_rows()

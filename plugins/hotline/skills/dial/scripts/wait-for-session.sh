@@ -241,8 +241,10 @@ if $CMUX_MODE; then
   TRANSCRIPT_PATH=""
   if [[ -f "$CALL_DIR/cwd.txt" ]]; then
     RECV_CWD=$(cat "$CALL_DIR/cwd.txt")
-    ENCODED_CWD=$(printf '%s' "$RECV_CWD" | sed 's|[^a-zA-Z0-9]|-|g')
-    TRANSCRIPT_PATH="${HOME}/.claude/projects/${ENCODED_CWD}/${PRESET}.jsonl"
+    # transcript-path.sh picks the config dir already holding a resumed
+    # session's transcript, else the primary dir a fresh one is written to.
+    TRANSCRIPT_PATH=$(bash "$SCRIPT_DIR/../../../scripts/transcript-path.sh" \
+      --cwd "$RECV_CWD" --session "$PRESET" 2>/dev/null) || TRANSCRIPT_PATH=""
   fi
 
   # FRESHNESS BASELINE for signal B. "The transcript file exists and is non-empty"

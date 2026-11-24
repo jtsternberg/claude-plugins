@@ -5,7 +5,8 @@
 //
 // Zero-dependency Node server. Reads the hotline call registry at
 // ~/.agents-hotline/sessions/*.json, resolves each session ID to its Claude
-// Code transcript (~/.claude/projects/*/<session-id>.jsonl), and serves a
+// Code transcript (<config-dir>/projects/*/<session-id>.jsonl, across the dirs
+// scripts/claude-config-dirs.sh lists), and serves a
 // dashboard that renders conversations and streams new entries via SSE as
 // the transcripts grow. View-only: never writes to registry or transcripts.
 //
@@ -22,7 +23,37 @@ const { pathToFileURL } = require('url');
 
 const HOME = os.homedir();
 const SESSIONS_DIR = process.env.HOTLINE_SESSIONS_DIR || path.join(HOME, '.agents-hotline', 'sessions');
-const PROJECTS_ROOT = process.env.HOTLINE_PROJECTS_ROOT || path.join(HOME, '.claude', 'projects');
+// One projects/ root per Claude config dir, read from the plugin's single
+// definition of that list (claude-config-dirs.sh) rather than restated here.
+// HOTLINE_PROJECTS_ROOT pins a single root (tests).
+const PROJECTS_ROOTS = process.env.HOTLINE_PROJECTS_ROOT
+  ? [process.env.HOTLINE_PROJECTS_ROOT]
+  : uniqueByRealpath(claudeConfigDirs().map(d => path.join(d, 'projects')));
+
+// A second account's projects/ is often a symlink to the first's; scanning it
+// twice would list every discovered call twice.
+function uniqueByRealpath(roots) {
+  const seen = new Set();
+  return roots.filter(r => {
+    let key = r;
+    try { key = fs.realpathSync(r); } catch { /* absent root */ }
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function claudeConfigDirs() {
+  const helper = path.join(__dirname, '..', '..', '..', 'scripts', 'claude-config-dirs.sh');
+  try {
+    const dirs = require('child_process').execFileSync('bash', [helper], { encoding: 'utf8' })
+      .split('\n').filter(Boolean);
+    if (dirs.length) return dirs;
+  } catch (err) {
+    console.error(`claude-config-dirs.sh failed (${err.message}); reading ~/.claude only`);
+  }
+  return [path.join(HOME, '.claude')];
+}
 
 const args = {};
 for (const a of process.argv.slice(2)) {
@@ -41,6 +72,10 @@ function slugifyCwd(cwd) {
   return String(cwd).replace(/[^a-zA-Z0-9]/g, '-');
 }
 
+function sameFile(a, b) {
+  try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return a === b; }
+}
+
 function findTranscript(sessionId, hintCwd) {
   if (!sessionId) return null;
   if (transcriptCache.has(sessionId)) {
@@ -49,20 +84,30 @@ function findTranscript(sessionId, hintCwd) {
     transcriptCache.delete(sessionId);
   }
   const fname = `${sessionId}.jsonl`;
-  // Fast path: derive project dir from the workspace cwd hint
-  if (hintCwd) {
-    const p = path.join(PROJECTS_ROOT, slugifyCwd(hintCwd), fname);
-    if (fs.existsSync(p)) { transcriptCache.set(sessionId, p); return p; }
+  // Per root: the cwd hint's project dir first, else the first project dir
+  // holding the file. An id in two roots is two accounts claiming one session.
+  const hits = [];
+  for (const root of PROJECTS_ROOTS) {
+    let hit = null;
+    if (hintCwd) {
+      const p = path.join(root, slugifyCwd(hintCwd), fname);
+      if (fs.existsSync(p)) hit = p;
+    }
+    if (!hit) {
+      let dirs = [];
+      try { dirs = fs.readdirSync(root); } catch { continue; }
+      for (const d of dirs) {
+        const p = path.join(root, d, fname);
+        if (fs.existsSync(p)) { hit = p; break; }
+      }
+    }
+    // A projects/ symlinked to another account's reaches the same file twice.
+    if (hit && !hits.some(h => sameFile(h, hit))) hits.push(hit);
   }
-  // Slow path: scan all project dirs
-  let dirs = [];
-  try { dirs = fs.readdirSync(PROJECTS_ROOT); } catch { return null; }
-  for (const d of dirs) {
-    const p = path.join(PROJECTS_ROOT, d, fname);
-    if (fs.existsSync(p)) { transcriptCache.set(sessionId, p); return p; }
-  }
-  transcriptCache.set(sessionId, null);
-  return null;
+  if (hits.length > 1) console.error(`ambiguous transcript for ${sessionId}: ${hits.join(' ')}`);
+  const found = hits.length === 1 ? hits[0] : null;
+  transcriptCache.set(sessionId, found);
+  return found;
 }
 
 // ---- registry reader ---------------------------------------------------------
@@ -147,11 +192,12 @@ function parseRingingHandshake(file, sessionId) {
 
 function discoverCalls(knownCalleeSids) {
   const calls = [];
-  let dirs = [];
-  try { dirs = fs.readdirSync(PROJECTS_ROOT); } catch { return calls; }
-  for (const d of dirs) {
+  const dirs = [];
+  for (const root of PROJECTS_ROOTS) {
+    try { for (const d of fs.readdirSync(root)) dirs.push(path.join(root, d)); } catch { /* absent root */ }
+  }
+  for (const dir of dirs) {
     let files = [];
-    const dir = path.join(PROJECTS_ROOT, d);
     try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')); } catch { continue; }
     for (const f of files) {
       const sid = f.slice(0, -6);
@@ -874,7 +920,7 @@ import(pathToFileURL(REGISTRY_READER).href).then((registry) => {
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`Hotline Switchboard listening on http://127.0.0.1:${PORT}`);
     console.log(`Registry: ${SESSIONS_DIR}`);
-    console.log(`Transcripts: ${PROJECTS_ROOT}`);
+    console.log(`Transcripts: ${PROJECTS_ROOTS.join(', ')}`);
   });
 }).catch((err) => {
   console.error(`Cannot load the shared registry reader at ${REGISTRY_READER}: ${err.message}`);
