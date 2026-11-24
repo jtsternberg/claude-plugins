@@ -1366,5 +1366,45 @@ class EndToEnd(unittest.TestCase):
             self.assertFalse((home / ".claude" / "runway" / "state.json").exists())
 
 
+class ConfigDir(unittest.TestCase):
+    """Runway reads the RUNNING session's account: $CLAUDE_CONFIG_DIR when set,
+    else ~/.claude. A second account also has its own keychain entry; reading the
+    default one would report the other account's quota."""
+
+    def load_with(self, env):
+        with mock.patch.dict(os.environ, env, clear=False):
+            for k in ("CLAUDE_CONFIG_DIR",):
+                if k not in env:
+                    os.environ.pop(k, None)
+            return load("runway_cfg", "runway.py")
+
+    def test_claude_dir_follows_claude_config_dir(self):
+        with TemporaryDirectory() as home:
+            self.assertEqual(self.load_with({"HOME": home}).CLAUDE_DIR, Path(home) / ".claude")
+            mod = self.load_with({"HOME": home, "CLAUDE_CONFIG_DIR": "/tmp/acct-b"})
+            self.assertEqual(mod.CLAUDE_DIR, Path("/tmp/acct-b"))
+            self.assertEqual(mod.STATE_FILE, Path("/tmp/acct-b/runway/state.json"))
+
+    def test_keychain_service_per_config_dir(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            self.assertEqual(rw.keychain_service(), "Claude Code-credentials")
+        # Observed on a real machine: the entry for /Users/JT/.claude-alt is
+        # "Claude Code-credentials-9d5a4ef0" (sha256 of the path, first 8 hex).
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "/Users/JT/.claude-alt"}):
+            self.assertEqual(rw.keychain_service(), "Claude Code-credentials-9d5a4ef0")
+
+    def test_read_credentials_asks_the_keychain_for_that_service(self):
+        seen = []
+        def fake_run(cmd, **_):
+            seen.append(cmd)
+            return mock.Mock(stdout='{"ok": true}')
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "/Users/JT/.claude-alt"}), \
+                mock.patch.object(rw.sys, "platform", "darwin"), \
+                mock.patch.object(rw.subprocess, "run", fake_run):
+            self.assertEqual(rw.read_credentials(), {"ok": True})
+        self.assertIn("Claude Code-credentials-9d5a4ef0", seen[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

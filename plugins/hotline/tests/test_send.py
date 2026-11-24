@@ -28,6 +28,7 @@ class SendTests(unittest.TestCase):
         self.addCleanup(self.env_patch.stop)
         os.environ.pop('CLAUDE_CONFIG_DIR', None)
         os.environ.pop('HOTLINE_CLAUDE_CONFIG_DIRS', None)
+        os.environ.pop('AGENT_CLAUDE_CONFIG_DIRS', None)
         self.db = self.home / '.t3/userdata/statev2.sqlite'
         self.db.parent.mkdir(parents=True)
         with closing(sqlite3.connect(self.db)) as db, db:

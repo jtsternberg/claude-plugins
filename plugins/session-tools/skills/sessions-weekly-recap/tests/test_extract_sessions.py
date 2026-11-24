@@ -21,7 +21,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from extract_sessions import (  # noqa: E402
+    claude_projects_dirs,
     extract_session_data,
+    scan_sessions,
     genuine_user_messages,
     session_commits,
 )
@@ -127,6 +129,40 @@ class ExtractSessionData(unittest.TestCase):
         data = extract_session_data(path)
         self.assertEqual(data["user_messages"], ["do the work and commit it"])
         self.assertEqual(len(data["commits"]), 1)
+
+
+class ConfigDirs(unittest.TestCase):
+    """Sessions are scanned across $CLAUDE_CONFIG_DIR (default ~/.claude) and each
+    dir in $AGENT_CLAUDE_CONFIG_DIRS. Env is passed explicitly, never read from
+    the real shell."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="recap-cfg-")).resolve()
+
+    def session(self, config, sid):
+        d = self.home / config / "projects" / "-tmp-recap-ws"
+        d.mkdir(parents=True, exist_ok=True)
+        rec = user("build the recap fixture", sessionId=sid)
+        (d / f"{sid}.jsonl").write_text(json.dumps(rec) + "\n")
+
+    def test_order_dedupe_and_empties(self):
+        (self.home / "alt").mkdir()
+        (self.home / "alt-link").symlink_to(self.home / "alt")
+        env = {"CLAUDE_CONFIG_DIR": str(self.home / "custom"),
+               "AGENT_CLAUDE_CONFIG_DIRS": f"{self.home}/alt::{self.home}/alt-link"}
+        self.assertEqual(claude_projects_dirs(env, self.home),
+                         [self.home / "custom/projects", self.home / "alt/projects"])
+        self.assertEqual(claude_projects_dirs({}, self.home), [self.home / ".claude/projects"])
+
+    def test_scans_extra_dir_and_counts_a_shared_projects_once(self):
+        self.session(".claude", "aaaaaaaa-0000-4000-8000-000000000001")
+        self.session(".claude-alt", "aaaaaaaa-0000-4000-8000-000000000002")
+        env = {"AGENT_CLAUDE_CONFIG_DIRS": str(self.home / ".claude-alt")}
+        self.assertEqual(scan_sessions(claude_projects_dirs(env, self.home))["total_sessions"], 2)
+        (self.home / "shared").mkdir()
+        (self.home / "shared/projects").symlink_to(self.home / ".claude/projects")
+        env = {"AGENT_CLAUDE_CONFIG_DIRS": str(self.home / "shared")}
+        self.assertEqual(scan_sessions(claude_projects_dirs(env, self.home))["total_sessions"], 1)
 
 
 if __name__ == "__main__":

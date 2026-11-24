@@ -15,7 +15,7 @@ SKILL_DIR="${CLAUDE_SKILL_DIR}"
 python3 "$SKILL_DIR/scripts/send.py" <target> <message> --sender-name <name>
 ```
 
-Native Claude targets are looked up in `$CLAUDE_CONFIG_DIR` (default `~/.claude`), then in each directory listed in `HOTLINE_CLAUDE_CONFIG_DIRS` (colon-separated, for example `~/.claude-alt` for a second account). Each directory's `sessions/` is its registry and its `projects/` holds the transcripts used for confirmation; the same target in two directories refuses as ambiguous. Dial and the switchboard read the same list (see the README's Configuration section).
+Native Claude targets are looked up in `$CLAUDE_CONFIG_DIR` (default `~/.claude`), then in each directory listed in `AGENT_CLAUDE_CONFIG_DIRS` (colon-separated, for example `~/.claude-alt` for a second account). Each directory's `sessions/` is its registry and its `projects/` holds the transcripts used for confirmation; the same target in two directories refuses as ambiguous. Dial and the switchboard read the same list (see the README's Configuration section).
 
 T3-hosted sessions use T3 even when addressed by their native ID. Native Claude uses its inbox socket; native Codex uses the target account's `codex queue`. Ambiguous or missing matches refuse. A T3 schema error prevents native routing because ownership cannot be established. Each message includes a reply address and unique ID. Output is one JSON object: `delivered` means receiver transcript evidence, `held` means Claude reported a held peer message, `unconfirmed` means no proof appeared within the default 20 seconds, and `sent` means T3 accepted the request. Do not describe acceptance as delivery.
 

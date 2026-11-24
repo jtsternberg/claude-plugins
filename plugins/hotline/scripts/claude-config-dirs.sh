@@ -5,8 +5,9 @@
 # to read it; shell scripts source it.
 #
 # Lookup order: $CLAUDE_CONFIG_DIR (default ~/.claude), then each entry of
-# $HOTLINE_CLAUDE_CONFIG_DIRS (colon-separated), duplicates dropped by resolved
-# path. A second account is opted in by naming its dir; never glob ~/.claude-*.
+# $AGENT_CLAUDE_CONFIG_DIRS (colon-separated; session-tools reads the same var),
+# or of $HOTLINE_CLAUDE_CONFIG_DIRS when the neutral var is unset. Duplicates are
+# dropped by resolved path. A second account is opted in by naming its dir; never glob ~/.claude-*.
 #
 # Usage:
 #   source claude-config-dirs.sh; hotline_claude_config_dirs   # one dir per line
@@ -16,7 +17,7 @@
 hotline_claude_config_dirs() {
   local d key seen=$'\n'
   local -a extra=()
-  IFS=':' read -r -a extra <<< "${HOTLINE_CLAUDE_CONFIG_DIRS:-}"
+  IFS=':' read -r -a extra <<< "${AGENT_CLAUDE_CONFIG_DIRS-${HOTLINE_CLAUDE_CONFIG_DIRS:-}}"
   for d in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ${extra[@]+"${extra[@]}"}; do
     [[ -z "$d" ]] && continue
     # One dir reached by two spellings would otherwise refuse its own sessions

@@ -17,17 +17,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { PROJECTS_ROOT } from './transcript.mjs';
+import { projectsRoots } from './transcript.mjs';
 
-const INDEX_PATH = path.join(os.homedir(), '.claude', '.catchup-index.json');
+// Resolved per call, so it follows the caller's HOME (tests run under a sandbox one).
+const indexPath = () => path.join(os.homedir(), '.claude', '.catchup-index.json');
 const EDGE_BYTES = 32 * 1024;
 
 function projectDirs() {
-	try {
-		return fs.readdirSync(PROJECTS_ROOT, { withFileTypes: true })
-			.filter(d => d.isDirectory())
-			.map(d => path.join(PROJECTS_ROOT, d.name));
-	} catch { return []; }
+	return projectsRoots().flatMap(root => {
+		try {
+			return fs.readdirSync(root, { withFileTypes: true })
+				.filter(d => d.isDirectory())
+				.map(d => path.join(root, d.name));
+		} catch { return []; }
+	});
 }
 
 /** Session transcripts only: <projects>/<dir>/<id>.jsonl. Never subagent files. */
@@ -93,7 +96,7 @@ export function describeFile(file) {
 /** Load + refresh the index. Entries are invalidated per file by mtime. */
 export function loadIndex({ refresh = true } = {}) {
 	let cache = {};
-	try { cache = JSON.parse(fs.readFileSync(INDEX_PATH, 'utf8')).entries || {}; } catch { /* cold */ }
+	try { cache = JSON.parse(fs.readFileSync(indexPath(), 'utf8')).entries || {}; } catch { /* cold */ }
 	if (!refresh) return Object.values(cache);
 
 	const files = allSessionFiles();
@@ -108,7 +111,7 @@ export function loadIndex({ refresh = true } = {}) {
 		if (rec) { next[file] = rec; rebuilt++; }
 	}
 	try {
-		fs.writeFileSync(INDEX_PATH, JSON.stringify({ builtAt: new Date().toISOString(), entries: next }));
+		fs.writeFileSync(indexPath(), JSON.stringify({ builtAt: new Date().toISOString(), entries: next }));
 	} catch { /* index is a cache; failure to persist is not fatal */ }
 	return Object.values(next).map(r => ({ ...r, _rebuilt: rebuilt }));
 }

@@ -43,7 +43,33 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-export const PROJECTS_ROOT = path.join(os.homedir(), '.claude', 'projects');
+// Claude config dirs, in lookup order: $CLAUDE_CONFIG_DIR (default ~/.claude),
+// then each dir in $AGENT_CLAUDE_CONFIG_DIRS (colon-separated) — a second
+// account is opted in by naming its dir, never by globbing ~/.claude-*. Read at
+// call time so a caller's environment is the one that counts.
+export function claudeConfigDirs(env = process.env) {
+	const dirs = [env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
+		...(env.AGENT_CLAUDE_CONFIG_DIRS || '').split(':').filter(Boolean)];
+	return uniqueByRealpath(dirs);
+}
+
+// One projects/ per config dir. A second account's projects/ is often a
+// symlink to the first's; resolved-path dedupe keeps that one root, so a
+// session there is neither listed twice nor refused as ambiguous.
+export function projectsRoots(env = process.env) {
+	return uniqueByRealpath(claudeConfigDirs(env).map(d => path.join(d, 'projects')));
+}
+
+function uniqueByRealpath(paths) {
+	const seen = new Set();
+	return paths.filter(p => {
+		let key = path.resolve(p);
+		try { key = fs.realpathSync(p); } catch { /* absent */ }
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	}).map(p => p.replace(/\/+$/, ''));
+}
 
 // Non-conversational bookkeeping records: no message payload, nothing to show.
 export const SKIP_TYPES = new Set([

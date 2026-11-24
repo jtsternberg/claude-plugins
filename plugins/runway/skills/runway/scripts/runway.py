@@ -35,6 +35,7 @@ line while the settings-file hooks are missing or outdated.
 
 import argparse
 import functools
+import hashlib
 import importlib.util
 import json
 import os
@@ -53,7 +54,8 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 SCRIPT = Path(__file__).resolve()
 INSTALLER = SCRIPT.parent / "install-hooks.py"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
-CLAUDE_DIR = Path.home() / ".claude"
+# The running session's account: Claude Code itself reads $CLAUDE_CONFIG_DIR.
+CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 STATE_FILE = CLAUDE_DIR / "runway" / "state.json"
 LARGE_CONTEXT_LIMIT = 1_000_000
 SMALL_CONTEXT_LIMIT = 200_000
@@ -132,12 +134,23 @@ def worst(levels):
     return max(levels, key=LEVELS.index) if levels else "ok"
 
 
+def keychain_service():
+    """The Keychain entry of the running session's account. Under a non-default
+    $CLAUDE_CONFIG_DIR, Claude Code suffixes the service with the first 8 hex of
+    sha256(<dir>) (observed: /Users/JT/.claude-alt -> ...-9d5a4ef0). Reading the
+    unsuffixed entry there would report the default account's quota."""
+    config = os.environ.get("CLAUDE_CONFIG_DIR")
+    if not config:
+        return KEYCHAIN_SERVICE
+    return f"{KEYCHAIN_SERVICE}-{hashlib.sha256(config.encode()).hexdigest()[:8]}"
+
+
 def read_credentials():
     """Return the parsed Claude Code credential blob, or None when unavailable."""
     if sys.platform == "darwin":
         try:
             raw = subprocess.run(
-                ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
+                ["security", "find-generic-password", "-s", keychain_service(), "-w"],
                 capture_output=True, text=True, timeout=10,
             ).stdout.strip()
             if raw:

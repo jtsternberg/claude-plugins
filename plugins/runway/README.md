@@ -203,6 +203,11 @@ Claude Code already stores: the macOS Keychain item `Claude Code-credentials`, o
 `~/.claude/.credentials.json` on other platforms. The script only reads, and sends nothing
 anywhere else.
 
+Every `~/.claude` path in this section means the running session's config dir:
+`$CLAUDE_CONFIG_DIR` when it is set, so a second account reports its own quota and context.
+Under a non-default config dir the Keychain item is `Claude Code-credentials-<first 8 hex of
+sha256(dir)>`. This naming was observed on a real machine; it is not documented.
+
 Context comes from the `usage` block on the newest assistant message in
 `~/.claude/projects/<slug>/<session-id>.jsonl`. Input plus cache-read plus cache-write tokens is
 the context the model just saw.

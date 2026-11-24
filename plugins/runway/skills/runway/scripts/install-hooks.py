@@ -19,6 +19,7 @@ alone, and the settings file is backed up before any write.
 
 import argparse
 import json
+import os
 import re
 import shutil
 import stat
@@ -27,7 +28,7 @@ import time
 from pathlib import Path
 
 SCRIPT = (Path(__file__).resolve().parent / "runway.py")
-DEFAULT_SETTINGS = Path.home() / ".claude" / "settings.json"
+DEFAULT_SETTINGS = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "settings.json"
 MARKER = "runway.py"
 EVENTS = ("SessionStart", "UserPromptSubmit", "PostModelSwitch")
 PROMPT_THROTTLE = 900

@@ -154,8 +154,31 @@ def extract_session_data(jsonl_path: Path) -> dict:
     }
 
 
+def claude_projects_dirs(env=os.environ, home: Path | None = None) -> list[Path]:
+    """projects/ of each Claude config dir: $CLAUDE_CONFIG_DIR (default
+    ~/.claude), then each dir in $AGENT_CLAUDE_CONFIG_DIRS. Same order and rules
+    as lib/transcript.mjs projectsRoots(); a projects/ reached twice (a second
+    account symlinked to the first's) is one root."""
+    home = home or Path.home()
+    dirs = [Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude")]
+    dirs += [Path(d) for d in env.get("AGENT_CLAUDE_CONFIG_DIRS", "").split(":") if d]
+    seen, roots = set(), []
+    for d in dirs:
+        key = d.resolve()
+        if key not in seen:
+            seen.add(key)
+            roots.append(d / "projects")
+    result, seen = [], set()
+    for r in roots:
+        key = r.resolve()
+        if key not in seen:
+            seen.add(key)
+            result.append(r)
+    return result
+
+
 def scan_sessions(
-    projects_dir: Path,
+    projects_dirs: list[Path],
     since: str | None = None,
     until: str | None = None,
     weekly: bool = False,
@@ -163,7 +186,9 @@ def scan_sessions(
     """Scan all projects for sessions and return data grouped by date or week."""
     results: list[dict] = []
 
-    for jsonl in projects_dir.rglob("*.jsonl"):
+    for projects_dir, jsonl in (
+        (root, f) for root in projects_dirs if root.is_dir() for f in root.rglob("*.jsonl")
+    ):
         if jsonl.name == "history.jsonl":
             continue
         if "subagents" in str(jsonl):
@@ -278,10 +303,11 @@ if __name__ == "__main__":
     elif not args.since and not args.all:
         args.since = (datetime.now() - timedelta(days=DEFAULT_SINCE_DAYS)).strftime("%Y-%m-%d")
 
-    projects_dir = Path(os.path.expanduser("~/.claude/projects"))
-    if not projects_dir.exists():
-        print(json.dumps({"error": "No ~/.claude/projects/ directory found."}))
+    projects_dirs = [d for d in claude_projects_dirs() if d.is_dir()]
+    if not projects_dirs:
+        searched = ", ".join(str(d) for d in claude_projects_dirs())
+        print(json.dumps({"error": f"No Claude projects/ directory found (searched: {searched})."}))
         exit(1)
 
-    data = scan_sessions(projects_dir, since=args.since, until=args.until, weekly=args.weekly)
+    data = scan_sessions(projects_dirs, since=args.since, until=args.until, weekly=args.weekly)
     print(json.dumps(data, indent=2))

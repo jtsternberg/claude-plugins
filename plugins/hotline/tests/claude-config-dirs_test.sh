@@ -4,7 +4,7 @@
 # config dirs, in the same order: $CLAUDE_CONFIG_DIR (default ~/.claude), then
 # $HOTLINE_CLAUDE_CONFIG_DIRS. Fake config dirs in a temp HOME; no live session.
 #
-# Each case runs under env -u for both vars and sets only what it is about: JT's
+# Each case runs under env -u for every config var and sets only what it is about: JT's
 # shell exports HOTLINE_CLAUDE_CONFIG_DIRS pointing at the REAL dirs, so an
 # unsanitized run would search the real ~/.claude-alt.
 # =============================================================================
@@ -30,7 +30,7 @@ SID="deadbeef-1111-2222-3333-444444444444"
 run() {
   local -a sets=()
   while [[ "$1" != "--" ]]; do sets+=("$1"); shift; done; shift
-  env -u CLAUDE_CONFIG_DIR -u HOTLINE_CLAUDE_CONFIG_DIRS -u HOTLINE_CLAUDE_CONFIG_DIR \
+  env -u CLAUDE_CONFIG_DIR -u AGENT_CLAUDE_CONFIG_DIRS -u HOTLINE_CLAUDE_CONFIG_DIRS -u HOTLINE_CLAUDE_CONFIG_DIR \
     -u HOTLINE_PROJECTS_ROOT -u HOTLINE_CALLER_SESSION_ID -u CODEX_THREAD_ID \
     HOME="$H" ${sets[@]+"${sets[@]}"} "$@"
 }
@@ -41,6 +41,13 @@ eq "default is ~/.claude alone" "$(run -- bash "$S/claude-config-dirs.sh")" "$H/
 eq "CLAUDE_CONFIG_DIR replaces the default, extras follow in order, dupes and empties drop" \
   "$(run CLAUDE_CONFIG_DIR="$T/custom" HOTLINE_CLAUDE_CONFIG_DIRS="$ALT::$H/alt-link:$T/custom/:$H/.claude" -- bash "$S/claude-config-dirs.sh" | tr '\n' ' ')" \
   "$T/custom $ALT $H/.claude "
+
+eq "AGENT_CLAUDE_CONFIG_DIRS is the extra-dir list" \
+  "$(run AGENT_CLAUDE_CONFIG_DIRS="$ALT" -- bash "$S/claude-config-dirs.sh" | tr '\n' ' ')" "$H/.claude $ALT "
+eq "AGENT_CLAUDE_CONFIG_DIRS wins over the hotline-named fallback" \
+  "$(run AGENT_CLAUDE_CONFIG_DIRS="$ALT" HOTLINE_CLAUDE_CONFIG_DIRS="$T/other" -- bash "$S/claude-config-dirs.sh" | tr '\n' ' ')" "$H/.claude $ALT "
+eq "HOTLINE_CLAUDE_CONFIG_DIRS still works when the neutral var is unset" \
+  "$(run HOTLINE_CLAUDE_CONFIG_DIRS="$ALT" -- bash "$S/claude-config-dirs.sh" | tr '\n' ' ')" "$H/.claude $ALT "
 
 echo "transcript-path.sh"
 TP=(bash "$S/transcript-path.sh" --cwd "$WS" --session "$SID")

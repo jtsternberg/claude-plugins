@@ -745,7 +745,7 @@ the caller took over."
 
 Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
 
-- **`HOTLINE_CLAUDE_CONFIG_DIRS=<dir>[:<dir>...]`** — extra Claude config dirs
+- **`AGENT_CLAUDE_CONFIG_DIRS=<dir>[:<dir>...]`** — extra Claude config dirs
   (a second account) searched after `$CLAUDE_CONFIG_DIR` (default `~/.claude`).
   Dial uses them to resolve a session-id target to its workspace, to find the
   caller's own transcript, and to watch a callee's transcript. A session id found

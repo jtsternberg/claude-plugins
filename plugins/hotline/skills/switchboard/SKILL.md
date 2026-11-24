@@ -14,7 +14,7 @@ A local dashboard that shows every hotline call — who dialed whom, live/recent
 
 - Call registry: `~/.agents-hotline/sessions/*.json` (caller, callees, session IDs, modes).
 - Discovery scan: calls missing from the registry are reconstructed from the `/hotline:hotline-ringing` handshake in each callee transcript's head and shown with a `traced` stamp.
-- Transcripts: each session ID maps to `<config-dir>/projects/*/<session-id>.jsonl`, searched across `$CLAUDE_CONFIG_DIR` (default `~/.claude`) and each dir in `HOTLINE_CLAUDE_CONFIG_DIRS`, which Claude Code appends to live. The server tails these from byte offsets and streams new entries to the browser over SSE.
+- Transcripts: each session ID maps to `<config-dir>/projects/*/<session-id>.jsonl`, searched across `$CLAUDE_CONFIG_DIR` (default `~/.claude`) and each dir in `AGENT_CLAUDE_CONFIG_DIRS`, which Claude Code appends to live. The server tails these from byte offsets and streams new entries to the browser over SSE.
 - Zero dependencies: single-file Node server, inline HTML/JS UI, no build step.
 
 ## Commands

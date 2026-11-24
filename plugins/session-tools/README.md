@@ -104,7 +104,7 @@ The installed plist:
 #### Requirements
 
 - Python 3.10+
-- Claude Code session transcripts at `~/.claude/projects/`
+- Claude Code session transcripts under each config dir's `projects/`: `$CLAUDE_CONFIG_DIR` (default `~/.claude`), then each dir in `AGENT_CLAUDE_CONFIG_DIRS` (colon-separated, for a second account). A `projects/` symlinked to another dir's is read once; a session id found in two distinct dirs is refused as ambiguous.
 - macOS for the launchd installer (the skill itself works on any OS)
 
 #### Files
@@ -112,7 +112,7 @@ The installed plist:
 | File | Purpose |
 |------|---------|
 | `skills/sessions-weekly-recap/SKILL.md` | Skill definition — modes, merge rules, writing guidelines |
-| `skills/sessions-weekly-recap/scripts/extract_sessions.py` | Scans `~/.claude/projects/*.jsonl` and emits structured JSON |
+| `skills/sessions-weekly-recap/scripts/extract_sessions.py` | Scans `<config-dir>/projects/*/*.jsonl` across the config dirs and emits structured JSON |
 | `skills/sessions-weekly-recap/scripts/install_cron.sh` | Installs/manages the weekly launchd job |
 
 ---
@@ -316,7 +316,7 @@ node --test plugins/session-tools/tests/transcript.test.mjs
 
 ### 🔎 sessions-find
 
-"Find the session where we X." Greps every transcript under `~/.claude/projects/` for the event, then answers with session id, date, cwd, and a `claude --resume` command. One file, no script — exact events like a clone or a PR are what semantic search misses.
+"Find the session where we X." Greps every transcript under each config dir's `projects/` for the event, then answers with session id, date, cwd, and a `claude --resume` command. One file, no script — exact events like a clone or a PR are what semantic search misses.
 
 ---
 

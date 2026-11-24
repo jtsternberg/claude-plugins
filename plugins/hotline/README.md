@@ -203,7 +203,7 @@ that *is* there, and delivery submits with Return, so the shell would run it. Wh
 the box never appears, hotline refuses to deliver and reports
 `stage: "deliver"` with the prompt still on disk.
 
-### Extra Claude config dirs (`HOTLINE_CLAUDE_CONFIG_DIRS`)
+### Extra Claude config dirs (`AGENT_CLAUDE_CONFIG_DIRS`)
 
 Hotline reads Claude Code's own state from a config dir: the `sessions/`
 registry and the `projects/` transcripts. It looks in `$CLAUDE_CONFIG_DIR`
@@ -213,7 +213,7 @@ dir, so list those dirs, colon-separated:
 ```json
 {
   "env": {
-    "HOTLINE_CLAUDE_CONFIG_DIRS": "/Users/you/.claude-alt"
+    "AGENT_CLAUDE_CONFIG_DIRS": "/Users/you/.claude-alt"
   }
 }
 ```
@@ -225,6 +225,8 @@ These honor it, all through `scripts/claude-config-dirs.sh`:
 - `dial`: resolves a session id to its workspace, finds the caller's own
   transcript, and watches the callee's transcript for boot and response.
 - `switchboard`: lists and tails transcripts from every dir.
+
+The variable is shared with other plugins that read Claude Code's state, such as session-tools. When `AGENT_CLAUDE_CONFIG_DIRS` is unset, hotline reads `HOTLINE_CLAUDE_CONFIG_DIRS` instead.
 
 A dir named twice (directly or through a symlink) is searched once. A session
 found in two different dirs refuses as ambiguous rather than picking one; a
