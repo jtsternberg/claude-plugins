@@ -42,9 +42,8 @@ frontmatter `name`. For example: `/qa-walkthrough-pr:qa-walkthrough-pr`.
 
 ### Codex
 
-Codex's native catalog currently offers `codex`, `hotline`, and the five PR plugins
-(`address-pr-comments`, `qa-walkthrough-pr`, `update-pr-description`,
-`walk-through-work-history`, `watch-pr-then-action`):
+Codex's native catalog offers every plugin except the few with no Codex surface
+(listed under `notAvailable` in `scripts/codex-catalog.config.json`):
 
 ```bash
 codex plugin marketplace add jtsternberg/claude-plugins
