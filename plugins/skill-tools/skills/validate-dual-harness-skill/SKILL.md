@@ -13,7 +13,7 @@ Codex: if the invocation token above is not substituted, use the text following 
 ## Establish scope
 
 1. Resolve each target `SKILL.md`, its plugin root, manifest, bundled resources, tests, and `agents/openai.yaml` when present.
-2. Read every applicable `AGENTS.md`. In this repository, treat `Dual-Harness Skill Contract` as authoritative.
+2. Read every applicable `AGENTS.md` and `CLAUDE.md`. If one states a dual-harness skill contract (in jtsternberg/claude-plugins, the `Dual-Harness Skill Contract` section), it overrides this checklist where they differ. If none does, this checklist is the contract, and the repo's missing setup gets reported (see the last section).
 3. Determine whether the skill promises dual-harness support or is explicitly harness-specific. Do not demand parity from a deliberate exception, but require the exception to be visible in metadata and documentation.
 4. When reviewing branch changes, compare the target files with the merge base so removed Claude behavior is visible; do not review only the final text.
 
@@ -44,10 +44,33 @@ Report a concrete failure whenever one of these contracts is violated:
 
 ## Prove the result
 
-1. Run the target plugin's focused tests.
-2. In this repository, run:
+1. Run the bundled static checker against every target skill directory, in every repository:
+
+   Codex: this path resolves under Claude Code; substitute the directory containing this SKILL.md.
+
+   ```bash
+   SKILL_DIR="${CLAUDE_SKILL_DIR}"
+   bash "$SKILL_DIR/scripts/check-skill.sh" <skill-dir-or-SKILL.md>...
+   ```
+
+   It reports `file:line: [rule]` for path tokens, Codex-only prose, dynamic-context placeholders, and explicit-only parity, and exits 1 on any violation. It cannot judge routing metadata, `allowed-tools` sync, or runtime behavior; check those by reading.
+2. Run the target plugin's focused tests, if the repository has any.
+3. Run the repository's own dual-harness checks when they exist. In jtsternberg/claude-plugins they are:
    - `bash plugins/codex/tests/skill-paths_test.sh`
    - `node --test plugins/codex/tests/compatibility.test.mjs`
-   - `bash tests/run-all.sh`
-3. If the edit changes paths, arguments, routing, hooks, permissions, or dynamic context, run a representative installed-plugin probe under both Claude Code and Codex. Static scans alone are insufficient.
-4. Report blockers first with file and line references, then non-blocking follow-ups, then exact test/probe evidence. If no issue remains, say which contracts were checked rather than giving a generic approval.
+   - `bash tests/run-all.sh`, only when the change touches scripts, tests, path tokens, invocation arguments, hooks, or a manifest or catalog.
+   Elsewhere, look for equivalents named in `AGENTS.md`/`CLAUDE.md`, CI workflows, or `tests/`. Do not invent commands.
+4. If the edit changes paths, arguments, routing, hooks, permissions, or dynamic context, run a representative installed-plugin probe under both Claude Code and Codex. Static scans alone are insufficient.
+5. Report blockers first with file and line references, then non-blocking follow-ups, then exact test/probe evidence. If no issue remains, say which contracts were checked rather than giving a generic approval.
+
+## When the repository lacks the setup
+
+A missing contract or missing checks never fails the skill under review. Report it in a separate **Repo setup** section after the findings, naming only what is actually missing:
+
+- **No written contract:** recommend adding the section in `${CLAUDE_SKILL_DIR}/references/repo-contract-template.md` to the repository's `AGENTS.md` (or `CLAUDE.md` when that file is what agents load there), adapted to the repo's layout.
+- **No automated check:** recommend running `check-skill.sh` in the repository's test suite or CI over its skill directories. Since the script lives in the installed plugin, the repository needs its own copy (for example `scripts/check-skill.sh`). Note that a copy does not pick up later rule changes on its own.
+- **No dual-harness probe:** recommend one documented smoke test per harness: install the plugin, invoke one skill with an argument, and confirm a bundled script path resolves.
+
+Codex: the template sits at `references/repo-contract-template.md` inside the directory containing this SKILL.md.
+
+Offer these as recommendations. Edit the repository only if the user asks.

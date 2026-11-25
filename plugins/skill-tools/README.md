@@ -77,7 +77,7 @@ Analyzes a skill file against best practices:
 
 ### `/skill-tools:validate-dual-harness-skill`
 
-Validate a new or edited skill against this repository's Claude Code and Codex contracts.
+Validate a new or edited skill against the Claude Code and Codex skill contracts, in this repository or any other.
 
 ```text
 Claude Code: /skill-tools:validate-dual-harness-skill <skill-name-or-path>
@@ -85,6 +85,14 @@ Codex: $skill-tools:validate-dual-harness-skill <skill-name-or-path>
 ```
 
 Checks discovery, routing metadata, explicit-invocation gates, argument interpolation, runtime paths, dynamic context, permission assumptions, versioning, and focused behavioral proof.
+
+Ships a standalone static checker that reports `file:line: [rule]` violations and exits non-zero, so any repository can run it in CI:
+
+```bash
+bash <installed-skill-dir>/scripts/check-skill.sh [--exclude GLOB]... <skill-dir-or-SKILL.md>...
+```
+
+In a repository with no written dual-harness contract or no automated check, the review ends with a **Repo setup** section recommending what to add. A contract template is bundled at `skills/validate-dual-harness-skill/references/repo-contract-template.md`.
 
 ### `/skill-tools:review-slash-command`
 
