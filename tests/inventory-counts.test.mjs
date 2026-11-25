@@ -50,3 +50,19 @@ test('the support matrix carries exactly one row per catalogued plugin', () => {
 		'catalogued plugins with no matrix row',
 	);
 });
+
+// The Codex column restated catalog policy by hand and went a quarter claiming a
+// seven-plugin subset after the generator began emitting the full inventory.
+test('the support matrix Codex column matches the generated Codex catalog policy', () => {
+	const guide = readText('docs/compatibility.md');
+	const matrix = guide.slice(guide.indexOf('## Plugin support matrix'));
+	const codexInstallable = new Set(
+		readJson('.agents/plugins/marketplace.json')
+			.plugins.filter((p) => p.policy?.installation !== 'NOT_AVAILABLE')
+			.map((p) => p.name),
+	);
+	const wrong = [...matrix.matchAll(/^\| \[([^\]]+)\]\([^)]*\) \| [^|]+ \| ([^|]+?) \|/gm)]
+		.map(([, name, codex]) => ({ name, codex, want: codexInstallable.has(name) ? 'Available' : 'Not offered' }))
+		.filter((row) => row.codex !== row.want);
+	assert.deepEqual(wrong, [], 'matrix Codex cells disagreeing with .agents/plugins/marketplace.json');
+});

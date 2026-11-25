@@ -4,12 +4,14 @@ This is the maintained guide for installing and using this repository's
 plugins in Claude Code and Codex. The harnesses deliberately publish different
 catalogs, so install from the column that matches the client you are using.
 
-**Last reviewed:** 2026-08-11
+**Last reviewed:** 2026-11-25 (Codex column; a GitHub-backed install re-verified on Codex CLI 0.172.0)
 
 **Catalog probes:** Claude Code 2.1.226 and Codex CLI 0.147.0
 
-The clean probes confirmed that Claude Code and Codex resolve separate catalogs
-and that Codex offers only a subset. The matrix below is the current inventory —
+Claude Code and Codex resolve separate catalogs. The Codex catalog is generated
+from the Claude Code one and offers every plugin except those marked
+`NOT_AVAILABLE` in `scripts/codex-catalog.config.json`; Codex-only plugins are
+the reverse. The matrix below is the current inventory —
 39 entries in the Claude Code catalog, 40 names across both. Recheck this guide
 after a client upgrade or a catalog change.
 
@@ -34,8 +36,8 @@ is not necessarily its invocation name.
 
 ### Codex
 
-Add the marketplace, then choose one of the three **Available** Codex-native
-plugins in the matrix:
+Add the marketplace, then install any plugin marked **Available** in the
+matrix's Codex column:
 
 ```bash
 codex plugin marketplace add jtsternberg/claude-plugins
@@ -102,12 +104,13 @@ is deliberately not repeated here.
 
 ## Reading the matrix
 
-- **Available** means the plugin appears in that harness's observed catalog and
-  is maintained as a working surface for that harness. Packaging and repository
-  checks support the classification; machine-specific prerequisites remain the
-  user's responsibility.
-- **Not offered** means it does not appear in that harness's observed catalog;
-  it is not a claim that the underlying idea could never work there.
+- **Available** means that harness's catalog offers the plugin for install.
+  Skills that only make sense in one harness (reading Claude Code transcripts,
+  for example) say so in the last column; machine-specific prerequisites remain
+  the user's responsibility.
+- **Not offered** means that harness's catalog does not install it (absent, or
+  `NOT_AVAILABLE` in the Codex catalog); it is not a claim that the underlying
+  idea could never work there.
 - **Redirect** means this repository's catalog entry is not the working plugin;
   it points users to a separately maintained distribution.
 - **Manual setup** means no installable skill/plugin surface is supplied for
@@ -121,29 +124,29 @@ state, or user configuration. Those constraints are noted in the last column.
 
 | Plugin | Claude Code | Codex | Requirements and scope |
 | --- | --- | --- | --- |
-| [agentmail](../plugins/agentmail) | Available | Not offered | Requires the `agentmail` CLI and an `AGENTMAIL_API_KEY`. |
-| [beads-workflow](../plugins/beads-workflow) | Available | Not offered | Both workflows support [standalone skill installation](codex/standalone-skills.md); requires the `bd` CLI for Beads work. |
-| [bible](../plugins/bible) | Available | Not offered | Requires the configured Bible API access. |
-| [cmux-cli](../plugins/cmux-cli) | Available | Not offered | macOS only; requires cmux.app and its `cmux` executable. |
+| [agentmail](../plugins/agentmail) | Available | Available | Requires the `agentmail` CLI and an `AGENTMAIL_API_KEY`. |
+| [beads-workflow](../plugins/beads-workflow) | Available | Available | Both workflows support [standalone skill installation](codex/standalone-skills.md); requires the `bd` CLI for Beads work. |
+| [bible](../plugins/bible) | Available | Available | Requires the configured Bible API access. |
+| [cmux-cli](../plugins/cmux-cli) | Available | Available | macOS only; requires cmux.app and its `cmux` executable. |
 | [codex](../plugins/codex) | Not offered | Available | Codex-native model-stance and delegation skills. |
-| [collab-tools](../plugins/collab-tools) | Available | Not offered | No extra platform requirement documented. |
+| [collab-tools](../plugins/collab-tools) | Available | Available | No extra platform requirement documented. |
 | [delayed-work](../plugins/delayed-work) | Available | Available | Zero-token waiting uses Claude Code's `Monitor`; Codex's only in-session wait blocks the turn, so it is honest there for short horizons only. Nothing here survives the session closing. |
-| [export-presentation](../plugins/export-presentation) | Available | Not offered | Requires browser automation dependencies. |
-| [fable](../plugins/fable) | Available | Not offered | Claude Code plugin; the Codex-native `codex` plugin carries its separate A/B skills. |
+| [export-presentation](../plugins/export-presentation) | Available | Available | Requires browser automation dependencies. |
+| [fable](../plugins/fable) | Available | Available | Claude Code plugin; the Codex-native `codex` plugin carries its separate A/B skills. |
 | [gauntlet](../plugins/gauntlet) | Available | Available | Requires `hotline` with its herdr transport, `herdr`, `git`, and Node. Either harness can lead a run; builders and critics are Claude Code callees on herdr. |
-| [generating-blog-images](../plugins/generating-blog-images) | Available | Not offered | Produces prompts; use of an image provider is a separate choice. |
-| [git-commits](../plugins/git-commits) | Available | Not offered | Both workflows support [standalone skill installation](codex/standalone-skills.md); requires a Git working tree. |
-| [git-tree](../plugins/git-tree) | Available | Not offered | Requires Git and local worktree prerequisites. |
-| [gws](../plugins/gws) | Available | Not offered | Requires the Google Workspace CLI and its authentication/setup. |
-| [google-foresight](../plugins/google-foresight) | Available | Not offered | macOS only; reads the Foresight app's local SQLite database with `python3`. The schema is an app internal and is checked on every run. |
-| [handoff](../plugins/handoff) | Available | Not offered | Uses local session/Beads context as described by the plugin. |
-| [headline-refiner](../plugins/headline-refiner) | Available | Not offered | No extra platform requirement documented. |
+| [generating-blog-images](../plugins/generating-blog-images) | Available | Available | Produces prompts; use of an image provider is a separate choice. |
+| [git-commits](../plugins/git-commits) | Available | Available | Both workflows support [standalone skill installation](codex/standalone-skills.md); requires a Git working tree. |
+| [git-tree](../plugins/git-tree) | Available | Available | Requires Git and local worktree prerequisites. |
+| [gws](../plugins/gws) | Available | Available | Requires the Google Workspace CLI and its authentication/setup. |
+| [google-foresight](../plugins/google-foresight) | Available | Available | macOS only; reads the Foresight app's local SQLite database with `python3`. The schema is an app internal and is checked on every run. |
+| [handoff](../plugins/handoff) | Available | Available | Uses local session/Beads context as described by the plugin. |
+| [headline-refiner](../plugins/headline-refiner) | Available | Available | No extra platform requirement documented. |
 | [hotline](../plugins/hotline) | Available | Available | Codex can place calls; the current launch transport starts Claude Code receivers. `cmux` is optional/preferred on macOS; calls need reachable local workspaces and a working Claude launcher. |
-| [localwp-shell](../plugins/localwp-shell) | Available | Not offered | macOS only; requires LocalWP and its local shell tooling. |
-| [mac-caffeinate](../plugins/mac-caffeinate) | Available | Not offered | macOS only; uses the system `caffeinate` utility. |
-| [maestro](../plugins/maestro) | Available | Not offered | Orchestration and waiting stances; binds to `hotline` and `cmux-cli` when installed, otherwise falls back to subagents. |
-| [obsidian-cli](../plugins/obsidian-cli) | Available | Not offered | Requires Obsidian CLI v1.12+ and a local vault. |
-| [paperclip](../plugins/paperclip) | Available | Not offered | Requires a locally running Paperclip instance and CLI. |
+| [localwp-shell](../plugins/localwp-shell) | Available | Available | macOS only; requires LocalWP and its local shell tooling. |
+| [mac-caffeinate](../plugins/mac-caffeinate) | Available | Available | macOS only; uses the system `caffeinate` utility. |
+| [maestro](../plugins/maestro) | Available | Available | Orchestration and waiting stances; binds to `hotline` and `cmux-cli` when installed, otherwise falls back to subagents. |
+| [obsidian-cli](../plugins/obsidian-cli) | Available | Available | Requires Obsidian CLI v1.12+ and a local vault. |
+| [paperclip](../plugins/paperclip) | Available | Available | Requires a locally running Paperclip instance and CLI. |
 | [address-pr-comments](../plugins/pr-workflow/address-pr-comments) | Available | Available | Requires an open PR and GitHub CLI authentication. |
 | [pr-workflow](../plugins/pr-workflow/bundle) | Available | Not offered | Dependency-only bundle for the five PR plugins; Codex does not resolve `dependencies`, so install the children there instead. |
 | [qa-walkthrough-pr](../plugins/pr-workflow/qa-walkthrough-pr) | Available | Available | Requires GitHub CLI authentication and the `bd` CLI for Beads work. |
@@ -151,15 +154,15 @@ state, or user configuration. Those constraints are noted in the last column.
 | [walk-through-work-history](../plugins/pr-workflow/walk-through-work-history) | Available | Available | Requires GitHub CLI authentication for PR history. |
 | [watch-pr-then-action](../plugins/pr-workflow/watch-pr-then-action) | Available | Available | Requires GitHub CLI authentication; schedules a polling cron job. |
 | [publish-insights](../plugins/publish-insights) | Redirect | Not offered | Install from the separately maintained `jtsternberg/claude-usage-data` marketplace; it also requires Git, authenticated `gh`, and a Claude Code insights report. |
-| [research-tools](../plugins/research-tools) | Available | Not offered | Requires network access for source retrieval. A self-contained skill can instead be installed through the standalone guide. |
+| [research-tools](../plugins/research-tools) | Available | Available | Requires network access for source retrieval. A self-contained skill can instead be installed through the standalone guide. |
 | [runway](../plugins/runway) | Available | Not offered | Reads Claude Code quota and transcripts, and ships Claude Code session hooks; pairs with `delayed-work` for the 429 wake-up. |
-| [session-tools](../plugins/session-tools) | Available | Not offered | Operates on Claude Code session transcripts. |
-| [skill-tools](../plugins/skill-tools) | Available | Not offered | Some workflows require their documented local toolchain. |
-| [slack](../plugins/slack) | Available | Not offered | Requires Slack Web API credentials/configuration. |
-| [slides-presentation](../plugins/slides-presentation) | Available | Not offered | Requires its documented browser/image-generation tooling as needed. |
-| [text-to-speech](../plugins/text-to-speech) | Available | Not offered | macOS playback via `afplay`; requires a running Ollama with a Phonon tag pulled, and `ffmpeg` for speed changes or MP3/M4A output. |
-| [thinking-tools](../plugins/thinking-tools) | Available | Not offered | No extra platform requirement documented. |
-| [work-with-media](../plugins/work-with-media) | Available | Not offered | macOS support is required for MacWhisper; `yt-dlp` covers supported URL workflows. |
+| [session-tools](../plugins/session-tools) | Available | Available | Operates on Claude Code session transcripts. |
+| [skill-tools](../plugins/skill-tools) | Available | Available | Some workflows require their documented local toolchain. |
+| [slack](../plugins/slack) | Available | Available | Requires Slack Web API credentials/configuration. |
+| [slides-presentation](../plugins/slides-presentation) | Available | Available | Requires its documented browser/image-generation tooling as needed. |
+| [text-to-speech](../plugins/text-to-speech) | Available | Available | macOS playback via `afplay`; requires a running Ollama with a Phonon tag pulled, and `ffmpeg` for speed changes or MP3/M4A output. |
+| [thinking-tools](../plugins/thinking-tools) | Available | Available | No extra platform requirement documented. |
+| [work-with-media](../plugins/work-with-media) | Available | Available | macOS support is required for MacWhisper; `yt-dlp` covers supported URL workflows. |
 | [workspace-status](../plugins/workspace-status) | Manual setup | Not offered | Configure Claude Code's `statusLine` manually as documented; requires PHP (and Git for repository status). |
 
 The matrix describes what each marketplace offers, not a promise that every
