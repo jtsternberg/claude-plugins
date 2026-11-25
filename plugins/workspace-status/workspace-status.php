@@ -343,6 +343,11 @@ function generate_summary_via_ollama($messages, $model) {
     $payload = json_encode([
         'model'    => $model,
         'stream'   => false,
+        // Default 32k ctx roughly doubles resident memory; the prompt is ~1KB.
+        'options'  => ['num_ctx' => 2048],
+        // Ollama's 5m default holds ~1GB long after work stops; 90s spans typical
+        // gaps between messages, so it rarely cold-loads mid-session.
+        'keep_alive' => '90s',
         'messages' => [
             ['role' => 'system', 'content' => $system],
             ['role' => 'user',   'content' => $user],
@@ -368,7 +373,20 @@ function generate_summary_via_ollama($messages, $model) {
 
     $data = json_decode($response, true);
     $text = trim($data['message']['content'] ?? '');
-    return $text ?: null;
+
+    // Small models sometimes echo the multi-line excerpt back instead of
+    // summarizing; keep one short line so the status line (and cache) stays sane.
+    $first = '';
+    foreach (preg_split('/\R/', $text) as $line) {
+        if (trim($line) !== '') {
+            $first = trim($line);
+            break;
+        }
+    }
+    if (mb_strlen($first) > 60) {
+        $first = rtrim(mb_substr($first, 0, 59)) . '…';
+    }
+    return $first !== '' ? $first : null;
 }
 
 /**
@@ -451,18 +469,16 @@ function generate_status_line($input_data) {
         $parts[] = getMsg('$' . $cost, 'green');
     }
 
-    // Ollama model: prefer config file, fall back to a small default
-    $ollama_model = 'qwen2.5-coder:1.5b';
+    // AI summary is opt-in: a resident Ollama model costs ~2GB of RAM.
+    $ollama_model = '';
     $config_file = ($_SERVER['HOME'] ?? '') . '/.config/workspace-status/config';
     if (file_exists($config_file)) {
         $cfg = parse_ini_file($config_file) ?: [];
-        if (!empty($cfg['OLLAMA_MODEL'])) {
-            $ollama_model = $cfg['OLLAMA_MODEL'];
-        }
+        $ollama_model = trim((string)($cfg['OLLAMA_MODEL'] ?? ''));
     }
-
-    // AI-generated conversation summary
-    $parts[] = get_conversation_summary($transcript_path, $ollama_model);
+    if ($ollama_model !== '') {
+        $parts[] = get_conversation_summary($transcript_path, $ollama_model);
+    }
 
     $line1 = implode(' | ', $parts);
 
