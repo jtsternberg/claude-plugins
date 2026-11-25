@@ -58,20 +58,97 @@ function get_git_branch() {
 }
 
 /**
- * Get git status indicator showing number of changed files.
- *
- * @return string Empty string or ±N format where N is number of changes
+ * Terminal columns the text occupies, ignoring ANSI escapes.
  */
-function get_git_status() {
+function visible_width($text) {
+    $plain = preg_replace('/\e\[[0-9;]*m/', '', $text);
+    return function_exists('mb_strwidth') ? mb_strwidth($plain, 'UTF-8') : strlen(utf8_decode($plain));
+}
+
+/**
+ * Render [bg, fg, text] segments (256-color numbers) joined by powerline arrows.
+ */
+function render_segments($segments) {
+    $sep = "\u{E0B0}";
+    $out = '';
+    $prev = null;
+    foreach ($segments as [$bg, $fg, $text]) {
+        if ($prev !== null) {
+            $out .= "\e[48;5;{$bg}m\e[38;5;{$prev}m{$sep}";
+        }
+        $out .= "\e[48;5;{$bg}m\e[38;5;{$fg}m {$text} ";
+        $prev = $bg;
+    }
+    if ($prev !== null) {
+        $out .= "\e[0m\e[38;5;{$prev}m{$sep}\e[0m";
+    }
+    return $out;
+}
+
+/**
+ * Shortest ~/.dirmap.json key whose path is exactly $dir, or '' (no file = no segment).
+ */
+function get_dirmap_key($dir) {
+    $home = $_SERVER['HOME'] ?? '';
+    $file = $home . '/.dirmap.json';
+    if (!is_readable($file)) {
+        return '';
+    }
+    $map = json_decode((string)file_get_contents($file), true);
+    if (!is_array($map)) {
+        return '';
+    }
+    $dir = rtrim($dir, '/');
+    $best = '';
+    foreach ($map as $key => $path) {
+        $key = (string)$key;
+        if ($key === '' || !is_string($path)) {
+            continue;
+        }
+        $path = rtrim(preg_replace('#^~#', $home, $path), '/');
+        if ($path === $dir && ($best === '' || strlen($key) < strlen($best))) {
+            $best = $key;
+        }
+    }
+    return $best;
+}
+
+/**
+ * ~-relative path, collapsed to first 3 + ‹‹N›› + last 2 segments when over 50 chars.
+ */
+function get_short_path($dir) {
+    $home = $_SERVER['HOME'] ?? '';
+    $path = ($home !== '' && strpos($dir, $home) === 0) ? '~' . substr($dir, strlen($home)) : $dir;
+    $segs = explode('/', $path);
+    $n = count($segs);
+    if ($n < 6 || strlen($path) <= 50) {
+        return $path;
+    }
+    return implode('/', array_slice($segs, 0, 3)) . '/‹‹' . ($n - 5) . '››/' . implode('/', array_slice($segs, -2));
+}
+
+/**
+ * ● for unstaged/untracked changes, ✚ for staged ones, '' when clean.
+ */
+function get_git_markers() {
     $output = null;
     $return_var = null;
     exec('git status --porcelain 2>/dev/null', $output, $return_var);
-
-    if ($return_var === 0 && !empty($output)) {
-        return '±' . count($output);
+    if ($return_var !== 0) {
+        return '';
     }
-
-    return '';
+    $unstaged = $staged = false;
+    foreach ($output as $line) {
+        $x = $line[0] ?? ' ';
+        $y = $line[1] ?? ' ';
+        if ($x === '?' || ($y !== ' ' && $y !== '')) {
+            $unstaged = true;
+        }
+        if ($x !== ' ' && $x !== '?') {
+            $staged = true;
+        }
+    }
+    return ($unstaged ? '●' : '') . ($staged ? '✚' : '');
 }
 
 /**
@@ -426,32 +503,32 @@ function get_conversation_summary($transcript_path, $model) {
  * @return string Formatted status line with ANSI color codes
  */
 function generate_status_line($input_data) {
-    $parts = [];
+    // Line 1 is drawn as powerline segments; cost and summary trail the last arrow.
+    $segments = [];
 
-    // Model display name
     $model_info = $input_data['model'] ?? [];
-    $model_name = $model_info['display_name'] ?? 'Claude';
-    $parts[] = getMsg("[{$model_name}]", 'cyan');
+    $segments[] = [236, 51, $model_info['display_name'] ?? 'Claude'];
 
-    // Current directory
     $workspace = $input_data['workspace'] ?? [];
     $current_dir = $workspace['current_dir'] ?? '';
     if ($current_dir) {
-        $dir_name = basename($current_dir);
-        $parts[] = getMsg('📁 ', 'blue') . getMsg('/', 'dark_gray') . getMsg($dir_name, 'blue');
+        $dirmap_key = get_dirmap_key($current_dir);
+        if ($dirmap_key !== '') {
+            // The key already locates the dir, so the path only needs its leaf.
+            $segments[] = [5, 15, $dirmap_key];
+            $segments[] = [4, 0, basename($current_dir)];
+        } else {
+            $segments[] = [4, 0, get_short_path($current_dir)];
+        }
     }
 
-    // Git branch and status
     $git_branch = get_git_branch();
     if ($git_branch) {
-        $git_status = get_git_status();
-        $git_info = "🌿 {$git_branch}";
-        if ($git_status) {
-            $git_info .= " {$git_status}";
-        }
-        $parts[] = getMsg($git_info, 'green');
+        $markers = get_git_markers();
+        $segments[] = [$markers === '' ? 2 : 3, 0, "\u{E0A0} {$git_branch}" . ($markers !== '' ? " {$markers}" : '')];
     }
 
+    $parts = [render_segments($segments)];
     // Context bar — prefer native used_percentage, fall back to transcript calculation
     $transcript_path = $input_data['transcript_path'] ?? '';
     $max_context = $input_data['context_window']['context_window_size'] ?? 200000;
@@ -480,7 +557,7 @@ function generate_status_line($input_data) {
         $parts[] = get_conversation_summary($transcript_path, $ollama_model);
     }
 
-    $line1 = implode(' | ', $parts);
+    $line1 = implode('  ', $parts);
 
     // Line 2: context bar + rate limits with visual bars
     $line2_parts = [];
@@ -508,7 +585,11 @@ function generate_status_line($input_data) {
     $line2 = implode('  ', $line2_parts);
 
     if (!empty($input_data['session_id'])) {
-        $line2 .= ' | ' . getMsg($input_data['session_id'], 'dark_gray');
+        $session = getMsg($input_data['session_id'], 'dark_gray');
+        // Claude Code passes the terminal width as COLUMNS; a wrapped line would split the id mid-copy.
+        $cols = (int)getenv('COLUMNS');
+        $fits = $cols <= 0 || visible_width($line2) + 3 + strlen($input_data['session_id']) <= $cols;
+        $line2 .= $fits ? ' | ' . $session : "\n" . $session;
     }
 
     $line1 .= "\n" . $line2;

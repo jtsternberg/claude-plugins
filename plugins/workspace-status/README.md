@@ -33,17 +33,21 @@ Replace `/path/to/claude-plugins/` with the actual path to your clone of this re
 Displays a dynamic status line at the bottom of your Claude Code terminal showing:
 
 - **Model name**: Current Claude model in use
-- **Current directory**: Working directory name
-- **Git branch**: Active git branch (if in a repo)
-- **Git status**: Clean, modified, or staged indicator
+- **Line 1 is powerline segments** (needs a Powerline-patched font):
+  - **Model name**: Current Claude model in use
+  - **Dirmap key** (optional): the shortest key in `~/.dirmap.json` whose path is the current directory; with no file or no match, the segment is hidden
+  - **Current directory**: just the folder name when a dirmap key is shown, else the `~`-relative path, collapsed to `first/3/segs/‹‹N››/last/two` past 50 characters
+  - **Git branch**: green when clean, yellow when dirty, with `●` for unstaged/untracked and `✚` for staged changes
+- **Cost**: session cost in USD, after the last segment
 - **Context usage**: Visual bar showing conversation context consumption
-- **Session ID**: Shown at the end of the second line, so you don't need `/status` to copy it
+- **Session ID**: Shown at the end of the second line, so you don't need `/status` to copy it, or on its own third line when the terminal (`COLUMNS`) is too narrow to fit it
 - **Conversation summary** (optional): 💭 one-line summary of recent messages from a local Ollama model — see below
 
 ## Example Output
 
 ```
-claude-sonnet-4 | ~/my-project | main ✓ | ████████░░ 80%
+Opus 5.5 ▶ myproj ▶ my-project ▶  main ● ▶  $0.74
+█▄░░░░░░░░░░░░░ 9% of 1000k  5h: ███│▄░░░░░░░░░░ 30% | <session-id>
 ```
 
 ## Conversation Summary (opt-in)
