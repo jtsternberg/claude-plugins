@@ -436,6 +436,13 @@ review/PR time; the `publish-release` runbook runs that scan at ship time.
   path, give it a dir knob defaulting to the production path and point every harness
   at its own `mktemp -d` (`HOTLINE_SESSION_CACHE_DIR`). (#27 CI run 36729320619,
   5162c06)
+- **A suite never reads or writes the developer's real HOME, account dirs or
+  settings; it gets them from the scratch env run-all builds.** Suites run inside live
+  sessions, so an inherited `CLAUDE_CONFIG_DIR` both failed hotline suites on a
+  second-account box and let a runway case write hooks into the real settings, which
+  blocked every prompt once its tmp dir was gone. `run_task` gives every suite a fresh
+  HOME (opt out only with a reported `run-all: real-home` line), and the run fails if
+  any real `~/.claude*`/`~/.codex*` config changed. (PR #55)
 - **A suite is not green until it is green on Linux.** The ubuntu runner is the
   only Linux check, and a macOS-green suite hid a red CI for the entire
   terminal.paste rework — portability bugs (BSD-only `stat`, `getppid` reparenting

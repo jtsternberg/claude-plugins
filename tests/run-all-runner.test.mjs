@@ -380,46 +380,92 @@ test('interrupt signals only the process groups still in flight', async (t) => {
 	assert.deepEqual([...signalled].sort(), [hangPid], `also signalled the reaped suite's group (${donePid})`);
 });
 
-// A suite that writes a real account's settings.json has already broken that
-// account (a hook pointing into a deleted tmp dir blocks every prompt), so the run
-// must fail loudly, whichever spelling of the file the suite wrote through.
-test('fails the run when a suite changes an account settings.json', (t) => {
-	for (const via of ['home', 'config-dir-symlink']) {
+// No suite inherits the developer's real dirs: each gets a fresh scratch HOME, and
+// the account/config dirs resolve inside it. A suite that writes "its" settings
+// therefore writes scratch, whoever wrote the test.
+function runWithHome(root, home, extraEnv = {}) {
+	const state = join(root, 'state');
+	mkdirSync(state, { recursive: true });
+	return spawnSync('/bin/bash', ['tests/run-all.sh'], {
+		cwd: root, encoding: 'utf8',
+		env: { ...process.env, HOME: home, RUN_ALL_JOBS: '1', RUNNER_TEST_STATE: state, ...extraEnv },
+	});
+}
+function fakeHome(root) {
+	const home = join(root, 'home');
+	for (const d of ['.claude', '.claude-alt', '.codex']) mkdirSync(join(home, d), { recursive: true });
+	writeFileSync(join(home, '.claude', 'settings.json'), '{}\n');
+	spawnSync('ln', ['-sf', join(home, '.claude', 'settings.json'), join(home, '.claude-alt', 'settings.json')]);
+	writeFileSync(join(home, '.codex', 'config.toml'), '# real\n');
+	return home;
+}
+
+test('every suite runs with a scratch HOME and account dirs, never the real ones', (t) => {
+	const root = createFixture();
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const home = fakeHome(root);
+	writeExecutable(join(root, 'plugins', 'fixture', 'tests', 'where_test.sh'), `#!/usr/bin/env bash
+printf 'HOME=%s\\nCCD=%s\\nCODEX=%s\\nXDG=%s\\n' "$HOME" "\${CLAUDE_CONFIG_DIR-}" "\${CODEX_HOME-}" "\${XDG_CONFIG_HOME-}" > "$RUNNER_TEST_STATE/where"
+printf '{"hooks":{}}\\n' > "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+`);
+	const result = runWithHome(root, home, {
+		CLAUDE_CONFIG_DIR: join(home, '.claude-alt'), CODEX_HOME: join(home, '.codex'),
+		XDG_CONFIG_HOME: join(home, '.config'), AGENT_CLAUDE_CONFIG_DIRS: join(home, '.claude-alt'),
+	});
+	assert.equal(result.status, 0, result.stdout);
+	const where = readFileSync(join(root, 'state', 'where'), 'utf8');
+	for (const line of where.trim().split('\n')) {
+		const value = line.split('=')[1];
+		if (value) assert.ok(!value.startsWith(home), `${line} leaked the real home`);
+	}
+	assert.match(where, /^HOME=\/.+/m);
+	assert.equal(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'), '{}\n');
+});
+
+// The opt-in is the one way a suite reaches the real environment, and the run
+// says so. It is also what lets the backstop below be exercised.
+// Assembled, so this file does not itself carry the opt-in line it tests.
+const REAL = `# run-all: ${'real'}-home — fixture needs the caller environment`;
+
+test('a suite opted into the real home sees it, and the run reports the opt-in', (t) => {
+	const root = createFixture();
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const home = fakeHome(root);
+	writeExecutable(join(root, 'plugins', 'fixture', 'tests', 'real_test.sh'),
+		`#!/usr/bin/env bash\n${REAL}\nprintf '%s' "$HOME" > "$RUNNER_TEST_STATE/home"\n`);
+	const result = runWithHome(root, home);
+	assert.equal(result.status, 0, result.stdout);
+	assert.equal(readFileSync(join(root, 'state', 'home'), 'utf8'), home);
+	assert.match(result.stdout, /REAL HOME.*fixture: real/);
+});
+
+// Backstop: a write to any real account or Codex config fails the whole run,
+// through whichever spelling (a symlinked second account is one file).
+test('fails the run when a suite changes a real Claude or Codex config', (t) => {
+	const targets = {
+		'claude-settings': '"$HOME/.claude/settings.json"',
+		'alt-symlink': '"$HOME/.claude-alt/settings.json"',
+		'codex-config': '"$HOME/.codex/config.toml"',
+		'codex-hooks': '"$HOME/.codex/hooks.json"',
+	};
+	for (const [via, target] of Object.entries(targets)) {
 		const root = createFixture();
 		t.after(() => rmSync(root, { recursive: true, force: true }));
-		const home = join(root, 'home');
-		const alt = join(root, 'alt');
-		mkdirSync(join(home, '.claude'), { recursive: true });
-		mkdirSync(alt, { recursive: true });
-		writeFileSync(join(home, '.claude', 'settings.json'), '{}\n');
-		spawnSync('ln', ['-s', join(home, '.claude', 'settings.json'), join(alt, 'settings.json')]);
-		const target = via === 'home' ? '"$HOME/.claude/settings.json"' : '"$CLAUDE_CONFIG_DIR/settings.json"';
+		const home = fakeHome(root);
 		writeExecutable(join(root, 'plugins', 'fixture', 'tests', 'writer_test.sh'),
-			`#!/usr/bin/env bash\nprintf '{"hooks":{}}\\n' > ${target}\n`);
-		const state = join(root, 'state');
-		mkdirSync(state, { recursive: true });
-		const result = spawnSync('/bin/bash', ['tests/run-all.sh'], {
-			cwd: root, encoding: 'utf8',
-			env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: alt, RUN_ALL_JOBS: '1', RUNNER_TEST_STATE: state },
-		});
+			`#!/usr/bin/env bash\n${REAL}\nprintf 'x\\n' > ${target}\n`);
+		const result = runWithHome(root, home);
 		assert.equal(result.status, 1, `${via}: ${result.stdout}`);
-		assert.match(result.stdout, /settings\.json CHANGED during the run/, via);
+		assert.match(result.stdout, /CHANGED during the run/, via);
 	}
 });
 
-test('an untouched settings.json leaves the run green', (t) => {
+test('an untouched real config leaves the run green', (t) => {
 	const root = createFixture();
 	t.after(() => rmSync(root, { recursive: true, force: true }));
-	const home = join(root, 'home');
-	mkdirSync(join(home, '.claude'), { recursive: true });
-	writeFileSync(join(home, '.claude', 'settings.json'), '{}\n');
+	const home = fakeHome(root);
 	addTrackedSuite(root, 'a', 0.01);
-	const state = join(root, 'state');
-	mkdirSync(state, { recursive: true });
-	const result = spawnSync('/bin/bash', ['tests/run-all.sh'], {
-		cwd: root, encoding: 'utf8',
-		env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude'), RUN_ALL_JOBS: '1', RUNNER_TEST_STATE: state },
-	});
+	const result = runWithHome(root, home);
 	assert.equal(result.status, 0, result.stdout);
 	assert.doesNotMatch(result.stdout, /CHANGED/);
 });

@@ -61,20 +61,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# A suite that writes a real account's settings.json breaks that account for every
-# session, not just this run: a hook pointing into a since-deleted test dir blocks
-# every prompt. Snapshot each account settings file (by realpath, so a symlinked
-# second account is one file) and fail the run if any changed. Snapshots live
-# outside RUN_TMP_HOME, which cleanup wipes, so a changed file can be restored.
+# Every suite runs with a scratch HOME (run_task), so none can reach the real
+# account dirs. This is the backstop for the one way around that, an opted-in
+# suite: a write to a real Claude or Codex config breaks that account for every
+# session (a hook pointing into a since-deleted test dir blocks every prompt).
+# Each file is watched by realpath, so a symlinked second account is one file, and
+# snapshotted outside RUN_TMP_HOME, which cleanup wipes, so it can be restored.
 SETTINGS_SNAP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/run-all-settings-XXXXXX")" || exit 1
 SETTINGS_WATCHED=()
-for _settings in "$HOME/.claude/settings.json" ${CLAUDE_CONFIG_DIR:+"$CLAUDE_CONFIG_DIR/settings.json"}; do
+shopt -s nullglob
+for _settings in "$HOME/.claude/settings.json" "$HOME"/.claude*/settings.json "$HOME"/.claude*/CLAUDE.md \
+		"$HOME/.codex/config.toml" "$HOME/.codex/hooks.json" "$HOME"/.codex*/config.toml "$HOME"/.codex*/hooks.json \
+		${CLAUDE_CONFIG_DIR:+"$CLAUDE_CONFIG_DIR/settings.json"} \
+		${CODEX_HOME:+"$CODEX_HOME/config.toml" "$CODEX_HOME/hooks.json"}; do
 	_real=$(realpath "$_settings" 2>/dev/null || printf '%s' "$_settings")
 	case " ${SETTINGS_WATCHED[*]-} " in *" $_real "*) continue ;; esac
 	SETTINGS_WATCHED+=("$_real")
 	_snap="$SETTINGS_SNAP_DIR/${#SETTINGS_WATCHED[@]}"
 	if [[ -e "$_real" ]]; then cp -p "$_real" "$_snap"; else : > "$_snap.absent"; fi
 done
+shopt -u nullglob
 settings_changed() {  # prints each watched file that differs from its snapshot
 	local i real snap
 	for i in "${!SETTINGS_WATCHED[@]}"; do
@@ -147,12 +153,15 @@ skip() {
 # failure can never interleave with another suite's diagnostics, and the logs
 # are replayed in discovery order rather than completion order.
 
-TASK_LABEL=(); TASK_KIND=(); TASK_PATH=()
+TASK_LABEL=(); TASK_KIND=(); TASK_PATH=(); TASK_REAL_HOME=()
 TASK_STATUS=(); TASK_START=(); TASK_LOG=(); TASK_END=()
 TASK_COUNT=0; TASK_SERIAL=0
 
 enqueue() {      # enqueue <label> <kind> <path>
 	TASK_LABEL+=("$1"); TASK_KIND+=("$2"); TASK_PATH+=("$3")
+	# The one way to the real environment: a `run-all: real-home` line in the suite
+	# (any file of a python suite dir), reported on every run.
+	if grep -rqs --include='*' 'run-all: real-home' "$3"; then TASK_REAL_HOME+=(1); else TASK_REAL_HOME+=(0); fi
 	TASK_STATUS+=(""); TASK_START+=(""); TASK_LOG+=(""); TASK_END+=("")
 	TASK_COUNT=$((TASK_COUNT + 1))
 }
@@ -207,9 +216,18 @@ build_run_order() {
 	fi
 }
 
-run_task() {     # run_task <kind> <path> <log> <end-file> <tmp-dir>
+run_task() {     # run_task <kind> <path> <log> <end-file> <tmp-dir> <real-home 0|1>
 	local kind="$1" path="$2" log="$3" end_file="$4" job_tmp="$5" status
 	export TMPDIR="$job_tmp" HOTLINE_CALL_HOME="$job_tmp/calls"
+	# No suite inherits the developer's dirs, whoever wrote it: a fresh HOME, with
+	# every account/config dir resolving inside it. CLAUDE_CONFIG_DIR is unset
+	# rather than pointed at HOME/.claude so code keyed on "is it set" sees CI's
+	# shape; the extra-account lists would otherwise name real dirs.
+	if [[ "${6:-0}" != 1 ]]; then
+		mkdir -p "$job_tmp/home/.claude" "$job_tmp/home/.codex" "$job_tmp/home/.config"
+		export HOME="$job_tmp/home" CODEX_HOME="$job_tmp/home/.codex" XDG_CONFIG_HOME="$job_tmp/home/.config"
+		unset CLAUDE_CONFIG_DIR AGENT_CLAUDE_CONFIG_DIRS HOTLINE_CLAUDE_CONFIG_DIRS HOTLINE_CLAUDE_CONFIG_DIR HOTLINE_CODEX_HOME
+	fi
 	case "$kind" in
 		node)   node --test "$path" >"$log" 2>&1 ;;
 		bash)   bash "$path" >"$log" 2>&1 ;;
@@ -228,13 +246,14 @@ launch_task() {  # launch_task <task-index>; sets LAUNCHED_PID
 	job_tmp="$RUN_TMP_HOME/t$TASK_SERIAL"
 	mkdir -p "$job_tmp/calls"
 	TASK_START[$i]="$(date +%s)"
-	( run_task "${TASK_KIND[$i]}" "${TASK_PATH[$i]}" "${TASK_LOG[$i]}" "${TASK_END[$i]}" "$job_tmp" ) &
+	( run_task "${TASK_KIND[$i]}" "${TASK_PATH[$i]}" "${TASK_LOG[$i]}" "${TASK_END[$i]}" "$job_tmp" "${TASK_REAL_HOME[$i]}" ) &
 	LAUNCHED_PID=$!
 }
 
 replay_task() {  # replay_task <task-index>
 	local i="$1" status ended
 	printf '\n\033[1m=== %s ===\033[0m\n' "${TASK_LABEL[$i]}"
+	[[ "${TASK_REAL_HOME[$i]}" != 1 ]] || printf '\033[33m⚠ REAL HOME: %s opted into the real environment (run-all: real-home)\033[0m\n' "${TASK_LABEL[$i]}"
 	cat "${TASK_LOG[$i]}"
 	# report prints a heading itself; update the counters inline after the
 	# already-rendered suite heading so each label appears only once.
