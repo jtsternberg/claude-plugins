@@ -70,6 +70,8 @@ source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
 source "$SCRIPT_DIR/../../../scripts/transport.sh"
 
 CALL_DIR="${1:-}"
+source "$SCRIPT_DIR/../../../scripts/claude-config-dir.sh"
+claude_config_dir_adopt "$CALL_DIR"
 TIMEOUT=""
 BOOT_POLL_SLEEP="${HOTLINE_BOOT_POLL_SLEEP:-1}"
 

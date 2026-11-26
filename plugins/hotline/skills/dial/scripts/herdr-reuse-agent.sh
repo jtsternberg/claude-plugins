@@ -203,6 +203,8 @@ CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 echo herdr    > "$CALL_DIR/transport.txt"
 echo "$AGENT_KIND" > "$CALL_DIR/agent_kind.txt"
 echo "$AGENT" > "$CALL_DIR/herdr_agent.txt"
+source "$HOTLINE_SCRIPTS/claude-config-dir.sh"
+claude_config_dir_record "$CALL_DIR" "$AGENT_KIND"
 if $PINNED_CODEX_CALL; then
   printf '%s\n' "$HOTLINE_CODEX_HOME" > "$CALL_DIR/codex_home.txt"
   printf '%s\n' "$CODEX_PINNED_ROLLOUT" > "$CALL_DIR/codex_rollout.txt"

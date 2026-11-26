@@ -275,6 +275,8 @@ fi
 # HOTLINE_CALL_HOME overrides the base dir (default /tmp) so test suites can own
 # and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
 CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
+source "$SCRIPT_DIR/../../../scripts/claude-config-dir.sh"
+claude_config_dir_record "$CALL_DIR" claude
 # Which backend owns this call dir — a follow-up reuses a live cmux surface, so
 # it is a cmux call dir like any other. Coarse selector; the sub-mode comes from
 # the placement. See wait-for-session.sh's dispatch block.

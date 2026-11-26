@@ -102,6 +102,11 @@ fi
 source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/callee-env.sh"
 callee_env_validate || { jq -nc --arg e "HOTLINE_CALLEE_ENV: $CALLEE_ENV_ERR" '{error: $e}'; exit 1; }
 CALLEE_SETTINGS=$(callee_env_settings_json)
+source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/claude-config-dir.sh"
+if [[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] \
+   && ! claude_config_dir_validate "$HOTLINE_CLAUDE_CONFIG_DIR" HOTLINE_CLAUDE_CONFIG_DIR; then
+  jq -nc --arg e "$CLAUDE_CONFIG_DIR_ERR" '{error: $e}'; exit 1
+fi
 
 # Create call directory. HOTLINE_CALL_HOME overrides the base (default /tmp) so
 # test suites can point every call dir at a directory they own and wipe on exit,
@@ -113,6 +118,7 @@ CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 # See wait-for-session.sh's dispatch block for the whole contract.
 echo headless > "$CALL_DIR/transport.txt"
 echo "$AGENT_KIND" > "$CALL_DIR/agent_kind.txt"
+claude_config_dir_record "$CALL_DIR" "$AGENT_KIND"
 # Persist receiver cwd + [MODE:]/[CALLER:]/[SESSION:] tags from the ringing
 # prompt so wait-for-session.sh can register the call in the sessions registry.
 # The prompt goes on STDIN, so it needs a file inside the call dir either way:
@@ -169,6 +175,16 @@ fi
 if $FORK_SESSION; then
   CMD+=(--fork-session)
 fi
+# The callee's account. Unset leaves the inherited account alone, as it always has;
+# the default dir is reached by unsetting it (claude-config-dir.sh). The knob itself
+# is dial's: a callee inheriting it would treat every dial it makes as an explicit
+# account choice, and its own CLAUDE_CONFIG_DIR already says which account it is.
+CCD_ENV=(env -u HOTLINE_CLAUDE_CONFIG_DIR)
+if [[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]]; then
+  if claude_config_dir_is_default "$HOTLINE_CLAUDE_CONFIG_DIR"; then CCD_ENV+=(-u CLAUDE_CONFIG_DIR)
+  else CCD_ENV+=("CLAUDE_CONFIG_DIR=$HOTLINE_CLAUDE_CONFIG_DIR"); fi
+fi
+CMD=("${CCD_ENV[@]}" "${CMD[@]}")
 
 # Determine working directory
 if [[ -n "$CWD" ]]; then

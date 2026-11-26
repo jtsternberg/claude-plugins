@@ -125,6 +125,10 @@ source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
 # scripts/callee-env.sh. dial.sh refuses a malformed value at its args stage; this
 # repeats the check for a direct invocation rather than launching without it.
 source "$SCRIPT_DIR/../../../scripts/callee-env.sh"
+source "$SCRIPT_DIR/../../../scripts/claude-config-dir.sh"
+if [[ -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] && ! claude_config_dir_validate "$HOTLINE_CLAUDE_CONFIG_DIR" HOTLINE_CLAUDE_CONFIG_DIR; then
+  jq -nc --arg e "$CLAUDE_CONFIG_DIR_ERR" '{error: $e}'; exit 1
+fi
 callee_env_validate || { jq -nc --arg e "HOTLINE_CALLEE_ENV: $CALLEE_ENV_ERR" '{error: $e}'; exit 1; }
 CALLEE_SETTINGS=$(callee_env_settings_json)
 BOX_TIMEOUT="${BOX_TIMEOUT:-${HOTLINE_PASTE_BOX_TIMEOUT:-$HOTLINE_BOOT_TIMEOUT_CMUX}}"
@@ -253,6 +257,11 @@ chmod 700 "$LAUNCH_SCRIPT"
   # Surface placements inherit the caller's shell cwd — cd into the target dir
   # so the callee resolves files / cwd-matched --resume sessions correctly.
   [[ -n "$CWD" ]] && printf 'cd %q || exit 1\n' "$CWD"
+  # The surface's shell is the cmux app's, so the account is set here or not at all.
+  if [[ -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]]; then
+    if claude_config_dir_is_default "$HOTLINE_CLAUDE_CONFIG_DIR"; then printf 'unset CLAUDE_CONFIG_DIR\n'
+    else printf 'export CLAUDE_CONFIG_DIR=%q\n' "$HOTLINE_CLAUDE_CONFIG_DIR"; fi
+  fi
   printf 'claude'
   # Model override, baked in at write time from the caller's env.
   [[ -n "${HOTLINE_CLAUDE_MODEL:-}" ]] && printf ' --model %q' "$HOTLINE_CLAUDE_MODEL"
@@ -347,6 +356,7 @@ if [[ -n "$PROMPT" ]]; then
   # backend even though nobody polls a conference. See wait-for-session.sh's
   # dispatch block for the contract.
   echo cmux > "$CALL_DIR/transport.txt"
+  claude_config_dir_record "$CALL_DIR" claude
   PASTE_PROMPT="$CALL_DIR/pending_paste.md"
   ( umask 077; printf '%s' "$PROMPT" > "$PASTE_PROMPT" )
   chmod 600 "$PASTE_PROMPT" 2>/dev/null || true

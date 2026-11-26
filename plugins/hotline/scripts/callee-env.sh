@@ -41,6 +41,11 @@
 #                                reason in CALLEE_ENV_ERR
 #   callee_env_settings_json   — prints {"env":{...}}, or nothing when unset/blank
 
+# Claude picks its config dir before it reads settings, so this block cannot carry
+# it: the callee would run on the default account. scripts/claude-config-dir.sh
+# sets it as a process env var instead.
+_CALLEE_ENV_CCD_ERR="CLAUDE_CONFIG_DIR cannot ride a settings env block (claude reads it before settings); set HOTLINE_CLAUDE_CONFIG_DIR instead, which defaults to the dialer's own CLAUDE_CONFIG_DIR"
+
 callee_env_validate() {
   CALLEE_ENV_ERR=""
   local tok key seen=" "
@@ -62,6 +67,9 @@ callee_env_validate() {
     if [[ "$seen" == *" $key "* ]]; then
       CALLEE_ENV_ERR="'$key' is set twice"; return 1
     fi
+    if [[ "$key" == CLAUDE_CONFIG_DIR ]]; then
+      CALLEE_ENV_ERR="$_CALLEE_ENV_CCD_ERR"; return 1
+    fi
     seen+="$key "
   done
   local -a names=()
@@ -69,6 +77,9 @@ callee_env_validate() {
   for key in ${names[@]+"${names[@]}"}; do
     if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
       CALLEE_ENV_ERR="HOTLINE_CALLEE_ENV_FORWARD: '$key' is not a valid variable name"; return 1
+    fi
+    if [[ "$key" == CLAUDE_CONFIG_DIR ]]; then
+      CALLEE_ENV_ERR="HOTLINE_CALLEE_ENV_FORWARD: $_CALLEE_ENV_CCD_ERR"; return 1
     fi
   done
   if [[ -n "${HOTLINE_CALLEE_GIT_CONFIG:-}" && -n "${HOTLINE_CALLEE_GIT_CONFIG//[[:space:]]/}" && -n "${GIT_CONFIG_COUNT:-}" ]]; then

@@ -161,6 +161,11 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../../scripts/codex-home.sh"
+source "$SCRIPT_DIR/../../../scripts/claude-config-dir.sh"
+if [[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] \
+   && ! claude_config_dir_validate "$HOTLINE_CLAUDE_CONFIG_DIR" HOTLINE_CLAUDE_CONFIG_DIR; then
+  jq -nc --arg e "$CLAUDE_CONFIG_DIR_ERR" '{error:$e,stage:"args"}'; exit 1
+fi
 codex_home_validate "$AGENT_KIND" cmux "" "$RESUME_ID" launch || {
   jq -nc --arg e "$CODEX_HOME_ERR" '{error:$e,stage:"args"}'; exit 1;
 }
@@ -231,6 +236,7 @@ fi
 # and wipe every call dir instead of littering /tmp (claude-plugins-cjgn).
 CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 if [[ ${HOTLINE_CODEX_HOME+x} ]]; then printf '%s\n' "$HOTLINE_CODEX_HOME" > "$CALL_DIR/codex_home.txt"; fi
+claude_config_dir_record "$CALL_DIR" "$AGENT_KIND"
 # Which backend owns this call dir. Written here, with the dir, so it is present
 # for every later reader no matter where this launcher gets to — the host handle
 # (surface_ref.txt / workspace_ref.txt) is not placed until much further down.
@@ -357,6 +363,11 @@ chmod 700 "$LAUNCH_SCRIPT"
   # --resume's cwd-matched session) correctly. Harmless for the detached path
   # where the new workspace already opened in CWD.
   [[ -n "$CWD" ]] && printf 'cd %q || exit 1\n' "$CWD"
+  # The surface's shell is the cmux app's, so the account is set here or not at all.
+  if [[ -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]]; then
+    if claude_config_dir_is_default "$HOTLINE_CLAUDE_CONFIG_DIR"; then printf 'unset CLAUDE_CONFIG_DIR\n'
+    else printf 'export CLAUDE_CONFIG_DIR=%q\n' "$HOTLINE_CLAUDE_CONFIG_DIR"; fi
+  fi
   printf 'claude'
   # Model override, baked in at write time from the caller's env (the pane's
   # shell won't inherit it). e.g. HOTLINE_CLAUDE_MODEL=opus

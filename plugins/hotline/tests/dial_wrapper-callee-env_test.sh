@@ -84,6 +84,16 @@ rc=$?
 check "forward: a non-variable name is refused, naming the knob and the name" $? \
   "rc=$rc err=$CALLEE_ENV_ERR"
 
+# CLAUDE_CONFIG_DIR picks claude's account before settings are read, so a settings
+# env block cannot carry it; HOTLINE_CLAUDE_CONFIG_DIR sets it on the process.
+for knob in "HOTLINE_CALLEE_ENV=CLAUDE_CONFIG_DIR=/x" "HOTLINE_CALLEE_ENV_FORWARD=CLAUDE_CONFIG_DIR"; do
+  env CLAUDE_CONFIG_DIR=/x "$knob" bash -c "source '$HOTLINE_DIR/scripts/callee-env.sh'; callee_env_validate || { echo \"\$CALLEE_ENV_ERR\"; exit 1; }" > "$TMP_ROOT/ccd-err.$$"
+  rc=$?
+  [[ $rc -ne 0 && "$(cat "$TMP_ROOT/ccd-err.$$")" == *HOTLINE_CLAUDE_CONFIG_DIR* ]]
+  check "${knob%%=*}: CLAUDE_CONFIG_DIR is refused, pointing at HOTLINE_CLAUDE_CONFIG_DIR" $? "rc=$rc err=$(cat "$TMP_ROOT/ccd-err.$$")"
+done
+rm -f "$TMP_ROOT/ccd-err.$$"
+
 # ---------------------------------------------------------------------------
 # HOTLINE_CALLEE_GIT_CONFIG: the dialer's GIT_CONFIG_* entries whose key matches a
 # glob, renumbered from 0 — and ident config mirrored into GIT_AUTHOR_*/COMMITTER_*.
@@ -246,6 +256,23 @@ grep -qF -- "--settings" "$conf_launch" 2>/dev/null \
   && grep -qF 'AGENTIC_DEV_RUN' "$conf_launch" 2>/dev/null
 check "conference: its launch script passes --settings with the variable" $? \
   "launch=$(cat "$conf_launch" 2>/dev/null || echo NONE)"
+
+# ===========================================================================
+# The dialer's CLAUDE_CONFIG_DIR is the callee's account, and never a settings key.
+# ===========================================================================
+t=$(new_env); note_leak "$t"
+argv_claude "$t/bin" "$t/argv.log"; make_ps "$t/bin"; mkdir -p "$t/acct"
+out=$(PATH="$t/bin:$PATH" HOME="$t/home" CLAUDE_CONFIG_DIR="$t/acct" \
+  HOTLINE_CALLER_SESSION_ID="caller-ce-7" HOTLINE_PENDING_DIR="$t/pending" \
+  HOTLINE_CALLEE_ENV="AGENTIC_DEV_ROLE=builder" \
+  bash "$DIAL" --target "$t/target" --mode quick --label "probe label" --headless \
+    --prompt "hi" --boot-timeout 8 2>"$t/err.txt")
+call_dir=$(jq -r '.call_dir // empty' <<<"$out" 2>/dev/null)
+[[ -n "$call_dir" ]] && note_leak "$call_dir"
+jq -e '.env == {AGENTIC_DEV_ROLE:"builder"}' <<<"$(settings_of "$t/argv.log")" >/dev/null 2>&1 \
+  && [[ "$(cat "$call_dir/claude_config_dir.txt" 2>/dev/null)" == "$t/acct" ]]
+check "CLAUDE_CONFIG_DIR never rides --settings, even with the env knobs set" $? \
+  "out=$out argv=$(cat "$t/argv.log" 2>/dev/null)"
 
 # ===========================================================================
 # Unset: no flag on any argv, no key in the payload.

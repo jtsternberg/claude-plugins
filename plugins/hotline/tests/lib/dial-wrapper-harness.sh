@@ -29,6 +29,9 @@
 TMP_ROOT="${TMPDIR:-/tmp}"
 TMP_ROOT=${TMP_ROOT%/}
 export TMP_ROOT
+# The developer's own Claude account must not reach the cases: dial.sh defaults a
+# claude callee's config dir to $CLAUDE_CONFIG_DIR, and transcript lookup reads it.
+unset CLAUDE_CONFIG_DIR AGENT_CLAUDE_CONFIG_DIRS HOTLINE_CLAUDE_CONFIG_DIRS HOTLINE_CLAUDE_CONFIG_DIR
 PASS=0
 FAIL=0
 FAILED_CASES=()
