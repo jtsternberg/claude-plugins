@@ -214,6 +214,11 @@ It exits 0 only when every suite that *could* run passed. A suite that cannot ru
 its runtime is absent, or it is opt-in and not enabled — is reported as **SKIP**,
 never silently passed, so read the summary, not just the exit code.
 
+**A test never reads or writes the developer's real HOME, `~/.claude*`, `~/.codex*` or their settings.**
+`run-all.sh` gives every suite a scratch HOME (opt out only with a reported `run-all: real-home` line) and fails
+the run if a real config changed. A suite run on its own gets no such isolation, so its harness sets its own scratch
+HOME and `CLAUDE_CONFIG_DIR`, never the caller's: `~/.claude-alt/settings.json` can be a symlink to the main account's.
+
 **A fast suite matters almost as much as TDD itself.** A slow suite gets run
 less, and a suite that isn't run pins nothing. So:
 
