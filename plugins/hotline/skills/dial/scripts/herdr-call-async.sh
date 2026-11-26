@@ -370,7 +370,10 @@ PANE_ENV=()
 [[ ${HOTLINE_CODEX_HOME+x} ]] && PANE_ENV+=(--env "CODEX_HOME=$HOTLINE_CODEX_HOME")
 # On every placement, split included: `pane split --env` reaches the pane's shell
 # (verified on herdr 0.9.5), and `agent start` runs claude from that shell.
+# The default dir is reached by NOT setting it; --env cannot unset a variable the
+# herdr server carries, so that one case takes the server's environment.
 [[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] \
+  && ! claude_config_dir_is_default "$HOTLINE_CLAUDE_CONFIG_DIR" \
   && PANE_ENV+=(--env "CLAUDE_CONFIG_DIR=$HOTLINE_CLAUDE_CONFIG_DIR")
 
 if [[ "$HERDR_PLACEMENT" == "split" ]]; then

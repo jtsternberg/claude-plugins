@@ -32,7 +32,8 @@
 # on, defaulting to the dialer's own $CLAUDE_CONFIG_DIR; unset on both sets nothing.
 # Local transports only (an explicit dir with --remote is an args error). A cached
 # callee keeps its launch account: an omitted dir inherits the pin, and an explicit
-# different one is refused. See scripts/claude-config-dir.sh.
+# different one is refused. A --resume runs on the dir that holds the session.
+# See scripts/claude-config-dir.sh.
 #
 # Usage:
 #   dial.sh --target <reference> --mode quick|work_order|conference
@@ -587,6 +588,24 @@ if [[ "$AGENT_KIND" == claude ]]; then
   if [[ -n "$CCD_LAUNCH" ]] && ! claude_config_dir_validate "$CCD_LAUNCH" \
        "$($CCD_EXPLICIT && echo HOTLINE_CLAUDE_CONFIG_DIR || echo "CLAUDE_CONFIG_DIR (the callee's default account)")"; then
     emit_error args "$CLAUDE_CONFIG_DIR_ERR" "Point it at the Claude config dir the callee should run under, or set HOTLINE_CLAUDE_CONFIG_DIR to one."
+  fi
+  # A resume runs on the account that wrote the session: `claude --resume` finds
+  # it nowhere else, while lookup searched every configured dir. A shared
+  # projects/ puts one session in several dirs; the launch dir wins that tie.
+  if [[ -n "$RESUME_ARG" && -z "$REMOTE_TARGET" ]] && ! claude_config_dir_holds "$CCD_LAUNCH" "$RESUME_ARG"; then
+    source "$PLUGIN_SCRIPTS/claude-config-dirs.sh"
+    CCD_HOLDER=""
+    while IFS= read -r _d; do
+      claude_config_dir_holds "$_d" "$RESUME_ARG" && { CCD_HOLDER="$_d"; break; }
+    done < <(hotline_claude_config_dirs)
+    if [[ -n "$CCD_HOLDER" ]]; then
+      $CCD_EXPLICIT && emit_error args \
+        "HOTLINE_CLAUDE_CONFIG_DIR=$HOTLINE_CLAUDE_CONFIG_DIR does not hold session $RESUME_ARG; it was written under $CCD_HOLDER, and claude resumes a session only under the account that wrote it" \
+        "Unset HOTLINE_CLAUDE_CONFIG_DIR to resume it under $CCD_HOLDER, or set it to that dir."
+      CCD_LAUNCH="$CCD_HOLDER"
+      # The default account is CLAUDE_CONFIG_DIR unset, which an empty value already says.
+      [[ -z "${CLAUDE_CONFIG_DIR:-}" ]] && claude_config_dir_is_default "$CCD_LAUNCH" && CCD_LAUNCH=""
+    fi
   fi
 fi
 

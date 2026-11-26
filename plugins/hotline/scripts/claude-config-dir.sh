@@ -25,12 +25,29 @@ claude_config_dir_validate() { # <dir> <name-for-errors>
   fi
 }
 
-claude_config_dir_same() { # <a> <b> — one dir by two spellings; empty only matches empty
-  [[ -z "$1" || -z "$2" ]] && { [[ "$1" == "$2" ]]; return; }
-  local a b
-  a=$(cd -P "$1" 2>/dev/null && pwd -P) || a="${1%/}"
-  b=$(cd -P "$2" 2>/dev/null && pwd -P) || b="${2%/}"
-  [[ "$a" == "$b" ]]
+# One account by two spellings. Empty (no CLAUDE_CONFIG_DIR) IS the default
+# account, ~/.claude.
+_claude_config_dir_key() {
+  local d="${1:-$HOME/.claude}"
+  (cd -P "$d" 2>/dev/null && pwd -P) || printf '%s\n' "${d%/}"
+}
+claude_config_dir_same() { # <a> <b>
+  [[ "$(_claude_config_dir_key "$1")" == "$(_claude_config_dir_key "$2")" ]]
+}
+
+# The default dir means the default account, which claude reaches with
+# CLAUDE_CONFIG_DIR UNSET: setting it to ~/.claude, even verbatim, keys a different
+# keychain entry. Launchers unset it for this dir instead of exporting it.
+claude_config_dir_is_default() { # <dir>
+  claude_config_dir_same "$1" ""
+}
+
+# Whether <dir> holds session <id>: its transcript, or a live registry entry for a
+# session that has not written one yet.
+claude_config_dir_holds() { # <dir> <session-id>
+  local d="${1:-$HOME/.claude}" f
+  for f in "$d"/projects/*/"$2".jsonl; do [[ -f "$f" ]] && return 0; done
+  grep -lsF "\"sessionId\":\"$2\"" "$d"/sessions/*.json >/dev/null 2>&1
 }
 
 # The launch record waiters and cache writers read. Absent = no dir was set.

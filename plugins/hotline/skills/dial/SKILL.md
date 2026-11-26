@@ -759,7 +759,10 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   launch account: a differing caller default yields (named in `.fallbacks`), a
   differing explicit dir is refused — use `--fresh`. Never put `CLAUDE_CONFIG_DIR`
   in `HOTLINE_CALLEE_ENV`; it is refused, since claude reads it before settings.
-  An explicit dir with `--remote` is an args error.
+  An explicit dir with `--remote` is an args error. A `--resume` runs on the
+  account dir that holds the session (the caller's own on a tie), and an explicit
+  dir that does not hold it is refused. `~/.claude` launches with
+  `CLAUDE_CONFIG_DIR` unset; callees never inherit the knob.
 - **`HOTLINE_CODEX_HOME=<absolute-directory>`** — select the Codex process account.
   New calls require `--agent codex` over local cmux, or `--fresh`/explicit
   thread resume with `HOTLINE_HERDR_PLACEMENT=tab` or `workspace` on local herdr. The directory must already exist and be readable/writable; spaces

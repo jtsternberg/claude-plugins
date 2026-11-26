@@ -364,7 +364,10 @@ chmod 700 "$LAUNCH_SCRIPT"
   # where the new workspace already opened in CWD.
   [[ -n "$CWD" ]] && printf 'cd %q || exit 1\n' "$CWD"
   # The surface's shell is the cmux app's, so the account is set here or not at all.
-  [[ -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] && printf 'export CLAUDE_CONFIG_DIR=%q\n' "$HOTLINE_CLAUDE_CONFIG_DIR"
+  if [[ -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]]; then
+    if claude_config_dir_is_default "$HOTLINE_CLAUDE_CONFIG_DIR"; then printf 'unset CLAUDE_CONFIG_DIR\n'
+    else printf 'export CLAUDE_CONFIG_DIR=%q\n' "$HOTLINE_CLAUDE_CONFIG_DIR"; fi
+  fi
   printf 'claude'
   # Model override, baked in at write time from the caller's env (the pane's
   # shell won't inherit it). e.g. HOTLINE_CLAUDE_MODEL=opus

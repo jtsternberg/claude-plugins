@@ -248,7 +248,16 @@ launch script, and the `claude -p` environment for headless. It is passed
 exactly as spelled, because Claude keys its login on that string; a symlinked or
 trailing-slash spelling of the same dir is a different, logged-out account. It
 cannot go through `HOTLINE_CALLEE_ENV`: Claude picks its config dir before it
-reads settings, so `CLAUDE_CONFIG_DIR` there is refused.
+reads settings, so `CLAUDE_CONFIG_DIR` there is refused. `~/.claude` itself means
+the default account, which is reached by leaving `CLAUDE_CONFIG_DIR` unset (a
+herdr pane then carries the herdr server's environment). The knob stays with
+`dial`: a callee never inherits `HOTLINE_CLAUDE_CONFIG_DIR`, so its own dials
+default to its own account.
+
+A `--resume` (or a session id as the target) runs on the account that wrote the
+session, because `claude --resume` finds it nowhere else. When a shared
+`projects/` puts it in several dirs, the caller's own wins. An explicit
+`HOTLINE_CLAUDE_CONFIG_DIR` that does not hold the session is refused.
 
 The call dir records it in `claude_config_dir.txt` and the session cache pins it.
 A follow-up keeps the account the callee launched with, including a `claude

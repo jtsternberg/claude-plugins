@@ -175,9 +175,16 @@ fi
 if $FORK_SESSION; then
   CMD+=(--fork-session)
 fi
-# The callee's account. Unset leaves the inherited environment alone, as it always has.
-[[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] \
-  && CMD=(env "CLAUDE_CONFIG_DIR=$HOTLINE_CLAUDE_CONFIG_DIR" "${CMD[@]}")
+# The callee's account. Unset leaves the inherited account alone, as it always has;
+# the default dir is reached by unsetting it (claude-config-dir.sh). The knob itself
+# is dial's: a callee inheriting it would treat every dial it makes as an explicit
+# account choice, and its own CLAUDE_CONFIG_DIR already says which account it is.
+CCD_ENV=(env -u HOTLINE_CLAUDE_CONFIG_DIR)
+if [[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]]; then
+  if claude_config_dir_is_default "$HOTLINE_CLAUDE_CONFIG_DIR"; then CCD_ENV+=(-u CLAUDE_CONFIG_DIR)
+  else CCD_ENV+=("CLAUDE_CONFIG_DIR=$HOTLINE_CLAUDE_CONFIG_DIR"); fi
+fi
+CMD=("${CCD_ENV[@]}" "${CMD[@]}")
 
 # Determine working directory
 if [[ -n "$CWD" ]]; then
