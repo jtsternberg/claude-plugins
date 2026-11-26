@@ -215,6 +215,8 @@ source "$HOTLINE_SCRIPTS/repl-state.sh"
 source "$HOTLINE_SCRIPTS/transport.sh"
 
 CALL_DIR="${1:-}"
+source "$HOTLINE_SCRIPTS/claude-config-dir.sh"
+claude_config_dir_adopt "$CALL_DIR"
 # The call's STATUS word → class map (dial.sh wrote any declarations here); the
 # extractor and the screen scrape both read it, so they classify alike.
 # shellcheck source=../../../scripts/status-classes.sh

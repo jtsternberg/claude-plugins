@@ -37,6 +37,9 @@
 
 SOCKET_STUB_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/socket-stub.py"
 
+# The developer's own Claude account must not reach the cases: dial.sh defaults a
+# claude callee's config dir to $CLAUDE_CONFIG_DIR, and transcript lookup reads it.
+unset CLAUDE_CONFIG_DIR AGENT_CLAUDE_CONFIG_DIRS HOTLINE_CLAUDE_CONFIG_DIRS HOTLINE_CLAUDE_CONFIG_DIR
 SOCKET_STUB_PIDS=()
 
 # socket_stub_start <dir> [responses-json] [echo-file] [reject-surface]

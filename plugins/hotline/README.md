@@ -232,10 +232,32 @@ A dir named twice (directly or through a symlink) is searched once. A session
 found in two different dirs refuses as ambiguous rather than picking one; a
 `projects/` symlinked to the other account's is one file, not two. A
 session that doesn't exist yet is looked for in the first dir, where a fresh
-launch writes it. Two gaps remain. `dial` launches and resumes `claude` without
-setting `CLAUDE_CONFIG_DIR`, so `--resume` of a second-account session still
-starts under the primary account. `--remote` calls read `~/.claude` on the
-remote box.
+launch writes it. `--remote` calls read `~/.claude` on the remote box.
+
+### The callee's Claude account (`HOTLINE_CLAUDE_CONFIG_DIR`)
+
+A claude callee runs on its caller's account: `dial` launches it with the
+dialer's own `CLAUDE_CONFIG_DIR`, so a call from a second-account session lands
+on that account and its quota. `HOTLINE_CLAUDE_CONFIG_DIR=<absolute-dir>` names
+a different one. With neither set, nothing is set and the callee runs on the
+default account.
+
+The dir reaches `claude` as a process environment variable on every local
+transport: herdr pane `--env` (split, tab and workspace), an `export` in the cmux
+launch script, and the `claude -p` environment for headless. It is passed
+exactly as spelled, because Claude keys its login on that string; a symlinked or
+trailing-slash spelling of the same dir is a different, logged-out account. It
+cannot go through `HOTLINE_CALLEE_ENV`: Claude picks its config dir before it
+reads settings, so `CLAUDE_CONFIG_DIR` there is refused.
+
+The call dir records it in `claude_config_dir.txt` and the session cache pins it.
+A follow-up keeps the account the callee launched with, including a `claude
+--resume` relaunch; a different `CLAUDE_CONFIG_DIR` on the caller yields to the
+pin and is named in `.fallbacks`, and a different explicit
+`HOTLINE_CLAUDE_CONFIG_DIR` is refused (`--fresh` starts a new callee under it).
+Waiters read the recorded dir, not their own environment. A `--remote` callee
+runs on that box's account: the caller's local dir is not sent, and an explicit
+one is an args error.
 
 ### Skip permission prompts in cmux receivers (opt-in)
 

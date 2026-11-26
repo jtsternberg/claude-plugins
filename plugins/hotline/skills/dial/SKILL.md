@@ -749,8 +749,17 @@ Set these in `~/.claude/settings.json`'s `"env"` block or the shell:
   (a second account) searched after `$CLAUDE_CONFIG_DIR` (default `~/.claude`).
   Dial uses them to resolve a session-id target to its workspace, to find the
   caller's own transcript, and to watch a callee's transcript. A session id found
-  in two dirs refuses as ambiguous. Dial still launches `claude` without setting
-  `CLAUDE_CONFIG_DIR`, so a new or resumed callee runs under the primary account.
+  in two dirs refuses as ambiguous.
+- **`HOTLINE_CLAUDE_CONFIG_DIR=<absolute-dir>`** — the Claude account a claude
+  callee runs on. Defaults to the dialer's own `CLAUDE_CONFIG_DIR`, so a callee
+  runs on its caller's account; with neither set, nothing is set. Delivered as a
+  process env var on every local transport (herdr `--env`, cmux launch-script
+  `export`, headless process env), verbatim, and recorded in
+  `claude_config_dir.txt` and the session cache. A follow-up keeps the callee's
+  launch account: a differing caller default yields (named in `.fallbacks`), a
+  differing explicit dir is refused — use `--fresh`. Never put `CLAUDE_CONFIG_DIR`
+  in `HOTLINE_CALLEE_ENV`; it is refused, since claude reads it before settings.
+  An explicit dir with `--remote` is an args error.
 - **`HOTLINE_CODEX_HOME=<absolute-directory>`** — select the Codex process account.
   New calls require `--agent codex` over local cmux, or `--fresh`/explicit
   thread resume with `HOTLINE_HERDR_PLACEMENT=tab` or `workspace` on local herdr. The directory must already exist and be readable/writable; spaces

@@ -90,6 +90,8 @@
 # HOTLINE_CODEX_HOME=<absolute-dir> selects the Codex process account via tab or
 # workspace creation --env CODEX_HOME. Local launches, including resume; split/remote
 # are refused. codex_home.txt pins the same home for independent response readers.
+# HOTLINE_CLAUDE_CONFIG_DIR does the same for a claude callee as --env
+# CLAUDE_CONFIG_DIR on any local placement (claude_config_dir.txt); remote is refused.
 #
 # --prompt-file is preferred: it keeps the payload out of argv end to end.
 # --detached is accepted and ignored, and so is a side placement: dial.sh's
@@ -161,6 +163,11 @@ die() { jq -nc --arg err "$1" '{error: $err}'; exit 1; }
 
 source "$HOTLINE_SCRIPTS/codex-home.sh"
 codex_home_validate "$AGENT_KIND" herdr "${HOTLINE_HERDR_REMOTE:-}" "$RESUME_ID" || die "$CODEX_HOME_ERR"
+source "$HOTLINE_SCRIPTS/claude-config-dir.sh"
+if [[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]]; then
+  [[ -z "${HOTLINE_HERDR_REMOTE:-}" ]] || die "HOTLINE_CLAUDE_CONFIG_DIR selects a local Claude account; a remote callee runs on its own box's account"
+  claude_config_dir_validate "$HOTLINE_CLAUDE_CONFIG_DIR" HOTLINE_CLAUDE_CONFIG_DIR || die "$CLAUDE_CONFIG_DIR_ERR"
+fi
 
 if [[ "$AGENT_KIND" == codex && -n "$RESUME_ID" && -z "${HOTLINE_HERDR_REMOTE:-}" ]]; then
   source "$SCRIPT_DIR/../../../scripts/codex-rollout.sh"
@@ -275,6 +282,7 @@ echo "$AGENT_KIND" > "$CALL_DIR/agent_kind.txt"
 if [[ ${HOTLINE_CODEX_HOME+x} ]]; then
   printf '%s\n' "$HOTLINE_CODEX_HOME" > "$CALL_DIR/codex_home.txt"
 fi
+claude_config_dir_record "$CALL_DIR" "$AGENT_KIND"
 # See WHY NOTHING IS CLOSED in the header.
 echo true > "$CALL_DIR/keep_workspace.txt"
 echo "$CWD" > "$CALL_DIR/cwd.txt"
@@ -360,10 +368,14 @@ HOST_TAB=""
 HOST_WORKSPACE=""
 PANE_ENV=()
 [[ ${HOTLINE_CODEX_HOME+x} ]] && PANE_ENV+=(--env "CODEX_HOME=$HOTLINE_CODEX_HOME")
+# On every placement, split included: `pane split --env` reaches the pane's shell
+# (verified on herdr 0.9.5), and `agent start` runs claude from that shell.
+[[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] \
+  && PANE_ENV+=(--env "CLAUDE_CONFIG_DIR=$HOTLINE_CLAUDE_CONFIG_DIR")
 
 if [[ "$HERDR_PLACEMENT" == "split" ]]; then
   SPLIT_DIRECTION="${HOTLINE_HERDR_SPLIT_DIRECTION:-right}"
-  herdr_cli pane split --pane "$SPLIT_FROM" \
+  herdr_cli pane split "${PANE_ENV[@]}" --pane "$SPLIT_FROM" \
       --direction "$SPLIT_DIRECTION" --cwd "$CWD" --no-focus \
     || fail_async "herdr pane split from $SPLIT_FROM failed: ${HERDR_CLI_ERR:-no diagnostic}"
   NEW_PANE=$(jq -r '.result.pane.pane_id // empty' <<<"$HERDR_CLI_OUT" 2>/dev/null)

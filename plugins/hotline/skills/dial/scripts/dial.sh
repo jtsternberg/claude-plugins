@@ -28,6 +28,12 @@
 # Cached nonfresh calls continue only with a verified matching home/pane/thread;
 # an omitted home inherits the pin, and a dead selected-account agent is refused.
 #
+# HOTLINE_CLAUDE_CONFIG_DIR=<absolute-dir>: the Claude account a claude callee runs
+# on, defaulting to the dialer's own $CLAUDE_CONFIG_DIR; unset on both sets nothing.
+# Local transports only (an explicit dir with --remote is an args error). A cached
+# callee keeps its launch account: an omitted dir inherits the pin, and an explicit
+# different one is refused. See scripts/claude-config-dir.sh.
+#
 # Usage:
 #   dial.sh --target <reference> --mode quick|work_order|conference
 #           (--prompt-file <path> | --prompt <text>)
@@ -560,6 +566,28 @@ CODEX_HOME_MODE=reuse
 if $FRESH || [[ -n "$RESUME_ARG" || "$CODEX_HOME_TRANSPORT" == cmux ]]; then CODEX_HOME_MODE=launch; fi
 if ! codex_home_validate "$AGENT_KIND" "$CODEX_HOME_TRANSPORT" "$REMOTE_TARGET" "$RESUME_ARG" "$CODEX_HOME_MODE"; then
   emit_error args "$CODEX_HOME_ERR" "Use local --agent codex with cmux or herdr tab/workspace placement, or unset HOTLINE_CODEX_HOME."
+fi
+
+# The claude callee's account (scripts/claude-config-dir.sh). Settled here; a
+# cached callee's own pin replaces it in step 4, and it is exported only then.
+source "$PLUGIN_SCRIPTS/claude-config-dir.sh"
+CCD_EXPLICIT=false
+[[ -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] && CCD_EXPLICIT=true
+CCD_LAUNCH=""
+if [[ "$AGENT_KIND" == claude ]]; then
+  if $CCD_EXPLICIT; then
+    [[ -z "$REMOTE_TARGET" ]] || emit_error args \
+      "HOTLINE_CLAUDE_CONFIG_DIR selects a local Claude account, and a --remote callee runs on $REMOTE_TARGET's own account" \
+      "Unset HOTLINE_CLAUDE_CONFIG_DIR for a --remote dial."
+    CCD_LAUNCH="$HOTLINE_CLAUDE_CONFIG_DIR"
+  elif [[ -z "$REMOTE_TARGET" ]]; then
+    # A local path means nothing on another box, so a remote dial does not inherit it.
+    CCD_LAUNCH="${CLAUDE_CONFIG_DIR:-}"
+  fi
+  if [[ -n "$CCD_LAUNCH" ]] && ! claude_config_dir_validate "$CCD_LAUNCH" \
+       "$($CCD_EXPLICIT && echo HOTLINE_CLAUDE_CONFIG_DIR || echo "CLAUDE_CONFIG_DIR (the callee's default account)")"; then
+    emit_error args "$CLAUDE_CONFIG_DIR_ERR" "Point it at the Claude config dir the callee should run under, or set HOTLINE_CLAUDE_CONFIG_DIR to one."
+  fi
 fi
 
 # --- Transport request, validated BEFORE anything has a side effect ----------
@@ -1340,6 +1368,28 @@ if ! $FRESH && ! $CODEX_HOME_NEW_HOST && { [[ ${HOTLINE_CODEX_HOME+x} || -n "$PR
   if [[ -n "$PREV_CODEX_HOME" && "$PREV_CODEX_HOME" != "$HOTLINE_CODEX_HOME" ]]; then
     emit_error transport "Codex account home mismatch between cache and call metadata" "Restore consistent call metadata; nothing was delivered."
   fi
+fi
+
+# A cached claude callee keeps the account it launched with: its live REPL cannot
+# switch, and a `claude --resume` relaunch must find the session where it was
+# written. Absent pin = launched with no dir, which stays that way. Only an
+# EXPLICIT different dir is refused; the caller's default yields to the pin.
+if [[ "$AGENT_KIND" == claude ]] && ! $FIRST_CONTACT; then
+  CCD_PIN=$(jq -r '.claude_config_dir // empty' <<<"$CACHED")
+  [[ -z "$CCD_PIN" && -s "$PREV_CALL_DIR/claude_config_dir.txt" ]] && CCD_PIN=$(cat "$PREV_CALL_DIR/claude_config_dir.txt")
+  if $CCD_EXPLICIT && ! claude_config_dir_same "$CCD_PIN" "$HOTLINE_CLAUDE_CONFIG_DIR"; then
+    emit_error transport \
+      "HOTLINE_CLAUDE_CONFIG_DIR=$HOTLINE_CLAUDE_CONFIG_DIR, but this target's cached callee runs under ${CCD_PIN:-the default Claude account (no CLAUDE_CONFIG_DIR)}, and a live callee keeps the account it launched with" \
+      "Re-dial with --fresh to start a new callee under $HOTLINE_CLAUDE_CONFIG_DIR, or unset HOTLINE_CLAUDE_CONFIG_DIR to continue the cached one on its own account. Nothing was delivered."
+  fi
+  if [[ -n "$CCD_PIN" ]] && ! claude_config_dir_validate "$CCD_PIN" "The cached callee's Claude config dir"; then
+    emit_error transport "$CLAUDE_CONFIG_DIR_ERR" "Restore that dir, or re-dial with --fresh to start a new callee. Nothing was delivered."
+  fi
+  claude_config_dir_same "$CCD_PIN" "$CCD_LAUNCH" || add_fallback "claude-config-dir→cached(${CCD_PIN:-default}; the cached callee keeps its launch account)"
+  CCD_LAUNCH="$CCD_PIN"
+fi
+if [[ "$AGENT_KIND" == claude ]]; then
+  if [[ -n "$CCD_LAUNCH" ]]; then export HOTLINE_CLAUDE_CONFIG_DIR="$CCD_LAUNCH"; else unset HOTLINE_CLAUDE_CONFIG_DIR; fi
 fi
 
 # Resume/fork semantics for the launchers:
