@@ -1217,15 +1217,36 @@ class Installer(unittest.TestCase):
                          ["SessionStart: missing", "PostModelSwitch: missing"])
 
 
+def isolated_env(home, extra=None):
+    """A subprocess env whose account is <home>/.claude, never the caller's.
+
+    Both HOME and CLAUDE_CONFIG_DIR are pinned: install-hooks.py and runway.py read
+    the config dir first, and the suite runs inside live sessions that set it.
+    Refuses outright if either still resolves to a real account dir.
+    """
+    import pwd
+    env = dict(os.environ, HOME=str(home), CLAUDE_CONFIG_DIR=str(Path(home) / ".claude"))
+    env.update(extra or {})
+    real_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    real = {os.path.realpath(real_home / name) for name in (".claude", ".claude-alt")}
+    for target in (env["CLAUDE_CONFIG_DIR"], str(Path(env["HOME"]) / ".claude")):
+        if os.path.realpath(target) in real:
+            raise AssertionError(f"refusing to run against a real Claude account dir: {target}")
+    return env
+
+
 class EndToEnd(unittest.TestCase):
     """Run the script as a subprocess, the way a hook does."""
 
     def run_script(self, args, stdin="", home=None, scripts=SCRIPTS, env_extra=None):
         import subprocess
-        env = dict(os.environ, HOME=str(home) if home else os.environ["HOME"])
-        env.pop("RUNWAY_CONTEXT_LIMIT", None)
-        env.pop("CLAUDE_CODE_SESSION_ID", None)
-        env.update(env_extra or {})
+        if home is None:
+            raise AssertionError("run_script needs a sandboxed home")
+        env = isolated_env(home, env_extra)
+        if not env_extra or "RUNWAY_CONTEXT_LIMIT" not in env_extra:
+            env.pop("RUNWAY_CONTEXT_LIMIT", None)
+        if not env_extra or "CLAUDE_CODE_SESSION_ID" not in env_extra:
+            env.pop("CLAUDE_CODE_SESSION_ID", None)
         return subprocess.run([rw.sys.executable, str(scripts / "runway.py"), *args],
                               input=stdin, capture_output=True, text=True, timeout=60, env=env)
 
@@ -1268,7 +1289,8 @@ class EndToEnd(unittest.TestCase):
             settings = Path(tmp) / "settings.json"
             done = subprocess.run([rw.sys.executable, str(SCRIPTS / "install-hooks.py"),
                                    "--settings", str(settings)],
-                                  capture_output=True, text=True, timeout=30)
+                                  capture_output=True, text=True, timeout=30,
+                                  env=isolated_env(tmp))
             self.assertNotEqual(done.returncode, 0)
             self.assertIn("ship with the plugin", done.stderr)
             self.assertFalse(settings.exists())
@@ -1298,6 +1320,18 @@ class EndToEnd(unittest.TestCase):
             self.assertIn("wired them", done.stderr)
             self.assertNotIn("wired them", done.stdout)
             self.assertIn("level", json.loads(done.stdout))
+
+    def test_a_manual_run_never_writes_the_parent_account(self):
+        # The suite runs inside a live session whose CLAUDE_CONFIG_DIR is a real
+        # account. A standalone copy's hooks point into its tmp dir, so writing them
+        # there blocks every prompt on that account once the dir is gone.
+        with TemporaryDirectory() as tmp, TemporaryDirectory() as decoy:
+            home = Path(tmp)
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": decoy}):
+                done = self.run_script(["--json"], "", home, self.standalone(home / "copy"))
+            self.assertIn("wired them", done.stderr)
+            self.assertFalse((Path(decoy) / "settings.json").exists())
+            self.assertTrue((home / ".claude" / "settings.json").exists())
 
     def test_no_self_install_leaves_settings_alone(self):
         with TemporaryDirectory() as tmp:

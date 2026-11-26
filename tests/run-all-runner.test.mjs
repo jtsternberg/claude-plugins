@@ -379,3 +379,47 @@ test('interrupt signals only the process groups still in flight', async (t) => {
 	// group after the fact aims SIGKILL at whatever now holds that number.
 	assert.deepEqual([...signalled].sort(), [hangPid], `also signalled the reaped suite's group (${donePid})`);
 });
+
+// A suite that writes a real account's settings.json has already broken that
+// account (a hook pointing into a deleted tmp dir blocks every prompt), so the run
+// must fail loudly, whichever spelling of the file the suite wrote through.
+test('fails the run when a suite changes an account settings.json', (t) => {
+	for (const via of ['home', 'config-dir-symlink']) {
+		const root = createFixture();
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		const home = join(root, 'home');
+		const alt = join(root, 'alt');
+		mkdirSync(join(home, '.claude'), { recursive: true });
+		mkdirSync(alt, { recursive: true });
+		writeFileSync(join(home, '.claude', 'settings.json'), '{}\n');
+		spawnSync('ln', ['-s', join(home, '.claude', 'settings.json'), join(alt, 'settings.json')]);
+		const target = via === 'home' ? '"$HOME/.claude/settings.json"' : '"$CLAUDE_CONFIG_DIR/settings.json"';
+		writeExecutable(join(root, 'plugins', 'fixture', 'tests', 'writer_test.sh'),
+			`#!/usr/bin/env bash\nprintf '{"hooks":{}}\\n' > ${target}\n`);
+		const state = join(root, 'state');
+		mkdirSync(state, { recursive: true });
+		const result = spawnSync('/bin/bash', ['tests/run-all.sh'], {
+			cwd: root, encoding: 'utf8',
+			env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: alt, RUN_ALL_JOBS: '1', RUNNER_TEST_STATE: state },
+		});
+		assert.equal(result.status, 1, `${via}: ${result.stdout}`);
+		assert.match(result.stdout, /settings\.json CHANGED during the run/, via);
+	}
+});
+
+test('an untouched settings.json leaves the run green', (t) => {
+	const root = createFixture();
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const home = join(root, 'home');
+	mkdirSync(join(home, '.claude'), { recursive: true });
+	writeFileSync(join(home, '.claude', 'settings.json'), '{}\n');
+	addTrackedSuite(root, 'a', 0.01);
+	const state = join(root, 'state');
+	mkdirSync(state, { recursive: true });
+	const result = spawnSync('/bin/bash', ['tests/run-all.sh'], {
+		cwd: root, encoding: 'utf8',
+		env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude'), RUN_ALL_JOBS: '1', RUNNER_TEST_STATE: state },
+	});
+	assert.equal(result.status, 0, result.stdout);
+	assert.doesNotMatch(result.stdout, /CHANGED/);
+});

@@ -60,6 +60,33 @@ cleanup() {
 	rm -rf "$RUN_TMP_HOME"
 }
 trap cleanup EXIT
+
+# A suite that writes a real account's settings.json breaks that account for every
+# session, not just this run: a hook pointing into a since-deleted test dir blocks
+# every prompt. Snapshot each account settings file (by realpath, so a symlinked
+# second account is one file) and fail the run if any changed. Snapshots live
+# outside RUN_TMP_HOME, which cleanup wipes, so a changed file can be restored.
+SETTINGS_SNAP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/run-all-settings-XXXXXX")" || exit 1
+SETTINGS_WATCHED=()
+for _settings in "$HOME/.claude/settings.json" ${CLAUDE_CONFIG_DIR:+"$CLAUDE_CONFIG_DIR/settings.json"}; do
+	_real=$(realpath "$_settings" 2>/dev/null || printf '%s' "$_settings")
+	case " ${SETTINGS_WATCHED[*]-} " in *" $_real "*) continue ;; esac
+	SETTINGS_WATCHED+=("$_real")
+	_snap="$SETTINGS_SNAP_DIR/${#SETTINGS_WATCHED[@]}"
+	if [[ -e "$_real" ]]; then cp -p "$_real" "$_snap"; else : > "$_snap.absent"; fi
+done
+settings_changed() {  # prints each watched file that differs from its snapshot
+	local i real snap
+	for i in "${!SETTINGS_WATCHED[@]}"; do
+		real="${SETTINGS_WATCHED[$i]}"; snap="$SETTINGS_SNAP_DIR/$((i + 1))"
+		if [[ -e "$snap.absent" ]]; then
+			[[ -e "$real" ]] && printf '%s\t(did not exist before the run)\n' "$real"
+		elif ! cmp -s "$snap" "$real"; then
+			printf '%s\t(before: %s)\n' "$real" "$snap"
+		fi
+	done
+	return 0
+}
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -379,6 +406,16 @@ if [[ $TASK_COUNT -eq 0 ]] && [[ $SKIP -eq 0 ]]; then
 fi
 
 run_queue
+
+SETTINGS_CHANGED=$(settings_changed)
+if [[ -n "$SETTINGS_CHANGED" ]]; then
+	printf '\n\033[1;31m✗ ACCOUNT settings.json CHANGED during the run — a suite wrote real Claude settings:\033[0m\n'
+	printf '  %s\n' "$SETTINGS_CHANGED"
+	printf '  Restore from the snapshot named above and find the suite that did it.\n'
+	FAIL=$((FAIL + 1)); FAILED+=("account settings.json changed during the run")
+else
+	rm -rf "$SETTINGS_SNAP_DIR"
+fi
 
 # ---- summary ----------------------------------------------------------------
 
