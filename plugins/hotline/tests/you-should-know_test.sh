@@ -114,8 +114,20 @@ read_ysk "$h" --transcript "$T/tx-many.jsonl"; broken && [[ "$OUT" == *"$SID"* ]
 check "canary: interactive, one 8-step turn, no entry for the session → BROKEN" $? "$OUT"
 read_ysk "$h" --transcript "$T/tx-few.jsonl"; quiet; check "canary: a 6-step turn, no entry → quiet" $? "$OUT"
 read_ysk "$h" --transcript "$T/tx-short.jsonl"; quiet; check "canary: many 3-step turns, no entry → quiet" $? "$OUT"
-HOTLINE_YSK_CANARY_STEPS=3 read_ysk "$h" --transcript "$T/tx-short.jsonl"; broken
-check "canary: HOTLINE_YSK_CANARY_STEPS overrides the threshold" $? "$OUT"
+# The mod backs off on ignored notes, skipping up to 16 check opportunities.
+h=$(new_home); store "$h" a "$(offer other-session 5000 | jq -c '.typedPastInARow = 7 | .looksToSkip = 16')"
+read_ysk "$h" --transcript "$T/tx-many.jsonl"; quiet
+check "canary: back-off in the store, 1 check opportunity → quiet" $? "$OUT"
+transcript "$T/tx-16.jsonl" 16 7
+read_ysk "$h" --transcript "$T/tx-16.jsonl"; quiet
+check "canary: back-off, 16 opportunities (the most it can skip) → quiet" $? "$OUT"
+transcript "$T/tx-17.jsonl" 17 7
+read_ysk "$h" --transcript "$T/tx-17.jsonl"; broken && [[ "$OUT" == *"17 check opportunities"* ]]
+check "canary: back-off, 17 opportunities → BROKEN" $? "$OUT"
+transcript "$T/tx-2x13.jsonl" 1 13
+h=$(new_home); store "$h" a "$(offer other-session 5000 | jq -c '.typedPastInARow = 2')"
+read_ysk "$h" --transcript "$T/tx-2x13.jsonl"; quiet
+check "canary: typedPastInARow nonzero counts as back-off" $? "$OUT"
 read_ysk "$h" --transcript "$T/tx-many.jsonl" --headless; quiet; check "canary: headless → quiet" $? "$OUT"
 
 # Store location: the callee's config dir first, then ~/.claude.

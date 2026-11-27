@@ -23,12 +23,17 @@
 # note ({line, explanation, shownAt}). The other known kinds are UI states after a
 # human interacted with the note — nothing to relay, but not drift either.
 #
-# The mod checks from a turn.step hook at a turn's step index 6, 12, … and stamps
-# askedTurn on the session's entry each time, so a session with one turn of
-# HOTLINE_YSK_CANARY_STEPS (default 7) steps and no entry means the reader no
-# longer understands the store — the canary. It only runs when a surface is
-# attached, so a headless (`claude -p`) callee legitimately has no entry and no
-# store file, and both checks are skipped for it.
+# The canary: a session the mod should have checked by now but has no entry for
+# means the reader no longer understands the store. The mod gets a check
+# opportunity at each main-agent turn's step index 6, 12, … (0-based; the index
+# resets each turn), and stamps askedTurn on the session's entry when it checks.
+# But it backs off on ignored notes — unwatched callees ignore every one — via the
+# account-global typedPastInARow / looksToSkip keys, skipping up to 16
+# opportunities BEFORE stamping. So the canary fires at 17 opportunities, or at 1
+# when the store shows no back-off (both keys 0). With no store file there is no
+# back-off to read, and 1 opportunity is the threshold. The mod only runs when a
+# surface is attached, so a headless (`claude -p`) callee legitimately has no
+# entry and no store file, and both checks are skipped for it.
 #
 # The plugins dir is probed at <config-dir>/plugins/store, then
 # ~/.claude/plugins/store: whether Claude Code puts plugins under
@@ -116,32 +121,31 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$SESSION" ]] || { echo "you-should-know: --session is required" >&2; exit 2; }
 [[ "$SINCE" =~ ^[0-9]+$ ]] || { echo "you-should-know: --since must be epoch ms" >&2; exit 2; }
-CANARY_STEPS="${HOTLINE_YSK_CANARY_STEPS:-7}"
-[[ "$CANARY_STEPS" =~ ^[0-9]+$ ]] || CANARY_STEPS=7
+# More than the mod's largest back-off (looksToSkip caps at 16).
+CANARY_MAX_SKIP_PLUS_ONE=17
 
 quiet()  { printf '{"notes":[],"broken":null}\n'; exit 0; }
 broken() { jq -nc --arg r "maybe the you-should-know relay is broken: $1" '{notes:[], broken:$r}'; exit 0; }
 
-# The most main-agent steps any single turn of the callee took: distinct assistant
-# message ids (one streamed message spans several rows) between real user prompts
-# (a tool_result-only user row continues the turn), sidechains excluded. Per turn
-# because the mod checks only at a turn's step index 6, 12, … (the index resets
-# each turn), so many short turns never get checked at all.
-main_steps() {
+# The mod's check opportunities in the callee's transcript: per main-agent turn,
+# floor((steps-1)/6), where steps are distinct assistant message ids (one streamed
+# message spans several rows) and a turn runs between real user prompts (a
+# tool_result-only user row continues it); sidechains excluded.
+check_opportunities() {
   [[ -n "$TRANSCRIPT" && -f "$TRANSCRIPT" ]] || { echo 0; return; }
   grep -F -e '"type":"assistant"' -e '"type":"user"' "$TRANSCRIPT" 2>/dev/null \
-    | jq -nR 'reduce (inputs | fromjson? | select(type == "object" and (.isSidechain | not))) as $r
-        ({cur: {}, best: 0};
+    | jq -nR 'def ops: if . > 0 then ((. - 1) / 6 | floor) else 0 end;
+      reduce (inputs | fromjson? | select(type == "object" and (.isSidechain | not))) as $r
+        ({cur: {}, sum: 0};
          if $r.type == "user" then
            (($r.message.content // "") as $c
             | if ($c | type) == "array" and ($c | length) > 0 and all($c[]; .type == "tool_result")
-              then . else .cur = {} end)
+              then . else .sum += (.cur | length | ops) | .cur = {} end)
          elif $r.type == "assistant" then
            .cur[($r.message.id // $r.uuid // "?") | tostring] = true
-           | .best = ([.best, (.cur | length)] | max)
-         else . end) | .best' 2>/dev/null || echo 0
+         else . end)
+      | .sum + (.cur | length | ops)' 2>/dev/null || echo 0
 }
-past_canary() { (( $(main_steps) >= CANARY_STEPS )); }
 
 ACCOUNT_DIR="${CONFIG_DIR:-$HOME/.claude}"
 # An explicit false is the only "off": a builtin's absent key is read as its
@@ -160,7 +164,7 @@ if (( ${#STORE_FILES[@]} == 0 )); then
   $HEADLESS && quiet
   # The store is shared by every session on the account, so it is absent only
   # until the mod's first check anywhere; give this callee that long.
-  past_canary && broken "no store file (cc-plugin-you-should-know_builtin-*.json) under ${CONFIG_DIR:+$CONFIG_DIR/plugins/store or }$HOME/.claude/plugins/store"
+  (( $(check_opportunities) >= 1 )) && broken "no store file (cc-plugin-you-should-know_builtin-*.json) under ${CONFIG_DIR:+$CONFIG_DIR/plugins/store or }$HOME/.claude/plugins/store"
   quiet
 fi
 
@@ -178,7 +182,11 @@ jq -e '.sessions | type == "array"' "$STORE" >/dev/null 2>&1 \
 ENTRY=$(jq -c --arg s "$SESSION" '[.sessions[] | select(type == "object" and .id == $s)] | last // empty' "$STORE")
 if [[ -z "$ENTRY" ]]; then
   $HEADLESS && quiet
-  past_canary && broken "callee session $SESSION had a turn of $(main_steps) main-agent steps but has no entry in $STORE"
+  OPS=$(check_opportunities)
+  NO_BACKOFF=$(jq -r '(.typedPastInARow // 0) == 0 and (.looksToSkip // 0) == 0' "$STORE" 2>/dev/null)
+  if (( OPS >= CANARY_MAX_SKIP_PLUS_ONE )) || { (( OPS >= 1 )) && [[ "$NO_BACKOFF" == true ]]; }; then
+    broken "callee session $SESSION had $OPS check opportunities (store back-off: $(jq -c '{typedPastInARow, looksToSkip}' "$STORE")) but has no entry in $STORE"
+  fi
   quiet
 fi
 
