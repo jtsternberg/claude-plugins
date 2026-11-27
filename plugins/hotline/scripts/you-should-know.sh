@@ -5,7 +5,8 @@
 #
 # A hotline callee's terminal has no human watching it, so a note the mod shows
 # there is never read unless something relays it. The waiter does
-# (wait-for-response.sh → ysk_relay below); this file is the one reader.
+# (wait-for-response.sh → ysk_relay below), collecting them in
+# call_dir/you_should_know.jsonl; this file is the one reader.
 #
 # Run as a CLI — prints ONE JSON line, always exits 0 once arguments parse:
 #   you-should-know.sh --session <id> [--config-dir <dir>] [--since <epoch-ms>]
@@ -22,9 +23,9 @@
 # note ({line, explanation, shownAt}). The other known kinds are UI states after a
 # human interacted with the note — nothing to relay, but not drift either.
 #
-# The mod checks from a turn.step hook every few main-agent steps and stamps
-# askedTurn on the session's entry each time, so a session that has taken
-# HOTLINE_YSK_CANARY_STEPS (default 6) steps with no entry means the reader no
+# The mod checks from a turn.step hook at a turn's step index 6, 12, … and stamps
+# askedTurn on the session's entry each time, so a session with one turn of
+# HOTLINE_YSK_CANARY_STEPS (default 7) steps and no entry means the reader no
 # longer understands the store — the canary. It only runs when a surface is
 # attached, so a headless (`claude -p`) callee legitimately has no entry and no
 # store file, and both checks are skipped for it.
@@ -37,18 +38,39 @@
 YSK_KNOWN_KINDS='["offer","asked","making","ready","explaining","explained","off","failed"]'
 YSK_MARK_FILE=you_should_know_since.txt
 
-# A call dir's mark: notes shown at or before it are not relayed. Seeded at dial
-# time, so a resumed or adopted session's older notes never reach this caller.
+# A call dir's seed: notes shown at or before it are not relayed. Written once at
+# dial time and never moved, so a resumed or adopted session's older notes never
+# reach this caller.
 ysk_mark_seed() { # <call-dir>
   [[ -d "${1:-}" && ! -e "$1/$YSK_MARK_FILE" ]] || return 0
   printf '%s000\n' "$(date +%s)" > "$1/$YSK_MARK_FILE" 2>/dev/null || true
 }
 
-# Prints the reader's JSON for the call dir's callee, advancing the mark past any
-# note it returns; prints nothing for a call this does not apply to (Codex, remote,
-# or a call dir dialed before marks existed). Never fails its caller.
+# Collect-then-show. New notes are appended to call_dir/you_should_know.jsonl
+# BEFORE anything is printed, and every run prints the whole collected list: a
+# waiter killed between reading and emitting loses nothing, at the price of a
+# re-run showing a note again. The append is read-dedupe-write, so it runs under a
+# per-call mkdir lock; a run that cannot get it within HOTLINE_YSK_LOCK_TRIES
+# tenths of a second skips collecting rather than holding up the waiter.
+YSK_NOTES_FILE=you_should_know.jsonl
+
+_ysk_lock() { # <lock-dir> → 0 when held
+  local l="$1" i m tries="${HOTLINE_YSK_LOCK_TRIES:-50}"
+  for ((i = 0; i < tries; i++)); do
+    mkdir "$l" 2>/dev/null && return 0
+    # A holder that died leaves the dir behind; past 60s it is not a live holder.
+    m=$(stat -c %Y "$l" 2>/dev/null || stat -f %m "$l" 2>/dev/null)
+    [[ "$m" =~ ^[0-9]+$ ]] && (( $(date +%s) - m > 60 )) && rmdir "$l" 2>/dev/null && continue
+    sleep 0.1
+  done
+  return 1
+}
+
+# Prints {"notes":[every note collected for this call],"broken":…}; prints
+# nothing for a call this does not apply to (Codex, remote, or a call dir dialed
+# before seeds existed). Never fails its caller.
 ysk_relay() { # <call-dir> <callee-session-id>
-  local d="$1" sid="$2" since kind cwd tp out newest args=()
+  local d="$1" sid="$2" since kind cwd tp out args=() f lock broken
   [[ -n "$sid" && -s "$d/$YSK_MARK_FILE" ]] || return 0
   kind=$(tr -d "[:space:]" 2>/dev/null < "$d/agent_kind.txt")
   [[ "${kind:-claude}" == claude && ! -s "$d/remote_target.txt" ]] || return 0
@@ -62,16 +84,19 @@ ysk_relay() { # <call-dir> <callee-session-id>
     tp=$(bash "$(dirname "${BASH_SOURCE[0]}")/transcript-path.sh" --cwd "$cwd" --session "$sid" 2>/dev/null) \
       && args+=(--transcript "$tp")
   fi
-  out=$(bash "${BASH_SOURCE[0]}" "${args[@]}" 2>/dev/null) || return 0
-  jq -e 'type == "object" and (.notes | type == "array")' <<<"$out" >/dev/null 2>&1 || return 0
-  newest=$(jq -r '[.notes[].shownAt] | max // empty' <<<"$out")
-  # max(old,new) through a rename, so two waiters on one call never move it back.
-  if [[ -n "$newest" ]] && (( newest > since )); then
-    printf '%s\n' "$newest" > "$d/$YSK_MARK_FILE.tmp.$$" 2>/dev/null \
-      && mv -f "$d/$YSK_MARK_FILE.tmp.$$" "$d/$YSK_MARK_FILE" 2>/dev/null
-    rm -f "$d/$YSK_MARK_FILE.tmp.$$" 2>/dev/null
+  out=$(bash "${BASH_SOURCE[0]}" "${args[@]}" 2>/dev/null) || out=""
+  jq -e 'type == "object" and (.notes | type == "array")' <<<"$out" >/dev/null 2>&1 || out='{"notes":[],"broken":null}'
+  f="$d/$YSK_NOTES_FILE" lock="$d/you_should_know.lock"
+  if jq -e '.notes | length > 0' <<<"$out" >/dev/null && _ysk_lock "$lock"; then
+    jq -c --slurpfile have <(cat "$f" 2>/dev/null) '
+      ($have | map("\(.shownAt)\u0000\(.line)")) as $keys
+      | .notes[] | select(("\(.shownAt)\u0000\(.line)") as $k | $keys | index($k) | not)' <<<"$out" >> "$f" 2>/dev/null
+    rmdir "$lock" 2>/dev/null
   fi
-  printf '%s\n' "$out"
+  broken=$(jq -c '.broken' <<<"$out")
+  if [[ -s "$f" ]] && jq -sc --argjson b "$broken" '{notes: ., broken: $b}' "$f" 2>/dev/null; then :
+  else jq -nc --argjson b "$broken" '{notes: [], broken: $b}'
+  fi
 }
 
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
@@ -91,19 +116,30 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$SESSION" ]] || { echo "you-should-know: --session is required" >&2; exit 2; }
 [[ "$SINCE" =~ ^[0-9]+$ ]] || { echo "you-should-know: --since must be epoch ms" >&2; exit 2; }
-CANARY_STEPS="${HOTLINE_YSK_CANARY_STEPS:-6}"
-[[ "$CANARY_STEPS" =~ ^[0-9]+$ ]] || CANARY_STEPS=6
+CANARY_STEPS="${HOTLINE_YSK_CANARY_STEPS:-7}"
+[[ "$CANARY_STEPS" =~ ^[0-9]+$ ]] || CANARY_STEPS=7
 
 quiet()  { printf '{"notes":[],"broken":null}\n'; exit 0; }
 broken() { jq -nc --arg r "maybe the you-should-know relay is broken: $1" '{notes:[], broken:$r}'; exit 0; }
 
-# Main-agent steps the callee has taken: distinct assistant message ids outside
-# sidechains (one streamed message can span several rows).
+# The most main-agent steps any single turn of the callee took: distinct assistant
+# message ids (one streamed message spans several rows) between real user prompts
+# (a tool_result-only user row continues the turn), sidechains excluded. Per turn
+# because the mod checks only at a turn's step index 6, 12, … (the index resets
+# each turn), so many short turns never get checked at all.
 main_steps() {
   [[ -n "$TRANSCRIPT" && -f "$TRANSCRIPT" ]] || { echo 0; return; }
-  grep -F '"type":"assistant"' "$TRANSCRIPT" 2>/dev/null \
-    | jq -R 'fromjson? | select(.type == "assistant" and (.isSidechain | not)) | .message.id // .uuid' 2>/dev/null \
-    | sort -u | wc -l | tr -d ' '
+  grep -F -e '"type":"assistant"' -e '"type":"user"' "$TRANSCRIPT" 2>/dev/null \
+    | jq -nR 'reduce (inputs | fromjson? | select(type == "object" and (.isSidechain | not))) as $r
+        ({cur: {}, best: 0};
+         if $r.type == "user" then
+           (($r.message.content // "") as $c
+            | if ($c | type) == "array" and ($c | length) > 0 and all($c[]; .type == "tool_result")
+              then . else .cur = {} end)
+         elif $r.type == "assistant" then
+           .cur[($r.message.id // $r.uuid // "?") | tostring] = true
+           | .best = ([.best, (.cur | length)] | max)
+         else . end) | .best' 2>/dev/null || echo 0
 }
 past_canary() { (( $(main_steps) >= CANARY_STEPS )); }
 
@@ -142,7 +178,7 @@ jq -e '.sessions | type == "array"' "$STORE" >/dev/null 2>&1 \
 ENTRY=$(jq -c --arg s "$SESSION" '[.sessions[] | select(type == "object" and .id == $s)] | last // empty' "$STORE")
 if [[ -z "$ENTRY" ]]; then
   $HEADLESS && quiet
-  past_canary && broken "callee session $SESSION has taken $(main_steps) main-agent steps but has no entry in $STORE"
+  past_canary && broken "callee session $SESSION had a turn of $(main_steps) main-agent steps but has no entry in $STORE"
   quiet
 fi
 

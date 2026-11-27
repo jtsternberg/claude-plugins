@@ -3,8 +3,8 @@
 # you-should-know.sh — relaying the callee's "You should know" mod notes.
 #
 # Fixture store files under a scratch HOME only; the real ~/.claude store is
-# never read. Covers the reader's quiet/broken rules, the call-dir mark (seeded
-# at dial, advanced only by the waiter), and the waiter's additive output.
+# never read. Covers the reader's quiet/broken rules, the call-dir seed (written
+# once at dial), the collected-notes file, and the waiter's additive output.
 # =============================================================================
 set -u
 unset CLAUDE_CONFIG_DIR HOTLINE_CLAUDE_CONFIG_DIR HOTLINE_CLAUDE_CONFIG_DIRS
@@ -33,15 +33,21 @@ offer() { # <session> <shownAt> [line] → a store document holding one offer
     '{known:[], seen:[], looksToSkip:0, typedPastInARow:0,
       sessions:[{id:$s, tag:"Heads up", view:{kind:"offer", line:$l, explanation:"why", shownAt:$at}}]}'
 }
-transcript() { # <path> <n main-agent steps> [n sidechain steps]
+transcript() { # <path> <turns> <main-agent steps per turn> [sidechain steps per turn]
   mkdir -p "$(dirname "$1")"; : > "$1"
-  local i
-  for ((i = 0; i < $2; i++)); do
-    printf '{"type":"assistant","message":{"id":"msg_%s"}}\n' "$i" >> "$1"
-    printf '{"type":"assistant","message":{"id":"msg_%s"}}\n' "$i" >> "$1"   # same message, 2nd block
-  done
-  for ((i = 0; i < ${3:-0}; i++)); do
-    printf '{"type":"assistant","isSidechain":true,"message":{"id":"side_%s"}}\n' "$i" >> "$1"
+  local t i
+  for ((t = 0; t < $2; t++)); do
+    printf '{"type":"user","message":{"content":"prompt %s"}}\n' "$t" >> "$1"
+    for ((i = 0; i < $3; i++)); do
+      printf '{"type":"assistant","message":{"id":"msg_%s_%s"}}\n' "$t" "$i" >> "$1"
+      printf '{"type":"assistant","message":{"id":"msg_%s_%s"}}\n' "$t" "$i" >> "$1"   # same message, 2nd block
+      # A tool result continues the turn; it is not a new prompt.
+      printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}\n' >> "$1"
+    done
+    for ((i = 0; i < ${4:-0}; i++)); do
+      printf '{"type":"assistant","isSidechain":true,"message":{"id":"side_%s_%s"}}\n' "$t" "$i" >> "$1"
+      printf '{"type":"user","isSidechain":true,"message":{"content":"subagent prompt"}}\n' >> "$1"
+    done
   done
 }
 read_ysk() { # <home> [args] → OUT
@@ -93,17 +99,23 @@ h=$(new_home); store "$h" a "$(jq -nc --arg s "$SID" '{sessions:[{id:$s, view:{k
 read_ysk "$h"; broken; check "an offer missing shownAt → BROKEN" $? "$OUT"
 
 # Missing store file and the canary: interactive vs headless.
-h=$(new_home); transcript "$T/tx-many.jsonl" 6
-read_ysk "$h" --transcript "$T/tx-many.jsonl"; broken; check "interactive, no store file, past the canary → BROKEN" $? "$OUT"
+h=$(new_home); transcript "$T/tx-many.jsonl" 1 8
+read_ysk "$h" --transcript "$T/tx-many.jsonl"; broken; check "interactive, no store file, an 8-step turn → BROKEN" $? "$OUT"
 read_ysk "$h" --transcript "$T/tx-many.jsonl" --headless; quiet; check "headless, no store file → quiet" $? "$OUT"
-transcript "$T/tx-few.jsonl" 5 4
+transcript "$T/tx-few.jsonl" 1 6 4
 read_ysk "$h" --transcript "$T/tx-few.jsonl"; quiet
-check "interactive, no store file, 5 main steps (+ sidechain, + repeated ids) → quiet" $? "$OUT"
+check "interactive, no store file, a 6-step turn (+ sidechain, + repeated ids) → quiet" $? "$OUT"
+transcript "$T/tx-short.jsonl" 20 3
+read_ysk "$h" --transcript "$T/tx-short.jsonl"; quiet
+check "interactive, no store file, many 3-step turns (60 steps in all) → quiet" $? "$OUT"
 
 h=$(new_home); store "$h" a "$(offer other-session 5000)"
 read_ysk "$h" --transcript "$T/tx-many.jsonl"; broken && [[ "$OUT" == *"$SID"* ]]
-check "canary: interactive, 6 steps, no entry for the session → BROKEN" $? "$OUT"
-read_ysk "$h" --transcript "$T/tx-few.jsonl"; quiet; check "canary: 5 steps, no entry → quiet" $? "$OUT"
+check "canary: interactive, one 8-step turn, no entry for the session → BROKEN" $? "$OUT"
+read_ysk "$h" --transcript "$T/tx-few.jsonl"; quiet; check "canary: a 6-step turn, no entry → quiet" $? "$OUT"
+read_ysk "$h" --transcript "$T/tx-short.jsonl"; quiet; check "canary: many 3-step turns, no entry → quiet" $? "$OUT"
+HOTLINE_YSK_CANARY_STEPS=3 read_ysk "$h" --transcript "$T/tx-short.jsonl"; broken
+check "canary: HOTLINE_YSK_CANARY_STEPS overrides the threshold" $? "$OUT"
 read_ysk "$h" --transcript "$T/tx-many.jsonl" --headless; quiet; check "canary: headless → quiet" $? "$OUT"
 
 # Store location: the callee's config dir first, then ~/.claude.
@@ -162,19 +174,43 @@ wait_on "$h" "$CD"
 [[ $RC -eq 0 && "$(jq -r '.you_should_know[0].line' <<<"$OUT")" == "the migration order check will fail" \
    && "$(jq -r '.response' <<<"$OUT")" == "the answer" ]] && ! jq -e 'has("you_should_know_broken")' <<<"$OUT" >/dev/null
 check "a new note is delivered as an additive you_should_know array" $? "rc=$RC out=$OUT"
-[[ "$(cat "$CD/you_should_know_since.txt")" == "$((NOW_MS + 10))" ]] && ! jq -e 'has("you_should_know")' "$CD/response.json" >/dev/null
-check "delivery advances the mark; response.json is untouched" $? "mark=$(cat "$CD/you_should_know_since.txt")"
+[[ "$(wc -l < "$CD/you_should_know.jsonl" | tr -d ' ')" == 1 && "$(cat "$CD/you_should_know_since.txt")" == "$NOW_MS" ]] \
+  && ! jq -e 'has("you_should_know")' "$CD/response.json" >/dev/null
+check "the note is collected in you_should_know.jsonl; the seed and response.json are untouched" $? \
+  "notes=$(cat "$CD/you_should_know.jsonl" 2>/dev/null) seed=$(cat "$CD/you_should_know_since.txt")"
 wait_on "$h" "$CD"
-[[ $RC -eq 0 && "$OUT" == "$(jq -c . "$CD/response.json")" ]]
-check "the same note is not delivered twice" $? "out=$OUT"
+[[ "$(jq -c '[.you_should_know[].line]' <<<"$OUT")" == '["the migration order check will fail"]' \
+   && "$(wc -l < "$CD/you_should_know.jsonl" | tr -d ' ')" == 1 ]]
+check "a re-run shows the collected note again, without collecting it twice" $? "out=$OUT"
 store "$h" a "$(offer "$SID" $((NOW_MS + 20)) "a later note")"
 wait_on "$h" "$CD"
-[[ "$(jq -r '.you_should_know[0].line' <<<"$OUT")" == "a later note" ]]
-check "a later note on a re-run is delivered" $? "out=$OUT"
-printf '%s\n' $((NOW_MS + 99)) > "$CD/you_should_know_since.txt"
-source "$READER"; ysk_relay "$CD" "$SID" >/dev/null
-[[ "$(cat "$CD/you_should_know_since.txt")" == "$((NOW_MS + 99))" ]]
-check "the mark never moves backwards" $? "mark=$(cat "$CD/you_should_know_since.txt")"
+[[ "$(jq -c '[.you_should_know[].line]' <<<"$OUT")" == '["the migration order check will fail","a later note"]' ]]
+check "a later note on a re-run is shown with every earlier one" $? "out=$OUT"
+
+# A waiter killed after reading but before printing: the store has since moved on
+# to a newer note (it keeps only the latest), yet the first one is not lost.
+h=$(new_home); CD=$(mk_call "$h"); store "$h" a "$(offer "$SID" $((NOW_MS + 10)) "first")"
+source "$READER"; HOME="$h" ysk_relay "$CD" "$SID" >/dev/null
+store "$h" a "$(offer "$SID" $((NOW_MS + 20)) "second")"
+wait_on "$h" "$CD"
+[[ "$(jq -c '[.you_should_know[].line]' <<<"$OUT")" == '["first","second"]' ]]
+check "a note collected by an interrupted run is still shown later" $? "out=$OUT"
+
+echo "concurrency:"
+h=$(new_home); CD=$(mk_call "$h"); store "$h" a "$(offer "$SID" $((NOW_MS + 10)) "only one")"
+pids=()
+for i in 1 2 3 4 5 6; do (HOME="$h" ysk_relay "$CD" "$SID" > "$T/conc-$i.out") & pids+=($!); done
+wait "${pids[@]}"
+[[ "$(wc -l < "$CD/you_should_know.jsonl" | tr -d ' ')" == 1 && "$(jq -r '.line' "$CD/you_should_know.jsonl")" == "only one" ]]
+check "six concurrent collectors → the note collected exactly once" $? "notes=$(cat "$CD/you_should_know.jsonl")"
+[[ ! -e "$CD/you_should_know.lock" ]]; check "the lock is released" $?
+h=$(new_home); CD=$(mk_call "$h"); store "$h" a "$(offer "$SID" $((NOW_MS + 30)) "late")"
+printf '%s\n' "$(jq -nc --argjson at $((NOW_MS + 5)) '{tag:"Heads up", line:"earlier", explanation:"", shownAt:$at}')" > "$CD/you_should_know.jsonl"
+mkdir "$CD/you_should_know.lock"
+OUT=$(HOME="$h" HOTLINE_YSK_LOCK_TRIES=2 ysk_relay "$CD" "$SID")
+[[ "$(jq -c '[.notes[].line]' <<<"$OUT")" == '["earlier"]' && "$(wc -l < "$CD/you_should_know.jsonl" | tr -d ' ')" == 1 ]]
+check "a held lock → collection skipped this run, earlier notes still shown" $? "out=$OUT"
+rmdir "$CD/you_should_know.lock"
 
 h=$(new_home); CD=$(mk_call "$h"); store "$h" a "$(jq -nc --arg s "$SID" '{sessions:[{id:$s, view:{kind:"glowing"}}]}')"
 wait_on "$h" "$CD"
