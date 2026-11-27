@@ -126,6 +126,7 @@ source "$SCRIPT_DIR/../../../scripts/repl-state.sh"
 # repeats the check for a direct invocation rather than launching without it.
 source "$SCRIPT_DIR/../../../scripts/callee-env.sh"
 source "$SCRIPT_DIR/../../../scripts/claude-config-dir.sh"
+source "$SCRIPT_DIR/../../../scripts/you-should-know.sh"
 if [[ -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] && ! claude_config_dir_validate "$HOTLINE_CLAUDE_CONFIG_DIR" HOTLINE_CLAUDE_CONFIG_DIR; then
   jq -nc --arg e "$CLAUDE_CONFIG_DIR_ERR" '{error: $e}'; exit 1
 fi
@@ -357,6 +358,7 @@ if [[ -n "$PROMPT" ]]; then
   # dispatch block for the contract.
   echo cmux > "$CALL_DIR/transport.txt"
   claude_config_dir_record "$CALL_DIR" claude
+  ysk_mark_seed "$CALL_DIR"
   PASTE_PROMPT="$CALL_DIR/pending_paste.md"
   ( umask 077; printf '%s' "$PROMPT" > "$PASTE_PROMPT" )
   chmod 600 "$PASTE_PROMPT" 2>/dev/null || true

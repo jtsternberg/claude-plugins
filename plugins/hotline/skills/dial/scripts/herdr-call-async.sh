@@ -164,6 +164,7 @@ die() { jq -nc --arg err "$1" '{error: $err}'; exit 1; }
 source "$HOTLINE_SCRIPTS/codex-home.sh"
 codex_home_validate "$AGENT_KIND" herdr "${HOTLINE_HERDR_REMOTE:-}" "$RESUME_ID" || die "$CODEX_HOME_ERR"
 source "$HOTLINE_SCRIPTS/claude-config-dir.sh"
+source "$HOTLINE_SCRIPTS/you-should-know.sh"
 if [[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]]; then
   [[ -z "${HOTLINE_HERDR_REMOTE:-}" ]] || die "HOTLINE_CLAUDE_CONFIG_DIR selects a local Claude account; a remote callee runs on its own box's account"
   claude_config_dir_validate "$HOTLINE_CLAUDE_CONFIG_DIR" HOTLINE_CLAUDE_CONFIG_DIR || die "$CLAUDE_CONFIG_DIR_ERR"
@@ -283,6 +284,7 @@ if [[ ${HOTLINE_CODEX_HOME+x} ]]; then
   printf '%s\n' "$HOTLINE_CODEX_HOME" > "$CALL_DIR/codex_home.txt"
 fi
 claude_config_dir_record "$CALL_DIR" "$AGENT_KIND"
+ysk_mark_seed "$CALL_DIR"
 # See WHY NOTHING IS CLOSED in the header.
 echo true > "$CALL_DIR/keep_workspace.txt"
 echo "$CWD" > "$CALL_DIR/cwd.txt"

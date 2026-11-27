@@ -48,6 +48,10 @@
 #   {"session_id":"...","response":"..."}
 # plus, on exit 4 only, an additive `"awaiting_review":true`, and on exit 7 only an
 # additive `"blocked":true` — every other status emits byte-identical JSON to before.
+# On any exit that prints JSON, a Claude callee's output may also carry an additive
+# `you_should_know` array and/or `you_should_know_broken` string (stdout only, never
+# response.json; see scripts/you-should-know.sh). Absent when there is nothing to
+# relay, so the output is otherwise unchanged.
 #
 # The emitted JSON is compact (single line) and re-validated via jq before
 # being written to stdout — so stdout is guaranteed to be parseable JSON on
@@ -352,13 +356,28 @@ record_waiter_timeout() {   # $1 = which loop expired
   printf 'budget=%ss %s' "$TIMEOUT" "$1" 2>/dev/null > "$WAITER_TIMEOUT_MARKER" || true
 }
 
+# shellcheck source=../../../scripts/you-should-know.sh
+source "$HOTLINE_SCRIPTS/you-should-know.sh"
+
 emit_response_json() {
   # Re-emit as compact, validated JSON. If response.json is somehow
   # unparseable, jq exits non-zero with an error on stderr — we surface that
   # loudly rather than hand a caller visibly-valid-but-broken bytes.
-  if ! jq -c . "$CALL_DIR/response.json"; then
+  if ! jq -c . "$CALL_DIR/response.json" >/dev/null; then
     echo "response.json is not parseable JSON — hotline emission bug" >&2
     exit 1
+  fi
+  # Notes the callee's "You should know" mod showed since the last delivery. Added
+  # to stdout only, never to response.json, so a re-run does not replay them.
+  local sid ysk=""
+  sid=$(jq -r '.session_id // empty' "$CALL_DIR/response.json" 2>/dev/null) || sid=""
+  [[ -n "$sid" ]] || sid=$(tr -d '[:space:]' < "$CALL_DIR/session_id.txt" 2>/dev/null) || sid=""
+  ysk=$(ysk_relay "$CALL_DIR" "$sid") || ysk=""
+  if [[ -n "$ysk" ]] && jq -e '(.notes | length) > 0 or .broken != null' <<<"$ysk" >/dev/null 2>&1; then
+    jq -c --argjson y "$ysk" '. + (if ($y.notes | length) > 0 then {you_should_know: $y.notes} else {} end)
+      + (if $y.broken != null then {you_should_know_broken: $y.broken} else {} end)' "$CALL_DIR/response.json"
+  else
+    jq -c . "$CALL_DIR/response.json"
   fi
 }
 

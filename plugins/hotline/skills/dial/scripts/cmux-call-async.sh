@@ -162,6 +162,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../../scripts/codex-home.sh"
 source "$SCRIPT_DIR/../../../scripts/claude-config-dir.sh"
+source "$SCRIPT_DIR/../../../scripts/you-should-know.sh"
 if [[ "$AGENT_KIND" == claude && -n "${HOTLINE_CLAUDE_CONFIG_DIR:-}" ]] \
    && ! claude_config_dir_validate "$HOTLINE_CLAUDE_CONFIG_DIR" HOTLINE_CLAUDE_CONFIG_DIR; then
   jq -nc --arg e "$CLAUDE_CONFIG_DIR_ERR" '{error:$e,stage:"args"}'; exit 1
@@ -237,6 +238,7 @@ fi
 CALL_DIR=$(mktemp -d "${HOTLINE_CALL_HOME:-/tmp}/hotline-call-XXXXX")
 if [[ ${HOTLINE_CODEX_HOME+x} ]]; then printf '%s\n' "$HOTLINE_CODEX_HOME" > "$CALL_DIR/codex_home.txt"; fi
 claude_config_dir_record "$CALL_DIR" "$AGENT_KIND"
+ysk_mark_seed "$CALL_DIR"
 # Which backend owns this call dir. Written here, with the dir, so it is present
 # for every later reader no matter where this launcher gets to — the host handle
 # (surface_ref.txt / workspace_ref.txt) is not placed until much further down.
