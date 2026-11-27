@@ -7,6 +7,7 @@ import socket
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -194,6 +195,130 @@ class SendTests(unittest.TestCase):
             send.main()
         self.assertEqual(json.loads(output.call_args.args[0])['status'], 'sent')
         self.assertIn('hotline send thread_abc', (self.home / 'message').read_text())
+
+class SenderNotesTests(unittest.TestCase):
+    """The sender's own "You should know" notes riding on its outgoing message."""
+    SID = '11111111-2222-4333-8444-555555555555'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        for p in (patch.object(send, 'HOME', self.home), patch.dict(os.environ)):
+            p.start(); self.addCleanup(p.stop)
+        for k in ('CLAUDE_CONFIG_DIR', 'HOTLINE_CLAUDE_CONFIG_DIRS', 'AGENT_CLAUDE_CONFIG_DIRS', 'HOTLINE_YSK_SEND_DIR'):
+            os.environ.pop(k, None)
+        # The reader reads $HOME's store; send hands it the module HOME.
+        self.sessions = self.home / '.claude/sessions'; self.sessions.mkdir(parents=True)
+        self.store_dir = self.home / '.claude/plugins/store'; self.store_dir.mkdir(parents=True)
+        self.sock = self.home / 'sock'
+        (self.sessions / '1.json').write_text(json.dumps({'pid': 1, 'name': 'worker', 'sessionId': 'callee', 'cwd': str(self.home), 'messagingSocketPath': str(self.sock)}))
+        (self.sessions / '2.json').write_text(json.dumps({'pid': 2, 'name': 'boss', 'sessionId': self.SID, 'cwd': str(self.home), 'messagingSocketPath': '/tmp/unused'}))
+        self.state = self.home / '.agents-hotline/you-should-know'
+        self.cursor = self.state / f'{self.SID}.since'
+        self.notes = self.state / f'{self.SID}.jsonl'
+
+    def offer(self, shown_at, kind='offer'):
+        view = {'kind': kind, 'line': 'the  migration\norder check will fail', 'explanation': 'LONG EXPLANATION', 'shownAt': shown_at}
+        (self.store_dir / 'cc-plugin-you-should-know_builtin-a.json').write_text(json.dumps({'looksToSkip': 0, 'typedPastInARow': 0, 'sessions': [{'id': self.SID, 'tag': 'Heads up', 'view': view}]}))
+
+    def set_cursor(self, ms):
+        self.state.mkdir(parents=True, exist_ok=True); self.cursor.write_text(f'{ms}\n')
+
+    def send(self, deliver=True, sender=None):
+        """→ (content the receiver got, status, nonce). deliver=False leaves no transcript evidence."""
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.unlink(missing_ok=True); server.bind(str(self.sock)); server.listen()
+        transcript = self.home / 'receiver.jsonl'; transcript.write_text('')
+        got = []
+        def receiver():
+            conn, _ = server.accept()
+            with conn:
+                frame = json.loads(conn.makefile().readline())
+                got.append(frame)
+                if deliver:
+                    transcript.write_text(json.dumps({'type': 'user', 'message': frame['message']}) + '\n')
+        thread = threading.Thread(target=receiver); thread.start()
+        try:
+            argv = ['send', 'worker', 'hello', '--sender-id', sender or self.SID, '--timeout', '1' if deliver else '0']
+            with patch.object(send, 'transcript', return_value=[transcript]), patch('sys.argv', argv), patch('builtins.print') as output:
+                send.main()
+        finally:
+            thread.join(2); server.close()
+        return got[0]['message']['content'], json.loads(output.call_args.args[0])['status'], got[0]['msg_id']
+
+    def plain(self, nonce, sender=None):
+        # The envelope exactly as send.py built it before sender notes existed.
+        return f'{nonce} [agent]\nhello\n\nReply: hotline send {sender or self.SID} …\nMessage ID: {nonce}'
+
+    def test_first_send_seeds_cursor_and_relays_nothing(self):
+        self.offer(5000)
+        before = int(time.time() * 1000)
+        content, status, nonce = self.send()
+        self.assertEqual(status, 'delivered')
+        self.assertEqual(content, self.plain(nonce))
+        self.assertGreaterEqual(int(self.cursor.read_text()), before)
+        self.assertFalse(self.notes.exists())
+
+    def test_no_new_note_is_byte_identical(self):
+        self.offer(5000); self.set_cursor(5000)
+        content, _, nonce = self.send()
+        self.assertEqual(content, self.plain(nonce))
+        self.assertEqual(self.cursor.read_text(), '5000\n')
+
+    def test_new_note_carried_compactly_once(self):
+        self.offer(5000); self.set_cursor(1000)
+        content, status, nonce = self.send()
+        self.assertEqual(status, 'delivered')
+        self.assertEqual(content, f'{nonce} [agent]\nhello\n\n'
+            f"Sender's You-should-know notes (full text: {self.notes}):\n"
+            'Heads up: the migration order check will fail'
+            f'\n\nReply: hotline send {self.SID} …\nMessage ID: {nonce}')
+        self.assertNotIn('LONG EXPLANATION', content)
+        kept = [json.loads(l) for l in self.notes.read_text().splitlines()]
+        self.assertEqual([(n['explanation'], n['shownAt']) for n in kept], [('LONG EXPLANATION', 5000)])
+        self.assertEqual(self.cursor.read_text(), '5000\n')
+        content, _, nonce = self.send()
+        self.assertEqual(content, self.plain(nonce))
+
+    def test_undelivered_send_keeps_cursor_and_retry_recarries(self):
+        self.offer(5000); self.set_cursor(1000)
+        content, status, _ = self.send(deliver=False)
+        self.assertEqual(status, 'unconfirmed')
+        self.assertIn('Heads up: the migration order check will fail', content)
+        self.assertEqual(self.cursor.read_text(), '1000\n')
+        content, status, _ = self.send()
+        self.assertEqual(status, 'delivered')
+        self.assertIn('Heads up: the migration order check will fail', content)
+        self.assertEqual(self.cursor.read_text(), '5000\n')
+        self.assertEqual(len(self.notes.read_text().splitlines()), 1)
+
+    def test_reader_failure_sends_unchanged(self):
+        self.offer(5000); self.set_cursor(1000)
+        for body in ('exit 1', 'echo not-json', 'echo \'{"notes":"x"}\'', 'sleep 3'):
+            with self.subTest(body=body):
+                bad = self.home / 'bad-reader.sh'; bad.write_text(body + '\n')
+                with patch.object(send, 'YSK_READER', bad), patch.dict(os.environ, {'HOTLINE_YSK_SEND_TIMEOUT': '0.3'}):
+                    content, status, nonce = self.send()
+                self.assertEqual((content, status), (self.plain(nonce), 'delivered'))
+                self.assertEqual(self.cursor.read_text(), '1000\n')
+
+    def test_broken_store_appends_one_line(self):
+        self.offer(5000, kind='brand-new-kind'); self.set_cursor(1000)
+        content, _, nonce = self.send()
+        head, tail = self.plain(nonce).split('\n\nReply:')
+        self.assertTrue(content.startswith(head + '\n\nSender-side note relay: maybe the you-should-know relay is broken: unknown view kind'), content)
+        self.assertTrue(content.endswith('\n\nReply:' + tail))
+        self.assertEqual(content.count('\n'), self.plain(nonce).count('\n') + 2)
+        self.assertEqual(self.cursor.read_text(), '1000\n')
+
+    def test_sender_not_a_claude_session_is_untouched(self):
+        self.offer(5000)
+        content, _, nonce = self.send(sender='codex-thread-1')
+        self.assertEqual(content, self.plain(nonce, 'codex-thread-1'))
+        self.assertFalse(self.state.exists())
+        self.assertIsNone(send.ysk_collect(None))
+        self.assertIsNone(send.ysk_collect('../escape'))
 
 if __name__ == '__main__':
     unittest.main()
