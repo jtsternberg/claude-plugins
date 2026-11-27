@@ -690,6 +690,15 @@ Exit codes that are not failures:
   usual (exit 0/4/7). A follow-up from a different caller session, or a human typing
   into the surface, still reads as exit 3.
 
+**Relay a `you_should_know` field.** On any exit that prints JSON, a Claude
+callee's output may carry `you_should_know`: notes Claude Code's "You should
+know" mod showed in the callee's unwatched terminal (`tag`, `line`,
+`explanation`). Pass each `line` on to the user alongside the answer. A
+`you_should_know_broken` string means the relay could not read the mod's store;
+mention it once. Neither changes the exit code, and neither appears when there is
+nothing to say. A note can land after the callee's last message; re-running the
+wait on the same `CALL_DIR` delivers it without re-sending anything.
+
 Leave the call dir where it is when the exchange is done; cleanup is the
 wrapper's job, not yours. Every dial starts by reaping call dirs older than
 `HOTLINE_CALL_SWEEP_DAYS` (default 3 days), and that age floor is what makes the
