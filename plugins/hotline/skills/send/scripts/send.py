@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 from contextlib import closing
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -123,6 +124,143 @@ def verify(paths, offsets, nonce, timeout, claude=False):
             return 'unconfirmed', 'no matching receiver transcript evidence'
         time.sleep(min(.2, max(0, deadline - time.monotonic())))
 
+# The sender's own "You should know" notes ride along on its outgoing message: a
+# long-lived callee reports through send, not through the caller's waiter, so its
+# notes would otherwise never leave its unwatched terminal. The reader is the one in
+# scripts/you-should-know.sh (its header has the quiet/broken rules). Everything here
+# is best-effort: any failure means the message goes out exactly as it would without
+# this, and a message with nothing to relay is byte-identical to one sent before it.
+YSK_READER = SCRIPTS / 'you-should-know.sh'
+SAFE_ID = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
+
+def ysk_dir():
+    return Path(os.getenv('HOTLINE_YSK_SEND_DIR') or HOME / '.agents-hotline/you-should-know')
+
+def ysk_locked(path, fn):
+    # flock with a bounded wait: a lock we cannot get skips the cursor work rather
+    # than holding up the send. Skipping an advance only risks a duplicate later.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'a') as lock:
+        for _ in range(20):
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                time.sleep(.05)
+        else:
+            return None
+        try: return fn()
+        finally: fcntl.flock(lock, fcntl.LOCK_UN)
+
+def ysk_write(path, text):
+    tmp = path.with_name(f'{path.name}.tmp.{os.getpid()}')
+    try:
+        tmp.write_text(text); os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+def ysk_cursor(path):
+    try: value = path.read_text().strip()
+    except FileNotFoundError: return None
+    return int(value) if value.isdigit() else None
+
+def ysk_sender(sender_id):
+    # Only a sender found in a Claude registry is a Claude session; the entry also
+    # names its account (the store's config dir) and cwd (its transcript, which the
+    # reader's canary counts check opportunities in).
+    if not sender_id or not SAFE_ID.fullmatch(sender_id):
+        return None
+    for config in claude_config_dirs():
+        for path in (config / 'sessions').glob('*.json'):
+            try: data = json.loads(path.read_text())
+            except (OSError, ValueError): continue
+            if isinstance(data, dict) and data.get('sessionId') == sender_id:
+                return config, data.get('cwd')
+    return None
+
+def ysk_run(cmd, env, deadline):
+    # Its own process group, killed whole at the deadline: the reader's jq children
+    # would otherwise hold the output pipe open and the send would wait them out.
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env, start_new_session=True)
+    try:
+        out, _ = proc.communicate(timeout=max(0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, 9); proc.communicate()
+        raise
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+    return out
+
+def ysk_collect(sender_id):
+    """→ None (nothing to add), or (suffix, max shownAt carried or None)."""
+    found = ysk_sender(sender_id)
+    if not found:
+        return None
+    config, cwd = found
+    base = ysk_dir()
+    cursor_file, notes_file = base / f'{sender_id}.since', base / f'{sender_id}.jsonl'
+    def seed():
+        # First send from this sender: notes it was shown before now are history,
+        # not news, so start the cursor here and relay nothing this time.
+        since = ysk_cursor(cursor_file)
+        if since is None:
+            ysk_write(cursor_file, f'{int(time.time() * 1000)}\n')
+        return since
+    since = ysk_locked(base / f'{sender_id}.lock', seed)
+    if since is None:
+        return None
+    env = {**os.environ, 'HOME': str(HOME)}
+    deadline = time.monotonic() + float(os.getenv('HOTLINE_YSK_SEND_TIMEOUT') or 5)
+    cmd = ['bash', str(YSK_READER), '--session', sender_id, '--since', str(since), '--config-dir', str(config)]
+    if cwd:
+        tp = ysk_run(['bash', str(SCRIPTS / 'transcript-path.sh'), '--cwd', cwd, '--session', sender_id], {**env, 'HOTLINE_CLAUDE_CONFIG_DIR': str(config)}, deadline)
+        if tp.strip():
+            cmd += ['--transcript', tp.strip()]
+    out = json.loads(ysk_run(cmd, env, deadline))
+    notes = [n for n in out['notes'] if isinstance(n, dict) and isinstance(n.get('line'), str)
+             and isinstance(n.get('shownAt'), (int, float)) and n['shownAt'] > since]
+    broken = out.get('broken')
+    if not notes and not isinstance(broken, str):
+        return None
+    lines = []
+    if notes:
+        def keep():
+            # The full notes (explanation, shownAt) stay sender-side; the message
+            # carries one line each and this path. Rewritten whole through a rename,
+            # deduped, so a retried send does not grow it.
+            kept, seen = [], set()
+            try: old = notes_file.read_text().splitlines()
+            except FileNotFoundError: old = []
+            for raw in old:
+                try: n = json.loads(raw)
+                except ValueError: continue
+                if isinstance(n, dict): kept.append(n)
+            kept += notes
+            out = []
+            for n in kept:
+                key = (n.get('shownAt'), n.get('line'))
+                if key not in seen: seen.add(key); out.append(json.dumps(n))
+            ysk_write(notes_file, '\n'.join(out) + '\n')
+            return True
+        if not ysk_locked(base / f'{sender_id}.lock', keep):
+            return None
+        lines.append(f"Sender's You-should-know notes (full text: {notes_file}):")
+        lines += [f"{one_line(n.get('tag') or 'You should know')}: {one_line(n['line'])}" for n in notes]
+    if isinstance(broken, str):
+        lines.append(f'Sender-side note relay: {one_line(broken)}')
+    return '\n\n' + '\n'.join(lines), (max(n['shownAt'] for n in notes) if notes else None)
+
+def one_line(text):
+    return ' '.join(str(text).split())
+
+def ysk_advance(sender_id, shown_at):
+    cursor_file = ysk_dir() / f'{sender_id}.since'
+    def advance():
+        current = ysk_cursor(cursor_file)
+        if current is None or shown_at > current:
+            ysk_write(cursor_file, f'{int(shown_at)}\n')
+    ysk_locked(ysk_dir() / f'{sender_id}.lock', advance)
+
 def main():
     parser = JsonParser()
     parser.add_argument('target'); parser.add_argument('message')
@@ -139,7 +277,11 @@ def main():
     if hosted: sender = 'thread_' + hosted
     route, target, detail = resolve(args.target)
     nonce = 'm-' + uuid.uuid4().hex[:16]
-    message = f'{nonce} [{args.sender_name}]\n{args.message}\n\nReply: hotline send {sender} …\nMessage ID: {nonce}'
+    ysk = None
+    if not hosted:
+        try: ysk = ysk_collect(args.sender_id)
+        except Exception: ysk = None
+    message = f'{nonce} [{args.sender_name}]\n{args.message}{ysk[0] if ysk else ""}\n\nReply: hotline send {sender} …\nMessage ID: {nonce}'
     evidence = ''
     if route == 't3':
         proc = subprocess.run(['t3', 'thread', 'send', target, '-'], input=message, capture_output=True, text=True)
@@ -160,6 +302,11 @@ def main():
         proc = subprocess.run([codex,'queue','--thread',target,'--message',message], env={**os.environ, 'CODEX_HOME':str(home)}, capture_output=True, text=True)
         if proc.returncode: raise Refusal(f'codex queue failed: {proc.stderr.strip()}')
         status, evidence = verify(paths, offsets, nonce, args.timeout)
+    # Only receiver transcript evidence moves the cursor: a held, unconfirmed or
+    # merely accepted (T3 `sent`) message carries the same notes again next time.
+    if ysk and ysk[1] is not None and status == 'delivered':
+        try: ysk_advance(args.sender_id, ysk[1])
+        except Exception: pass
     print(json.dumps({'status':status, 'route':route, 'target':target, 'evidence':evidence}))
 
 if __name__ == '__main__':
