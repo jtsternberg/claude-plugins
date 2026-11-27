@@ -49,9 +49,11 @@
 # plus, on exit 4 only, an additive `"awaiting_review":true`, and on exit 7 only an
 # additive `"blocked":true` — every other status emits byte-identical JSON to before.
 # On any exit that prints JSON, a Claude callee's output may also carry an additive
-# `you_should_know` array and/or `you_should_know_broken` string (stdout only, never
-# response.json; see scripts/you-should-know.sh). Absent when there is nothing to
-# relay, so the output is otherwise unchanged.
+# `you_should_know` array and/or `you_should_know_broken` string. Notes are
+# persisted in call_dir/you_should_know.jsonl, and stdout carries ALL notes
+# collected so far on every run, so a re-run can show one again; response.json is
+# unchanged. Both are absent when there is nothing to relay (see
+# scripts/you-should-know.sh).
 #
 # The emitted JSON is compact (single line) and re-validated via jq before
 # being written to stdout — so stdout is guaranteed to be parseable JSON on
@@ -367,8 +369,8 @@ emit_response_json() {
     echo "response.json is not parseable JSON — hotline emission bug" >&2
     exit 1
   fi
-  # Notes the callee's "You should know" mod showed since the last delivery. Added
-  # to stdout only, never to response.json, so a re-run does not replay them.
+  # Every note the callee's "You should know" mod showed since the dial, collected
+  # in you_should_know.jsonl. Stdout only: response.json stays the callee's answer.
   local sid ysk=""
   sid=$(jq -r '.session_id // empty' "$CALL_DIR/response.json" 2>/dev/null) || sid=""
   [[ -n "$sid" ]] || sid=$(tr -d '[:space:]' < "$CALL_DIR/session_id.txt" 2>/dev/null) || sid=""
