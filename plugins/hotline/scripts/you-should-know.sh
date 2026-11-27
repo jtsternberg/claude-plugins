@@ -93,15 +93,26 @@ ysk_relay() { # <call-dir> <callee-session-id>
   jq -e 'type == "object" and (.notes | type == "array")' <<<"$out" >/dev/null 2>&1 || out='{"notes":[],"broken":null}'
   f="$d/$YSK_NOTES_FILE" lock="$d/you_should_know.lock"
   if jq -e '.notes | length > 0' <<<"$out" >/dev/null && _ysk_lock "$lock"; then
-    jq -c --slurpfile have <(cat "$f" 2>/dev/null) '
-      ($have | map("\(.shownAt)\u0000\(.line)")) as $keys
-      | .notes[] | select(("\(.shownAt)\u0000\(.line)") as $k | $keys | index($k) | not)' <<<"$out" >> "$f" 2>/dev/null
+    # Rewritten whole through a rename, never appended: a run killed mid-append
+    # would leave a partial last line. Unparsable lines are dropped on the way.
+    if { _ysk_collected "$f"; jq -c '.notes[]' <<<"$out"; } \
+         | jq -sc 'reduce .[] as $n ({seen: {}, out: []};
+             "\($n.shownAt)\u0000\($n.line)" as $k
+             | if .seen[$k] then . else .seen[$k] = true | .out += [$n] end) | .out[]' \
+         > "$f.tmp.$$" 2>/dev/null; then
+      mv -f "$f.tmp.$$" "$f" 2>/dev/null
+    fi
+    rm -f "$f.tmp.$$" 2>/dev/null
     rmdir "$lock" 2>/dev/null
   fi
   broken=$(jq -c '.broken' <<<"$out")
-  if [[ -s "$f" ]] && jq -sc --argjson b "$broken" '{notes: ., broken: $b}' "$f" 2>/dev/null; then :
-  else jq -nc --argjson b "$broken" '{notes: [], broken: $b}'
-  fi
+  _ysk_collected "$f" | jq -sc --argjson b "$broken" '{notes: ., broken: $b}'
+}
+
+# The collected notes, one per line, skipping any line that does not parse.
+_ysk_collected() { # <notes-file>
+  [[ -s "$1" ]] || return 0
+  jq -cR 'fromjson? | select(type == "object")' "$1" 2>/dev/null
 }
 
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0

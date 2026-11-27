@@ -208,6 +208,17 @@ wait_on "$h" "$CD"
 [[ "$(jq -c '[.you_should_know[].line]' <<<"$OUT")" == '["first","second"]' ]]
 check "a note collected by an interrupted run is still shown later" $? "out=$OUT"
 
+h=$(new_home); CD=$(mk_call "$h"); store "$h" a "$(offer "$SID" $((NOW_MS + 20)) "new")"
+{ jq -nc --argjson at $((NOW_MS + 5)) '{tag:"Heads up", line:"kept", explanation:"", shownAt:$at}'
+  printf '{"tag":"Heads up","line":"cut of'; } > "$CD/you_should_know.jsonl"
+wait_on "$h" "$CD"
+[[ "$(jq -c '[.you_should_know[].line]' <<<"$OUT")" == '["kept","new"]' ]] \
+  && jq -e . "$CD/you_should_know.jsonl" >/dev/null 2>&1 && [[ "$(wc -l < "$CD/you_should_know.jsonl" | tr -d ' ')" == 2 ]]
+check "a truncated trailing line → earlier notes still shown, the new one collected, the file healed" $? \
+  "out=$OUT file=$(cat "$CD/you_should_know.jsonl")"
+ls "$CD"/you_should_know.jsonl.tmp.* >/dev/null 2>&1; [[ $? -ne 0 ]]
+check "no tmp file is left behind" $?
+
 echo "concurrency:"
 h=$(new_home); CD=$(mk_call "$h"); store "$h" a "$(offer "$SID" $((NOW_MS + 10)) "only one")"
 pids=()
