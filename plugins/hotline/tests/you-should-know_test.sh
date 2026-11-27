@@ -125,6 +125,39 @@ transcript "$T/tx-17.jsonl" 17 7
 read_ysk "$h" --transcript "$T/tx-17.jsonl"; broken && [[ "$OUT" == *"17 check opportunities"* ]]
 check "canary: back-off, 17 opportunities → BROKEN" $? "$OUT"
 transcript "$T/tx-2x13.jsonl" 1 13
+# A full store (32 sessions) evicts entries, so a missing one is no evidence there;
+# only a store the mod has not written since the callee's first check opportunity is.
+full_store() { # <home> → 32 other sessions, no back-off
+  store "$1" a "$(jq -nc '{typedPastInARow:0, looksToSkip:0, sessions:[range(32) | {id:"other-\(.)", askedTurn:"t"}]}')"
+}
+ts_transcript() { # <path> <epoch seconds every row carries>
+  local iso; iso=$(jq -rn --argjson e "$2" '$e | todate | sub("Z$"; ".123Z")')
+  transcript "$1" 1 8
+  jq -c --arg ts "$iso" '. + {timestamp: $ts}' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+store_mtime() { # <home> <epoch seconds>
+  TZ=UTC touch -t "$(jq -rn --argjson e "$2" '$e | strftime("%Y%m%d%H%M.%S")')" \
+    "$1/.claude/plugins/store/cc-plugin-you-should-know_builtin-a.json"
+}
+NOW_S=$(date +%s)
+h=$(new_home); full_store "$h"; ts_transcript "$T/tx-ts-old.jsonl" $((NOW_S - 600))
+read_ysk "$h" --transcript "$T/tx-ts-old.jsonl"; quiet
+check "full store, missing entry, store written after the first opportunity → quiet" $? "$OUT"
+ts_transcript "$T/tx-ts-now.jsonl" "$NOW_S"
+store_mtime "$h" $((NOW_S - 60))
+read_ysk "$h" --transcript "$T/tx-ts-now.jsonl"; quiet
+check "full store, store written 60s before the first opportunity (inside the grace) → quiet" $? "$OUT"
+store_mtime "$h" $((NOW_S - 600))
+read_ysk "$h" --transcript "$T/tx-ts-now.jsonl"; broken && [[ "$OUT" == *"full"* ]]
+check "full store, store last written 600s before the first opportunity → BROKEN" $? "$OUT"
+read_ysk "$h" --transcript "$T/tx-ts-now.jsonl" --headless; quiet
+check "full store, stale mtime, headless → quiet" $? "$OUT"
+read_ysk "$h" --transcript "$T/tx-few.jsonl"; quiet
+check "full store, stale mtime, no check opportunity yet → quiet" $? "$OUT"
+h=$(new_home); store "$h" a "$(jq -nc '{typedPastInARow:0, looksToSkip:0, sessions:[range(31) | {id:"other-\(.)", askedTurn:"t"}]}')"
+read_ysk "$h" --transcript "$T/tx-ts-old.jsonl"; broken
+check "31 sessions (not full), no back-off, 1 opportunity → BROKEN as before" $? "$OUT"
+
 h=$(new_home); store "$h" a "$(offer other-session 5000 | jq -c '.typedPastInARow = 2')"
 read_ysk "$h" --transcript "$T/tx-2x13.jsonl"; quiet
 check "canary: typedPastInARow nonzero counts as back-off" $? "$OUT"
